@@ -2,22 +2,57 @@
 
 This guide covers how to set up your development environment, build, debug, and install HeliBoard on your Android device.
 
+# Install app on phone
+
+To install HeliBoard permanently on your phone (sideloading), you have two options:
+Option 1: Debug Build (Easiest)
+Debug APKs are automatically signed and work fine for personal use:
+
+Build
+
+```
+./gradlew assembleDebug
+
+adb install -r app/build/outputs/apk/release/HeliBoard_3.6-release.apk
+```
+
+Install adb
+
+```
+brew install android-platform-tools
+```
+
+Check if Mac Sees the Device at All
+
+```
+system_profiler SPUSBDataType | grep -A 5 -i android
+```
+
+Restart ADB
+
+```
+adb kill-server
+sudo adb start-server
+adb devices
+```
+
 ## Prerequisites
 
 ### System Requirements
 
-| Requirement | Version |
-|-------------|---------|
-| **Java JDK** | 17 or higher (JDK 21 recommended) |
-| **Android Studio** | Ladybug (2024.2.1) or newer |
-| **Android SDK** | API Level 35 (Android 15) |
-| **Android NDK** | 28.0.13004108 |
-| **Gradle** | 8.14 (managed by wrapper) |
-| **Min Android Version** | Android 5.0 (API 21) |
+| Requirement             | Version                           |
+| ----------------------- | --------------------------------- |
+| **Java JDK**            | 17 or higher (JDK 21 recommended) |
+| **Android Studio**      | Ladybug (2024.2.1) or newer       |
+| **Android SDK**         | API Level 35 (Android 15)         |
+| **Android NDK**         | 28.0.13004108                     |
+| **Gradle**              | 8.14 (managed by wrapper)         |
+| **Min Android Version** | Android 5.0 (API 21)              |
 
 ### No API Keys Required
 
 **HeliBoard does not require any API keys or external services.** It is designed to be 100% offline and privacy-focused. There are no:
+
 - Google API keys
 - Firebase configuration
 - Analytics services
@@ -28,20 +63,24 @@ This guide covers how to set up your development environment, build, debug, and 
 ### Option 1: Android Studio (Recommended)
 
 1. **Install Android Studio**
+
    - Download from: https://developer.android.com/studio
    - Install with default settings
 
 2. **Clone and Open Project**
+
    ```bash
    git clone <your-repository-url>
    cd heliboard
    ```
+
    - Open Android Studio
    - Select "Open" and navigate to the project folder
    - Wait for Gradle sync to complete
 
 3. **Install SDK Components**
    Android Studio will prompt you to install missing SDK components. Accept all prompts, or manually install via:
+
    - Go to `Tools > SDK Manager`
    - **SDK Platforms tab**: Install Android 15 (API 35)
    - **SDK Tools tab**: Install:
@@ -56,6 +95,7 @@ This guide covers how to set up your development environment, build, debug, and 
 ### Option 2: Command Line Only
 
 1. **Install Java JDK 17+**
+
    ```bash
    # Ubuntu/Debian
    sudo apt install openjdk-17-jdk
@@ -68,6 +108,7 @@ This guide covers how to set up your development environment, build, debug, and 
    ```
 
 2. **Install Android SDK**
+
    ```bash
    # Download command line tools from:
    # https://developer.android.com/studio#command-line-tools-only
@@ -89,13 +130,13 @@ This guide covers how to set up your development environment, build, debug, and 
 
 ### Build Variants
 
-| Variant | Purpose | Features |
-|---------|---------|----------|
-| `debug` | Development testing | Minified, debug suffix (.debug) |
-| `debugNoMinify` | Fast IDE builds | No minification, faster builds |
-| `release` | Production | Minified, optimized |
-| `nouserlib` | Release without user libs | Like release, but blocks user-provided libraries |
-| `runTests` | CI testing | For running automated tests |
+| Variant         | Purpose                   | Features                                         |
+| --------------- | ------------------------- | ------------------------------------------------ |
+| `debug`         | Development testing       | Minified, debug suffix (.debug)                  |
+| `debugNoMinify` | Fast IDE builds           | No minification, faster builds                   |
+| `release`       | Production                | Minified, optimized                              |
+| `nouserlib`     | Release without user libs | Like release, but blocks user-provided libraries |
+| `runTests`      | CI testing                | For running automated tests                      |
 
 ### Building via Android Studio
 
@@ -120,6 +161,7 @@ This guide covers how to set up your development environment, build, debug, and 
 ```
 
 **APK Output Locations:**
+
 - Debug: `app/build/outputs/apk/debug/HeliBoard_3.6-debug.apk`
 - Release: `app/build/outputs/apk/release/HeliBoard_3.6-release.apk`
 
@@ -136,6 +178,7 @@ keytool -genkey -v -keystore my-release-key.jks -keyalg RSA -keysize 2048 -valid
 ### Configure Signing in Gradle
 
 Create `keystore.properties` in project root (add to `.gitignore`):
+
 ```properties
 storeFile=/path/to/my-release-key.jks
 storePassword=your-store-password
@@ -144,6 +187,7 @@ keyPassword=your-key-password
 ```
 
 Add to `app/build.gradle.kts`:
+
 ```kotlin
 android {
     signingConfigs {
@@ -170,10 +214,12 @@ android {
 ### Method 1: Via Android Studio
 
 1. Enable **Developer Options** on your Android device:
+
    - Go to `Settings > About Phone`
    - Tap "Build Number" 7 times
 
 2. Enable **USB Debugging**:
+
    - Go to `Settings > Developer Options`
    - Enable "USB Debugging"
 
@@ -231,12 +277,15 @@ adb logcat | grep -i heliboard
 ### Common Issues
 
 **1. NDK not found**
+
 ```
 NDK not configured. Download it with SDK Manager.
 ```
+
 Solution: Install NDK 28.0.13004108 via SDK Manager
 
 **2. Gradle sync fails**
+
 ```bash
 # Clear Gradle cache
 ./gradlew clean
@@ -246,6 +295,7 @@ rm -rf ~/.gradle/caches/
 
 **3. Build fails with memory error**
 Add to `gradle.properties`:
+
 ```properties
 org.gradle.jvmargs=-Xmx2048m
 ```
@@ -257,10 +307,12 @@ HeliBoard supports glide typing but requires a closed-source library that is **n
 To enable glide typing:
 
 1. Obtain the swype library files (`libjni_latinimegoogle.so`) from:
+
    - GApps packages (search for "swypelibs")
    - Or download from: https://github.com/erkserkserks/openboard/tree/46fdf2b550035ca69299ce312fa158e7ade36967/app/src/main/jniLibs
 
 2. Place the `.so` files in:
+
    ```
    app/src/main/jniLibs/
    ├── arm64-v8a/
@@ -325,6 +377,7 @@ HeliBoard supports custom dictionaries for word suggestions:
 ## Customizing Layouts
 
 See [layouts.md](layouts.md) for detailed documentation on:
+
 - Creating custom keyboard layouts
 - Modifying symbol/number layouts
 - Adding new language layouts
