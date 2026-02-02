@@ -51,6 +51,7 @@ public class SettingsValues {
     public final int mDisplayOrientation;
     // From preferences
     public final boolean mAutoCap;
+    public final boolean mSmartAutoCap;
     public final boolean mVibrateOn;
     public final boolean mVibrateInDndMode;
     public final boolean mSoundOn;
@@ -172,6 +173,7 @@ public class SettingsValues {
         mToolbarMode = Settings.readToolbarMode(prefs);
         mToolbarHidingGlobal = prefs.getBoolean(Settings.PREF_TOOLBAR_HIDING_GLOBAL, Defaults.PREF_TOOLBAR_HIDING_GLOBAL);
         mAutoCap = prefs.getBoolean(Settings.PREF_AUTO_CAP, Defaults.PREF_AUTO_CAP) && ScriptUtils.scriptSupportsUppercase(mLocale);
+        mSmartAutoCap = prefs.getBoolean(Settings.PREF_SMART_AUTO_CAP, Defaults.PREF_SMART_AUTO_CAP);
         mVibrateOn = Settings.readVibrationEnabled(prefs);
         mVibrateInDndMode = prefs.getBoolean(Settings.PREF_VIBRATE_IN_DND_MODE, Defaults.PREF_VIBRATE_IN_DND_MODE);
         mSoundOn = prefs.getBoolean(Settings.PREF_SOUND_ON, Defaults.PREF_SOUND_ON);
@@ -384,6 +386,8 @@ public class SettingsValues {
         sb.append("" + mSpacingAndPunctuations.dump());
         sb.append("\n   mAutoCap = ");
         sb.append("" + mAutoCap);
+        sb.append("\n   mSmartAutoCap = ");
+        sb.append("" + mSmartAutoCap);
         sb.append("\n   mVibrateOn = ");
         sb.append("" + mVibrateOn);
         sb.append("\n   mSoundOn = ");

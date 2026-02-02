@@ -61,6 +61,7 @@ import helium314.keyboard.latin.utils.Log;
 import helium314.keyboard.latin.utils.RecapitalizeMode;
 import helium314.keyboard.latin.utils.RecapitalizeStatus;
 import helium314.keyboard.latin.utils.ScriptUtils;
+import helium314.keyboard.latin.utils.SmartAutoCapsUtils;
 import helium314.keyboard.latin.utils.StatsUtils;
 import helium314.keyboard.latin.utils.TextPlacement;
 import helium314.keyboard.latin.utils.TextRange;
@@ -1999,10 +2000,28 @@ public final class InputLogic {
         final EditorInfo ei = getCurrentInputEditorInfo();
         if (ei == null) return Constants.TextUtils.CAP_MODE_OFF;
         final int inputType = ei.inputType;
+        final boolean hasPhantomSpace = SpaceState.PHANTOM == mSpaceState;
         // Warning: this depends on mSpaceState, which may not be the most current value. If
         // mSpaceState gets updated later, whoever called this may need to be told about it.
-        return mConnection.getCursorCapsMode(inputType, settingsValues.mSpacingAndPunctuations,
-                SpaceState.PHANTOM == mSpaceState);
+        final int appCapsMode = mConnection.getCursorCapsMode(inputType,
+                settingsValues.mSpacingAndPunctuations, hasPhantomSpace);
+
+        // If the app already requests sentence capitalization, use the standard caps mode
+        if ((appCapsMode & TextUtils.CAP_MODE_SENTENCES) != 0) {
+            return appCapsMode;
+        }
+
+        // Smart auto-caps: Check if we should capitalize even if the app doesn't request it.
+        // This handles cases where Android apps don't properly send "start of sentence" signals.
+        if (settingsValues.mSmartAutoCap) {
+            final CharSequence textBeforeCursor = mConnection.getCachedTextBeforeCursor();
+            if (SmartAutoCapsUtils.shouldCapitalize(textBeforeCursor, hasPhantomSpace)) {
+                // Add sentence capitalization mode to whatever the app requested
+                return appCapsMode | TextUtils.CAP_MODE_SENTENCES;
+            }
+        }
+
+        return appCapsMode;
     }
 
     @Nullable
