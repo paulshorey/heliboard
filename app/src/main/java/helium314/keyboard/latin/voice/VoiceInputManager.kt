@@ -82,22 +82,27 @@ class VoiceInputManager(private val context: Context) {
 
         voiceRecorder.setCallback(object : VoiceRecorder.RecordingCallback {
             override fun onRecordingStarted() {
+                Log.i(TAG, "Recording started callback received")
                 currentState = State.RECORDING
                 listener?.onStateChanged(State.RECORDING)
             }
 
             override fun onRecordingStopped(audioFile: File?) {
+                Log.i(TAG, "Recording stopped callback received, audioFile: ${audioFile?.absolutePath}, size: ${audioFile?.length() ?: 0}")
                 currentAudioFile = audioFile
-                if (audioFile != null) {
+                if (audioFile != null && audioFile.exists() && audioFile.length() > 44) {
+                    Log.i(TAG, "Audio file valid, starting transcription")
                     transcribeAudio(audioFile)
                 } else {
+                    Log.e(TAG, "Audio file invalid or empty: exists=${audioFile?.exists()}, size=${audioFile?.length()}")
                     currentState = State.IDLE
                     listener?.onStateChanged(State.IDLE)
-                    listener?.onError("Recording failed - no audio captured")
+                    listener?.onError("Recording failed - no audio captured (file size: ${audioFile?.length() ?: 0} bytes)")
                 }
             }
 
             override fun onRecordingError(error: String) {
+                Log.e(TAG, "Recording error: $error")
                 currentState = State.IDLE
                 listener?.onStateChanged(State.IDLE)
                 listener?.onError(error)
@@ -132,20 +137,24 @@ class VoiceInputManager(private val context: Context) {
     }
 
     private fun transcribeAudio(audioFile: File) {
+        Log.i(TAG, "transcribeAudio called with file: ${audioFile.absolutePath}, size: ${audioFile.length()}")
         currentState = State.TRANSCRIBING
         listener?.onStateChanged(State.TRANSCRIBING)
 
         val apiKey = getApiKey()
+        Log.i(TAG, "API key retrieved, length: ${apiKey.length}, blank: ${apiKey.isBlank()}")
         if (apiKey.isBlank()) {
+            Log.e(TAG, "API key is blank!")
             currentState = State.IDLE
             listener?.onStateChanged(State.IDLE)
-            listener?.onError("OpenAI API key not configured. Please set it in Settings > Voice Input.")
+            listener?.onError("OpenAI API key not configured. Please set it in Settings > Advanced.")
             cleanupAudioFile()
             return
         }
 
         // Get current keyboard language for better transcription
         val language = getCurrentLanguage()
+        Log.i(TAG, "Starting Whisper API call with language: $language")
 
         whisperClient.transcribe(
             audioFile = audioFile,
@@ -153,16 +162,19 @@ class VoiceInputManager(private val context: Context) {
             language = language,
             callback = object : WhisperApiClient.TranscriptionCallback {
                 override fun onTranscriptionStarted() {
-                    // Already handled above
+                    Log.i(TAG, "Transcription started")
                 }
 
                 override fun onTranscriptionComplete(text: String) {
+                    Log.i(TAG, "Transcription complete, text length: ${text.length}, text: '$text'")
                     currentState = State.IDLE
                     listener?.onStateChanged(State.IDLE)
 
                     if (text.isNotBlank()) {
+                        Log.i(TAG, "Calling onTranscriptionResult with text")
                         listener?.onTranscriptionResult(text)
                     } else {
+                        Log.w(TAG, "Transcription returned empty text")
                         listener?.onError("No speech detected in recording")
                     }
 
@@ -170,6 +182,7 @@ class VoiceInputManager(private val context: Context) {
                 }
 
                 override fun onTranscriptionError(error: String) {
+                    Log.e(TAG, "Transcription error: $error")
                     currentState = State.IDLE
                     listener?.onStateChanged(State.IDLE)
                     listener?.onError(error)

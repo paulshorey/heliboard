@@ -1576,6 +1576,7 @@ public class LatinIME extends InputMethodService implements
         mVoiceInputManager.setListener(new VoiceInputManager.VoiceInputListener() {
             @Override
             public void onStateChanged(@NonNull VoiceInputManager.State state) {
+                Log.i(TAG, "Voice input state changed: " + state);
                 // Update the UI to reflect the current state
                 if (mSuggestionStripView != null) {
                     switch (state) {
@@ -1596,15 +1597,20 @@ public class LatinIME extends InputMethodService implements
 
             @Override
             public void onTranscriptionResult(@NonNull String text) {
+                Log.i(TAG, "Voice transcription result received: '" + text + "'");
                 // Insert the transcribed text
                 if (text != null && !text.isEmpty()) {
+                    Log.i(TAG, "Committing transcribed text to input");
                     mInputLogic.mConnection.commitText(text, 1);
                     mKeyboardSwitcher.showToast("Transcribed: " + (text.length() > 50 ? text.substring(0, 50) + "..." : text), true);
+                } else {
+                    Log.w(TAG, "Transcription text is null or empty");
                 }
             }
 
             @Override
             public void onError(@NonNull String error) {
+                Log.e(TAG, "Voice input error: " + error);
                 mKeyboardSwitcher.showToast("Voice input error: " + error, true);
                 if (mSuggestionStripView != null) {
                     mSuggestionStripView.setVoiceInputState(false, false);
@@ -1613,6 +1619,7 @@ public class LatinIME extends InputMethodService implements
 
             @Override
             public void onPermissionRequired() {
+                Log.w(TAG, "Microphone permission required");
                 mKeyboardSwitcher.showToast("Microphone permission required. Please grant permission in Settings.", true);
             }
         });

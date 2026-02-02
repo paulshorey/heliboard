@@ -49,7 +49,10 @@ class WhisperApiClient {
         language: String? = null,
         callback: TranscriptionCallback
     ) {
+        Log.i(TAG, "transcribe() called - file: ${audioFile.absolutePath}, size: ${audioFile.length()}, apiKey length: ${apiKey.length}")
+
         if (apiKey.isBlank()) {
+            Log.e(TAG, "API key is blank")
             mainHandler.post {
                 callback.onTranscriptionError("OpenAI API key is not configured")
             }
@@ -57,20 +60,24 @@ class WhisperApiClient {
         }
 
         if (!audioFile.exists() || audioFile.length() == 0L) {
+            Log.e(TAG, "Audio file doesn't exist or is empty: exists=${audioFile.exists()}, size=${audioFile.length()}")
             mainHandler.post {
                 callback.onTranscriptionError("Audio file is empty or doesn't exist")
             }
             return
         }
 
+        Log.i(TAG, "Starting transcription thread")
         mainHandler.post { callback.onTranscriptionStarted() }
 
         thread {
             try {
+                Log.i(TAG, "Sending transcription request...")
                 val result = sendTranscriptionRequest(audioFile, apiKey, language)
+                Log.i(TAG, "Transcription result received: '$result'")
                 mainHandler.post { callback.onTranscriptionComplete(result) }
             } catch (e: Exception) {
-                Log.e(TAG, "Transcription error: ${e.message}")
+                Log.e(TAG, "Transcription error: ${e.message}", e)
                 mainHandler.post {
                     callback.onTranscriptionError(e.message ?: "Unknown transcription error")
                 }
@@ -83,11 +90,13 @@ class WhisperApiClient {
         apiKey: String,
         language: String?
     ): String {
+        Log.i(TAG, "sendTranscriptionRequest starting...")
         val boundary = "----${UUID.randomUUID()}"
         val lineEnd = "\r\n"
         val twoHyphens = "--"
 
         val url = URL(WHISPER_API_URL)
+        Log.i(TAG, "Connecting to: $WHISPER_API_URL")
         val connection = url.openConnection() as HttpURLConnection
 
         try {
@@ -99,6 +108,7 @@ class WhisperApiClient {
             connection.readTimeout = READ_TIMEOUT
             connection.setRequestProperty("Authorization", "Bearer $apiKey")
             connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+            Log.i(TAG, "Connection configured, sending data...")
 
             connection.outputStream.bufferedWriter(Charsets.UTF_8).use { writer ->
                 // Add model field
@@ -139,8 +149,9 @@ class WhisperApiClient {
                 writer.append(twoHyphens).append(boundary).append(twoHyphens).append(lineEnd)
             }
 
+            Log.i(TAG, "Request sent, waiting for response...")
             val responseCode = connection.responseCode
-            Log.d(TAG, "Response code: $responseCode")
+            Log.i(TAG, "Response code: $responseCode")
 
             if (responseCode == HttpURLConnection.HTTP_OK) {
                 val response = BufferedReader(InputStreamReader(connection.inputStream)).use { it.readText() }
