@@ -1176,4 +1176,21 @@ public final class RichInputConnection implements PrivateCommandPerformer {
             | (requestImmediateCallback ? InputConnection.CURSOR_UPDATE_IMMEDIATE : 0);
         return mIC.requestCursorUpdates(cursorUpdateMode);
     }
+
+    /**
+     * Returns the cached text before cursor for smart auto-capitalization.
+     * <p>
+     * This returns the internally cached text that was committed before the composing text,
+     * combined with the composing text itself. This is useful for smart auto-caps detection
+     * without triggering IPC calls to the editor.
+     *
+     * @return The cached text before cursor, or empty string if nothing is cached.
+     */
+    @NonNull
+    public CharSequence getCachedTextBeforeCursor() {
+        if (mCommittedTextBeforeComposingText.length() == 0 && mComposingText.length() == 0) {
+            return "";
+        }
+        return new StringBuilder(mCommittedTextBeforeComposingText).append(mComposingText);
+    }
 }
