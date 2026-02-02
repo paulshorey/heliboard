@@ -219,6 +219,9 @@
     <string name="backup_restored">Backup restored</string>
     <!-- Preferences item for format for timestamp keycode -->
     <string name="timestamp_format_title">Format for timestamp key</string>
+    <!-- Voice Input (Whisper API) settings -->
+    <string name="whisper_api_key_title">OpenAI Whisper API Key</string>
+    <string name="whisper_api_key_summary">API key for voice-to-text transcription. Get your key from platform.openai.com</string>
     <!-- Preferences item for choosing secondary language -->
     <string name="secondary_locale">Multilingual typing</string>
     <!-- Clarification which locales are available for multilingual typing -->
