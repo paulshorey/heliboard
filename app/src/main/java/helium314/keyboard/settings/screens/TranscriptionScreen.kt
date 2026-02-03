@@ -9,9 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -62,25 +60,18 @@ fun TranscriptionScreen(
     onClickBack: () -> Unit,
 ) {
     val context = LocalContext.current
-    val prefs = context.prefs()
     val b = (context.getActivity() as? SettingsActivity)?.prefChanged?.collectAsState()
     if ((b?.value ?: 0) < 0)
         Log.v("irrelevant", "stupid way to trigger recomposition on preference change")
 
-    val scrollState = rememberScrollState()
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(scrollState)
-    ) {
-        // Back button and title header
-        SearchSettingsScreen(
-            onClickBack = onClickBack,
-            title = stringResource(R.string.settings_screen_transcription),
-            settings = listOf(Settings.PREF_WHISPER_API_KEY)
+    SearchSettingsScreen(
+        onClickBack = onClickBack,
+        title = stringResource(R.string.settings_screen_transcription),
+        settings = listOf(
+            Settings.PREF_WHISPER_API_KEY,
+            Settings.PREF_WHISPER_PROMPT_SELECTED
         )
-    }
+    )
 }
 
 fun createTranscriptionSettings(context: Context) = listOf(
