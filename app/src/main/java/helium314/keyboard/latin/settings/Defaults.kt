@@ -169,11 +169,7 @@ object Defaults {
     const val PREF_WHISPER_PROMPT_SELECTED = 0 // Default to first preset
     val PREF_WHISPER_PROMPTS = listOf(
         // Technical/Standard
-        """Add proper capitalization to every sentence, name, proper noun, etc. Add precise punctuation (.!?;:-...) when makes sense. Add special characters to technical terms and filenames (such as /path/to/file.jpg). When you hear any character such as "curly bracket open" or "slash" (assume forward-slash), insert the special character instead of spelling it out.
-Detect the type of text:
-* if the user is making a list, return each item as a bullet point list item
-* if they are explaining programming terms, make sure to detect special characters
-* if they are explaining mathematical and numeric content, make sure to use correct numbers and operators""",
+        "Capitalize first letter in every sentence. Capitalize first letter in a new line or list item. Capitalize proper nouns, titles, products. Make acronyms UPPERCASE. Add punctuation. Add special characters when they are mentioned.",
         // Braindump
         "Braindump. The recording is a long stream of consciousness. It's messy, repetitive, lacks structure, contains mistakes and parts that don't make any sense. Make sense of it. Clean it up. Make the text easier to read.",
         // Casual conversation
