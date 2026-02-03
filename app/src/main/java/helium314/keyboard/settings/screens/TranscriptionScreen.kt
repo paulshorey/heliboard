@@ -20,7 +20,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,6 +43,8 @@ import helium314.keyboard.settings.Setting
 import helium314.keyboard.settings.SettingsActivity
 import helium314.keyboard.settings.SettingsContainer
 import helium314.keyboard.settings.Theme
+import helium314.keyboard.settings.dialogs.ThreeButtonAlertDialog
+import helium314.keyboard.settings.preferences.Preference
 import helium314.keyboard.settings.preferences.TextInputPreference
 import helium314.keyboard.settings.previewDark
 
@@ -78,13 +82,38 @@ fun createTranscriptionSettings(context: Context) = listOf(
     Setting(context, Settings.PREF_WHISPER_API_KEY, R.string.whisper_api_key_title, R.string.whisper_api_key_summary) { setting ->
         TextInputPreference(setting, Defaults.PREF_WHISPER_API_KEY)
     },
-    Setting(context, Settings.PREF_WHISPER_PROMPT_SELECTED, R.string.whisper_prompt_title, R.string.whisper_prompt_summary) { _ ->
-        WhisperPromptPresetsEditor()
+    Setting(context, Settings.PREF_WHISPER_PROMPT_SELECTED, R.string.whisper_prompt_title, R.string.whisper_prompt_summary) { setting ->
+        WhisperPromptPreference(setting)
     },
 )
 
 @Composable
-fun WhisperPromptPresetsEditor() {
+fun WhisperPromptPreference(setting: Setting) {
+    var showDialog by rememberSaveable { mutableStateOf(false) }
+    val context = LocalContext.current
+    val prefs = context.prefs()
+
+    // Get current selection for description
+    val selectedIndex = prefs.getInt(Settings.PREF_WHISPER_PROMPT_SELECTED, Defaults.PREF_WHISPER_PROMPT_SELECTED)
+    val selectedLabel = stringResource(PROMPT_LABELS.getOrElse(selectedIndex) { R.string.whisper_prompt_none })
+
+    Preference(
+        name = setting.title,
+        description = selectedLabel,
+        onClick = { showDialog = true }
+    )
+
+    if (showDialog) {
+        WhisperPromptDialog(
+            onDismissRequest = { showDialog = false }
+        )
+    }
+}
+
+@Composable
+fun WhisperPromptDialog(
+    onDismissRequest: () -> Unit
+) {
     val context = LocalContext.current
     val prefs = context.prefs()
 
@@ -103,61 +132,59 @@ fun WhisperPromptPresetsEditor() {
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-    ) {
-        Text(
-            text = stringResource(R.string.whisper_prompt_presets_title),
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(bottom = 12.dp)
-        )
-
-        // Editable prompt presets
-        for (i in 0 until Settings.WHISPER_PROMPT_COUNT) {
-            PromptPresetItem(
-                index = i,
-                label = stringResource(PROMPT_LABELS[i]),
-                prompt = prompts[i],
-                isSelected = selectedIndex == i,
-                onSelected = {
-                    selectedIndex = i
-                    prefs.edit { putInt(Settings.PREF_WHISPER_PROMPT_SELECTED, i) }
-                },
-                onPromptChanged = { newPrompt ->
-                    prompts[i] = newPrompt
-                    val key = Settings.PREF_WHISPER_PROMPT_PREFIX + i
-                    prefs.edit { putString(key, newPrompt) }
+    ThreeButtonAlertDialog(
+        onDismissRequest = onDismissRequest,
+        onConfirmed = {
+            // Save all prompts and selection
+            prefs.edit {
+                putInt(Settings.PREF_WHISPER_PROMPT_SELECTED, selectedIndex)
+                for (i in 0 until Settings.WHISPER_PROMPT_COUNT) {
+                    putString(Settings.PREF_WHISPER_PROMPT_PREFIX + i, prompts[i])
                 }
-            )
+            }
+        },
+        title = { Text(stringResource(R.string.whisper_prompt_presets_title)) },
+        scrollContent = true,
+        content = {
+            Column(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // Editable prompt presets
+                for (i in 0 until Settings.WHISPER_PROMPT_COUNT) {
+                    PromptPresetItem(
+                        index = i,
+                        label = stringResource(PROMPT_LABELS[i]),
+                        prompt = prompts[i],
+                        isSelected = selectedIndex == i,
+                        onSelected = { selectedIndex = i },
+                        onPromptChanged = { newPrompt -> prompts[i] = newPrompt }
+                    )
 
-            if (i < Settings.WHISPER_PROMPT_COUNT - 1) {
+                    if (i < Settings.WHISPER_PROMPT_COUNT - 1) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(12.dp))
+
+                // Show currently active prompt
+                val activePrompt = prompts.getOrElse(selectedIndex) { "" }
+                if (activePrompt.isNotEmpty()) {
+                    Text(
+                        text = stringResource(R.string.whisper_prompt_current, activePrompt),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.whisper_prompt_none_active),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Show currently active prompt
-        val activePrompt = prompts.getOrElse(selectedIndex) { "" }
-        if (activePrompt.isNotEmpty()) {
-            Text(
-                text = stringResource(R.string.whisper_prompt_current, activePrompt),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 8.dp)
-            )
-        } else {
-            Text(
-                text = stringResource(R.string.whisper_prompt_none_active),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 8.dp)
-            )
-        }
-    }
+    )
 }
 
 @Composable
