@@ -166,7 +166,16 @@ object Defaults {
     const val PREF_SPACE_BAR_TEXT = ""
     const val PREF_TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss"
     const val PREF_WHISPER_API_KEY = ""
-    const val PREF_WHISPER_PROMPT = "Use proper capitalization and punctuation."
+    const val PREF_WHISPER_PROMPT_SELECTED = 1 // Default to "Standard" preset
+    val PREF_WHISPER_PROMPTS = listOf(
+        "", // None (no prompt)
+        "Use proper capitalization and punctuation.", // Standard
+        "Use proper capitalization, punctuation, and paragraph breaks.", // With paragraphs
+        "Transcribe in all lowercase with minimal punctuation.", // Casual/lowercase
+        "Use formal business English with proper grammar and punctuation.", // Formal/business
+        "This is a text message. Use casual, conversational language.", // Text messaging
+        "Include technical terms and programming syntax.", // Technical/coding
+    )
     const val PREF_EMOJI_RECENT_KEYS = ""
     const val PREF_LAST_SHOWN_EMOJI_CATEGORY_PAGE_ID = 0
     const val PREF_SHOW_DEBUG_SETTINGS = false

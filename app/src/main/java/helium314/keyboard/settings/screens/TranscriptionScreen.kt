@@ -2,7 +2,6 @@
 package helium314.keyboard.settings.screens
 
 import android.content.Context
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,7 +9,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -19,7 +20,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -41,65 +43,74 @@ import helium314.keyboard.settings.Setting
 import helium314.keyboard.settings.SettingsActivity
 import helium314.keyboard.settings.SettingsContainer
 import helium314.keyboard.settings.Theme
-import helium314.keyboard.settings.preferences.Preference
 import helium314.keyboard.settings.preferences.TextInputPreference
 import helium314.keyboard.settings.previewDark
 
-// Predefined prompts for common use cases
-private val PROMPT_PRESETS = listOf(
-    "" to "None (no prompt)",
-    "Use proper capitalization and punctuation." to "Standard (capitalize & punctuate)",
-    "Use proper capitalization, punctuation, and paragraph breaks." to "With paragraphs",
-    "Transcribe in all lowercase with minimal punctuation." to "Casual/lowercase",
-    "Use formal business English with proper grammar and punctuation." to "Formal/business",
-    "This is a text message. Use casual, conversational language." to "Text messaging",
-    "Include technical terms and programming syntax." to "Technical/coding",
+// Labels for each prompt preset slot
+private val PROMPT_LABELS = listOf(
+    R.string.whisper_prompt_none,
+    R.string.whisper_prompt_standard,
+    R.string.whisper_prompt_paragraphs,
+    R.string.whisper_prompt_casual,
+    R.string.whisper_prompt_formal,
+    R.string.whisper_prompt_texting,
+    R.string.whisper_prompt_technical,
 )
 
 @Composable
 fun TranscriptionScreen(
     onClickBack: () -> Unit,
 ) {
-    val prefs = LocalContext.current.prefs()
-    val b = (LocalContext.current.getActivity() as? SettingsActivity)?.prefChanged?.collectAsState()
+    val context = LocalContext.current
+    val prefs = context.prefs()
+    val b = (context.getActivity() as? SettingsActivity)?.prefChanged?.collectAsState()
     if ((b?.value ?: 0) < 0)
         Log.v("irrelevant", "stupid way to trigger recomposition on preference change")
 
-    val items = listOf(
-        Settings.PREF_WHISPER_API_KEY,
-        Settings.PREF_WHISPER_PROMPT,
-    )
+    val scrollState = rememberScrollState()
 
-    SearchSettingsScreen(
-        onClickBack = onClickBack,
-        title = stringResource(R.string.settings_screen_transcription),
-        settings = items
-    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(scrollState)
+    ) {
+        // Back button and title header
+        SearchSettingsScreen(
+            onClickBack = onClickBack,
+            title = stringResource(R.string.settings_screen_transcription),
+            settings = listOf(Settings.PREF_WHISPER_API_KEY)
+        )
+    }
 }
 
 fun createTranscriptionSettings(context: Context) = listOf(
     Setting(context, Settings.PREF_WHISPER_API_KEY, R.string.whisper_api_key_title, R.string.whisper_api_key_summary) { setting ->
         TextInputPreference(setting, Defaults.PREF_WHISPER_API_KEY)
     },
-    Setting(context, Settings.PREF_WHISPER_PROMPT, R.string.whisper_prompt_title, R.string.whisper_prompt_summary) { setting ->
-        WhisperPromptPreference(setting.key)
+    Setting(context, Settings.PREF_WHISPER_PROMPT_SELECTED, R.string.whisper_prompt_title, R.string.whisper_prompt_summary) { _ ->
+        WhisperPromptPresetsEditor()
     },
 )
 
 @Composable
-fun WhisperPromptPreference(key: String) {
+fun WhisperPromptPresetsEditor() {
     val context = LocalContext.current
     val prefs = context.prefs()
-    var currentPrompt by remember {
-        mutableStateOf(prefs.getString(key, Defaults.PREF_WHISPER_PROMPT) ?: "")
-    }
-    var customPrompt by remember {
-        mutableStateOf(
-            if (PROMPT_PRESETS.none { it.first == currentPrompt }) currentPrompt else ""
-        )
+
+    // Load initial values from SharedPreferences
+    var selectedIndex by remember {
+        mutableIntStateOf(prefs.getInt(Settings.PREF_WHISPER_PROMPT_SELECTED, Defaults.PREF_WHISPER_PROMPT_SELECTED))
     }
 
-    val isCustomSelected = PROMPT_PRESETS.none { it.first == currentPrompt } && currentPrompt.isNotEmpty()
+    val prompts = remember {
+        mutableStateListOf<String>().apply {
+            for (i in 0 until Settings.WHISPER_PROMPT_COUNT) {
+                val key = Settings.PREF_WHISPER_PROMPT_PREFIX + i
+                val defaultValue = Defaults.PREF_WHISPER_PROMPTS.getOrElse(i) { "" }
+                add(prefs.getString(key, defaultValue) ?: defaultValue)
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -110,104 +121,105 @@ fun WhisperPromptPreference(key: String) {
             text = stringResource(R.string.whisper_prompt_presets_title),
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(bottom = 8.dp)
+            modifier = Modifier.padding(bottom = 12.dp)
         )
 
-        // Preset options
-        PROMPT_PRESETS.forEach { (prompt, label) ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .selectable(
-                        selected = currentPrompt == prompt && !isCustomSelected,
-                        onClick = {
-                            currentPrompt = prompt
-                            prefs.edit { putString(key, prompt) }
-                        },
-                        role = Role.RadioButton
-                    )
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                RadioButton(
-                    selected = currentPrompt == prompt && !isCustomSelected,
-                    onClick = null
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
-                    Text(
-                        text = label,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    if (prompt.isNotEmpty()) {
-                        Text(
-                            text = prompt,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+        // Editable prompt presets
+        for (i in 0 until Settings.WHISPER_PROMPT_COUNT) {
+            PromptPresetItem(
+                index = i,
+                label = stringResource(PROMPT_LABELS[i]),
+                prompt = prompts[i],
+                isSelected = selectedIndex == i,
+                onSelected = {
+                    selectedIndex = i
+                    prefs.edit { putInt(Settings.PREF_WHISPER_PROMPT_SELECTED, i) }
+                },
+                onPromptChanged = { newPrompt ->
+                    prompts[i] = newPrompt
+                    val key = Settings.PREF_WHISPER_PROMPT_PREFIX + i
+                    prefs.edit { putString(key, newPrompt) }
                 }
+            )
+
+            if (i < Settings.WHISPER_PROMPT_COUNT - 1) {
+                Spacer(modifier = Modifier.height(12.dp))
             }
         }
 
-        // Custom option
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .selectable(
-                    selected = isCustomSelected,
-                    onClick = {
-                        if (customPrompt.isNotEmpty()) {
-                            currentPrompt = customPrompt
-                            prefs.edit { putString(key, customPrompt) }
-                        }
-                    },
-                    role = Role.RadioButton
-                )
-                .padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            RadioButton(
-                selected = isCustomSelected,
-                onClick = null
-            )
-            Spacer(modifier = Modifier.width(8.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Show currently active prompt
+        val activePrompt = prompts.getOrElse(selectedIndex) { "" }
+        if (activePrompt.isNotEmpty()) {
             Text(
-                text = stringResource(R.string.whisper_prompt_custom),
-                style = MaterialTheme.typography.bodyMedium
+                text = stringResource(R.string.whisper_prompt_current, activePrompt),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp)
             )
-        }
-
-        // Custom prompt text field
-        OutlinedTextField(
-            value = customPrompt,
-            onValueChange = { newValue ->
-                customPrompt = newValue
-                if (newValue.isNotEmpty()) {
-                    currentPrompt = newValue
-                    prefs.edit { putString(key, newValue) }
-                }
-            },
-            label = { Text(stringResource(R.string.whisper_prompt_custom_hint)) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 40.dp, top = 4.dp),
-            minLines = 2,
-            maxLines = 4,
-            enabled = true
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Current prompt display
-        if (currentPrompt.isNotEmpty()) {
+        } else {
             Text(
-                text = stringResource(R.string.whisper_prompt_current, currentPrompt),
+                text = stringResource(R.string.whisper_prompt_none_active),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp)
             )
         }
+    }
+}
+
+@Composable
+private fun PromptPresetItem(
+    index: Int,
+    label: String,
+    prompt: String,
+    isSelected: Boolean,
+    onSelected: () -> Unit,
+    onPromptChanged: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .selectable(
+                    selected = isSelected,
+                    onClick = onSelected,
+                    role = Role.RadioButton
+                )
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RadioButton(
+                selected = isSelected,
+                onClick = null
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+            )
+        }
+
+        OutlinedTextField(
+            value = prompt,
+            onValueChange = onPromptChanged,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 40.dp),
+            minLines = 2,
+            maxLines = 3,
+            textStyle = MaterialTheme.typography.bodySmall,
+            placeholder = {
+                Text(
+                    text = if (index == 0) stringResource(R.string.whisper_prompt_empty_hint) else stringResource(R.string.whisper_prompt_edit_hint),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        )
     }
 }
 

@@ -2,6 +2,7 @@
 package helium314.keyboard.latin.voice
 
 import android.content.Context
+import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.prefs
@@ -208,7 +209,13 @@ class VoiceInputManager(private val context: Context) {
 
     private fun getPrompt(): String {
         return try {
-            context.prefs().getString(Settings.PREF_WHISPER_PROMPT, "") ?: ""
+            val prefs = context.prefs()
+            // Get the selected preset index
+            val selectedIndex = prefs.getInt(Settings.PREF_WHISPER_PROMPT_SELECTED, Defaults.PREF_WHISPER_PROMPT_SELECTED)
+            // Get the prompt text for that index
+            val key = Settings.PREF_WHISPER_PROMPT_PREFIX + selectedIndex
+            val defaultValue = Defaults.PREF_WHISPER_PROMPTS.getOrElse(selectedIndex) { "" }
+            prefs.getString(key, defaultValue) ?: defaultValue
         } catch (e: Exception) {
             Log.e(TAG, "Error getting prompt: ${e.message}")
             ""
