@@ -75,13 +75,10 @@ class WhisperApiClient {
         thread {
             try {
                 Log.i(TAG, "Sending transcription request...")
-                android.util.Log.e("VOICE_DEBUG", "=== STARTING API REQUEST ===")
                 val result = sendTranscriptionRequest(audioFile, apiKey, language, prompt)
-                android.util.Log.e("VOICE_DEBUG", "=== API RESULT: '$result' ===")
                 Log.i(TAG, "Transcription result received: '$result'")
                 mainHandler.post { callback.onTranscriptionComplete(result) }
             } catch (e: Exception) {
-                android.util.Log.e("VOICE_DEBUG", "=== API ERROR: ${e.message} ===", e)
                 Log.e(TAG, "Transcription error: ${e.message}", e)
                 mainHandler.post {
                     callback.onTranscriptionError(e.message ?: "Unknown transcription error")
@@ -96,7 +93,6 @@ class WhisperApiClient {
         language: String?,
         prompt: String?
     ): String {
-        android.util.Log.e("VOICE_DEBUG", "sendTranscriptionRequest called, file size: ${audioFile.length()}, prompt: ${prompt?.take(30)}")
         Log.i(TAG, "sendTranscriptionRequest starting...")
         val boundary = "----${UUID.randomUUID()}"
         val lineEnd = "\r\n"
@@ -164,10 +160,8 @@ class WhisperApiClient {
                 writer.append(twoHyphens).append(boundary).append(twoHyphens).append(lineEnd)
             }
 
-            android.util.Log.e("VOICE_DEBUG", "Request sent, waiting for response...")
             Log.i(TAG, "Request sent, waiting for response...")
             val responseCode = connection.responseCode
-            android.util.Log.e("VOICE_DEBUG", "Response code: $responseCode")
             Log.i(TAG, "Response code: $responseCode")
 
             if (responseCode == HttpURLConnection.HTTP_OK) {
