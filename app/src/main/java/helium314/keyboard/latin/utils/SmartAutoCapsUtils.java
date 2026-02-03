@@ -16,7 +16,7 @@ import android.text.TextUtils;
  * <p>
  * Capitalization rules:
  * 1. If there are no previous characters - capitalize
- * 2. If previous character (ignoring spaces and tabs) was a period "." - capitalize
+ * 2. If previous character (ignoring spaces) was a sentence terminator (. ? !) followed by a space - capitalize
  * 3. If previous character (ignoring spaces and tabs) was a newline/line break/carriage return - capitalize
  * 4. Otherwise - do not capitalize
  */
@@ -43,14 +43,18 @@ public final class SmartAutoCapsUtils {
 
         // Find the last non-whitespace character (ignoring spaces and tabs, but considering newlines)
         int index = textBeforeCursor.length() - 1;
+        int spacesSkipped = 0;
 
-        // If we have a phantom space, treat it as if there's a space after the text
-        // We need to find the significant character before the cursor
+        // If we have a phantom space, count it as a skipped space
+        if (hasSpaceBefore) {
+            spacesSkipped = 1;
+        }
 
         // Skip spaces and tabs (but NOT newlines - those are significant)
         while (index >= 0) {
             final char c = textBeforeCursor.charAt(index);
             if (c == ' ' || c == '\t') {
+                spacesSkipped++;
                 index--;
             } else {
                 break;
@@ -69,9 +73,10 @@ public final class SmartAutoCapsUtils {
             return true;
         }
 
-        // Rule 2: If previous significant character is a sentence terminator, capitalize
-        // Check for common sentence terminators
-        if (isSentenceTerminator(lastSignificantChar)) {
+        // Rule 2: If previous significant character is a sentence terminator AND
+        // there's at least one space after it, capitalize
+        // This ensures we don't capitalize immediately after typing "." but only after ". "
+        if (isSentenceTerminator(lastSignificantChar) && spacesSkipped > 0) {
             return true;
         }
 
