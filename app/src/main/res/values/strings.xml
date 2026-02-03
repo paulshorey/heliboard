@@ -222,6 +222,8 @@
     <!-- Voice Input (Whisper API) settings -->
     <string name="whisper_api_key_title">OpenAI Whisper API Key</string>
     <string name="whisper_api_key_summary">API key for voice-to-text transcription. Get your key from platform.openai.com</string>
+    <string name="whisper_prompt_title">Voice Input Style Prompt</string>
+    <string name="whisper_prompt_summary">Guide transcription style (capitalization, punctuation, vocabulary). Leave empty for default.</string>
     <!-- Preferences item for choosing secondary language -->
     <string name="secondary_locale">Multilingual typing</string>
     <!-- Clarification which locales are available for multilingual typing -->

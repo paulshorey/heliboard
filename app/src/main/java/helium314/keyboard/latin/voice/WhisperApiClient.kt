@@ -41,15 +41,17 @@ class WhisperApiClient {
      * @param audioFile The WAV audio file to transcribe
      * @param apiKey The OpenAI API key
      * @param language Optional language code (e.g., "en", "es", "fr"). If null, auto-detect.
+     * @param prompt Optional prompt to guide transcription style (capitalization, punctuation, vocabulary)
      * @param callback Callback for transcription results
      */
     fun transcribe(
         audioFile: File,
         apiKey: String,
         language: String? = null,
+        prompt: String? = null,
         callback: TranscriptionCallback
     ) {
-        Log.i(TAG, "transcribe() called - file: ${audioFile.absolutePath}, size: ${audioFile.length()}, apiKey length: ${apiKey.length}")
+        Log.i(TAG, "transcribe() called - file: ${audioFile.absolutePath}, size: ${audioFile.length()}, apiKey length: ${apiKey.length}, prompt: '${prompt?.take(50)}...'")
 
         if (apiKey.isBlank()) {
             Log.e(TAG, "API key is blank")
@@ -74,7 +76,7 @@ class WhisperApiClient {
             try {
                 Log.i(TAG, "Sending transcription request...")
                 android.util.Log.e("VOICE_DEBUG", "=== STARTING API REQUEST ===")
-                val result = sendTranscriptionRequest(audioFile, apiKey, language)
+                val result = sendTranscriptionRequest(audioFile, apiKey, language, prompt)
                 android.util.Log.e("VOICE_DEBUG", "=== API RESULT: '$result' ===")
                 Log.i(TAG, "Transcription result received: '$result'")
                 mainHandler.post { callback.onTranscriptionComplete(result) }
@@ -91,9 +93,10 @@ class WhisperApiClient {
     private fun sendTranscriptionRequest(
         audioFile: File,
         apiKey: String,
-        language: String?
+        language: String?,
+        prompt: String?
     ): String {
-        android.util.Log.e("VOICE_DEBUG", "sendTranscriptionRequest called, file size: ${audioFile.length()}")
+        android.util.Log.e("VOICE_DEBUG", "sendTranscriptionRequest called, file size: ${audioFile.length()}, prompt: ${prompt?.take(30)}")
         Log.i(TAG, "sendTranscriptionRequest starting...")
         val boundary = "----${UUID.randomUUID()}"
         val lineEnd = "\r\n"
@@ -127,6 +130,14 @@ class WhisperApiClient {
                     writer.append("Content-Disposition: form-data; name=\"language\"").append(lineEnd)
                     writer.append(lineEnd)
                     writer.append(language).append(lineEnd)
+                }
+
+                // Add prompt field if specified (helps with capitalization, punctuation, style)
+                if (!prompt.isNullOrBlank()) {
+                    writer.append(twoHyphens).append(boundary).append(lineEnd)
+                    writer.append("Content-Disposition: form-data; name=\"prompt\"").append(lineEnd)
+                    writer.append(lineEnd)
+                    writer.append(prompt).append(lineEnd)
                 }
 
                 // Add response_format field

@@ -181,6 +181,7 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
 
     // Voice Input (Whisper API)
     public static final String PREF_WHISPER_API_KEY = "whisper_api_key";
+    public static final String PREF_WHISPER_PROMPT = "whisper_prompt";
 
     // Emoji
     public static final String PREF_EMOJI_MAX_SDK = "emoji_max_sdk";

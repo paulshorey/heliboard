@@ -155,12 +155,16 @@ class VoiceInputManager(private val context: Context) {
 
         // Get current keyboard language for better transcription
         val language = getCurrentLanguage()
-        Log.i(TAG, "Starting Whisper API call with language: $language")
+
+        // Get custom prompt for transcription style
+        val prompt = getPrompt()
+        Log.i(TAG, "Starting Whisper API call with language: $language, prompt: '${prompt.take(50)}...'")
 
         whisperClient.transcribe(
             audioFile = audioFile,
             apiKey = apiKey,
             language = language,
+            prompt = prompt.ifBlank { null },
             callback = object : WhisperApiClient.TranscriptionCallback {
                 override fun onTranscriptionStarted() {
                     Log.i(TAG, "Transcription started")
@@ -198,6 +202,15 @@ class VoiceInputManager(private val context: Context) {
             context.prefs().getString(Settings.PREF_WHISPER_API_KEY, "") ?: ""
         } catch (e: Exception) {
             Log.e(TAG, "Error getting API key: ${e.message}")
+            ""
+        }
+    }
+
+    private fun getPrompt(): String {
+        return try {
+            context.prefs().getString(Settings.PREF_WHISPER_PROMPT, "") ?: ""
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting prompt: ${e.message}")
             ""
         }
     }

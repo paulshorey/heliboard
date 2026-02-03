@@ -31,7 +31,23 @@ HeliBoard includes a built-in voice-to-text feature that uses OpenAI's Whisper A
 3. Find **"OpenAI Whisper API Key"**
 4. Paste your API key and save
 
-### Step 3: Grant Microphone Permission
+### Step 3: Configure Style Prompt (Optional)
+
+The **Voice Input Style Prompt** setting allows you to customize how Whisper transcribes your speech:
+
+1. In **Advanced** settings, find **"Voice Input Style Prompt"**
+2. Enter a prompt to guide the transcription style
+
+**Example prompts:**
+- `Use proper capitalization and punctuation.` (default)
+- `Transcribe in all lowercase with no punctuation.`
+- `Use formal business English with proper grammar.`
+- `Include technical terms like API, JSON, HTTP, SDK.`
+- `This is a text message conversation. Use casual language.`
+
+The prompt helps Whisper understand context and produce better results for your specific use case.
+
+### Step 4: Grant Microphone Permission
 
 When you first tap the microphone button, Android will ask for microphone permission. Grant this permission to enable voice recording.
 
