@@ -74,6 +74,7 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         fun onCodeInput(primaryCode: Int, x: Int, y: Int, isKeyRepeat: Boolean)
         fun removeSuggestion(word: String?)
         fun removeExternalSuggestions()
+        fun onVoiceInputClicked()
     }
 
     private val moreSuggestionsContainer: View
@@ -115,11 +116,14 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
     private val pinnedKeys: ViewGroup = findViewById(R.id.pinned_keys)
     private val suggestionsStrip: ViewGroup = findViewById(R.id.suggestions_strip)
     private val toolbarExpandKey = findViewById<ImageButton>(R.id.suggestions_strip_toolbar_key)
+    private val voiceInputKey = findViewById<ImageButton>(R.id.voice_input_key)
     private val incognitoIcon = KeyboardIconsSet.instance.getNewDrawable(ToolbarKey.INCOGNITO.name, context)
     private val toolbarArrowIcon = KeyboardIconsSet.instance.getNewDrawable(KeyboardIconsSet.NAME_TOOLBAR_KEY, context)
+    private val voiceIcon = KeyboardIconsSet.instance.getNewDrawable(ToolbarKey.VOICE.name, context)
     private val defaultToolbarBackground: Drawable = toolbarExpandKey.background
     private val enabledToolKeyBackground = GradientDrawable()
     private var direction = 1 // 1 if LTR, -1 if RTL
+    private var isVoiceRecording = false
 
     private val toolbarKeyLayoutParams = LinearLayout.LayoutParams(
         resources.getDimensionPixelSize(R.dimen.config_suggestions_strip_edge_key_width),
@@ -144,6 +148,19 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         enabledToolKeyBackground.colors = intArrayOf(color, Color.TRANSPARENT)
         enabledToolKeyBackground.gradientType = GradientDrawable.RADIAL_GRADIENT
         enabledToolKeyBackground.gradientRadius = resources.getDimensionPixelSize(R.dimen.config_suggestions_strip_height) / 2.1f
+
+        // Voice input key setup
+        voiceInputKey.layoutParams.height = toolbarHeight
+        voiceInputKey.layoutParams.width = toolbarHeight
+        voiceInputKey.setImageDrawable(voiceIcon)
+        colors.setColor(voiceInputKey, ColorType.TOOL_BAR_KEY)
+        colors.setBackground(voiceInputKey, ColorType.STRIP_BACKGROUND)
+        voiceInputKey.setOnClickListener {
+            AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, this, HapticEvent.KEY_PRESS)
+            if (::listener.isInitialized) {
+                listener.onVoiceInputClicked()
+            }
+        }
 
         val mToolbarMode = Settings.getValues().mToolbarMode
         if (mToolbarMode == ToolbarMode.TOOLBAR_KEYS) {
@@ -543,6 +560,32 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         view.setOnLongClickListener(this)
         colors.setColor(view, ColorType.TOOL_BAR_KEY)
         colors.setBackground(view, ColorType.STRIP_BACKGROUND)
+    }
+
+    /**
+     * Update the voice input button state based on recording status.
+     * @param isRecording true if currently recording, false otherwise
+     * @param isTranscribing true if transcribing (processing), false otherwise
+     */
+    fun setVoiceInputState(isRecording: Boolean, isTranscribing: Boolean = false) {
+        this.isVoiceRecording = isRecording
+        post {
+            when {
+                isRecording -> {
+                    // Recording state: show red tint
+                    voiceInputKey.setColorFilter(Color.RED)
+                }
+                isTranscribing -> {
+                    // Transcribing state: show orange/amber tint
+                    voiceInputKey.setColorFilter(Color.parseColor("#FFA500"))
+                }
+                else -> {
+                    // Idle state: restore normal color
+                    voiceInputKey.clearColorFilter()
+                    Settings.getValues()?.mColors?.setColor(voiceInputKey, ColorType.TOOL_BAR_KEY)
+                }
+            }
+        }
     }
 
     companion object {

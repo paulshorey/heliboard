@@ -165,6 +165,24 @@ object Defaults {
     const val PREF_REMOVE_REDUNDANT_POPUPS = false
     const val PREF_SPACE_BAR_TEXT = ""
     const val PREF_TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss"
+    const val PREF_WHISPER_API_KEY = ""
+    const val PREF_WHISPER_PROMPT_SELECTED = 0 // Default to first preset
+    val PREF_WHISPER_PROMPTS = listOf(
+        // Technical/Standard
+        "Capitalize first letter in every sentence. Capitalize first letter in a new line or list item. Capitalize proper nouns, titles, products. Make acronyms UPPERCASE. Add punctuation. Add special characters when they are mentioned.",
+        // Braindump
+        "Braindump. The recording is a long stream of consciousness. It's messy, repetitive, lacks structure, contains mistakes and parts that don't make any sense. Make sense of it. Clean it up. Make the text easier to read.",
+        // Casual conversation
+        "Casual conversation. Relax and conversate. Be cool and create. Add emojis to emphasize words and feelings \uD83D\uDE0A",
+        // Professional business
+        """Professional business communication. Polished email or professional message. Use complete sentences, clear structure, and a confident but courteous tone. Automatically correct grammar and flow. If the speaker gives commands like "subject," "greeting," or "signature," treat them as structural cues. Avoid slang and contractions unless specified. Preserve the factual meaning while smoothing awkward phrasing.""",
+        // Creative/satirical
+        "Creative or satirical writing. Show personality and flair, emphasizing voice and timing. Maintain humor, irony, or commentary style depending on the speaker's tone. Break paragraphs naturally for readability and comedic effect. Keep interjections or laughter cues in parentheses (e.g., laughs) to preserve delivery. Do not over-correct slang or comedic exaggeration—retain the speaker's voice.",
+        // Academic research
+        """Academic research. Use smart and formal tone and structure. Use precise vocabulary, clear sentence logic, and consistent formatting for citations or references if applicable. Convert verbal cues like "open quote," "close quote," or "bracket" into proper punctuation. Ensure complex terms (scientific, philosophical, or mathematical) are accurately transcribed and spelled. Avoid unnecessary phrasing like "I think" or "maybe."""",
+        // Creative writing/storytelling
+        "Creative writing and storytelling. Convey a rich, imaginative tone suitable for creative writing. Include emotion, rhythm, and setting details implied by speech. Correct grammar and pacing for readability, but retain personality and flow. When detecting narration, add paragraph breaks where natural pauses occur. Maintain character dialogue format when quoted speech is recognized.",
+    )
     const val PREF_EMOJI_RECENT_KEYS = ""
     const val PREF_LAST_SHOWN_EMOJI_CATEGORY_PAGE_ID = 0
     const val PREF_SHOW_DEBUG_SETTINGS = false

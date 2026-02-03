@@ -81,6 +81,7 @@ import helium314.keyboard.latin.utils.SubtypeLocaleUtils;
 import helium314.keyboard.latin.utils.SubtypeSettings;
 import helium314.keyboard.latin.utils.SubtypeState;
 import helium314.keyboard.latin.utils.ToolbarMode;
+import helium314.keyboard.latin.voice.VoiceInputManager;
 import helium314.keyboard.settings.SettingsActivity2;
 import kotlin.Unit;
 
@@ -177,6 +178,9 @@ public class LatinIME extends InputMethodService implements
     private GestureConsumer mGestureConsumer = GestureConsumer.NULL_GESTURE_CONSUMER;
 
     private final ClipboardHistoryManager mClipboardHistoryManager = new ClipboardHistoryManager(this);
+
+    // Voice input manager for Whisper API transcription
+    private VoiceInputManager mVoiceInputManager;
 
     public static final class UIHandler extends LeakGuardHandlerWrapper<LatinIME> {
         private static final int MSG_UPDATE_SHIFT_STATE = 0;
@@ -542,6 +546,10 @@ public class LatinIME extends InputMethodService implements
         mClipboardHistoryManager.onCreate();
         mHandler.onCreate();
 
+        // Initialize voice input manager
+        mVoiceInputManager = new VoiceInputManager(this);
+        setupVoiceInputListener();
+
         // Register to receive ringer mode change.
         final IntentFilter filter = new IntentFilter();
         filter.addAction(AudioManager.RINGER_MODE_CHANGED_ACTION);
@@ -678,6 +686,9 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public void onDestroy() {
+        if (mVoiceInputManager != null) {
+            mVoiceInputManager.destroy();
+        }
         mClipboardHistoryManager.onDestroy();
         mDictionaryFacilitator.closeDictionaries();
         mSettings.onDestroy();
@@ -1550,6 +1561,67 @@ public class LatinIME extends InputMethodService implements
     public void removeExternalSuggestions() {
         setNeutralSuggestionStrip();
         mHandler.postResumeSuggestions(false);
+    }
+
+    @Override
+    public void onVoiceInputClicked() {
+        if (mVoiceInputManager != null) {
+            mVoiceInputManager.toggleRecording();
+        }
+    }
+
+    private void setupVoiceInputListener() {
+        if (mVoiceInputManager == null) return;
+
+        mVoiceInputManager.setListener(new VoiceInputManager.VoiceInputListener() {
+            @Override
+            public void onStateChanged(@NonNull VoiceInputManager.State state) {
+                Log.i(TAG, "Voice input state changed: " + state);
+                // Update the UI to reflect the current state
+                if (mSuggestionStripView != null) {
+                    switch (state) {
+                        case RECORDING:
+                            mSuggestionStripView.setVoiceInputState(true, false);
+                            mKeyboardSwitcher.showToast("Recording...", false);
+                            break;
+                        case TRANSCRIBING:
+                            mSuggestionStripView.setVoiceInputState(false, true);
+                            mKeyboardSwitcher.showToast("Transcribing...", false);
+                            break;
+                        case IDLE:
+                            mSuggestionStripView.setVoiceInputState(false, false);
+                            break;
+                    }
+                }
+            }
+
+            @Override
+            public void onTranscriptionResult(@NonNull String text) {
+                Log.i(TAG, "Voice transcription result received: '" + text + "'");
+                // Insert the transcribed text
+                if (text != null && !text.isEmpty()) {
+                    Log.i(TAG, "Committing transcribed text to input");
+                    mInputLogic.mConnection.commitText(text, 1);
+                } else {
+                    Log.w(TAG, "Transcription text is null or empty");
+                }
+            }
+
+            @Override
+            public void onError(@NonNull String error) {
+                Log.e(TAG, "Voice input error: " + error);
+                mKeyboardSwitcher.showToast("Voice input error: " + error, true);
+                if (mSuggestionStripView != null) {
+                    mSuggestionStripView.setVoiceInputState(false, false);
+                }
+            }
+
+            @Override
+            public void onPermissionRequired() {
+                Log.w(TAG, "Microphone permission required");
+                mKeyboardSwitcher.showToast("Microphone permission required. Please grant permission in Settings.", true);
+            }
+        });
     }
 
     private void loadKeyboard() {
