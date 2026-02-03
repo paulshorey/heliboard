@@ -1570,6 +1570,13 @@ public class LatinIME extends InputMethodService implements
         }
     }
 
+    @Override
+    public void onVoiceCancelClicked() {
+        if (mVoiceInputManager != null) {
+            mVoiceInputManager.cancelRecording();
+        }
+    }
+
     private void setupVoiceInputListener() {
         if (mVoiceInputManager == null) return;
 
