@@ -231,13 +231,13 @@
     <string name="whisper_prompt_edit_hint">Edit this prompt…</string>
     <string name="whisper_prompt_empty_hint">Leave empty for raw transcription</string>
     <!-- Prompt preset labels -->
-    <string name="whisper_prompt_none">None</string>
-    <string name="whisper_prompt_standard">Standard</string>
-    <string name="whisper_prompt_paragraphs">With paragraphs</string>
-    <string name="whisper_prompt_casual">Casual</string>
-    <string name="whisper_prompt_formal">Formal</string>
-    <string name="whisper_prompt_texting">Text messaging</string>
-    <string name="whisper_prompt_technical">Technical</string>
+    <string name="whisper_prompt_none">Technical/Standard</string>
+    <string name="whisper_prompt_standard">Braindump</string>
+    <string name="whisper_prompt_paragraphs">Casual conversation</string>
+    <string name="whisper_prompt_casual">Professional business</string>
+    <string name="whisper_prompt_formal">Creative/satirical</string>
+    <string name="whisper_prompt_texting">Academic research</string>
+    <string name="whisper_prompt_technical">Creative writing</string>
     <!-- Preferences item for choosing secondary language -->
     <string name="secondary_locale">Multilingual typing</string>
     <!-- Clarification which locales are available for multilingual typing -->
