@@ -1602,7 +1602,6 @@ public class LatinIME extends InputMethodService implements
                 if (text != null && !text.isEmpty()) {
                     Log.i(TAG, "Committing transcribed text to input");
                     mInputLogic.mConnection.commitText(text, 1);
-                    mKeyboardSwitcher.showToast("Transcribed: " + (text.length() > 50 ? text.substring(0, 50) + "..." : text), true);
                 } else {
                     Log.w(TAG, "Transcription text is null or empty");
                 }
