@@ -4,6 +4,7 @@ package helium314.keyboard.latin.voice
 import android.content.Context
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.utils.Log
+import helium314.keyboard.latin.utils.prefs
 import java.io.File
 
 /**
@@ -194,11 +195,7 @@ class VoiceInputManager(private val context: Context) {
 
     private fun getApiKey(): String {
         return try {
-            val prefs = context.getSharedPreferences(
-                context.packageName + "_preferences",
-                Context.MODE_PRIVATE
-            )
-            prefs.getString(Settings.PREF_WHISPER_API_KEY, "") ?: ""
+            context.prefs().getString(Settings.PREF_WHISPER_API_KEY, "") ?: ""
         } catch (e: Exception) {
             Log.e(TAG, "Error getting API key: ${e.message}")
             ""
