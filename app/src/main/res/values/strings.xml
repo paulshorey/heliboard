@@ -220,10 +220,15 @@
     <!-- Preferences item for format for timestamp keycode -->
     <string name="timestamp_format_title">Format for timestamp key</string>
     <!-- Voice Input (Whisper API) settings -->
+    <string name="settings_screen_transcription">Transcription</string>
     <string name="whisper_api_key_title">OpenAI Whisper API Key</string>
     <string name="whisper_api_key_summary">API key for voice-to-text transcription. Get your key from platform.openai.com</string>
-    <string name="whisper_prompt_title">Voice Input Style Prompt</string>
-    <string name="whisper_prompt_summary">Guide transcription style (capitalization, punctuation, vocabulary). Leave empty for default.</string>
+    <string name="whisper_prompt_title">Transcription Style</string>
+    <string name="whisper_prompt_summary">Guide transcription style (capitalization, punctuation, vocabulary)</string>
+    <string name="whisper_prompt_presets_title">Choose a style preset</string>
+    <string name="whisper_prompt_custom">Custom prompt</string>
+    <string name="whisper_prompt_custom_hint">Enter your custom prompt</string>
+    <string name="whisper_prompt_current">Current: %s</string>
     <!-- Preferences item for choosing secondary language -->
     <string name="secondary_locale">Multilingual typing</string>
     <!-- Clarification which locales are available for multilingual typing -->
