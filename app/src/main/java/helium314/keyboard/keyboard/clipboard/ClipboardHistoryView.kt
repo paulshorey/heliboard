@@ -232,7 +232,8 @@ class ClipboardHistoryView @JvmOverloads constructor(
 
     override fun onKeyUp(clipId: Long) {
         val clipContent = clipboardHistoryManager.getHistoryEntryContent(clipId)
-        keyboardActionListener.onTextInput(clipContent?.text)
+        val textWithSpace = clipContent?.text?.let { if (it.isNotEmpty()) "$it " else it }
+        keyboardActionListener.onTextInput(textWithSpace)
         keyboardActionListener.onReleaseKey(KeyCode.NOT_SPECIFIED, false)
         if (Settings.getValues().mAlphaAfterClipHistoryEntry)
             keyboardActionListener.onCodeInput(KeyCode.ALPHA, Constants.NOT_A_COORDINATE, Constants.NOT_A_COORDINATE, false)
