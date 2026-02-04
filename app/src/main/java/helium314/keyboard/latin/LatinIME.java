@@ -1591,6 +1591,10 @@ public class LatinIME extends InputMethodService implements
                             mSuggestionStripView.setVoiceInputState(true, false);
                             mKeyboardSwitcher.showToast("Recording...", false);
                             break;
+                        case CONTINUOUS_RECORDING:
+                            mSuggestionStripView.setVoiceInputState(true, false);
+                            mKeyboardSwitcher.showToast("Listening... (tap to stop)", false);
+                            break;
                         case TRANSCRIBING:
                             mSuggestionStripView.setVoiceInputState(false, true);
                             mKeyboardSwitcher.showToast("Transcribing...", false);
@@ -1600,6 +1604,16 @@ public class LatinIME extends InputMethodService implements
                             break;
                     }
                 }
+            }
+
+            @Override
+            public void onSpeechDetected() {
+                Log.i(TAG, "Speech detected in continuous mode");
+            }
+
+            @Override
+            public void onSilenceDetected() {
+                Log.i(TAG, "Silence detected in continuous mode");
             }
 
             @Override

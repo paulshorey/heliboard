@@ -18,6 +18,7 @@ import kotlin.concurrent.thread
 /**
  * Handles audio recording for voice-to-text functionality.
  * Records audio in WAV format suitable for Whisper API transcription.
+ * Supports continuous recording mode with automatic silence detection.
  */
 class VoiceRecorder(private val context: Context) {
 
@@ -27,25 +28,62 @@ class VoiceRecorder(private val context: Context) {
         private const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
         private const val AUDIO_SOURCE = MediaRecorder.AudioSource.MIC
+
+        // Volume detection thresholds
+        // 16-bit audio has max amplitude of 32767
+        // Speech typically has RMS of 500-5000, silence/noise is below 300
+        const val SPEECH_THRESHOLD_RMS = 400.0  // Above this = speech detected
+        const val SILENCE_THRESHOLD_RMS = 300.0 // Below this = silence detected
+
+        // Timing constants for continuous mode (in milliseconds)
+        const val MIN_SPEECH_DURATION_MS = 3000L  // Minimum speech before considering silence
+        const val SILENCE_DURATION_FOR_CHUNK_MS = 3000L  // Silence duration to trigger chunk
+        const val VOLUME_CHECK_INTERVAL_MS = 100L // How often to check volume (100ms chunks)
     }
 
     interface RecordingCallback {
         fun onRecordingStarted()
         fun onRecordingStopped(audioFile: File?)
         fun onRecordingError(error: String)
+        // Continuous mode callbacks
+        fun onChunkReady(audioFile: File) {}  // Called when a speech chunk is ready for transcription
+        fun onSpeechDetected() {}  // Called when speech starts
+        fun onSilenceDetected() {}  // Called when silence starts after speech
     }
 
     private var audioRecord: AudioRecord? = null
     private var recordingThread: Thread? = null
     private var isRecording = false
+    private var isContinuousMode = false
     private var outputFile: File? = null
     private var callback: RecordingCallback? = null
+
+    // Volume and speech detection state
+    private var currentRms: Double = 0.0
+    private var isSpeaking = false
+    private var speechStartTime: Long = 0L
+    private var silenceStartTime: Long = 0L
+    private var hasSpeechInCurrentChunk = false
+    private var chunkCounter = 0
 
     val isCurrentlyRecording: Boolean
         get() = isRecording
 
+    val isInContinuousMode: Boolean
+        get() = isContinuousMode
+
     fun setCallback(callback: RecordingCallback?) {
         this.callback = callback
+    }
+
+    /**
+     * Reset speech detection state for a new chunk
+     */
+    private fun resetSpeechState() {
+        isSpeaking = false
+        speechStartTime = 0L
+        silenceStartTime = 0L
+        hasSpeechInCurrentChunk = false
     }
 
     fun hasRecordPermission(): Boolean {
@@ -55,7 +93,23 @@ class VoiceRecorder(private val context: Context) {
         ) == PackageManager.PERMISSION_GRANTED
     }
 
+    /**
+     * Start recording in normal (single-shot) mode.
+     */
     fun startRecording(): Boolean {
+        return startRecordingInternal(continuousMode = false)
+    }
+
+    /**
+     * Start recording in continuous mode.
+     * In this mode, recording automatically chunks based on speech/silence detection.
+     * After detecting speech followed by silence, it saves the chunk and starts a new one.
+     */
+    fun startContinuousRecording(): Boolean {
+        return startRecordingInternal(continuousMode = true)
+    }
+
+    private fun startRecordingInternal(continuousMode: Boolean): Boolean {
         if (isRecording) {
             Log.w(TAG, "Already recording")
             return false
@@ -91,17 +145,26 @@ class VoiceRecorder(private val context: Context) {
             }
 
             // Create temp file for recording
-            outputFile = File.createTempFile("voice_recording_", ".wav", context.cacheDir)
+            chunkCounter = 0
+            outputFile = File.createTempFile("voice_chunk_${chunkCounter}_", ".wav", context.cacheDir)
+
+            // Reset state
+            isContinuousMode = continuousMode
+            resetSpeechState()
 
             audioRecord?.startRecording()
             isRecording = true
 
             recordingThread = thread(start = true) {
-                writeAudioDataToFile(bufferSize)
+                if (continuousMode) {
+                    writeAudioDataContinuous(bufferSize)
+                } else {
+                    writeAudioDataToFile(bufferSize)
+                }
             }
 
             callback?.onRecordingStarted()
-            Log.i(TAG, "Recording started")
+            Log.i(TAG, "Recording started, continuous mode: $continuousMode")
             return true
 
         } catch (e: SecurityException) {
@@ -123,7 +186,9 @@ class VoiceRecorder(private val context: Context) {
             return null
         }
 
+        val wasContinuousMode = isContinuousMode
         isRecording = false
+        isContinuousMode = false
 
         try {
             recordingThread?.join(2000) // Wait up to 2 seconds for thread to finish
@@ -140,14 +205,23 @@ class VoiceRecorder(private val context: Context) {
         releaseRecorder()
 
         val file = outputFile
-        if (file != null && file.exists() && file.length() > 44) { // > WAV header size
+        // In continuous mode, only return the file if there was speech in it
+        val hasContent = if (wasContinuousMode) {
+            hasSpeechInCurrentChunk && file != null && file.exists() && file.length() > 44
+        } else {
+            file != null && file.exists() && file.length() > 44
+        }
+
+        if (hasContent && file != null) {
             // Write WAV header
             writeWavHeader(file)
             Log.i(TAG, "Recording stopped, file: ${file.absolutePath}, size: ${file.length()}")
             callback?.onRecordingStopped(file)
             return file
         } else {
-            Log.w(TAG, "Recording file is empty or doesn't exist")
+            Log.w(TAG, "Recording file is empty or doesn't exist (or no speech in continuous mode)")
+            // Clean up the file if it exists but has no speech
+            file?.delete()
             callback?.onRecordingStopped(null)
             return null
         }
@@ -157,6 +231,7 @@ class VoiceRecorder(private val context: Context) {
         if (!isRecording) return
 
         isRecording = false
+        isContinuousMode = false
 
         try {
             recordingThread?.join(1000)
@@ -175,6 +250,7 @@ class VoiceRecorder(private val context: Context) {
         // Delete temp file
         outputFile?.delete()
         outputFile = null
+        resetSpeechState()
         callback?.onRecordingStopped(null)
         Log.i(TAG, "Recording cancelled")
     }
@@ -207,6 +283,123 @@ class VoiceRecorder(private val context: Context) {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error writing audio data: ${e.message}")
+        }
+    }
+
+    /**
+     * Continuous recording mode: monitors volume and automatically chunks based on speech/silence.
+     */
+    private fun writeAudioDataContinuous(bufferSize: Int) {
+        val data = ByteArray(bufferSize)
+        var file = outputFile ?: return
+        var fos: FileOutputStream? = null
+
+        try {
+            fos = FileOutputStream(file)
+            // Write placeholder WAV header (44 bytes)
+            fos.write(ByteArray(44))
+
+            while (isRecording && isContinuousMode) {
+                val read = audioRecord?.read(data, 0, bufferSize) ?: break
+                if (read > 0) {
+                    // Calculate RMS for this buffer
+                    currentRms = calculateRms(data, read)
+                    val currentTime = System.currentTimeMillis()
+
+                    // Detect speech/silence transitions
+                    val wasSpeaking = isSpeaking
+
+                    if (currentRms >= SPEECH_THRESHOLD_RMS) {
+                        // Speech detected
+                        if (!isSpeaking) {
+                            isSpeaking = true
+                            speechStartTime = currentTime
+                            silenceStartTime = 0L
+                            Log.i(TAG, "Speech started, RMS: $currentRms")
+                            callback?.onSpeechDetected()
+                        }
+                        hasSpeechInCurrentChunk = true
+                    } else if (currentRms < SILENCE_THRESHOLD_RMS) {
+                        // Silence detected
+                        if (isSpeaking) {
+                            isSpeaking = false
+                            silenceStartTime = currentTime
+                            Log.i(TAG, "Silence started, RMS: $currentRms")
+                            callback?.onSilenceDetected()
+                        }
+                    }
+
+                    // Write audio data to current chunk
+                    fos.write(data, 0, read)
+
+                    // Check if we should finalize this chunk
+                    // Conditions: had speech for >= 3 seconds, then silence for >= 3 seconds
+                    val speechDuration = if (hasSpeechInCurrentChunk && speechStartTime > 0) {
+                        currentTime - speechStartTime
+                    } else 0L
+
+                    val silenceDuration = if (silenceStartTime > 0) {
+                        currentTime - silenceStartTime
+                    } else 0L
+
+                    if (hasSpeechInCurrentChunk &&
+                        speechDuration >= MIN_SPEECH_DURATION_MS &&
+                        silenceDuration >= SILENCE_DURATION_FOR_CHUNK_MS) {
+
+                        Log.i(TAG, "Chunk ready! Speech duration: ${speechDuration}ms, Silence duration: ${silenceDuration}ms")
+
+                        // Finalize current chunk
+                        fos.close()
+                        writeWavHeader(file)
+
+                        // Notify that chunk is ready for transcription
+                        val completedChunk = file
+                        callback?.onChunkReady(completedChunk)
+
+                        // Start a new chunk
+                        chunkCounter++
+                        file = File.createTempFile("voice_chunk_${chunkCounter}_", ".wav", context.cacheDir)
+                        outputFile = file
+                        fos = FileOutputStream(file)
+                        fos.write(ByteArray(44)) // WAV header placeholder
+
+                        // Reset speech state for new chunk
+                        resetSpeechState()
+
+                        Log.i(TAG, "Started new chunk: ${file.name}")
+                    }
+                }
+            }
+
+            // Close the final file output stream
+            fos?.close()
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in continuous recording: ${e.message}")
+            fos?.close()
+        }
+    }
+
+    /**
+     * Calculate RMS (Root Mean Square) amplitude from PCM 16-bit audio data.
+     */
+    private fun calculateRms(data: ByteArray, length: Int): Double {
+        var sumSquares = 0.0
+        var sampleCount = 0
+
+        // PCM 16-bit: 2 bytes per sample, little-endian
+        for (i in 0 until length - 1 step 2) {
+            val sample = (data[i].toInt() and 0xFF) or (data[i + 1].toInt() shl 8)
+            // Convert to signed 16-bit
+            val signedSample = if (sample > 32767) sample - 65536 else sample
+            sumSquares += signedSample.toDouble() * signedSample.toDouble()
+            sampleCount++
+        }
+
+        return if (sampleCount > 0) {
+            kotlin.math.sqrt(sumSquares / sampleCount)
+        } else {
+            0.0
         }
     }
 
