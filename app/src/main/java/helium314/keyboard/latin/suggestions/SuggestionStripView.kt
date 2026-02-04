@@ -75,6 +75,7 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         fun removeSuggestion(word: String?)
         fun removeExternalSuggestions()
         fun onVoiceInputClicked()
+        fun onVoiceCancelClicked()
     }
 
     private val moreSuggestionsContainer: View
@@ -117,6 +118,7 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
     private val suggestionsStrip: ViewGroup = findViewById(R.id.suggestions_strip)
     private val toolbarExpandKey = findViewById<ImageButton>(R.id.suggestions_strip_toolbar_key)
     private val voiceInputKey = findViewById<ImageButton>(R.id.voice_input_key)
+    private val voiceCancelKey = findViewById<ImageButton>(R.id.voice_cancel_key)
     private val incognitoIcon = KeyboardIconsSet.instance.getNewDrawable(ToolbarKey.INCOGNITO.name, context)
     private val toolbarArrowIcon = KeyboardIconsSet.instance.getNewDrawable(KeyboardIconsSet.NAME_TOOLBAR_KEY, context)
     private val voiceIcon = KeyboardIconsSet.instance.getNewDrawable(ToolbarKey.VOICE.name, context)
@@ -159,6 +161,18 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
             AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, this, HapticEvent.KEY_PRESS)
             if (::listener.isInitialized) {
                 listener.onVoiceInputClicked()
+            }
+        }
+
+        // Voice cancel key setup
+        voiceCancelKey.layoutParams.height = toolbarHeight
+        voiceCancelKey.layoutParams.width = toolbarHeight
+        colors.setColor(voiceCancelKey, ColorType.TOOL_BAR_KEY)
+        colors.setBackground(voiceCancelKey, ColorType.STRIP_BACKGROUND)
+        voiceCancelKey.setOnClickListener {
+            AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, this, HapticEvent.KEY_PRESS)
+            if (::listener.isInitialized) {
+                listener.onVoiceCancelClicked()
             }
         }
 
@@ -570,10 +584,14 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
     fun setVoiceInputState(isRecording: Boolean, isTranscribing: Boolean = false) {
         this.isVoiceRecording = isRecording
         post {
+            // Show cancel button only when recording
+            voiceCancelKey.isVisible = isRecording
+
             when {
                 isRecording -> {
                     // Recording state: show red tint
                     voiceInputKey.setColorFilter(Color.RED)
+                    voiceCancelKey.setColorFilter(Color.RED)
                 }
                 isTranscribing -> {
                     // Transcribing state: show orange/amber tint
