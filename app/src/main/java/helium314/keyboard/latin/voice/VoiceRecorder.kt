@@ -27,11 +27,16 @@ class VoiceRecorder(private val context: Context) {
         private const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
         private const val AUDIO_SOURCE = MediaRecorder.AudioSource.MIC
+
+        // Volume detection threshold - RMS value below which audio is considered too quiet
+        // 16-bit audio has max amplitude of 32767, typical quiet speech is around 500-2000 RMS
+        // We set a low threshold to detect silence/noise (around 1.5% of max amplitude)
+        const val MIN_RMS_THRESHOLD = 500.0
     }
 
     interface RecordingCallback {
         fun onRecordingStarted()
-        fun onRecordingStopped(audioFile: File?)
+        fun onRecordingStopped(audioFile: File?, averageRms: Double)
         fun onRecordingError(error: String)
     }
 
@@ -40,6 +45,11 @@ class VoiceRecorder(private val context: Context) {
     private var isRecording = false
     private var outputFile: File? = null
     private var callback: RecordingCallback? = null
+
+    // Volume tracking
+    private var sumSquares: Double = 0.0
+    private var sampleCount: Long = 0
+    private var averageRms: Double = 0.0
 
     val isCurrentlyRecording: Boolean
         get() = isRecording
@@ -93,6 +103,11 @@ class VoiceRecorder(private val context: Context) {
             // Create temp file for recording
             outputFile = File.createTempFile("voice_recording_", ".wav", context.cacheDir)
 
+            // Reset volume tracking
+            sumSquares = 0.0
+            sampleCount = 0
+            averageRms = 0.0
+
             audioRecord?.startRecording()
             isRecording = true
 
@@ -140,15 +155,17 @@ class VoiceRecorder(private val context: Context) {
         releaseRecorder()
 
         val file = outputFile
+        val finalRms = averageRms
+        Log.i(TAG, "Recording stopped, averageRms: $finalRms, threshold: $MIN_RMS_THRESHOLD")
         if (file != null && file.exists() && file.length() > 44) { // > WAV header size
             // Write WAV header
             writeWavHeader(file)
-            Log.i(TAG, "Recording stopped, file: ${file.absolutePath}, size: ${file.length()}")
-            callback?.onRecordingStopped(file)
+            Log.i(TAG, "Recording stopped, file: ${file.absolutePath}, size: ${file.length()}, rms: $finalRms")
+            callback?.onRecordingStopped(file, finalRms)
             return file
         } else {
             Log.w(TAG, "Recording file is empty or doesn't exist")
-            callback?.onRecordingStopped(null)
+            callback?.onRecordingStopped(null, finalRms)
             return null
         }
     }
@@ -175,7 +192,11 @@ class VoiceRecorder(private val context: Context) {
         // Delete temp file
         outputFile?.delete()
         outputFile = null
-        callback?.onRecordingStopped(null)
+        // Reset volume tracking
+        sumSquares = 0.0
+        sampleCount = 0
+        averageRms = 0.0
+        callback?.onRecordingStopped(null, 0.0)
         Log.i(TAG, "Recording cancelled")
     }
 
@@ -202,7 +223,21 @@ class VoiceRecorder(private val context: Context) {
                     val read = audioRecord?.read(data, 0, bufferSize) ?: break
                     if (read > 0) {
                         fos.write(data, 0, read)
+                        // Calculate RMS for volume detection
+                        // PCM 16-bit: 2 bytes per sample, little-endian
+                        for (i in 0 until read - 1 step 2) {
+                            val sample = (data[i].toInt() and 0xFF) or (data[i + 1].toInt() shl 8)
+                            // Convert to signed 16-bit
+                            val signedSample = if (sample > 32767) sample - 65536 else sample
+                            sumSquares += signedSample.toDouble() * signedSample.toDouble()
+                            sampleCount++
+                        }
                     }
+                }
+
+                // Calculate final average RMS
+                if (sampleCount > 0) {
+                    averageRms = kotlin.math.sqrt(sumSquares / sampleCount)
                 }
             }
         } catch (e: Exception) {
