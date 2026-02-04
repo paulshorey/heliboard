@@ -226,7 +226,7 @@ class VoiceRecorder(private val context: Context) {
                         // Calculate RMS for volume detection
                         // PCM 16-bit: 2 bytes per sample, little-endian
                         for (i in 0 until read - 1 step 2) {
-                            val sample = (data[i].toInt() and 0xFF) or (data[i + 1].toInt() shl 8)
+                            val sample = (data[i].toInt() and 0xFF) or ((data[i + 1].toInt() and 0xFF) shl 8)
                             // Convert to signed 16-bit
                             val signedSample = if (sample > 32767) sample - 65536 else sample
                             sumSquares += signedSample.toDouble() * signedSample.toDouble()

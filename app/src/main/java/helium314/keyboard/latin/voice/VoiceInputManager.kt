@@ -196,8 +196,13 @@ class VoiceInputManager(private val context: Context) {
                     if (text.isNotBlank()) {
                         // Post-process short transcriptions
                         val processedText = postProcessTranscription(text)
-                        Log.i(TAG, "Calling onTranscriptionResult with text: '$processedText'")
-                        listener?.onTranscriptionResult(processedText)
+                        if (processedText.isNotBlank()) {
+                            Log.i(TAG, "Calling onTranscriptionResult with text: '$processedText'")
+                            listener?.onTranscriptionResult(processedText)
+                        } else {
+                            Log.w(TAG, "Post-processed transcription is empty")
+                            listener?.onError("No speech detected in recording")
+                        }
                     } else {
                         Log.w(TAG, "Transcription returned empty text")
                         listener?.onError("No speech detected in recording")
