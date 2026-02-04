@@ -2,6 +2,16 @@
 
 This guide covers how to set up your development environment, build, debug, and install HeliBoard on your Android device.
 
+# Run the app with logs
+
+```
+./gradlew assembleDebug && ./gradlew installDebug
+gita && ./gradlew assembleDebug && ./gradlew installDebug
+
+./gradlew assembleDebug && ./gradlew installDebug && adb logcat | grep -E "(voice|whisper)"
+gita && ./gradlew assembleDebug && ./gradlew installDebug && adb logcat | grep -E "(prompt)"
+```
+
 # Install app on phone
 
 To install HeliBoard permanently on your phone (sideloading), you have two options:
@@ -11,7 +21,7 @@ Debug APKs are automatically signed and work fine for personal use:
 Build
 
 ```
-./gradlew assembleDebug
+./gradlew assembleDebug &&
 
 adb install -r app/build/outputs/apk/release/HeliBoard_3.6-release.apk
 ```
