@@ -359,7 +359,7 @@ class VoiceRecorder(private val context: Context) {
                     }
 
                     // Write audio data to current chunk
-                    fos.write(data, 0, read)
+                    fos?.write(data, 0, read)
 
                     // Check if we should finalize this chunk
                     // Conditions: had speech for >= 3 seconds, then silence for >= 3 seconds
@@ -378,7 +378,7 @@ class VoiceRecorder(private val context: Context) {
                         Log.i(TAG, "Chunk ready! Speech duration: ${speechDuration}ms, Silence duration: ${silenceDuration}ms")
 
                         // Finalize current chunk
-                        fos.close()
+                        fos?.close()
                         writeWavHeader(file)
 
                         // Notify that chunk is ready for transcription

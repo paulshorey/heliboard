@@ -408,30 +408,6 @@ class VoiceInputManager(private val context: Context) {
         }
     }
 
-    /**
-     * Post-process transcription results.
-     * For short texts (< 25 chars), removes sentence punctuation and converts to lowercase.
-     */
-    private fun postProcessTranscription(text: String): String {
-        val trimmedText = text.trim()
-
-        // Only apply processing to short transcriptions
-        if (trimmedText.length >= SHORT_TEXT_THRESHOLD) {
-            return trimmedText
-        }
-
-        Log.i(TAG, "Applying short text processing to: '$trimmedText'")
-
-        // Remove sentence punctuation and convert to lowercase
-        val processed = trimmedText
-            .filter { it !in SENTENCE_PUNCTUATION }
-            .lowercase()
-            .trim()
-
-        Log.i(TAG, "Post-processed short text: '$processed'")
-        return processed
-    }
-
     private fun getApiKey(): String {
         return try {
             context.prefs().getString(Settings.PREF_WHISPER_API_KEY, "") ?: ""
