@@ -135,7 +135,7 @@ class ClipboardHistoryManager(
         textView.setCompoundDrawablesRelativeWithIntrinsicBounds(clipIcon, null, null, null)
         textView.setOnClickListener {
             dontShowCurrentSuggestion = true
-            latinIME.onTextInput(content.toString())
+            latinIME.onTextInput(content.toString() + " ")
             AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, it, HapticEvent.KEY_PRESS)
             binding.root.isGone = true
         }
