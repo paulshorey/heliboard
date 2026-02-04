@@ -43,7 +43,7 @@ class VoiceRecorder(private val context: Context) {
 
     interface RecordingCallback {
         fun onRecordingStarted()
-        fun onRecordingStopped(audioFile: File?)
+        fun onRecordingStopped(audioFile: File?, averageRms: Double)
         fun onRecordingError(error: String)
         // Continuous mode callbacks
         fun onChunkReady(audioFile: File) {}  // Called when a speech chunk is ready for transcription
@@ -152,6 +152,11 @@ class VoiceRecorder(private val context: Context) {
             isContinuousMode = continuousMode
             resetSpeechState()
 
+            // Reset volume tracking
+            sumSquares = 0.0
+            sampleCount = 0
+            averageRms = 0.0
+
             audioRecord?.startRecording()
             isRecording = true
 
@@ -215,8 +220,8 @@ class VoiceRecorder(private val context: Context) {
         if (hasContent && file != null) {
             // Write WAV header
             writeWavHeader(file)
-            Log.i(TAG, "Recording stopped, file: ${file.absolutePath}, size: ${file.length()}")
-            callback?.onRecordingStopped(file)
+            Log.i(TAG, "Recording stopped, file: ${file.absolutePath}, size: ${file.length()}, rms: $finalRms")
+            callback?.onRecordingStopped(file, finalRms)
             return file
         } else {
             Log.w(TAG, "Recording file is empty or doesn't exist (or no speech in continuous mode)")
@@ -278,7 +283,21 @@ class VoiceRecorder(private val context: Context) {
                     val read = audioRecord?.read(data, 0, bufferSize) ?: break
                     if (read > 0) {
                         fos.write(data, 0, read)
+                        // Calculate RMS for volume detection
+                        // PCM 16-bit: 2 bytes per sample, little-endian
+                        for (i in 0 until read - 1 step 2) {
+                            val sample = (data[i].toInt() and 0xFF) or (data[i + 1].toInt() shl 8)
+                            // Convert to signed 16-bit
+                            val signedSample = if (sample > 32767) sample - 65536 else sample
+                            sumSquares += signedSample.toDouble() * signedSample.toDouble()
+                            sampleCount++
+                        }
                     }
+                }
+
+                // Calculate final average RMS
+                if (sampleCount > 0) {
+                    averageRms = kotlin.math.sqrt(sumSquares / sampleCount)
                 }
             }
         } catch (e: Exception) {

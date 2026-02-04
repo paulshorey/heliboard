@@ -122,9 +122,20 @@ class VoiceInputManager(private val context: Context) {
                 listener?.onStateChanged(State.RECORDING)
             }
 
-            override fun onRecordingStopped(audioFile: File?) {
-                Log.i(TAG, "Recording stopped callback received, audioFile: ${audioFile?.absolutePath}, size: ${audioFile?.length() ?: 0}")
+            override fun onRecordingStopped(audioFile: File?, averageRms: Double) {
+                Log.i(TAG, "Recording stopped callback received, audioFile: ${audioFile?.absolutePath}, size: ${audioFile?.length() ?: 0}, rms: $averageRms")
                 currentAudioFile = audioFile
+
+                // Check if audio is too quiet (likely silence or noise)
+                if (averageRms < VoiceRecorder.MIN_RMS_THRESHOLD) {
+                    Log.w(TAG, "Audio too quiet (rms: $averageRms < threshold: ${VoiceRecorder.MIN_RMS_THRESHOLD}), cancelling transcription")
+                    currentState = State.IDLE
+                    listener?.onStateChanged(State.IDLE)
+                    listener?.onError("No speech detected - audio was too quiet")
+                    cleanupAudioFile()
+                    return
+                }
+
                 if (audioFile != null && audioFile.exists() && audioFile.length() > 44) {
                     Log.i(TAG, "Audio file valid, starting transcription")
                     transcribeAudio(audioFile, isContinuousMode = false)
@@ -422,6 +433,32 @@ class VoiceInputManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Error cleaning up audio file: ${e.message}")
         }
+    }
+
+    /**
+     * Post-process transcription results.
+     * For short texts (< 25 chars), removes sentence punctuation and converts to lowercase.
+     * This helps with short voice inputs like "yes" or "okay" which Whisper tends to
+     * return as "Yes." or "Okay."
+     */
+    private fun postProcessTranscription(text: String): String {
+        val trimmedText = text.trim()
+
+        // Only apply processing to short transcriptions
+        if (trimmedText.length >= SHORT_TEXT_THRESHOLD) {
+            return trimmedText
+        }
+
+        Log.i(TAG, "Applying short text processing to: '$trimmedText'")
+
+        // Remove sentence punctuation and convert to lowercase
+        val processed = trimmedText
+            .filter { it !in SENTENCE_PUNCTUATION }
+            .lowercase()
+            .trim()
+
+        Log.i(TAG, "Post-processed short text: '$processed'")
+        return processed
     }
 
     /**
