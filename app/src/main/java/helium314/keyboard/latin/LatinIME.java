@@ -1583,20 +1583,29 @@ public class LatinIME extends InputMethodService implements
         mVoiceInputManager.setListener(new VoiceInputManager.VoiceInputListener() {
             @Override
             public void onStateChanged(@NonNull VoiceInputManager.State state) {
-                Log.i(TAG, "Voice input state changed: " + state);
+                boolean isContinuousMode = mVoiceInputManager.isContinuousMode();
+                Log.i(TAG, "Voice input state changed: " + state + ", continuous: " + isContinuousMode);
                 // Update the UI to reflect the current state
                 if (mSuggestionStripView != null) {
                     switch (state) {
                         case RECORDING:
-                            mSuggestionStripView.setVoiceInputState(true, false);
-                            mKeyboardSwitcher.showToast("Recording...", false);
+                            mSuggestionStripView.setVoiceInputState(true, false, isContinuousMode);
+                            mKeyboardSwitcher.showToast("Listening...", false);
                             break;
                         case TRANSCRIBING:
-                            mSuggestionStripView.setVoiceInputState(false, true);
-                            mKeyboardSwitcher.showToast("Transcribing...", false);
+                            // In continuous mode, keep showing recording state during transcription
+                            // so the cancel button stays visible
+                            mSuggestionStripView.setVoiceInputState(false, true, isContinuousMode);
+                            // Don't show toast during continuous transcription to reduce interruption
+                            if (!isContinuousMode) {
+                                mKeyboardSwitcher.showToast("Transcribing...", false);
+                            }
                             break;
                         case IDLE:
-                            mSuggestionStripView.setVoiceInputState(false, false);
+                            // Only fully reset UI if not in continuous mode
+                            if (!isContinuousMode) {
+                                mSuggestionStripView.setVoiceInputState(false, false, false);
+                            }
                             break;
                     }
                 }
@@ -1605,10 +1614,11 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onTranscriptionResult(@NonNull String text) {
                 Log.i(TAG, "Voice transcription result received: '" + text + "'");
-                // Insert the transcribed text
+                // Insert the transcribed text with a space after it for continuous typing
                 if (text != null && !text.isEmpty()) {
                     Log.i(TAG, "Committing transcribed text to input");
-                    mInputLogic.mConnection.commitText(text, 1);
+                    // Add a space after the text for better continuous input experience
+                    mInputLogic.mConnection.commitText(text + " ", 1);
                 } else {
                     Log.w(TAG, "Transcription text is null or empty");
                 }
@@ -1617,9 +1627,13 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onError(@NonNull String error) {
                 Log.e(TAG, "Voice input error: " + error);
-                mKeyboardSwitcher.showToast("Voice input error: " + error, true);
-                if (mSuggestionStripView != null) {
-                    mSuggestionStripView.setVoiceInputState(false, false);
+                // Only show error toast if not in continuous mode or if it's a critical error
+                boolean isContinuousMode = mVoiceInputManager.isContinuousMode();
+                if (!isContinuousMode || error.contains("API key") || error.contains("permission")) {
+                    mKeyboardSwitcher.showToast("Voice input error: " + error, true);
+                }
+                if (mSuggestionStripView != null && !isContinuousMode) {
+                    mSuggestionStripView.setVoiceInputState(false, false, false);
                 }
             }
 

@@ -8,6 +8,8 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import androidx.core.content.ContextCompat
 import helium314.keyboard.latin.utils.Log
 import java.io.File
@@ -32,12 +34,21 @@ class VoiceRecorder(private val context: Context) {
         // 16-bit audio has max amplitude of 32767, typical quiet speech is around 500-2000 RMS
         // We set a low threshold to detect silence/noise (around 1.5% of max amplitude)
         const val MIN_RMS_THRESHOLD = 500.0
+
+        // Speech detection threshold - RMS value above which we consider the user is speaking
+        // This is higher than MIN_RMS_THRESHOLD to avoid triggering on ambient noise
+        const val SPEECH_RMS_THRESHOLD = 800.0
+
+        // How often to report RMS updates (in milliseconds)
+        private const val RMS_UPDATE_INTERVAL_MS = 100L
     }
 
     interface RecordingCallback {
         fun onRecordingStarted()
         fun onRecordingStopped(audioFile: File?, averageRms: Double)
         fun onRecordingError(error: String)
+        /** Called periodically with the current RMS volume level during recording */
+        fun onVolumeUpdate(currentRms: Double) {}
     }
 
     private var audioRecord: AudioRecord? = null
@@ -45,11 +56,13 @@ class VoiceRecorder(private val context: Context) {
     private var isRecording = false
     private var outputFile: File? = null
     private var callback: RecordingCallback? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     // Volume tracking
     private var sumSquares: Double = 0.0
     private var sampleCount: Long = 0
     private var averageRms: Double = 0.0
+    private var lastRmsUpdateTime: Long = 0
 
     val isCurrentlyRecording: Boolean
         get() = isRecording
@@ -107,6 +120,7 @@ class VoiceRecorder(private val context: Context) {
             sumSquares = 0.0
             sampleCount = 0
             averageRms = 0.0
+            lastRmsUpdateTime = 0
 
             audioRecord?.startRecording()
             isRecording = true
@@ -219,18 +233,40 @@ class VoiceRecorder(private val context: Context) {
                 // Write placeholder WAV header (44 bytes)
                 fos.write(ByteArray(44))
 
+                // For short-term RMS calculation (per chunk)
+                var chunkSumSquares = 0.0
+                var chunkSampleCount = 0
+
                 while (isRecording) {
                     val read = audioRecord?.read(data, 0, bufferSize) ?: break
                     if (read > 0) {
                         fos.write(data, 0, read)
+
+                        // Reset chunk tracking for this buffer
+                        chunkSumSquares = 0.0
+                        chunkSampleCount = 0
+
                         // Calculate RMS for volume detection
                         // PCM 16-bit: 2 bytes per sample, little-endian
                         for (i in 0 until read - 1 step 2) {
                             val sample = (data[i].toInt() and 0xFF) or (data[i + 1].toInt() shl 8)
                             // Convert to signed 16-bit
                             val signedSample = if (sample > 32767) sample - 65536 else sample
-                            sumSquares += signedSample.toDouble() * signedSample.toDouble()
+                            val squaredSample = signedSample.toDouble() * signedSample.toDouble()
+                            sumSquares += squaredSample
                             sampleCount++
+                            chunkSumSquares += squaredSample
+                            chunkSampleCount++
+                        }
+
+                        // Report current RMS periodically
+                        val currentTime = System.currentTimeMillis()
+                        if (currentTime - lastRmsUpdateTime >= RMS_UPDATE_INTERVAL_MS && chunkSampleCount > 0) {
+                            lastRmsUpdateTime = currentTime
+                            val currentRms = kotlin.math.sqrt(chunkSumSquares / chunkSampleCount)
+                            mainHandler.post {
+                                callback?.onVolumeUpdate(currentRms)
+                            }
                         }
                     }
                 }

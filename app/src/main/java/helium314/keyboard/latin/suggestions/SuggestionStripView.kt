@@ -580,12 +580,13 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
      * Update the voice input button state based on recording status.
      * @param isRecording true if currently recording, false otherwise
      * @param isTranscribing true if transcribing (processing), false otherwise
+     * @param isContinuousMode true if in continuous recording mode (keep cancel visible)
      */
-    fun setVoiceInputState(isRecording: Boolean, isTranscribing: Boolean = false) {
-        this.isVoiceRecording = isRecording
+    fun setVoiceInputState(isRecording: Boolean, isTranscribing: Boolean = false, isContinuousMode: Boolean = false) {
+        this.isVoiceRecording = isRecording || isContinuousMode
         post {
-            // Show cancel button only when recording
-            voiceCancelKey.isVisible = isRecording
+            // Show cancel button when recording or in continuous mode (even while transcribing)
+            voiceCancelKey.isVisible = isRecording || isContinuousMode
 
             when {
                 isRecording -> {
@@ -596,6 +597,10 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
                 isTranscribing -> {
                     // Transcribing state: show orange/amber tint
                     voiceInputKey.setColorFilter(Color.parseColor("#FFA500"))
+                    // Keep cancel button red in continuous mode
+                    if (isContinuousMode) {
+                        voiceCancelKey.setColorFilter(Color.parseColor("#FFA500"))
+                    }
                 }
                 else -> {
                     // Idle state: restore normal color
