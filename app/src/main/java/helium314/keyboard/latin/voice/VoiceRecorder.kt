@@ -35,6 +35,10 @@ class VoiceRecorder(private val context: Context) {
         const val SPEECH_THRESHOLD_RMS = 400.0  // Above this = speech detected
         const val SILENCE_THRESHOLD_RMS = 300.0 // Below this = silence detected
 
+        // Minimum RMS threshold for single-shot mode - below this, recording is considered too quiet
+        // Used to reject recordings that are mostly silence/noise
+        const val MIN_RMS_THRESHOLD = 500.0
+
         // Timing constants for continuous mode (in milliseconds)
         const val MIN_SPEECH_DURATION_MS = 3000L  // Minimum speech before considering silence
         const val SILENCE_DURATION_FOR_CHUNK_MS = 3000L  // Silence duration to trigger chunk
@@ -65,6 +69,11 @@ class VoiceRecorder(private val context: Context) {
     private var silenceStartTime: Long = 0L
     private var hasSpeechInCurrentChunk = false
     private var chunkCounter = 0
+
+    // Volume tracking for single-shot mode RMS calculation
+    private var sumSquares: Double = 0.0
+    private var sampleCount: Long = 0
+    private var averageRms: Double = 0.0
 
     val isCurrentlyRecording: Boolean
         get() = isRecording
@@ -210,6 +219,9 @@ class VoiceRecorder(private val context: Context) {
         releaseRecorder()
 
         val file = outputFile
+        val finalRms = averageRms
+        Log.i(TAG, "Recording stopped, averageRms: $finalRms")
+
         // In continuous mode, only return the file if there was speech in it
         val hasContent = if (wasContinuousMode) {
             hasSpeechInCurrentChunk && file != null && file.exists() && file.length() > 44
@@ -227,7 +239,7 @@ class VoiceRecorder(private val context: Context) {
             Log.w(TAG, "Recording file is empty or doesn't exist (or no speech in continuous mode)")
             // Clean up the file if it exists but has no speech
             file?.delete()
-            callback?.onRecordingStopped(null)
+            callback?.onRecordingStopped(null, finalRms)
             return null
         }
     }
@@ -256,7 +268,7 @@ class VoiceRecorder(private val context: Context) {
         outputFile?.delete()
         outputFile = null
         resetSpeechState()
-        callback?.onRecordingStopped(null)
+        callback?.onRecordingStopped(null, 0.0)
         Log.i(TAG, "Recording cancelled")
     }
 
@@ -326,8 +338,6 @@ class VoiceRecorder(private val context: Context) {
                     val currentTime = System.currentTimeMillis()
 
                     // Detect speech/silence transitions
-                    val wasSpeaking = isSpeaking
-
                     if (currentRms >= SPEECH_THRESHOLD_RMS) {
                         // Speech detected
                         if (!isSpeaking) {

@@ -2,6 +2,8 @@
 package helium314.keyboard.latin.voice
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.utils.Log
@@ -44,12 +46,14 @@ class VoiceInputManager(private val context: Context) {
 
     private val voiceRecorder = VoiceRecorder(context)
     private val whisperClient = WhisperApiClient()
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var listener: VoiceInputListener? = null
-    private var currentState = State.IDLE
+    @Volatile private var currentState = State.IDLE
     private var currentAudioFile: File? = null
 
-    // Continuous mode tracking
-    private var pendingTranscriptions = 0
+    // Continuous mode tracking (accessed from multiple threads, use synchronized access)
+    private val stateLock = Any()
+    @Volatile private var pendingTranscriptions = 0
     private val pendingAudioFiles = mutableListOf<File>()
 
     val isRecording: Boolean
@@ -117,41 +121,47 @@ class VoiceInputManager(private val context: Context) {
 
         voiceRecorder.setCallback(object : VoiceRecorder.RecordingCallback {
             override fun onRecordingStarted() {
-                Log.i(TAG, "Recording started callback received")
-                currentState = State.RECORDING
-                listener?.onStateChanged(State.RECORDING)
+                mainHandler.post {
+                    Log.i(TAG, "Recording started callback received")
+                    currentState = State.RECORDING
+                    listener?.onStateChanged(State.RECORDING)
+                }
             }
 
             override fun onRecordingStopped(audioFile: File?, averageRms: Double) {
-                Log.i(TAG, "Recording stopped callback received, audioFile: ${audioFile?.absolutePath}, size: ${audioFile?.length() ?: 0}, rms: $averageRms")
-                currentAudioFile = audioFile
+                mainHandler.post {
+                    Log.i(TAG, "Recording stopped callback received, audioFile: ${audioFile?.absolutePath}, size: ${audioFile?.length() ?: 0}, rms: $averageRms")
+                    currentAudioFile = audioFile
 
-                // Check if audio is too quiet (likely silence or noise)
-                if (averageRms < VoiceRecorder.MIN_RMS_THRESHOLD) {
-                    Log.w(TAG, "Audio too quiet (rms: $averageRms < threshold: ${VoiceRecorder.MIN_RMS_THRESHOLD}), cancelling transcription")
-                    currentState = State.IDLE
-                    listener?.onStateChanged(State.IDLE)
-                    listener?.onError("No speech detected - audio was too quiet")
-                    cleanupAudioFile()
-                    return
-                }
+                    // Check if audio is too quiet (likely silence or noise)
+                    if (averageRms < VoiceRecorder.MIN_RMS_THRESHOLD) {
+                        Log.w(TAG, "Audio too quiet (rms: $averageRms < threshold: ${VoiceRecorder.MIN_RMS_THRESHOLD}), cancelling transcription")
+                        currentState = State.IDLE
+                        listener?.onStateChanged(State.IDLE)
+                        listener?.onError("No speech detected - audio was too quiet")
+                        cleanupAudioFile()
+                        return@post
+                    }
 
-                if (audioFile != null && audioFile.exists() && audioFile.length() > 44) {
-                    Log.i(TAG, "Audio file valid, starting transcription")
-                    transcribeAudio(audioFile, isContinuousMode = false)
-                } else {
-                    Log.e(TAG, "Audio file invalid or empty: exists=${audioFile?.exists()}, size=${audioFile?.length()}")
-                    currentState = State.IDLE
-                    listener?.onStateChanged(State.IDLE)
-                    listener?.onError("Recording failed - no audio captured (file size: ${audioFile?.length() ?: 0} bytes)")
+                    if (audioFile != null && audioFile.exists() && audioFile.length() > 44) {
+                        Log.i(TAG, "Audio file valid, starting transcription")
+                        transcribeAudio(audioFile, isContinuousMode = false)
+                    } else {
+                        Log.e(TAG, "Audio file invalid or empty: exists=${audioFile?.exists()}, size=${audioFile?.length()}")
+                        currentState = State.IDLE
+                        listener?.onStateChanged(State.IDLE)
+                        listener?.onError("Recording failed - no audio captured (file size: ${audioFile?.length() ?: 0} bytes)")
+                    }
                 }
             }
 
             override fun onRecordingError(error: String) {
-                Log.e(TAG, "Recording error: $error")
-                currentState = State.IDLE
-                listener?.onStateChanged(State.IDLE)
-                listener?.onError(error)
+                mainHandler.post {
+                    Log.e(TAG, "Recording error: $error")
+                    currentState = State.IDLE
+                    listener?.onStateChanged(State.IDLE)
+                    listener?.onError(error)
+                }
             }
         })
 
@@ -181,47 +191,63 @@ class VoiceInputManager(private val context: Context) {
 
         voiceRecorder.setCallback(object : VoiceRecorder.RecordingCallback {
             override fun onRecordingStarted() {
-                Log.i(TAG, "Continuous recording started")
-                currentState = State.CONTINUOUS_RECORDING
-                listener?.onStateChanged(State.CONTINUOUS_RECORDING)
+                mainHandler.post {
+                    Log.i(TAG, "Continuous recording started")
+                    currentState = State.CONTINUOUS_RECORDING
+                    listener?.onStateChanged(State.CONTINUOUS_RECORDING)
+                }
             }
 
-            override fun onRecordingStopped(audioFile: File?) {
-                Log.i(TAG, "Continuous recording stopped, final chunk: ${audioFile?.absolutePath}")
-                // Handle the final chunk when user stops recording
-                if (audioFile != null && audioFile.exists() && audioFile.length() > 44) {
-                    transcribeAudio(audioFile, isContinuousMode = true)
-                } else {
-                    // No speech in final chunk, check if we have pending transcriptions
-                    if (pendingTranscriptions == 0) {
-                        currentState = State.IDLE
-                        listener?.onStateChanged(State.IDLE)
+            override fun onRecordingStopped(audioFile: File?, averageRms: Double) {
+                mainHandler.post {
+                    Log.i(TAG, "Continuous recording stopped, final chunk: ${audioFile?.absolutePath}, rms: $averageRms")
+                    // Handle the final chunk when user stops recording
+                    // In continuous mode, we don't check averageRms for the final chunk since it may contain
+                    // partial speech that was cut off when user stopped recording
+                    if (audioFile != null && audioFile.exists() && audioFile.length() > 44) {
+                        transcribeAudio(audioFile, isContinuousMode = true)
+                    } else {
+                        // No speech in final chunk, check if we have pending transcriptions
+                        synchronized(stateLock) {
+                            if (pendingTranscriptions == 0) {
+                                currentState = State.IDLE
+                                listener?.onStateChanged(State.IDLE)
+                            }
+                        }
+                        // If there are pending transcriptions, state will be updated when they complete
                     }
-                    // If there are pending transcriptions, state will be updated when they complete
                 }
             }
 
             override fun onRecordingError(error: String) {
-                Log.e(TAG, "Recording error: $error")
-                currentState = State.IDLE
-                listener?.onStateChanged(State.IDLE)
-                listener?.onError(error)
+                mainHandler.post {
+                    Log.e(TAG, "Recording error: $error")
+                    currentState = State.IDLE
+                    listener?.onStateChanged(State.IDLE)
+                    listener?.onError(error)
+                }
             }
 
             override fun onChunkReady(audioFile: File) {
-                // A chunk is ready for transcription while recording continues
-                Log.i(TAG, "Chunk ready for transcription: ${audioFile.absolutePath}, size: ${audioFile.length()}")
-                transcribeAudio(audioFile, isContinuousMode = true)
+                mainHandler.post {
+                    // A chunk is ready for transcription while recording continues
+                    Log.i(TAG, "Chunk ready for transcription: ${audioFile.absolutePath}, size: ${audioFile.length()}")
+                    transcribeAudio(audioFile, isContinuousMode = true)
+                }
             }
 
             override fun onSpeechDetected() {
-                Log.i(TAG, "Speech detected")
-                listener?.onSpeechDetected()
+                mainHandler.post {
+                    Log.i(TAG, "Speech detected")
+                    listener?.onSpeechDetected()
+                }
             }
 
             override fun onSilenceDetected() {
-                Log.i(TAG, "Silence detected")
-                listener?.onSilenceDetected()
+                mainHandler.post {
+                    Log.i(TAG, "Silence detected")
+                    listener?.onSilenceDetected()
+                }
             }
         })
 
@@ -262,9 +288,11 @@ class VoiceInputManager(private val context: Context) {
     fun cancelRecording() {
         if (currentState == State.RECORDING || currentState == State.CONTINUOUS_RECORDING) {
             voiceRecorder.cancelRecording()
-            pendingTranscriptions = 0
-            pendingAudioFiles.forEach { it.delete() }
-            pendingAudioFiles.clear()
+            synchronized(stateLock) {
+                pendingTranscriptions = 0
+                pendingAudioFiles.forEach { it.delete() }
+                pendingAudioFiles.clear()
+            }
             currentState = State.IDLE
             listener?.onStateChanged(State.IDLE)
         }
@@ -278,9 +306,11 @@ class VoiceInputManager(private val context: Context) {
             listener?.onStateChanged(State.TRANSCRIBING)
         } else {
             // Track pending transcriptions in continuous mode
-            pendingTranscriptions++
-            pendingAudioFiles.add(audioFile)
-            Log.i(TAG, "Pending transcriptions: $pendingTranscriptions")
+            synchronized(stateLock) {
+                pendingTranscriptions++
+                pendingAudioFiles.add(audioFile)
+                Log.i(TAG, "Pending transcriptions: $pendingTranscriptions")
+            }
         }
 
         val apiKey = getApiKey()
@@ -327,34 +357,45 @@ class VoiceInputManager(private val context: Context) {
     private fun handleTranscriptionComplete(audioFile: File, isContinuousMode: Boolean, text: String?, error: String?) {
         // Clean up the audio file
         audioFile.delete()
-        pendingAudioFiles.remove(audioFile)
 
         if (isContinuousMode) {
-            pendingTranscriptions--
-            Log.i(TAG, "Continuous mode transcription complete, pending: $pendingTranscriptions")
+            val shouldGoIdle: Boolean
+            synchronized(stateLock) {
+                pendingAudioFiles.remove(audioFile)
+                if (pendingTranscriptions > 0) {
+                    pendingTranscriptions--
+                }
+                Log.i(TAG, "Continuous mode transcription complete, pending: $pendingTranscriptions")
+                shouldGoIdle = !voiceRecorder.isCurrentlyRecording && pendingTranscriptions == 0
+            }
 
             if (text != null && text.isNotBlank()) {
-                // Post-process and deliver result
-                val processedText = postProcessTranscription(text)
+                // Post-process and deliver result with trailing space for better UX
+                val processedText = postProcessTranscription(text) + " "
                 Log.i(TAG, "Delivering transcription result: '$processedText'")
                 listener?.onTranscriptionResult(processedText)
             } else if (error != null) {
-                listener?.onError(error)
+                // In continuous mode, log errors but don't interrupt the flow
+                Log.w(TAG, "Transcription error in continuous mode (continuing): $error")
             }
 
             // Check if we should transition to IDLE
             // Only go idle if recording has stopped AND no pending transcriptions
-            if (!voiceRecorder.isCurrentlyRecording && pendingTranscriptions == 0) {
+            if (shouldGoIdle) {
                 currentState = State.IDLE
                 listener?.onStateChanged(State.IDLE)
             }
         } else {
             // Single-shot mode
+            synchronized(stateLock) {
+                pendingAudioFiles.remove(audioFile)
+            }
             currentState = State.IDLE
             listener?.onStateChanged(State.IDLE)
 
             if (text != null && text.isNotBlank()) {
-                val processedText = postProcessTranscription(text)
+                // Add trailing space for better UX
+                val processedText = postProcessTranscription(text) + " "
                 Log.i(TAG, "Calling onTranscriptionResult with text: '$processedText'")
                 listener?.onTranscriptionResult(processedText)
             } else if (error != null) {
@@ -470,9 +511,11 @@ class VoiceInputManager(private val context: Context) {
         }
         cleanupAudioFile()
         // Clean up any pending audio files
-        pendingAudioFiles.forEach { it.delete() }
-        pendingAudioFiles.clear()
-        pendingTranscriptions = 0
+        synchronized(stateLock) {
+            pendingAudioFiles.forEach { it.delete() }
+            pendingAudioFiles.clear()
+            pendingTranscriptions = 0
+        }
         listener = null
     }
 }
