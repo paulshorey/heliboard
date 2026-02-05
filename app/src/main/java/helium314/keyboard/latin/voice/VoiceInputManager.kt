@@ -23,7 +23,8 @@ class VoiceInputManager(private val context: Context) {
 
     companion object {
         private const val TAG = "VoiceInputManager"
-        private const val SILENCE_TIMEOUT_MS = 30000L // 30 seconds
+        private const val SILENCE_TIMEOUT_MS = 30000L // 30 seconds - cancel recording
+        private const val CLEANUP_DELAY_MS = 3000L // 3 seconds - trigger cleanup after silence
     }
 
     /**
@@ -42,6 +43,8 @@ class VoiceInputManager(private val context: Context) {
         fun onTranscriptionResult(text: String)
         /** Called with partial/incremental transcription (for real-time feedback) */
         fun onTranscriptionDelta(text: String)
+        /** Called after 3 seconds of silence - time to cleanup the current paragraph */
+        fun onCleanupRequested()
         fun onError(error: String)
         fun onPermissionRequired()
     }
@@ -54,12 +57,20 @@ class VoiceInputManager(private val context: Context) {
     // State tracking
     private var currentState = State.IDLE
     
-    // Silence timeout - auto-cancel after 15 seconds of no speech
+    // Silence timeout - auto-cancel after 30 seconds of no speech
     private val silenceTimeoutRunnable = Runnable {
         if (currentState == State.RECORDING) {
             Log.i(TAG, "Silence timeout - cancelling recording")
             cancelRecording()
             listener?.onError("Recording cancelled due to silence")
+        }
+    }
+    
+    // Cleanup timer - trigger cleanup after 3 seconds of silence
+    private val cleanupTimerRunnable = Runnable {
+        if (currentState == State.RECORDING) {
+            Log.i(TAG, "3 second silence - requesting cleanup")
+            listener?.onCleanupRequested()
         }
     }
 
@@ -156,6 +167,17 @@ class VoiceInputManager(private val context: Context) {
                     }
                 }
 
+                override fun onSpeechStarted() {
+                    // User started speaking - cancel cleanup timer
+                    cancelCleanupTimer()
+                    resetSilenceTimeout()
+                }
+
+                override fun onSpeechStopped() {
+                    // User stopped speaking - start 3 second cleanup timer
+                    startCleanupTimer()
+                }
+
                 override fun onError(error: String) {
                     Log.e(TAG, "Realtime API error: $error")
                     listener?.onError(error)
@@ -232,6 +254,7 @@ class VoiceInputManager(private val context: Context) {
      */
     private fun stopRecordingInternal() {
         cancelSilenceTimeout()
+        cancelCleanupTimer()
         voiceRecorder.stopRecording()
         realtimeClient.disconnect()
         updateState(State.IDLE)
@@ -255,6 +278,7 @@ class VoiceInputManager(private val context: Context) {
             return
         }
         cancelSilenceTimeout()
+        cancelCleanupTimer()
         voiceRecorder.pauseRecording()
         updateState(State.PAUSED)
         Log.i(TAG, "Recording paused")
@@ -310,6 +334,23 @@ class VoiceInputManager(private val context: Context) {
      */
     private fun cancelSilenceTimeout() {
         mainHandler.removeCallbacks(silenceTimeoutRunnable)
+    }
+    
+    /**
+     * Start the cleanup timer. Called when speech stops.
+     */
+    private fun startCleanupTimer() {
+        mainHandler.removeCallbacks(cleanupTimerRunnable)
+        if (currentState == State.RECORDING) {
+            mainHandler.postDelayed(cleanupTimerRunnable, CLEANUP_DELAY_MS)
+        }
+    }
+    
+    /**
+     * Cancel the cleanup timer. Called when speech starts again.
+     */
+    private fun cancelCleanupTimer() {
+        mainHandler.removeCallbacks(cleanupTimerRunnable)
     }
 
     private fun getApiKey(): String {

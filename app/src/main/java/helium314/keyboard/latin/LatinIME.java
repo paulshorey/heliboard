@@ -1629,13 +1629,33 @@ public class LatinIME extends InputMethodService implements
                 if (text == null || text.isEmpty()) {
                     return;
                 }
+                // Just insert the raw text with basic capitalization fix
+                // Cleanup will happen later when onCleanupRequested is called after 3s silence
+                String adjustedText = adjustCapitalization(text);
                 
-                // Get Anthropic API key for Claude cleanup
+                // Add space after punctuation, otherwise no space
+                String textToInsert = adjustedText;
+                if (!adjustedText.isEmpty()) {
+                    char lastChar = adjustedText.charAt(adjustedText.length() - 1);
+                    if (lastChar == '.' || lastChar == '!' || lastChar == '?' || 
+                        lastChar == ',' || lastChar == ';' || lastChar == ':') {
+                        textToInsert = adjustedText + " ";
+                    }
+                }
+                mInputLogic.mConnection.commitText(textToInsert, 1);
+            }
+
+            @Override
+            public void onTranscriptionDelta(@NonNull String text) {
+                // Real-time partial transcription - could be used for live preview
+            }
+
+            @Override
+            public void onCleanupRequested() {
+                // Called after 3 seconds of silence - time to cleanup the current paragraph
                 String anthropicApiKey = KtxKt.prefs(LatinIME.this).getString(Settings.PREF_ANTHROPIC_API_KEY, "");
                 if (anthropicApiKey == null || anthropicApiKey.isEmpty()) {
-                    // No Anthropic API key, fall back to simple insertion with client-side fix
-                    String adjustedText = adjustCapitalization(text);
-                    mInputLogic.mConnection.commitText(adjustedText + " ", 1);
+                    // No Anthropic API key, skip cleanup
                     return;
                 }
                 
@@ -1645,51 +1665,68 @@ public class LatinIME extends InputMethodService implements
                     cleanupPrompt = Defaults.PREF_CLEANUP_PROMPT;
                 }
                 
-                // Get text before cursor to find context from last newline
+                // Get text before cursor to find the current paragraph
                 CharSequence textBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(2000, 0);
                 String beforeText = textBeforeCursor != null ? textBeforeCursor.toString() : "";
+                
+                if (beforeText.isEmpty()) {
+                    return;
+                }
                 
                 // Find the last newline position
                 int lastNewlinePos = beforeText.lastIndexOf('\n');
                 
-                // Extract context from last newline (or start if no newline)
-                String existingContext;
-                final int contextStartPos;
+                // Extract current paragraph from last newline (or start if no newline)
+                final String originalParagraph;
                 if (lastNewlinePos >= 0) {
-                    existingContext = beforeText.substring(lastNewlinePos + 1);
-                    contextStartPos = lastNewlinePos + 1;
+                    originalParagraph = beforeText.substring(lastNewlinePos + 1);
                 } else {
-                    existingContext = beforeText;
-                    contextStartPos = 0;
+                    originalParagraph = beforeText;
                 }
                 
-                // Calculate how many characters to delete when replacing
-                final int charsToDelete = beforeText.length() - contextStartPos;
+                if (originalParagraph.trim().isEmpty()) {
+                    return;
+                }
                 
-                // Send to Claude for cleanup
+                Log.d(TAG, "Cleanup requested for paragraph: " + originalParagraph);
+                
+                // Send current paragraph to Claude for cleanup
                 final String prompt = cleanupPrompt;
-                mTextCleanupClient.cleanupText(anthropicApiKey, prompt, existingContext, text, new TextCleanupClient.CleanupCallback() {
+                mTextCleanupClient.cleanupText(anthropicApiKey, prompt, "", originalParagraph, new TextCleanupClient.CleanupCallback() {
                     @Override
                     public void onCleanupComplete(String cleanedText) {
-                        // Delete the existing context and insert cleaned text
-                        if (charsToDelete > 0) {
-                            mInputLogic.mConnection.deleteTextBeforeCursor(charsToDelete);
+                        // Find and replace the original paragraph instead of deleting from position
+                        // This handles the race condition where new text may have been added
+                        CharSequence currentTextBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(4000, 0);
+                        String currentText = currentTextBeforeCursor != null ? currentTextBeforeCursor.toString() : "";
+                        
+                        // Find where the original paragraph is in the current text
+                        int originalPos = currentText.lastIndexOf(originalParagraph);
+                        if (originalPos >= 0) {
+                            // Calculate how much text is after the original paragraph (new text added during cleanup)
+                            int endOfOriginal = originalPos + originalParagraph.length();
+                            String textAfterOriginal = currentText.substring(endOfOriginal);
+                            
+                            // Delete from original position to end
+                            int charsToDelete = currentText.length() - originalPos;
+                            if (charsToDelete > 0) {
+                                mInputLogic.mConnection.deleteTextBeforeCursor(charsToDelete);
+                            }
+                            
+                            // Insert cleaned text + any new text that was added during cleanup
+                            mInputLogic.mConnection.commitText(cleanedText + textAfterOriginal, 1);
+                        } else {
+                            // Original paragraph not found - text changed too much, skip cleanup
+                            Log.w(TAG, "Original paragraph not found, skipping cleanup");
                         }
-                        mInputLogic.mConnection.commitText(cleanedText + " ", 1);
                     }
                     
                     @Override
                     public void onCleanupError(String error) {
-                        // Fall back to simple insertion with client-side capitalization fix
-                        String adjustedText = adjustCapitalization(text);
-                        mInputLogic.mConnection.commitText(adjustedText + " ", 1);
+                        // On error, leave the text as-is (already inserted)
+                        Log.e(TAG, "Cleanup error: " + error);
                     }
                 });
-            }
-
-            @Override
-            public void onTranscriptionDelta(@NonNull String text) {
-                // Real-time partial transcription - could be used for live preview
             }
 
             @Override

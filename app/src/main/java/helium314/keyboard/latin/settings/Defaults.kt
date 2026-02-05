@@ -168,16 +168,18 @@ object Defaults {
     const val PREF_WHISPER_API_KEY = ""
     const val PREF_ANTHROPIC_API_KEY = ""
     const val PREF_WHISPER_PROMPT_SELECTED = 0 // Default to first preset
-    const val PREF_CLEANUP_PROMPT = """Edit this raw transcription to have correct grammar and structure. DO NOT add any content. Do not complete the sentence. Return only the fixed text. Rewrite end of sentence when continuing a thought. Remove artifacts like "Um...".
+    const val PREF_CLEANUP_PROMPT = """Edit this raw transcription to be written correctly: 
+    
+Add capitalization and punctuation (.!?:,) to sentences. Fix grammar. Combine or split sentences to make them sound natural. Split one sentence into two if it reads better. Add punctuation where it makes sense. If the text is just a word or code then do not add grammatical punctuation or capitalization. Remove short insignificant artifacts like "Um...". 
 
-Detect sentences. Separate text into sentences. Add capitalization and punctuation (.!?:,) to sentences. Fix grammar. Combine two sentences if they will sound more natural as one sentence. Split one sentence into two if it reads better. Add punctuation where it makes sense.
+Capitalize names and products such as "Claude Code". Acronyms should be uppercase (api -> API). If the name of a special character is spelled out like 'open curly bracket', 'open parentheses', 'slash' then convert it into the actual character '{', '(', '/'. Example: 'Open curly bracket quote model unquote colon quote opus dash four dash six quote Close curly bracket' -> '{"model":"claude-opus-4-6"}'
 
-If the text is not a sentence, then do not add grammatical punctuation or capitalization. Capitalize names and products such as "Claude Code". Acronyms like IBKR should be uppercase.
+DO NOT add any content. DO NOT complete the sentence. DO NOT remove actual words, even if they are not grammatically correct. The end of this text may be unfinished, transcription still in progress.
 
-Convert spelled out names of special characters ('open curly bracket', 'open parentheses', 'slash') into the actual characters ('{','(','/'). Example: 'Open curly bracket quote model unquote colon quote opus- four-six quote close curly bracket' -> '{"model":"claude-opus-4-6"}'"""
+Return only the fixed text."""
     val PREF_TRANSCRIBE_PROMPTS = listOf(
         // Technical/Standard
-        "Capitalize first letter only in a full sentence. Do not capitalize words and phrases. Add punctuation where necessary.",
+        "",
         // Braindump
         "Braindump. The recording is a long stream of consciousness. It's messy, repetitive, lacks structure, contains mistakes and parts that don't make any sense. Make sense of it. Clean it up. Make the text easier to read.",
         // Casual conversation

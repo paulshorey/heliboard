@@ -65,8 +65,7 @@ class TextCleanupClient {
             newText
         }
         
-        Log.d(TAG, "CLEANUP_INPUT_CONTEXT: $existingContext")
-        Log.d(TAG, "CLEANUP_INPUT_NEW: $newText")
+        Log.d(TAG, "CLEANUP_INPUT: $fullText")
         
         // Skip cleanup if no text to process
         if (fullText.isBlank()) {
@@ -116,8 +115,6 @@ class TextCleanupClient {
                         return
                     }
 
-                    Log.d(TAG, "CLEANUP_RESPONSE: $responseBody")
-                    
                     val json = JSONObject(responseBody ?: "{}")
                     // Anthropic response format: content[0].text
                     val content = json.optJSONArray("content")

@@ -59,6 +59,12 @@ class RealtimeTranscriptionClient {
         /** Called when a speech segment's transcription is complete */
         fun onTranscriptionComplete(text: String)
 
+        /** Called when speech starts (VAD detected voice) */
+        fun onSpeechStarted()
+
+        /** Called when speech stops (VAD detected silence) */
+        fun onSpeechStopped()
+
         /** Called when an error occurs */
         fun onError(error: String)
 
@@ -301,9 +307,12 @@ class RealtimeTranscriptionClient {
                     currentTranscript.clear()
                 }
 
-                "input_audio_buffer.speech_started",
+                "input_audio_buffer.speech_started" -> {
+                    mainHandler.post { callback?.onSpeechStarted() }
+                }
+
                 "input_audio_buffer.speech_stopped" -> {
-                    // VAD events - no action needed, server handles automatically
+                    mainHandler.post { callback?.onSpeechStopped() }
                 }
 
                 "conversation.item.input_audio_transcription.delta" -> {
