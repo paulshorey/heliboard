@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Manages the voice input workflow: recording audio and transcribing via Whisper API.
+ * Coordinates between VoiceRecorder and WhisperApiClient.
  *
  * Architecture: Recording and transcription are decoupled and run in parallel.
  * - Recording loop: continuously records, detects silence, saves file, immediately restarts

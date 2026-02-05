@@ -28,7 +28,7 @@ HeliBoard includes a built-in voice-to-text feature that uses OpenAI's Whisper A
 
 1. Open HeliBoard Settings
 2. Navigate to **Advanced** settings
-3. Find **"OpenAI Whisper API Key"**
+3. Find **"OpenAI API Key"**
 4. Paste your API key and save
 
 ### Step 3: Configure Style Prompt (Optional)
@@ -70,7 +70,7 @@ When you first tap the microphone button, Android will ask for microphone permis
 ## Troubleshooting
 
 ### "OpenAI API key not configured"
-- Make sure you've entered your API key in Settings > Advanced > OpenAI Whisper API Key
+- Make sure you've entered your API key in Settings > Advanced > OpenAI API Key
 
 ### "Microphone permission required"
 - Go to Android Settings > Apps > HeliBoard > Permissions
@@ -114,4 +114,4 @@ Whisper supports 50+ languages including:
 
 - Audio Format: WAV (PCM 16-bit, 16kHz mono)
 - API Endpoint: `https://api.openai.com/v1/audio/transcriptions`
-- Model: `whisper-1`
+- Model: `whisper-1` (OpenAI's Whisper model)
