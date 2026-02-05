@@ -1632,16 +1632,7 @@ public class LatinIME extends InputMethodService implements
                 // Just insert the raw text with basic capitalization fix
                 // Cleanup will happen later when onCleanupRequested is called after 3s silence
                 String adjustedText = adjustCapitalization(text);
-                
-                // Add space after punctuation, otherwise no space
-                String textToInsert = adjustedText;
-                if (!adjustedText.isEmpty()) {
-                    char lastChar = adjustedText.charAt(adjustedText.length() - 1);
-                    if (lastChar == '.' || lastChar == '!' || lastChar == '?' || 
-                        lastChar == ',' || lastChar == ';' || lastChar == ':') {
-                        textToInsert = adjustedText + " ";
-                    }
-                }
+                String textToInsert = addSpaceAfterPunctuation(adjustedText);
                 mInputLogic.mConnection.commitText(textToInsert, 1);
             }
 
@@ -1713,8 +1704,11 @@ public class LatinIME extends InputMethodService implements
                                 mInputLogic.mConnection.deleteTextBeforeCursor(charsToDelete);
                             }
                             
+                            // Post-process cleaned text to add space after punctuation
+                            String processedText = addSpaceAfterPunctuation(cleanedText);
+                            
                             // Insert cleaned text + any new text that was added during cleanup
-                            mInputLogic.mConnection.commitText(cleanedText + textAfterOriginal, 1);
+                            mInputLogic.mConnection.commitText(processedText + textAfterOriginal, 1);
                         } else {
                             // Original paragraph not found - text changed too much, skip cleanup
                             Log.w(TAG, "Original paragraph not found, skipping cleanup");
@@ -1791,6 +1785,22 @@ public class LatinIME extends InputMethodService implements
             return Character.toLowerCase(firstChar) + text.substring(1);
         }
 
+        return text;
+    }
+
+    /**
+     * Add a space after the text if it ends with punctuation.
+     * This ensures proper spacing after transcribed sentences.
+     */
+    private String addSpaceAfterPunctuation(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+        char lastChar = text.charAt(text.length() - 1);
+        if (lastChar == '.' || lastChar == '!' || lastChar == '?' || 
+            lastChar == ',' || lastChar == ';' || lastChar == ':') {
+            return text + " ";
+        }
         return text;
     }
 
