@@ -1584,28 +1584,29 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onStateChanged(@NonNull VoiceInputManager.State state) {
                 boolean isContinuousMode = mVoiceInputManager.isContinuousMode();
-                Log.i(TAG, "Voice input state changed: " + state + ", continuous: " + isContinuousMode);
-                // Update the UI to reflect the current state
+                boolean isRecording = mVoiceInputManager.isRecording();
+                boolean isTranscribing = mVoiceInputManager.isTranscribing();
+                Log.i(TAG, "Voice input state changed: " + state + ", continuous: " + isContinuousMode +
+                        ", recording: " + isRecording + ", transcribing: " + isTranscribing);
+
                 if (mSuggestionStripView != null) {
                     switch (state) {
                         case RECORDING:
-                            mSuggestionStripView.setVoiceInputState(true, false, isContinuousMode);
-                            mKeyboardSwitcher.showToast("Listening...", false);
+                            // Recording is active (may also be transcribing in background)
+                            mSuggestionStripView.setVoiceInputState(true, isTranscribing, isContinuousMode);
+                            if (!isTranscribing) {
+                                // Only show toast on fresh start, not when restarting while transcribing
+                                mKeyboardSwitcher.showToast("Listening...", false);
+                            }
                             break;
                         case TRANSCRIBING:
-                            // In continuous mode, keep showing recording state during transcription
-                            // so the cancel button stays visible
+                            // Only transcribing (user stopped recording manually)
                             mSuggestionStripView.setVoiceInputState(false, true, isContinuousMode);
-                            // Don't show toast during continuous transcription to reduce interruption
-                            if (!isContinuousMode) {
-                                mKeyboardSwitcher.showToast("Transcribing...", false);
-                            }
+                            mKeyboardSwitcher.showToast("Transcribing...", false);
                             break;
                         case IDLE:
-                            // Only fully reset UI if not in continuous mode
-                            if (!isContinuousMode) {
-                                mSuggestionStripView.setVoiceInputState(false, false, false);
-                            }
+                            // Nothing happening
+                            mSuggestionStripView.setVoiceInputState(false, false, false);
                             break;
                     }
                 }
@@ -1627,13 +1628,10 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onError(@NonNull String error) {
                 Log.e(TAG, "Voice input error: " + error);
-                // Only show error toast if not in continuous mode or if it's a critical error
+                // Only show error toast for critical errors, not transient ones in continuous mode
                 boolean isContinuousMode = mVoiceInputManager.isContinuousMode();
                 if (!isContinuousMode || error.contains("API key") || error.contains("permission")) {
                     mKeyboardSwitcher.showToast("Voice input error: " + error, true);
-                }
-                if (mSuggestionStripView != null && !isContinuousMode) {
-                    mSuggestionStripView.setVoiceInputState(false, false, false);
                 }
             }
 

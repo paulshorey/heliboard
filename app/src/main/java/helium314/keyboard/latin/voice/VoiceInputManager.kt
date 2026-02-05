@@ -2,15 +2,23 @@
 package helium314.keyboard.latin.voice
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.prefs
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Manages the voice input workflow: recording audio and transcribing via Whisper API.
- * Coordinates between VoiceRecorder and WhisperApiClient.
+ *
+ * Architecture: Recording and transcription are decoupled and run in parallel.
+ * - Recording loop: continuously records, detects silence, saves file, immediately restarts
+ * - Transcription: processes saved audio files asynchronously, inserts text when complete
+ *
+ * This allows the microphone to always be listening while transcriptions happen in background.
  */
 class VoiceInputManager(private val context: Context) {
 
@@ -27,10 +35,14 @@ class VoiceInputManager(private val context: Context) {
         private const val SILENCE_DURATION_MS = 3000L
     }
 
+    /**
+     * State represents the overall voice input state for UI purposes.
+     * Note: Recording and transcription can happen simultaneously in continuous mode.
+     */
     enum class State {
-        IDLE,
-        RECORDING,
-        TRANSCRIBING
+        IDLE,           // Not doing anything
+        RECORDING,      // Actively recording (may also be transcribing in background)
+        TRANSCRIBING    // Only transcribing (recording stopped, e.g., when user clicks to stop)
     }
 
     interface VoiceInputListener {
@@ -43,8 +55,13 @@ class VoiceInputManager(private val context: Context) {
     private val voiceRecorder = VoiceRecorder(context)
     private val whisperClient = WhisperApiClient()
     private var listener: VoiceInputListener? = null
-    private var currentState = State.IDLE
-    private var currentAudioFile: File? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    // Recording state
+    private var isRecordingActive = false
+
+    // Transcription state - track pending transcriptions
+    private val pendingTranscriptions = AtomicInteger(0)
 
     // Continuous recording mode state
     private var continuousMode = false
@@ -52,16 +69,24 @@ class VoiceInputManager(private val context: Context) {
     private var silenceStartTime: Long = 0
 
     val isRecording: Boolean
-        get() = currentState == State.RECORDING
+        get() = isRecordingActive
 
     val isTranscribing: Boolean
-        get() = currentState == State.TRANSCRIBING
+        get() = pendingTranscriptions.get() > 0
 
     val isIdle: Boolean
-        get() = currentState == State.IDLE
+        get() = !isRecordingActive && pendingTranscriptions.get() == 0
 
+    /**
+     * Get the current state for UI purposes.
+     * In continuous mode, we prioritize showing RECORDING state.
+     */
     val state: State
-        get() = currentState
+        get() = when {
+            isRecordingActive -> State.RECORDING
+            pendingTranscriptions.get() > 0 -> State.TRANSCRIBING
+            else -> State.IDLE
+        }
 
     fun setListener(listener: VoiceInputListener?) {
         this.listener = listener
@@ -72,23 +97,21 @@ class VoiceInputManager(private val context: Context) {
      * and completes the current transcription.
      */
     fun toggleRecording() {
-        when (currentState) {
-            State.IDLE -> startRecording()
-            State.RECORDING -> {
+        when {
+            isRecordingActive -> {
                 // Stop continuous mode and transcribe the current recording
                 Log.i(TAG, "Toggle: stopping continuous mode and transcribing")
                 continuousMode = false
                 stopRecordingAndTranscribe()
             }
-            State.TRANSCRIBING -> {
-                // If in continuous mode while transcribing, stop the mode
-                // The current transcription will finish but won't restart
-                if (continuousMode) {
-                    Log.i(TAG, "Toggle: stopping continuous mode while transcribing")
-                    continuousMode = false
-                } else {
-                    Log.w(TAG, "Cannot toggle while transcribing (not in continuous mode)")
-                }
+            pendingTranscriptions.get() > 0 -> {
+                // Transcription in progress but not recording - just disable continuous mode
+                Log.i(TAG, "Toggle: stopping continuous mode while transcribing")
+                continuousMode = false
+            }
+            else -> {
+                // Idle - start recording
+                startRecording()
             }
         }
     }
@@ -96,11 +119,11 @@ class VoiceInputManager(private val context: Context) {
     /**
      * Start recording audio.
      * @param continuous If true, enables continuous recording mode where recording
-     *                   auto-restarts after transcription until manually cancelled.
+     *                   auto-restarts immediately after stopping (not waiting for transcription).
      */
     fun startRecording(continuous: Boolean = true): Boolean {
-        if (currentState != State.IDLE) {
-            Log.w(TAG, "Cannot start recording, current state: $currentState")
+        if (isRecordingActive) {
+            Log.w(TAG, "Cannot start recording, already recording")
             return false
         }
 
@@ -115,77 +138,77 @@ class VoiceInputManager(private val context: Context) {
         speechDetected = false
         silenceStartTime = 0
 
+        setupRecorderCallback()
+        return voiceRecorder.startRecording()
+    }
+
+    /**
+     * Setup the recorder callback. Called when starting recording.
+     */
+    private fun setupRecorderCallback() {
         voiceRecorder.setCallback(object : VoiceRecorder.RecordingCallback {
             override fun onRecordingStarted() {
-                Log.i(TAG, "Recording started callback received (continuous=$continuousMode)")
-                currentState = State.RECORDING
+                Log.i(TAG, "Recording started (continuous=$continuousMode, pendingTranscriptions=${pendingTranscriptions.get()})")
+                isRecordingActive = true
                 speechDetected = false
                 silenceStartTime = 0
                 listener?.onStateChanged(State.RECORDING)
             }
 
             override fun onRecordingStopped(audioFile: File?, averageRms: Double) {
-                Log.i(TAG, "Recording stopped callback received, audioFile: ${audioFile?.absolutePath}, size: ${audioFile?.length() ?: 0}, rms: $averageRms")
-                currentAudioFile = audioFile
+                Log.i(TAG, "Recording stopped, file: ${audioFile?.absolutePath}, size: ${audioFile?.length() ?: 0}, rms: $averageRms")
+                isRecordingActive = false
 
-                // Check if audio is too quiet (likely silence or noise)
-                if (averageRms < VoiceRecorder.MIN_RMS_THRESHOLD) {
-                    Log.w(TAG, "Audio too quiet (rms: $averageRms < threshold: ${VoiceRecorder.MIN_RMS_THRESHOLD}), cancelling transcription")
-
-                    // In continuous mode, restart recording instead of going to idle
-                    if (continuousMode) {
-                        Log.i(TAG, "Continuous mode: restarting recording after silence")
-                        cleanupAudioFile()
-                        // Small delay before restarting
-                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                            if (continuousMode) {
-                                startRecordingInternal()
-                            }
-                        }, 100)
-                        return
+                // CRITICAL: In continuous mode, restart recording IMMEDIATELY
+                // This happens BEFORE we start transcription
+                if (continuousMode) {
+                    Log.i(TAG, "Continuous mode: immediately restarting recording")
+                    mainHandler.post {
+                        if (continuousMode) {
+                            startRecordingInternal()
+                        } else {
+                            // Continuous mode was cancelled while we were stopping
+                            notifyStateChange()
+                        }
                     }
+                }
 
-                    currentState = State.IDLE
-                    listener?.onStateChanged(State.IDLE)
-                    listener?.onError("No speech detected - audio was too quiet")
-                    cleanupAudioFile()
+                // Now handle the audio file (transcription runs in parallel)
+                if (averageRms < VoiceRecorder.MIN_RMS_THRESHOLD) {
+                    Log.w(TAG, "Audio too quiet (rms: $averageRms), skipping transcription")
+                    audioFile?.delete()
+                    if (!continuousMode) {
+                        listener?.onError("No speech detected - audio was too quiet")
+                        notifyStateChange()
+                    }
                     return
                 }
 
                 if (audioFile != null && audioFile.exists() && audioFile.length() > 44) {
-                    Log.i(TAG, "Audio file valid, starting transcription")
-                    transcribeAudio(audioFile)
+                    Log.i(TAG, "Audio file valid, queuing transcription")
+                    // Transcription runs in background, doesn't block recording
+                    transcribeAudioAsync(audioFile)
                 } else {
-                    Log.e(TAG, "Audio file invalid or empty: exists=${audioFile?.exists()}, size=${audioFile?.length()}")
-
-                    // In continuous mode, restart recording
-                    if (continuousMode) {
-                        Log.i(TAG, "Continuous mode: restarting recording after empty file")
-                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                            if (continuousMode) {
-                                startRecordingInternal()
-                            }
-                        }, 100)
-                        return
+                    Log.e(TAG, "Audio file invalid or empty")
+                    audioFile?.delete()
+                    if (!continuousMode) {
+                        listener?.onError("Recording failed - no audio captured")
+                        notifyStateChange()
                     }
-
-                    currentState = State.IDLE
-                    listener?.onStateChanged(State.IDLE)
-                    listener?.onError("Recording failed - no audio captured (file size: ${audioFile?.length() ?: 0} bytes)")
                 }
             }
 
             override fun onRecordingError(error: String) {
                 Log.e(TAG, "Recording error: $error")
+                isRecordingActive = false
                 continuousMode = false
-                currentState = State.IDLE
                 listener?.onStateChanged(State.IDLE)
                 listener?.onError(error)
             }
 
             override fun onVolumeUpdate(currentRms: Double) {
                 // Handle real-time volume updates for auto-pause detection
-                if (currentState != State.RECORDING) return
+                if (!isRecordingActive) return
 
                 val currentTime = System.currentTimeMillis()
 
@@ -208,36 +231,47 @@ class VoiceInputManager(private val context: Context) {
                         if (silenceDuration >= SILENCE_DURATION_MS) {
                             Log.i(TAG, "Auto-stopping after ${silenceDuration}ms of silence")
                             // Auto-stop recording - this will trigger transcription
-                            stopRecordingAndTranscribe()
+                            // Recording will immediately restart in onRecordingStopped
+                            stopRecordingInternal()
                         }
                     }
                 }
             }
         })
-
-        return voiceRecorder.startRecording()
     }
 
     /**
      * Internal method to start recording without resetting continuous mode.
      */
     private fun startRecordingInternal(): Boolean {
-        if (currentState != State.IDLE) {
-            Log.w(TAG, "Cannot start recording internal, current state: $currentState")
+        if (isRecordingActive) {
+            Log.w(TAG, "Cannot start recording internal, already recording")
             return false
         }
 
         speechDetected = false
         silenceStartTime = 0
+        setupRecorderCallback()
         return voiceRecorder.startRecording()
+    }
+
+    /**
+     * Internal method to stop recording without changing continuous mode.
+     */
+    private fun stopRecordingInternal() {
+        if (!isRecordingActive) {
+            Log.w(TAG, "Cannot stop recording, not recording")
+            return
+        }
+        voiceRecorder.stopRecording()
     }
 
     /**
      * Stop recording and start transcription.
      */
     fun stopRecordingAndTranscribe() {
-        if (currentState != State.RECORDING) {
-            Log.w(TAG, "Cannot stop recording, current state: $currentState")
+        if (!isRecordingActive) {
+            Log.w(TAG, "Cannot stop recording, not recording")
             return
         }
 
@@ -255,20 +289,18 @@ class VoiceInputManager(private val context: Context) {
         speechDetected = false
         silenceStartTime = 0
 
-        if (currentState == State.RECORDING) {
+        if (isRecordingActive) {
             voiceRecorder.cancelRecording()
-            currentState = State.IDLE
-            listener?.onStateChanged(State.IDLE)
-        } else if (currentState == State.TRANSCRIBING) {
-            // If transcribing, just mark that continuous mode is off
-            // The transcription will finish but won't restart recording
-            Log.i(TAG, "Cancelling continuous mode while transcribing")
+            isRecordingActive = false
         }
+
+        // Note: pending transcriptions will complete, but results won't restart recording
+        notifyStateChange()
     }
 
     /**
      * Stop continuous recording mode.
-     * Recording will stop after the current transcription completes.
+     * Recording will stop after the current segment completes.
      */
     fun stopContinuousMode() {
         Log.i(TAG, "stopContinuousMode called")
@@ -281,19 +313,29 @@ class VoiceInputManager(private val context: Context) {
     val isContinuousMode: Boolean
         get() = continuousMode
 
-    private fun transcribeAudio(audioFile: File) {
-        Log.i(TAG, "transcribeAudio called with file: ${audioFile.absolutePath}, size: ${audioFile.length()}")
-        currentState = State.TRANSCRIBING
-        listener?.onStateChanged(State.TRANSCRIBING)
+    /**
+     * Notify listener of state change based on current recording/transcription status.
+     */
+    private fun notifyStateChange() {
+        listener?.onStateChanged(state)
+    }
+
+    /**
+     * Transcribe audio file asynchronously. Recording continues independently.
+     */
+    private fun transcribeAudioAsync(audioFile: File) {
+        Log.i(TAG, "transcribeAudioAsync: file=${audioFile.absolutePath}, size=${audioFile.length()}")
+
+        pendingTranscriptions.incrementAndGet()
+        Log.i(TAG, "Pending transcriptions: ${pendingTranscriptions.get()}")
 
         val apiKey = getApiKey()
-        Log.i(TAG, "API key retrieved, length: ${apiKey.length}, blank: ${apiKey.isBlank()}")
         if (apiKey.isBlank()) {
             Log.e(TAG, "API key is blank!")
-            currentState = State.IDLE
-            listener?.onStateChanged(State.IDLE)
+            audioFile.delete()
+            pendingTranscriptions.decrementAndGet()
             listener?.onError("OpenAI API key not configured. Please set it in Settings > Advanced.")
-            cleanupAudioFile()
+            notifyStateChange()
             return
         }
 
@@ -302,7 +344,7 @@ class VoiceInputManager(private val context: Context) {
 
         // Get custom prompt for transcription style
         val prompt = getPrompt()
-        Log.i(TAG, "Starting Whisper API call with language: $language, prompt: '${prompt.take(50)}...'")
+        Log.i(TAG, "Starting Whisper API call with language: $language")
 
         whisperClient.transcribe(
             audioFile = audioFile,
@@ -311,61 +353,46 @@ class VoiceInputManager(private val context: Context) {
             prompt = prompt.ifBlank { null },
             callback = object : WhisperApiClient.TranscriptionCallback {
                 override fun onTranscriptionStarted() {
-                    Log.i(TAG, "Transcription started")
+                    Log.i(TAG, "Transcription started for ${audioFile.name}")
                 }
 
                 override fun onTranscriptionComplete(text: String) {
-                    Log.i(TAG, "Transcription complete, text length: ${text.length}, text: '$text'")
+                    Log.i(TAG, "Transcription complete: '$text'")
+
+                    // Clean up this specific audio file
+                    audioFile.delete()
+                    pendingTranscriptions.decrementAndGet()
+                    Log.i(TAG, "Pending transcriptions after completion: ${pendingTranscriptions.get()}")
 
                     if (text.isNotBlank()) {
                         // Post-process short transcriptions
                         val processedText = postProcessTranscription(text)
-                        Log.i(TAG, "Calling onTranscriptionResult with text: '$processedText'")
+                        Log.i(TAG, "Delivering transcription result: '$processedText'")
                         listener?.onTranscriptionResult(processedText)
                     } else {
                         Log.w(TAG, "Transcription returned empty text")
-                        // Don't show error in continuous mode for empty transcriptions
-                        if (!continuousMode) {
-                            listener?.onError("No speech detected in recording")
-                        }
+                        // Don't show error - this is normal for silence segments
                     }
 
-                    cleanupAudioFile()
-
-                    // In continuous mode, restart recording after transcription
-                    if (continuousMode) {
-                        Log.i(TAG, "Continuous mode: restarting recording after transcription")
-                        currentState = State.IDLE
-                        // Small delay before restarting to allow UI update
-                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                            if (continuousMode) {
-                                startRecordingInternal()
-                            }
-                        }, 100)
-                    } else {
-                        currentState = State.IDLE
-                        listener?.onStateChanged(State.IDLE)
+                    // Notify state change (might go to IDLE if this was last transcription)
+                    if (!isRecordingActive) {
+                        notifyStateChange()
                     }
                 }
 
                 override fun onTranscriptionError(error: String) {
                     Log.e(TAG, "Transcription error: $error")
-                    cleanupAudioFile()
 
-                    // In continuous mode, try to restart recording even after error
-                    if (continuousMode) {
-                        Log.i(TAG, "Continuous mode: restarting recording after transcription error")
-                        currentState = State.IDLE
-                        listener?.onError(error)
-                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                            if (continuousMode) {
-                                startRecordingInternal()
-                            }
-                        }, 500)
-                    } else {
-                        currentState = State.IDLE
-                        listener?.onStateChanged(State.IDLE)
-                        listener?.onError(error)
+                    // Clean up this specific audio file
+                    audioFile.delete()
+                    pendingTranscriptions.decrementAndGet()
+                    Log.i(TAG, "Pending transcriptions after error: ${pendingTranscriptions.get()}")
+
+                    listener?.onError(error)
+
+                    // Notify state change
+                    if (!isRecordingActive) {
+                        notifyStateChange()
                     }
                 }
             }
@@ -407,15 +434,6 @@ class VoiceInputManager(private val context: Context) {
         }
     }
 
-    private fun cleanupAudioFile() {
-        try {
-            currentAudioFile?.delete()
-            currentAudioFile = null
-        } catch (e: Exception) {
-            Log.e(TAG, "Error cleaning up audio file: ${e.message}")
-        }
-    }
-
     /**
      * Post-process transcription results.
      * For short texts (< 25 chars), removes sentence punctuation and converts to lowercase.
@@ -447,10 +465,10 @@ class VoiceInputManager(private val context: Context) {
      */
     fun destroy() {
         continuousMode = false
-        if (currentState == State.RECORDING) {
+        if (isRecordingActive) {
             voiceRecorder.cancelRecording()
+            isRecordingActive = false
         }
-        cleanupAudioFile()
         listener = null
     }
 }
