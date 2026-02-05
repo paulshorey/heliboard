@@ -9,7 +9,7 @@ import helium314.keyboard.latin.utils.prefs
 import java.io.File
 
 /**
- * Manages the voice input workflow: recording audio and transcribing via Whisper API.
+ * Manages the voice input workflow: recording audio and transcribing via OpenAI API.
  * Coordinates between VoiceRecorder and WhisperApiClient.
  */
 class VoiceInputManager(private val context: Context) {
@@ -176,7 +176,7 @@ class VoiceInputManager(private val context: Context) {
 
         // Get custom prompt for transcription style
         val prompt = getPrompt()
-        Log.i(TAG, "Starting Whisper API call with language: $language, prompt: '${prompt.take(50)}...'")
+        Log.i(TAG, "Starting transcription API call with language: $language, prompt: '${prompt.take(50)}...'")
 
         whisperClient.transcribe(
             audioFile = audioFile,
@@ -261,12 +261,12 @@ class VoiceInputManager(private val context: Context) {
         }
     }
 
-    /**
-     * Post-process transcription results.
-     * For short texts (< 25 chars), removes sentence punctuation and converts to lowercase.
-     * This helps with short voice inputs like "yes" or "okay" which Whisper tends to
-     * return as "Yes." or "Okay."
-     */
+        /**
+         * Post-process transcription results.
+         * For short texts (< 25 chars), removes sentence punctuation and converts to lowercase.
+         * This helps with short voice inputs like "yes" or "okay" which transcription tends to
+         * return as "Yes." or "Okay."
+         */
     private fun postProcessTranscription(text: String): String {
         val trimmedText = text.trim()
 

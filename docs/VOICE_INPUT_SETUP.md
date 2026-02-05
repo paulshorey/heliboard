@@ -4,12 +4,12 @@ This document explains how to set up and use the voice-to-text (dictation) featu
 
 ## Overview
 
-HeliBoard includes a built-in voice-to-text feature that uses OpenAI's Whisper API to transcribe your speech into text. This feature allows you to dictate messages, notes, or any text input using your voice.
+HeliBoard includes a built-in voice-to-text feature that uses OpenAI's GPT-4o audio transcription to transcribe your speech into text. This feature allows you to dictate messages, notes, or any text input using your voice.
 
 ## How It Works
 
 1. **Recording**: When you tap the microphone button, HeliBoard starts recording audio using your device's microphone.
-2. **Transcription**: When you tap the button again to stop recording, the audio is sent to OpenAI's Whisper API for transcription.
+2. **Transcription**: When you tap the button again to stop recording, the audio is sent to OpenAI's GPT-4o audio transcription API for processing.
 3. **Text Input**: The transcribed text is automatically inserted into the text field you're typing in.
 
 ## Setup Instructions
@@ -28,12 +28,12 @@ HeliBoard includes a built-in voice-to-text feature that uses OpenAI's Whisper A
 
 1. Open HeliBoard Settings
 2. Navigate to **Advanced** settings
-3. Find **"OpenAI Whisper API Key"**
+3. Find **"OpenAI API Key"**
 4. Paste your API key and save
 
 ### Step 3: Configure Style Prompt (Optional)
 
-The **Voice Input Style Prompt** setting allows you to customize how Whisper transcribes your speech:
+The **Voice Input Style Prompt** setting allows you to customize how the transcription AI processes your speech:
 
 1. In **Advanced** settings, find **"Voice Input Style Prompt"**
 2. Enter a prompt to guide the transcription style
@@ -45,7 +45,7 @@ The **Voice Input Style Prompt** setting allows you to customize how Whisper tra
 - `Include technical terms like API, JSON, HTTP, SDK.`
 - `This is a text message conversation. Use casual language.`
 
-The prompt helps Whisper understand context and produce better results for your specific use case.
+The prompt helps the AI understand context and produce better results for your specific use case.
 
 ### Step 4: Grant Microphone Permission
 
@@ -70,7 +70,7 @@ When you first tap the microphone button, Android will ask for microphone permis
 ## Troubleshooting
 
 ### "OpenAI API key not configured"
-- Make sure you've entered your API key in Settings > Advanced > OpenAI Whisper API Key
+- Make sure you've entered your API key in Settings > Advanced > OpenAI API Key
 
 ### "Microphone permission required"
 - Go to Android Settings > Apps > HeliBoard > Permissions
@@ -88,8 +88,7 @@ When you first tap the microphone button, Android will ask for microphone permis
 
 ## API Costs
 
-The Whisper API charges based on audio duration:
-- Current pricing: ~$0.006 per minute of audio
+The GPT-4o audio transcription API charges based on audio duration. Pricing may vary from the legacy Whisper API.
 
 Check [OpenAI's pricing page](https://openai.com/pricing) for the most up-to-date information.
 
@@ -102,9 +101,9 @@ Check [OpenAI's pricing page](https://openai.com/pricing) for the most up-to-dat
 
 ## Language Support
 
-The Whisper API automatically detects the spoken language. For best results, the keyboard will send the current keyboard language as a hint to the API.
+The GPT-4o audio transcription API automatically detects the spoken language. For best results, the keyboard will send the current keyboard language as a hint to the API.
 
-Whisper supports 50+ languages including:
+GPT-4o supports 50+ languages including:
 - English, Spanish, French, German, Italian, Portuguese
 - Chinese, Japanese, Korean
 - Arabic, Hindi, Russian
@@ -114,4 +113,4 @@ Whisper supports 50+ languages including:
 
 - Audio Format: WAV (PCM 16-bit, 16kHz mono)
 - API Endpoint: `https://api.openai.com/v1/audio/transcriptions`
-- Model: `whisper-1`
+- Model: `gpt-4o-audio-preview`

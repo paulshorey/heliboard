@@ -14,15 +14,15 @@ import java.util.UUID
 import kotlin.concurrent.thread
 
 /**
- * Client for OpenAI Whisper API to transcribe audio files to text.
- * Uses the whisper-1 model for speech-to-text transcription.
+ * Client for OpenAI Audio Transcription API to transcribe audio files to text.
+ * Uses the gpt-4o-audio-preview model for speech-to-text transcription.
  */
 class WhisperApiClient {
 
     companion object {
         private const val TAG = "WhisperApiClient"
         private const val WHISPER_API_URL = "https://api.openai.com/v1/audio/transcriptions"
-        private const val MODEL = "whisper-1"
+        private const val MODEL = "gpt-4o-audio-preview"
         private const val CONNECT_TIMEOUT = 30000 // 30 seconds
         private const val READ_TIMEOUT = 60000 // 60 seconds
     }
@@ -36,7 +36,7 @@ class WhisperApiClient {
     private val mainHandler = Handler(Looper.getMainLooper())
 
     /**
-     * Transcribe an audio file using OpenAI Whisper API.
+     * Transcribe an audio file using OpenAI Audio Transcription API with GPT-4o.
      *
      * @param audioFile The WAV audio file to transcribe
      * @param apiKey The OpenAI API key
