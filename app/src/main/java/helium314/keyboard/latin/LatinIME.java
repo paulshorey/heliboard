@@ -82,6 +82,7 @@ import helium314.keyboard.latin.utils.SubtypeSettings;
 import helium314.keyboard.latin.utils.SubtypeState;
 import helium314.keyboard.latin.utils.ToolbarMode;
 import helium314.keyboard.latin.voice.VoiceInputManager;
+import helium314.keyboard.latin.voice.TextCleanupClient;
 import helium314.keyboard.latin.suggestions.SuggestionStripView.VoiceState;
 import helium314.keyboard.settings.SettingsActivity2;
 import kotlin.Unit;
@@ -182,6 +183,8 @@ public class LatinIME extends InputMethodService implements
 
     // Voice input manager for Whisper API transcription
     private VoiceInputManager mVoiceInputManager;
+    // Text cleanup client for GPT-4.1-nano post-processing
+    private TextCleanupClient mTextCleanupClient;
 
     public static final class UIHandler extends LeakGuardHandlerWrapper<LatinIME> {
         private static final int MSG_UPDATE_SHIFT_STATE = 0;
@@ -549,6 +552,7 @@ public class LatinIME extends InputMethodService implements
 
         // Initialize voice input manager
         mVoiceInputManager = new VoiceInputManager(this);
+        mTextCleanupClient = new TextCleanupClient();
         setupVoiceInputListener();
 
         // Register to receive ringer mode change.
@@ -1622,14 +1626,63 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onTranscriptionResult(@NonNull String text) {
                 Log.i(TAG, "Voice transcription result received: '" + text + "'");
-                // Insert the transcribed text with a space after it for continuous typing
-                if (text != null && !text.isEmpty()) {
-                    Log.i(TAG, "Committing transcribed text to input");
-                    // Add a space after the text for better continuous input experience
-                    mInputLogic.mConnection.commitText(text + " ", 1);
-                } else {
+                if (text == null || text.isEmpty()) {
                     Log.w(TAG, "Transcription text is null or empty");
+                    return;
                 }
+                
+                // Get API key for cleanup
+                String apiKey = KtxKt.prefs(LatinIME.this).getString(Settings.PREF_WHISPER_API_KEY, "");
+                if (apiKey == null || apiKey.isEmpty()) {
+                    // No API key, fall back to simple insertion with client-side fix
+                    String adjustedText = adjustCapitalization(text);
+                    mInputLogic.mConnection.commitText(adjustedText + " ", 1);
+                    return;
+                }
+                
+                // Get text before cursor to find context from last newline
+                CharSequence textBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(2000, 0);
+                String beforeText = textBeforeCursor != null ? textBeforeCursor.toString() : "";
+                
+                // Find the last newline position
+                int lastNewlinePos = beforeText.lastIndexOf('\n');
+                
+                // Extract context from last newline (or start if no newline)
+                String existingContext;
+                final int contextStartPos;
+                if (lastNewlinePos >= 0) {
+                    existingContext = beforeText.substring(lastNewlinePos + 1);
+                    contextStartPos = lastNewlinePos + 1;
+                } else {
+                    existingContext = beforeText;
+                    contextStartPos = 0;
+                }
+                
+                // Calculate how many characters to delete when replacing
+                final int charsToDelete = beforeText.length() - contextStartPos;
+                
+                Log.d(TAG, "Cleanup context: '" + existingContext + "' (from pos " + contextStartPos + ", delete " + charsToDelete + " chars)");
+                
+                // Send to GPT-4.1-nano for cleanup
+                mTextCleanupClient.cleanupText(apiKey, existingContext, text, new TextCleanupClient.CleanupCallback() {
+                    @Override
+                    public void onCleanupComplete(String cleanedText) {
+                        Log.i(TAG, "Cleanup complete: '" + cleanedText + "'");
+                        // Delete the existing context and insert cleaned text
+                        if (charsToDelete > 0) {
+                            mInputLogic.mConnection.deleteTextBeforeCursor(charsToDelete);
+                        }
+                        mInputLogic.mConnection.commitText(cleanedText + " ", 1);
+                    }
+                    
+                    @Override
+                    public void onCleanupError(String error) {
+                        Log.e(TAG, "Cleanup error: " + error + ", falling back to simple insertion");
+                        // Fall back to simple insertion with client-side capitalization fix
+                        String adjustedText = adjustCapitalization(text);
+                        mInputLogic.mConnection.commitText(adjustedText + " ", 1);
+                    }
+                });
             }
 
             @Override
@@ -1654,6 +1707,54 @@ public class LatinIME extends InputMethodService implements
                 mKeyboardSwitcher.showToast("Microphone permission required. Please grant permission in Settings.", true);
             }
         });
+    }
+
+    /**
+     * Adjust capitalization of transcribed text based on context.
+     * If the previous text doesn't end with sentence-ending punctuation,
+     * lowercase the first letter of the new transcription.
+     */
+    private String adjustCapitalization(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+
+        // Get text before cursor to check context
+        CharSequence textBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(5, 0);
+        
+        // If no text before cursor or at start, keep original capitalization
+        if (textBeforeCursor == null || textBeforeCursor.length() == 0) {
+            return text;
+        }
+
+        // Find the last non-space character
+        String beforeText = textBeforeCursor.toString();
+        char lastChar = ' ';
+        for (int i = beforeText.length() - 1; i >= 0; i--) {
+            char c = beforeText.charAt(i);
+            if (c != ' ') {
+                lastChar = c;
+                break;
+            }
+        }
+
+        // Check if last character is sentence-ending punctuation
+        boolean isSentenceEnd = (lastChar == '.' || lastChar == '!' || lastChar == '?' || 
+                                  lastChar == '\n' || lastChar == ' '); // space at position 0 means start
+
+        // If previous text ends a sentence, keep original capitalization
+        if (isSentenceEnd || lastChar == ' ') {
+            return text;
+        }
+
+        // Otherwise, lowercase the first letter if it's uppercase
+        char firstChar = text.charAt(0);
+        if (Character.isUpperCase(firstChar)) {
+            Log.d(TAG, "Lowercasing first letter of transcription (context: '" + lastChar + "')");
+            return Character.toLowerCase(firstChar) + text.substring(1);
+        }
+
+        return text;
     }
 
     private void loadKeyboard() {
