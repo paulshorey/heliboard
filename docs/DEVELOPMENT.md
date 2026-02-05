@@ -2,6 +2,19 @@
 
 This guide covers how to set up your development environment, build, debug, and install HeliBoard on your Android device.
 
+# Run locally
+
+```
+// Normal:
+./gradlew assembleDebug && ./gradlew installDebug
+
+// With pull:
+gita && ./gradlew assembleDebug && ./gradlew installDebug
+
+// With debugging:
+./gradlew assembleDebug && ./gradlew installDebug && adb logcat | grep -E "(voice|whisper|prompt)"
+```
+
 # Install app on phone
 
 To install HeliBoard permanently on your phone (sideloading), you have two options:
@@ -63,7 +76,6 @@ adb devices
 ### Option 1: Android Studio (Recommended)
 
 1. **Install Android Studio**
-
    - Download from: https://developer.android.com/studio
    - Install with default settings
 
@@ -80,7 +92,6 @@ adb devices
 
 3. **Install SDK Components**
    Android Studio will prompt you to install missing SDK components. Accept all prompts, or manually install via:
-
    - Go to `Tools > SDK Manager`
    - **SDK Platforms tab**: Install Android 15 (API 35)
    - **SDK Tools tab**: Install:
@@ -214,12 +225,10 @@ android {
 ### Method 1: Via Android Studio
 
 1. Enable **Developer Options** on your Android device:
-
    - Go to `Settings > About Phone`
    - Tap "Build Number" 7 times
 
 2. Enable **USB Debugging**:
-
    - Go to `Settings > Developer Options`
    - Enable "USB Debugging"
 
@@ -307,7 +316,6 @@ HeliBoard supports glide typing but requires a closed-source library that is **n
 To enable glide typing:
 
 1. Obtain the swype library files (`libjni_latinimegoogle.so`) from:
-
    - GApps packages (search for "swypelibs")
    - Or download from: https://github.com/erkserkserks/openboard/tree/46fdf2b550035ca69299ce312fa158e7ade36967/app/src/main/jniLibs
 
