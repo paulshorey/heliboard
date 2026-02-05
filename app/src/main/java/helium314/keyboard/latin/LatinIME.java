@@ -1577,26 +1577,53 @@ public class LatinIME extends InputMethodService implements
         }
     }
 
+    @Override
+    public void onVoicePauseClicked() {
+        if (mVoiceInputManager != null) {
+            mVoiceInputManager.togglePause();
+            // Update UI immediately to show pause state
+            if (mSuggestionStripView != null) {
+                boolean isPaused = mVoiceInputManager.isPaused();
+                boolean isRecording = mVoiceInputManager.isRecording();
+                boolean isTranscribing = mVoiceInputManager.isTranscribing();
+                boolean isContinuousMode = mVoiceInputManager.isContinuousMode();
+                mSuggestionStripView.setVoiceInputState(isRecording, isTranscribing, isContinuousMode, isPaused);
+                mKeyboardSwitcher.showToast(isPaused ? "Paused" : "Resumed", false);
+            }
+        }
+    }
+
     private void setupVoiceInputListener() {
         if (mVoiceInputManager == null) return;
 
         mVoiceInputManager.setListener(new VoiceInputManager.VoiceInputListener() {
             @Override
             public void onStateChanged(@NonNull VoiceInputManager.State state) {
-                Log.i(TAG, "Voice input state changed: " + state);
-                // Update the UI to reflect the current state
+                boolean isContinuousMode = mVoiceInputManager.isContinuousMode();
+                boolean isRecording = mVoiceInputManager.isRecording();
+                boolean isTranscribing = mVoiceInputManager.isTranscribing();
+                boolean isPaused = mVoiceInputManager.isPaused();
+                Log.i(TAG, "Voice input state changed: " + state + ", continuous: " + isContinuousMode +
+                        ", recording: " + isRecording + ", transcribing: " + isTranscribing + ", paused: " + isPaused);
+
                 if (mSuggestionStripView != null) {
                     switch (state) {
                         case RECORDING:
-                            mSuggestionStripView.setVoiceInputState(true, false);
-                            mKeyboardSwitcher.showToast("Recording...", false);
+                            // Recording is active (may also be transcribing in background)
+                            mSuggestionStripView.setVoiceInputState(true, isTranscribing, isContinuousMode, isPaused);
+                            if (!isTranscribing && !isPaused) {
+                                // Only show toast on fresh start, not when restarting while transcribing
+                                mKeyboardSwitcher.showToast("Listening...", false);
+                            }
                             break;
                         case TRANSCRIBING:
-                            mSuggestionStripView.setVoiceInputState(false, true);
+                            // Only transcribing (user stopped recording manually)
+                            mSuggestionStripView.setVoiceInputState(false, true, isContinuousMode, false);
                             mKeyboardSwitcher.showToast("Transcribing...", false);
                             break;
                         case IDLE:
-                            mSuggestionStripView.setVoiceInputState(false, false);
+                            // Nothing happening
+                            mSuggestionStripView.setVoiceInputState(false, false, false, false);
                             break;
                     }
                 }
@@ -1605,21 +1632,29 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onTranscriptionResult(@NonNull String text) {
                 Log.i(TAG, "Voice transcription result received: '" + text + "'");
-                // Insert the transcribed text
+                // Insert the transcribed text with a space after it for continuous typing
                 if (text != null && !text.isEmpty()) {
                     Log.i(TAG, "Committing transcribed text to input");
-                    mInputLogic.mConnection.commitText(text, 1);
+                    // Add a space after the text for better continuous input experience
+                    mInputLogic.mConnection.commitText(text + " ", 1);
                 } else {
                     Log.w(TAG, "Transcription text is null or empty");
                 }
             }
 
             @Override
+            public void onTranscriptionProcessing() {
+                Log.i(TAG, "Voice transcription processing started");
+                mKeyboardSwitcher.showToast("Processing...", false);
+            }
+
+            @Override
             public void onError(@NonNull String error) {
                 Log.e(TAG, "Voice input error: " + error);
-                mKeyboardSwitcher.showToast("Voice input error: " + error, true);
-                if (mSuggestionStripView != null) {
-                    mSuggestionStripView.setVoiceInputState(false, false);
+                // Only show error toast for critical errors, not transient ones in continuous mode
+                boolean isContinuousMode = mVoiceInputManager.isContinuousMode();
+                if (!isContinuousMode || error.contains("API key") || error.contains("permission")) {
+                    mKeyboardSwitcher.showToast("Voice input error: " + error, true);
                 }
             }
 
