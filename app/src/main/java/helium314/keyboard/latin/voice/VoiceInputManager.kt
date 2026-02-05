@@ -536,6 +536,7 @@ class VoiceInputManager(private val context: Context) {
      */
     fun destroy() {
         continuousMode = false
+        skipPostProcessing = false
         if (isRecordingActive) {
             voiceRecorder.cancelRecording()
             isRecordingActive = false
