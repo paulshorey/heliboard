@@ -1625,9 +1625,7 @@ public class LatinIME extends InputMethodService implements
 
             @Override
             public void onTranscriptionResult(@NonNull String text) {
-                Log.i(TAG, "Voice transcription result received: '" + text + "'");
                 if (text == null || text.isEmpty()) {
-                    Log.w(TAG, "Transcription text is null or empty");
                     return;
                 }
                 
@@ -1661,13 +1659,10 @@ public class LatinIME extends InputMethodService implements
                 // Calculate how many characters to delete when replacing
                 final int charsToDelete = beforeText.length() - contextStartPos;
                 
-                Log.d(TAG, "Cleanup context: '" + existingContext + "' (from pos " + contextStartPos + ", delete " + charsToDelete + " chars)");
-                
                 // Send to GPT-4.1-nano for cleanup
                 mTextCleanupClient.cleanupText(apiKey, existingContext, text, new TextCleanupClient.CleanupCallback() {
                     @Override
                     public void onCleanupComplete(String cleanedText) {
-                        Log.i(TAG, "Cleanup complete: '" + cleanedText + "'");
                         // Delete the existing context and insert cleaned text
                         if (charsToDelete > 0) {
                             mInputLogic.mConnection.deleteTextBeforeCursor(charsToDelete);
@@ -1677,7 +1672,6 @@ public class LatinIME extends InputMethodService implements
                     
                     @Override
                     public void onCleanupError(String error) {
-                        Log.e(TAG, "Cleanup error: " + error + ", falling back to simple insertion");
                         // Fall back to simple insertion with client-side capitalization fix
                         String adjustedText = adjustCapitalization(text);
                         mInputLogic.mConnection.commitText(adjustedText + " ", 1);
@@ -1687,9 +1681,7 @@ public class LatinIME extends InputMethodService implements
 
             @Override
             public void onTranscriptionDelta(@NonNull String text) {
-                // Real-time partial transcription feedback
-                // Could be used to show live transcription preview
-                Log.d(TAG, "Voice transcription delta: '" + text + "'");
+                // Real-time partial transcription - could be used for live preview
             }
 
             @Override

@@ -135,12 +135,10 @@ class VoiceInputManager(private val context: Context) {
                 }
 
                 override fun onTranscriptionDelta(text: String) {
-                    Log.d(TAG, "Transcription delta: '$text'")
                     listener?.onTranscriptionDelta(text)
                 }
 
                 override fun onTranscriptionComplete(text: String) {
-                    Log.i(TAG, "Transcription complete: '$text'")
                     if (text.isNotBlank()) {
                         listener?.onTranscriptionResult(text)
                     }

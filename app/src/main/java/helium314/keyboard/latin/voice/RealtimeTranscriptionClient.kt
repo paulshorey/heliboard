@@ -10,7 +10,6 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
-import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -241,11 +240,8 @@ class RealtimeTranscriptionClient {
 
     /**
      * Configure the transcription session with gpt-4o-transcribe model.
-     * Structure: { type: "transcription_session.update", session: { ...config } }
      */
     private fun configureSession() {
-        Log.i(TAG, "Configuring transcription session...")
-
         val sessionConfig = JSONObject().apply {
             put("type", "transcription_session.update")
 
@@ -280,43 +276,34 @@ class RealtimeTranscriptionClient {
             })
         }
 
-        val configStr = sessionConfig.toString()
-        Log.i(TAG, "Sending session config: $configStr")
-        webSocket?.send(configStr)
+        webSocket?.send(sessionConfig.toString())
     }
 
     /**
      * Handle incoming WebSocket messages.
      */
     private fun handleMessage(text: String) {
-        Log.d(TAG, "Received message: $text")
         try {
             val message = JSONObject(text)
             val type = message.optString("type", "")
 
             when (type) {
                 "transcription_session.created", "transcription_session.updated" -> {
-                    Log.i(TAG, "Session event: $type")
                     // Only fire onSessionReady once (on first event)
                     if (!isSessionReady.getAndSet(true)) {
-                        Log.i(TAG, "Session ready, notifying callback")
+                        Log.i(TAG, "Session ready")
                         mainHandler.post { callback?.onSessionReady() }
                     }
                 }
 
                 "input_audio_buffer.committed" -> {
-                    val itemId = message.optString("item_id", "")
-                    Log.i(TAG, "Audio committed, item_id: $itemId")
-                    currentItemId = itemId
+                    currentItemId = message.optString("item_id", "")
                     currentTranscript.clear()
                 }
 
-                "input_audio_buffer.speech_started" -> {
-                    Log.i(TAG, "Speech started")
-                }
-
+                "input_audio_buffer.speech_started",
                 "input_audio_buffer.speech_stopped" -> {
-                    Log.i(TAG, "Speech stopped")
+                    // VAD events - no action needed, server handles automatically
                 }
 
                 "conversation.item.input_audio_transcription.delta" -> {
@@ -329,7 +316,6 @@ class RealtimeTranscriptionClient {
 
                 "conversation.item.input_audio_transcription.completed" -> {
                     val transcript = message.optString("transcript", "")
-                    Log.i(TAG, "Transcription complete: '$transcript'")
                     mainHandler.post { callback?.onTranscriptionComplete(transcript) }
                     currentTranscript.clear()
                     currentItemId = null
@@ -338,14 +324,12 @@ class RealtimeTranscriptionClient {
                 "error" -> {
                     val error = message.optJSONObject("error")
                     val errorMessage = error?.optString("message") ?: "Unknown error"
-                    val errorCode = error?.optString("code") ?: ""
-                    Log.e(TAG, "API Error: $errorCode - $errorMessage")
+                    Log.e(TAG, "API Error: $errorMessage")
                     mainHandler.post { callback?.onError(errorMessage) }
                 }
 
-                else -> {
-                    Log.d(TAG, "Unhandled message type: $type")
-                }
+                // Ignore other message types (conversation.item.created, etc.)
+                else -> { }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing message: ${e.message}", e)

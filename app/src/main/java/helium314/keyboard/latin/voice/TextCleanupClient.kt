@@ -71,8 +71,6 @@ Rules:
             newText
         }
 
-        Log.d(TAG, "Cleaning up text: context='$existingContext', new='$newText'")
-
         val requestBody = JSONObject().apply {
             put("model", MODEL)
             put("messages", JSONArray().apply {
@@ -124,8 +122,6 @@ Rules:
                         ?.optString("content", "")
                         ?.trim()
                         ?: ""
-
-                    Log.d(TAG, "Cleanup result: '$cleanedText'")
 
                     if (cleanedText.isNotEmpty()) {
                         mainHandler.post {
