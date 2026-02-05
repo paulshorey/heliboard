@@ -1645,7 +1645,7 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onTranscriptionProcessing() {
                 Log.i(TAG, "Voice transcription processing started");
-                mKeyboardSwitcher.showToast("Processing...", false);
+                mKeyboardSwitcher.showToast("...", false);
             }
 
             @Override
@@ -1654,7 +1654,7 @@ public class LatinIME extends InputMethodService implements
                 // Only show error toast for critical errors, not transient ones in continuous mode
                 boolean isContinuousMode = mVoiceInputManager.isContinuousMode();
                 if (!isContinuousMode || error.contains("API key") || error.contains("permission")) {
-                    mKeyboardSwitcher.showToast("Voice input error: " + error, true);
+                    mKeyboardSwitcher.showToast("X", true);
                 }
             }
 
