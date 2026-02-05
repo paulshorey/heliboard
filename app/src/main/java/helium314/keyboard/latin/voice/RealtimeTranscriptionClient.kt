@@ -34,8 +34,9 @@ class RealtimeTranscriptionClient {
 
     companion object {
         private const val TAG = "RealtimeTranscription"
-        private const val REALTIME_URL = "wss://api.openai.com/v1/realtime?intent=transcription"
         private const val MODEL = "gpt-4o-transcribe"
+        // For transcription-only mode, use intent=transcription
+        private const val REALTIME_URL = "wss://api.openai.com/v1/realtime?intent=transcription"
 
         // Connection timeouts
         private const val CONNECT_TIMEOUT_SECONDS = 30L
@@ -138,11 +139,19 @@ class RealtimeTranscriptionClient {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e(TAG, "WebSocket failure: ${t.message}", t)
+                val responseCode = response?.code ?: -1
+                val responseBody = try { response?.body?.string() } catch (e: Exception) { null }
+                Log.e(TAG, "WebSocket failure: code=$responseCode, message=${t.message}, body=$responseBody", t)
                 isConnected.set(false)
                 isSessionReady.set(false)
                 mainHandler.post {
-                    callback.onError("Connection failed: ${t.message}")
+                    val errorMsg = when (responseCode) {
+                        401 -> "Invalid API key"
+                        403 -> "API access denied - check your API key permissions"
+                        429 -> "Rate limited - too many requests"
+                        else -> "Connection failed: ${t.message}"
+                    }
+                    callback.onError(errorMsg)
                     callback.onDisconnected()
                 }
             }
@@ -232,17 +241,20 @@ class RealtimeTranscriptionClient {
 
     /**
      * Configure the transcription session with gpt-4o-transcribe model.
+     * Structure: { type: "transcription_session.update", session: { ...config } }
      */
     private fun configureSession() {
         Log.i(TAG, "Configuring transcription session...")
 
         val sessionConfig = JSONObject().apply {
             put("type", "transcription_session.update")
+
+            // All config goes inside "session" wrapper
             put("session", JSONObject().apply {
-                // Audio input configuration
+                // Audio format: PCM16
                 put("input_audio_format", "pcm16")
 
-                // Transcription configuration
+                // Transcription settings
                 put("input_audio_transcription", JSONObject().apply {
                     put("model", MODEL)
                     if (!language.isNullOrBlank()) {
@@ -258,32 +270,38 @@ class RealtimeTranscriptionClient {
                     put("type", "server_vad")
                     put("threshold", 0.5)
                     put("prefix_padding_ms", 300)
-                    put("silence_duration_ms", 500) // Shorter than our old 3000ms
+                    put("silence_duration_ms", 500)
                 })
 
-                // Optional: noise reduction
+                // Noise reduction
                 put("input_audio_noise_reduction", JSONObject().apply {
                     put("type", "near_field")
                 })
             })
         }
 
-        webSocket?.send(sessionConfig.toString())
+        val configStr = sessionConfig.toString()
+        Log.i(TAG, "Sending session config: $configStr")
+        webSocket?.send(configStr)
     }
 
     /**
      * Handle incoming WebSocket messages.
      */
     private fun handleMessage(text: String) {
+        Log.d(TAG, "Received message: $text")
         try {
             val message = JSONObject(text)
             val type = message.optString("type", "")
 
             when (type) {
                 "transcription_session.created", "transcription_session.updated" -> {
-                    Log.i(TAG, "Session configured: $type")
-                    isSessionReady.set(true)
-                    mainHandler.post { callback?.onSessionReady() }
+                    Log.i(TAG, "Session event: $type")
+                    // Only fire onSessionReady once (on first event)
+                    if (!isSessionReady.getAndSet(true)) {
+                        Log.i(TAG, "Session ready, notifying callback")
+                        mainHandler.post { callback?.onSessionReady() }
+                    }
                 }
 
                 "input_audio_buffer.committed" -> {
