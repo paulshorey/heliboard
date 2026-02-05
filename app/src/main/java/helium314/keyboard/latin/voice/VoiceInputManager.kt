@@ -25,6 +25,7 @@ class VoiceInputManager(private val context: Context) {
         private const val TAG = "VoiceInputManager"
         private const val SILENCE_TIMEOUT_MS = 30000L // 30 seconds - cancel recording
         private const val CLEANUP_DELAY_MS = 3000L // 3 seconds - trigger cleanup after silence
+        private const val NEW_PARAGRAPH_DELAY_MS = 12000L // 12 seconds - start new paragraph after long silence
     }
 
     /**
@@ -45,6 +46,8 @@ class VoiceInputManager(private val context: Context) {
         fun onTranscriptionDelta(text: String)
         /** Called after 3 seconds of silence - time to cleanup the current paragraph */
         fun onCleanupRequested()
+        /** Called after 12 seconds of silence - time to start a new paragraph */
+        fun onNewParagraphRequested()
         fun onError(error: String)
         fun onPermissionRequired()
     }
@@ -71,6 +74,14 @@ class VoiceInputManager(private val context: Context) {
         if (currentState == State.RECORDING) {
             Log.i(TAG, "3 second silence - requesting cleanup")
             listener?.onCleanupRequested()
+        }
+    }
+    
+    // New paragraph timer - insert line breaks after 12 seconds of silence
+    private val newParagraphTimerRunnable = Runnable {
+        if (currentState == State.RECORDING) {
+            Log.i(TAG, "12 second silence - requesting new paragraph")
+            listener?.onNewParagraphRequested()
         }
     }
 
@@ -168,14 +179,16 @@ class VoiceInputManager(private val context: Context) {
                 }
 
                 override fun onSpeechStarted() {
-                    // User started speaking - cancel cleanup timer
+                    // User started speaking - cancel timers
                     cancelCleanupTimer()
+                    cancelNewParagraphTimer()
                     resetSilenceTimeout()
                 }
 
                 override fun onSpeechStopped() {
-                    // User stopped speaking - start 3 second cleanup timer
-                    startCleanupTimer()
+                    // User stopped speaking - start silence timers
+                    startCleanupTimer()        // 3 seconds - cleanup
+                    startNewParagraphTimer()   // 12 seconds - new paragraph
                 }
 
                 override fun onError(error: String) {
@@ -255,6 +268,7 @@ class VoiceInputManager(private val context: Context) {
     private fun stopRecordingInternal() {
         cancelSilenceTimeout()
         cancelCleanupTimer()
+        cancelNewParagraphTimer()
         voiceRecorder.stopRecording()
         realtimeClient.disconnect()
         updateState(State.IDLE)
@@ -279,6 +293,7 @@ class VoiceInputManager(private val context: Context) {
         }
         cancelSilenceTimeout()
         cancelCleanupTimer()
+        cancelNewParagraphTimer()
         voiceRecorder.pauseRecording()
         updateState(State.PAUSED)
         Log.i(TAG, "Recording paused")
@@ -351,6 +366,23 @@ class VoiceInputManager(private val context: Context) {
      */
     private fun cancelCleanupTimer() {
         mainHandler.removeCallbacks(cleanupTimerRunnable)
+    }
+    
+    /**
+     * Start the new paragraph timer. Called when speech stops.
+     */
+    private fun startNewParagraphTimer() {
+        mainHandler.removeCallbacks(newParagraphTimerRunnable)
+        if (currentState == State.RECORDING) {
+            mainHandler.postDelayed(newParagraphTimerRunnable, NEW_PARAGRAPH_DELAY_MS)
+        }
+    }
+    
+    /**
+     * Cancel the new paragraph timer. Called when speech starts again.
+     */
+    private fun cancelNewParagraphTimer() {
+        mainHandler.removeCallbacks(newParagraphTimerRunnable)
     }
 
     private fun getApiKey(): String {

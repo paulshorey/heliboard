@@ -186,6 +186,9 @@ public class LatinIME extends InputMethodService implements
     private VoiceInputManager mVoiceInputManager;
     // Text cleanup client for GPT-4.1-nano post-processing
     private TextCleanupClient mTextCleanupClient;
+    private boolean mCleanupInProgress = false;
+    private boolean mPendingNewParagraph = false;
+    private String mPendingTranscription = null;
 
     public static final class UIHandler extends LeakGuardHandlerWrapper<LatinIME> {
         private static final int MSG_UPDATE_SHIFT_STATE = 0;
@@ -1619,6 +1622,10 @@ public class LatinIME extends InputMethodService implements
                             break;
                         case IDLE:
                             mSuggestionStripView.setVoiceInputState(VoiceState.IDLE);
+                            // Reset cleanup state when voice input ends
+                            mCleanupInProgress = false;
+                            mPendingNewParagraph = false;
+                            mPendingTranscription = null;
                             break;
                     }
                 }
@@ -1629,11 +1636,28 @@ public class LatinIME extends InputMethodService implements
                 if (text == null || text.isEmpty()) {
                     return;
                 }
+                
+                // If cleanup is in progress, queue this transcription to avoid race condition
+                if (mCleanupInProgress) {
+                    Log.d(TAG, "TRANSCRIPTION: cleanup in progress, queueing \"" + text + "\"");
+                    if (mPendingTranscription == null) {
+                        mPendingTranscription = text;
+                    } else {
+                        mPendingTranscription += text;
+                    }
+                    return;
+                }
+                
                 // Just insert the raw text with basic capitalization fix
                 // Cleanup will happen later when onCleanupRequested is called after 3s silence
                 String adjustedText = adjustCapitalization(text);
-                String textToInsert = addSpaceAfterPunctuation(adjustedText);
+                String textToInsert = ensureTrailingSpace(adjustedText);
+                Log.d(TAG, "TRANSCRIPTION: inserting \"" + textToInsert + "\"");
+                
+                // Use batch edit to ensure atomic operation
+                mInputLogic.mConnection.beginBatchEdit();
                 mInputLogic.mConnection.commitText(textToInsert, 1);
+                mInputLogic.mConnection.endBatchEdit();
             }
 
             @Override
@@ -1660,6 +1684,14 @@ public class LatinIME extends InputMethodService implements
                 CharSequence textBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(2000, 0);
                 String beforeText = textBeforeCursor != null ? textBeforeCursor.toString() : "";
                 
+                // Also check text after cursor to understand cursor position
+                CharSequence textAfterCursor = mInputLogic.mConnection.getTextAfterCursor(500, 0);
+                int afterLength = textAfterCursor != null ? textAfterCursor.length() : 0;
+                
+                Log.d(TAG, "CLEANUP_REQUEST: beforeCursor=" + beforeText.length() + 
+                      " afterCursor=" + afterLength +
+                      " first50=\"" + beforeText.substring(0, Math.min(50, beforeText.length())).replace("\n", "\\n") + "\"");
+                
                 if (beforeText.isEmpty()) {
                     return;
                 }
@@ -1676,10 +1708,14 @@ public class LatinIME extends InputMethodService implements
                 }
                 
                 if (originalParagraph.trim().isEmpty()) {
+                    Log.d(TAG, "CLEANUP_REQUEST: paragraph is empty, skipping");
                     return;
                 }
                 
-                Log.d(TAG, "Cleanup requested for paragraph: " + originalParagraph);
+                Log.d(TAG, "CLEANUP_REQUEST: paragraph=\"" + originalParagraph + "\"");
+                
+                // Mark cleanup as in progress to prevent race conditions with new paragraph
+                mCleanupInProgress = true;
                 
                 // Send current paragraph to Claude for cleanup
                 final String prompt = cleanupPrompt;
@@ -1691,27 +1727,62 @@ public class LatinIME extends InputMethodService implements
                         CharSequence currentTextBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(4000, 0);
                         String currentText = currentTextBeforeCursor != null ? currentTextBeforeCursor.toString() : "";
                         
+                        Log.d(TAG, "CLEANUP_COMPLETE: currentText length=" + currentText.length());
+                        Log.d(TAG, "CLEANUP_COMPLETE: looking for originalParagraph length=" + originalParagraph.length());
+                        
                         // Find where the original paragraph is in the current text
                         int originalPos = currentText.lastIndexOf(originalParagraph);
+                        Log.d(TAG, "CLEANUP_COMPLETE: originalPos=" + originalPos);
+                        
                         if (originalPos >= 0) {
                             // Calculate how much text is after the original paragraph (new text added during cleanup)
                             int endOfOriginal = originalPos + originalParagraph.length();
                             String textAfterOriginal = currentText.substring(endOfOriginal);
                             
+                            Log.d(TAG, "CLEANUP_COMPLETE: textAfterOriginal=\"" + textAfterOriginal + "\"");
+                            
                             // Delete from original position to end
                             int charsToDelete = currentText.length() - originalPos;
+                            Log.d(TAG, "CLEANUP_COMPLETE: deleting " + charsToDelete + " chars");
+                            
+                            // Post-process cleaned text to add space after punctuation
+                            String processedText = ensureTrailingSpace(cleanedText);
+                            
+                            // Insert cleaned text + any new text that was added during cleanup
+                            String finalText = processedText + textAfterOriginal;
+                            Log.d(TAG, "CLEANUP_COMPLETE: committing \"" + finalText + "\"");
+                            
+                            // Use beginBatchEdit/endBatchEdit to ensure atomic delete+commit operation
+                            mInputLogic.mConnection.beginBatchEdit();
                             if (charsToDelete > 0) {
                                 mInputLogic.mConnection.deleteTextBeforeCursor(charsToDelete);
                             }
-                            
-                            // Post-process cleaned text to add space after punctuation
-                            String processedText = addSpaceAfterPunctuation(cleanedText);
-                            
-                            // Insert cleaned text + any new text that was added during cleanup
-                            mInputLogic.mConnection.commitText(processedText + textAfterOriginal, 1);
+                            mInputLogic.mConnection.commitText(finalText, 1);
+                            mInputLogic.mConnection.endBatchEdit();
                         } else {
                             // Original paragraph not found - text changed too much, skip cleanup
-                            Log.w(TAG, "Original paragraph not found, skipping cleanup");
+                            Log.w(TAG, "CLEANUP_COMPLETE: Original paragraph not found, skipping cleanup");
+                        }
+                        
+                        // Cleanup finished
+                        mCleanupInProgress = false;
+                        
+                        // Process any pending transcription that arrived during cleanup
+                        if (mPendingTranscription != null) {
+                            Log.d(TAG, "CLEANUP_COMPLETE: inserting pending transcription \"" + mPendingTranscription + "\"");
+                            String adjustedText = adjustCapitalization(mPendingTranscription);
+                            String textToInsert = ensureTrailingSpace(adjustedText);
+                            mInputLogic.mConnection.beginBatchEdit();
+                            mInputLogic.mConnection.commitText(textToInsert, 1);
+                            mInputLogic.mConnection.endBatchEdit();
+                            mPendingTranscription = null;
+                        }
+                        
+                        // Check if new paragraph was pending
+                        if (mPendingNewParagraph) {
+                            mPendingNewParagraph = false;
+                            Log.d(TAG, "Inserting pending new paragraph after cleanup");
+                            mInputLogic.mConnection.commitText("\n\n", 1);
                         }
                     }
                     
@@ -1719,8 +1790,50 @@ public class LatinIME extends InputMethodService implements
                     public void onCleanupError(String error) {
                         // On error, leave the text as-is (already inserted)
                         Log.e(TAG, "Cleanup error: " + error);
+                        
+                        // Cleanup finished (with error)
+                        mCleanupInProgress = false;
+                        
+                        // Process any pending transcription that arrived during cleanup
+                        if (mPendingTranscription != null) {
+                            Log.d(TAG, "Cleanup error: inserting pending transcription \"" + mPendingTranscription + "\"");
+                            String adjustedText = adjustCapitalization(mPendingTranscription);
+                            String textToInsert = ensureTrailingSpace(adjustedText);
+                            mInputLogic.mConnection.beginBatchEdit();
+                            mInputLogic.mConnection.commitText(textToInsert, 1);
+                            mInputLogic.mConnection.endBatchEdit();
+                            mPendingTranscription = null;
+                        }
+                        
+                        // Check if new paragraph was pending
+                        if (mPendingNewParagraph) {
+                            mPendingNewParagraph = false;
+                            Log.d(TAG, "Inserting pending new paragraph after cleanup error");
+                            mInputLogic.mConnection.commitText("\n\n", 1);
+                        }
                     }
                 });
+            }
+
+            @Override
+            public void onNewParagraphRequested() {
+                // Called after 12 seconds of silence - insert two line breaks to start new paragraph
+                CharSequence beforeInsert = mInputLogic.mConnection.getTextBeforeCursor(2000, 0);
+                CharSequence afterInsert = mInputLogic.mConnection.getTextAfterCursor(500, 0);
+                int beforeLen = beforeInsert != null ? beforeInsert.length() : 0;
+                int afterLen = afterInsert != null ? afterInsert.length() : 0;
+                String beforeStr = beforeInsert != null ? beforeInsert.toString().replace("\n", "\\n") : "";
+                Log.d(TAG, "NEW_PARAGRAPH: beforeCursor=" + beforeLen + " afterCursor=" + afterLen +
+                      " text=\"" + beforeStr.substring(0, Math.min(50, beforeStr.length())) + "\"");
+                
+                if (mCleanupInProgress) {
+                    // Cleanup is in progress - defer new paragraph until cleanup completes
+                    Log.d(TAG, "NEW_PARAGRAPH: cleanup in progress, deferring");
+                    mPendingNewParagraph = true;
+                } else {
+                    Log.d(TAG, "NEW_PARAGRAPH: inserting \\n\\n now");
+                    mInputLogic.mConnection.commitText("\n\n", 1);
+                }
             }
 
             @Override
@@ -1789,19 +1902,17 @@ public class LatinIME extends InputMethodService implements
     }
 
     /**
-     * Add a space after the text if it ends with punctuation.
-     * This ensures proper spacing after transcribed sentences.
+     * Ensure the text ends with a trailing space.
+     * This ensures proper spacing after transcribed text.
      */
-    private String addSpaceAfterPunctuation(String text) {
+    private String ensureTrailingSpace(String text) {
         if (text == null || text.isEmpty()) {
             return text;
         }
-        char lastChar = text.charAt(text.length() - 1);
-        if (lastChar == '.' || lastChar == '!' || lastChar == '?' || 
-            lastChar == ',' || lastChar == ';' || lastChar == ':') {
-            return text + " ";
+        if (text.endsWith(" ")) {
+            return text;
         }
-        return text;
+        return text + " ";
     }
 
     private void loadKeyboard() {
