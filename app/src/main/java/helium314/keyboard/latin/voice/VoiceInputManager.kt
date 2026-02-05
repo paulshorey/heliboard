@@ -107,12 +107,14 @@ class VoiceInputManager(private val context: Context) {
                 // Stop continuous mode and transcribe the current recording
                 Log.i(TAG, "Toggle: stopping continuous mode and transcribing")
                 continuousMode = false
+                skipPostProcessing = false  // Reset for next session
                 stopRecordingAndTranscribe()
             }
             pendingTranscriptions.get() > 0 -> {
                 // Transcription in progress but not recording - just disable continuous mode
                 Log.i(TAG, "Toggle: stopping continuous mode while transcribing")
                 continuousMode = false
+                skipPostProcessing = false  // Reset for next session
             }
             else -> {
                 // Idle - start recording
@@ -298,6 +300,7 @@ class VoiceInputManager(private val context: Context) {
         continuousMode = false
         speechDetected = false
         silenceStartTime = 0
+        skipPostProcessing = false  // Reset for next session
 
         if (isRecordingActive) {
             voiceRecorder.cancelRecording()
