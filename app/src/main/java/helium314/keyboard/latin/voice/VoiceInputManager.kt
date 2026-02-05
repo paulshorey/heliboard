@@ -48,6 +48,7 @@ class VoiceInputManager(private val context: Context) {
     interface VoiceInputListener {
         fun onStateChanged(state: State)
         fun onTranscriptionResult(text: String)
+        fun onTranscriptionProcessing()  // Called when audio is being sent to API
         fun onError(error: String)
         fun onPermissionRequired()
     }
@@ -67,6 +68,10 @@ class VoiceInputManager(private val context: Context) {
     private var continuousMode = false
     private var speechDetected = false
     private var silenceStartTime: Long = 0
+
+    // Flag to skip post-processing (removing caps/punctuation) for auto-stopped recordings
+    // Set to true when silence detection auto-stops, affects all transcriptions in the session
+    private var skipPostProcessing = false
 
     val isRecording: Boolean
         get() = isRecordingActive
@@ -137,6 +142,8 @@ class VoiceInputManager(private val context: Context) {
         continuousMode = continuous
         speechDetected = false
         silenceStartTime = 0
+        // Reset post-processing flag - only skip if auto-stopped by silence detection
+        skipPostProcessing = false
 
         setupRecorderCallback()
         return voiceRecorder.startRecording()
@@ -230,6 +237,9 @@ class VoiceInputManager(private val context: Context) {
                         val silenceDuration = currentTime - silenceStartTime
                         if (silenceDuration >= SILENCE_DURATION_MS) {
                             Log.i(TAG, "Auto-stopping after ${silenceDuration}ms of silence")
+                            // Set flag to skip post-processing for all transcriptions in this session
+                            // Since auto-stop was triggered, user is dictating continuously
+                            skipPostProcessing = true
                             // Auto-stop recording - this will trigger transcription
                             // Recording will immediately restart in onRecordingStopped
                             stopRecordingInternal()
@@ -346,6 +356,11 @@ class VoiceInputManager(private val context: Context) {
         val prompt = getPrompt()
         Log.i(TAG, "Starting Whisper API call with language: $language")
 
+        // Notify listener that we're processing (sending to API)
+        mainHandler.post {
+            listener?.onTranscriptionProcessing()
+        }
+
         whisperClient.transcribe(
             audioFile = audioFile,
             apiKey = apiKey,
@@ -439,9 +454,19 @@ class VoiceInputManager(private val context: Context) {
      * For short texts (< 25 chars), removes sentence punctuation and converts to lowercase.
      * This helps with short voice inputs like "yes" or "okay" which Whisper tends to
      * return as "Yes." or "Okay."
+     *
+     * NOTE: This processing is SKIPPED when silence detection auto-stopped the recording,
+     * because in continuous dictation mode we want to preserve the original formatting.
      */
     private fun postProcessTranscription(text: String): String {
         val trimmedText = text.trim()
+
+        // Skip post-processing if auto-stopped by silence detection
+        // In continuous dictation, preserve original capitalization and punctuation
+        if (skipPostProcessing) {
+            Log.i(TAG, "Skipping post-processing (auto-stopped session): '$trimmedText'")
+            return trimmedText
+        }
 
         // Only apply processing to short transcriptions
         if (trimmedText.length >= SHORT_TEXT_THRESHOLD) {
