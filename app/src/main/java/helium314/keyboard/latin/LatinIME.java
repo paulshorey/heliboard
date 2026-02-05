@@ -62,6 +62,7 @@ import helium314.keyboard.latin.common.ViewOutlineProviderUtilsKt;
 import helium314.keyboard.latin.define.DebugFlags;
 import helium314.keyboard.latin.inputlogic.InputLogic;
 import helium314.keyboard.latin.personalization.PersonalizationHelper;
+import helium314.keyboard.latin.settings.Defaults;
 import helium314.keyboard.latin.settings.Settings;
 import helium314.keyboard.latin.settings.SettingsValues;
 import helium314.keyboard.latin.suggestions.SuggestionStripView;
@@ -82,6 +83,8 @@ import helium314.keyboard.latin.utils.SubtypeSettings;
 import helium314.keyboard.latin.utils.SubtypeState;
 import helium314.keyboard.latin.utils.ToolbarMode;
 import helium314.keyboard.latin.voice.VoiceInputManager;
+import helium314.keyboard.latin.voice.TextCleanupClient;
+import helium314.keyboard.latin.suggestions.SuggestionStripView.VoiceState;
 import helium314.keyboard.settings.SettingsActivity2;
 import kotlin.Unit;
 
@@ -181,6 +184,13 @@ public class LatinIME extends InputMethodService implements
 
     // Voice input manager for Whisper API transcription
     private VoiceInputManager mVoiceInputManager;
+    // Text cleanup client for GPT-4.1-nano post-processing
+    private TextCleanupClient mTextCleanupClient;
+    
+    // Voice input state management for cleanup/transcription coordination
+    private boolean mCleanupInProgress = false;
+    private boolean mPendingNewParagraph = false;
+    private final StringBuilder mPendingTranscription = new StringBuilder();
 
     public static final class UIHandler extends LeakGuardHandlerWrapper<LatinIME> {
         private static final int MSG_UPDATE_SHIFT_STATE = 0;
@@ -548,6 +558,7 @@ public class LatinIME extends InputMethodService implements
 
         // Initialize voice input manager
         mVoiceInputManager = new VoiceInputManager(this);
+        mTextCleanupClient = new TextCleanupClient();
         setupVoiceInputListener();
 
         // Register to receive ringer mode change.
@@ -1584,10 +1595,7 @@ public class LatinIME extends InputMethodService implements
             // Update UI immediately to show pause state
             if (mSuggestionStripView != null) {
                 boolean isPaused = mVoiceInputManager.isPaused();
-                boolean isRecording = mVoiceInputManager.isRecording();
-                boolean isTranscribing = mVoiceInputManager.isTranscribing();
-                boolean isContinuousMode = mVoiceInputManager.isContinuousMode();
-                mSuggestionStripView.setVoiceInputState(isRecording, isTranscribing, isContinuousMode, isPaused);
+                mSuggestionStripView.setVoiceInputState(isPaused ? VoiceState.PAUSED : VoiceState.RECORDING);
                 mKeyboardSwitcher.showToast(isPaused ? "Paused" : "Resumed", false);
             }
         }
@@ -1599,31 +1607,25 @@ public class LatinIME extends InputMethodService implements
         mVoiceInputManager.setListener(new VoiceInputManager.VoiceInputListener() {
             @Override
             public void onStateChanged(@NonNull VoiceInputManager.State state) {
-                boolean isContinuousMode = mVoiceInputManager.isContinuousMode();
-                boolean isRecording = mVoiceInputManager.isRecording();
-                boolean isTranscribing = mVoiceInputManager.isTranscribing();
-                boolean isPaused = mVoiceInputManager.isPaused();
-                Log.i(TAG, "Voice input state changed: " + state + ", continuous: " + isContinuousMode +
-                        ", recording: " + isRecording + ", transcribing: " + isTranscribing + ", paused: " + isPaused);
+                Log.i(TAG, "Voice input state changed: " + state);
 
                 if (mSuggestionStripView != null) {
                     switch (state) {
                         case RECORDING:
-                            // Recording is active (may also be transcribing in background)
-                            mSuggestionStripView.setVoiceInputState(true, isTranscribing, isContinuousMode, isPaused);
-                            if (!isTranscribing && !isPaused) {
-                                // Only show toast on fresh start, not when restarting while transcribing
-                                mKeyboardSwitcher.showToast("Listening...", false);
-                            }
+                            mSuggestionStripView.setVoiceInputState(VoiceState.RECORDING);
+                            mKeyboardSwitcher.showToast("Listening...", false);
                             break;
-                        case TRANSCRIBING:
-                            // Only transcribing (user stopped recording manually)
-                            mSuggestionStripView.setVoiceInputState(false, true, isContinuousMode, false);
-                            mKeyboardSwitcher.showToast("Transcribing...", false);
+                        case CONNECTING:
+                            mSuggestionStripView.setVoiceInputState(VoiceState.CONNECTING);
+                            mKeyboardSwitcher.showToast("Connecting...", false);
+                            break;
+                        case PAUSED:
+                            mSuggestionStripView.setVoiceInputState(VoiceState.PAUSED);
                             break;
                         case IDLE:
-                            // Nothing happening
-                            mSuggestionStripView.setVoiceInputState(false, false, false, false);
+                            mSuggestionStripView.setVoiceInputState(VoiceState.IDLE);
+                            // Reset all voice input state when session ends
+                            resetVoiceInputState();
                             break;
                     }
                 }
@@ -1631,30 +1633,145 @@ public class LatinIME extends InputMethodService implements
 
             @Override
             public void onTranscriptionResult(@NonNull String text) {
-                Log.i(TAG, "Voice transcription result received: '" + text + "'");
-                // Insert the transcribed text with a space after it for continuous typing
-                if (text != null && !text.isEmpty()) {
-                    Log.i(TAG, "Committing transcribed text to input");
-                    // Add a space after the text for better continuous input experience
-                    mInputLogic.mConnection.commitText(text + " ", 1);
-                } else {
-                    Log.w(TAG, "Transcription text is null or empty");
+                if (text == null || text.isEmpty()) {
+                    return;
                 }
+                
+                // If cleanup is in progress, queue this transcription to avoid race condition
+                if (mCleanupInProgress) {
+                    mPendingTranscription.append(text);
+                    
+                    // Safety limit: if pending buffer gets too large, insert it anyway
+                    if (mPendingTranscription.length() > 5000) {
+                        Log.w(TAG, "Pending transcription buffer overflow, inserting now");
+                        String pending = mPendingTranscription.toString();
+                        mPendingTranscription.setLength(0);
+                        insertTranscriptionText(pending);
+                    }
+                    return;
+                }
+                
+                insertTranscriptionText(text);
             }
 
             @Override
-            public void onTranscriptionProcessing() {
-                Log.i(TAG, "Voice transcription processing started");
-                mKeyboardSwitcher.showToast("...", false);
+            public void onTranscriptionDelta(@NonNull String text) {
+                // Real-time partial transcription - could be used for live preview
+            }
+
+            @Override
+            public void onCleanupRequested() {
+                // Prevent re-entrant cleanup calls
+                if (mCleanupInProgress) {
+                    return;
+                }
+                
+                // Called after 3 seconds of silence - time to cleanup the current paragraph
+                String anthropicApiKey = KtxKt.prefs(LatinIME.this).getString(Settings.PREF_ANTHROPIC_API_KEY, "");
+                if (anthropicApiKey == null || anthropicApiKey.isEmpty()) {
+                    return;
+                }
+                
+                // Get cleanup prompt from settings
+                String cleanupPrompt = KtxKt.prefs(LatinIME.this).getString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT);
+                if (cleanupPrompt == null || cleanupPrompt.isEmpty()) {
+                    cleanupPrompt = Defaults.PREF_CLEANUP_PROMPT;
+                }
+                
+                // Get text before cursor to find the current paragraph
+                CharSequence textBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(2000, 0);
+                String beforeText = textBeforeCursor != null ? textBeforeCursor.toString() : "";
+                
+                if (beforeText.isEmpty()) {
+                    return;
+                }
+                
+                // Find the last newline position
+                int lastNewlinePos = beforeText.lastIndexOf('\n');
+                
+                // Extract current paragraph from last newline (or start if no newline)
+                final String originalParagraph;
+                if (lastNewlinePos >= 0) {
+                    originalParagraph = beforeText.substring(lastNewlinePos + 1);
+                } else {
+                    originalParagraph = beforeText;
+                }
+                
+                if (originalParagraph.trim().isEmpty()) {
+                    return;
+                }
+                
+                // Mark cleanup as in progress to prevent race conditions with new paragraph
+                mCleanupInProgress = true;
+                
+                // Send current paragraph to Claude for cleanup
+                final String prompt = cleanupPrompt;
+                mTextCleanupClient.cleanupText(anthropicApiKey, prompt, "", originalParagraph, new TextCleanupClient.CleanupCallback() {
+                    @Override
+                    public void onCleanupComplete(String cleanedText) {
+                        // Find and replace the original paragraph
+                        CharSequence currentTextBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(4000, 0);
+                        String currentText = currentTextBeforeCursor != null ? currentTextBeforeCursor.toString() : "";
+                        
+                        // Find where the original paragraph is in the current text
+                        int originalPos = currentText.lastIndexOf(originalParagraph);
+                        
+                        if (originalPos >= 0) {
+                            // Calculate text added during cleanup (to preserve it)
+                            int endOfOriginal = originalPos + originalParagraph.length();
+                            String textAfterOriginal = currentText.substring(endOfOriginal);
+                            
+                            // Delete from original position to end
+                            int charsToDelete = currentText.length() - originalPos;
+                            
+                            // Post-process cleaned text and combine with any new text
+                            String processedText = ensureTrailingSpace(cleanedText);
+                            String finalText = processedText + textAfterOriginal;
+                            
+                            // Atomic delete+commit operation
+                            mInputLogic.mConnection.beginBatchEdit();
+                            if (charsToDelete > 0) {
+                                mInputLogic.mConnection.deleteTextBeforeCursor(charsToDelete);
+                            }
+                            mInputLogic.mConnection.commitText(finalText, 1);
+                            mInputLogic.mConnection.endBatchEdit();
+                        }
+                        // If original paragraph not found, skip cleanup (text changed too much)
+                        
+                        // Cleanup finished - process any pending items
+                        mCleanupInProgress = false;
+                        processPendingVoiceInput();
+                    }
+                    
+                    @Override
+                    public void onCleanupError(String error) {
+                        // On error, leave the text as-is (already inserted)
+                        Log.e(TAG, "Cleanup error: " + error);
+                        
+                        // Cleanup finished (with error) - process any pending items
+                        mCleanupInProgress = false;
+                        processPendingVoiceInput();
+                    }
+                });
+            }
+
+            @Override
+            public void onNewParagraphRequested() {
+                // Called after 12 seconds of silence - insert two line breaks to start new paragraph
+                if (mCleanupInProgress) {
+                    // Defer new paragraph until cleanup completes
+                    mPendingNewParagraph = true;
+                } else {
+                    mInputLogic.mConnection.commitText("\n\n", 1);
+                }
             }
 
             @Override
             public void onError(@NonNull String error) {
                 Log.e(TAG, "Voice input error: " + error);
-                // Only show error toast for critical errors, not transient ones in continuous mode
-                boolean isContinuousMode = mVoiceInputManager.isContinuousMode();
-                if (!isContinuousMode || error.contains("API key") || error.contains("permission")) {
-                    mKeyboardSwitcher.showToast("X", true);
+                // Show error toast for critical errors
+                if (error.contains("API key") || error.contains("permission") || error.contains("Connection")) {
+                    mKeyboardSwitcher.showToast("Error: " + error, true);
                 }
             }
 
@@ -1664,6 +1781,115 @@ public class LatinIME extends InputMethodService implements
                 mKeyboardSwitcher.showToast("Microphone permission required. Please grant permission in Settings.", true);
             }
         });
+    }
+
+    /**
+     * Adjust capitalization of transcribed text based on context.
+     * If the previous text doesn't end with sentence-ending punctuation,
+     * lowercase the first letter of the new transcription.
+     */
+    private String adjustCapitalization(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+
+        // Get text before cursor to check context
+        CharSequence textBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(5, 0);
+        
+        // If no text before cursor or at start, keep original capitalization
+        if (textBeforeCursor == null || textBeforeCursor.length() == 0) {
+            return text;
+        }
+
+        // Find the last non-space character
+        String beforeText = textBeforeCursor.toString();
+        char lastChar = ' ';
+        for (int i = beforeText.length() - 1; i >= 0; i--) {
+            char c = beforeText.charAt(i);
+            if (c != ' ') {
+                lastChar = c;
+                break;
+            }
+        }
+
+        // Check if last character is sentence-ending punctuation
+        boolean isSentenceEnd = (lastChar == '.' || lastChar == '!' || lastChar == '?' || 
+                                  lastChar == '\n' || lastChar == ' '); // space at position 0 means start
+
+        // If previous text ends a sentence, keep original capitalization
+        if (isSentenceEnd || lastChar == ' ') {
+            return text;
+        }
+
+        // Otherwise, lowercase the first letter if it's uppercase
+        char firstChar = text.charAt(0);
+        if (Character.isUpperCase(firstChar)) {
+            return Character.toLowerCase(firstChar) + text.substring(1);
+        }
+
+        return text;
+    }
+
+    /**
+     * Ensure the text ends with a trailing space.
+     * This ensures proper spacing after transcribed text.
+     */
+    private String ensureTrailingSpace(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+        if (text.endsWith(" ")) {
+            return text;
+        }
+        return text + " ";
+    }
+
+    /**
+     * Insert transcription text into the text field.
+     * Handles capitalization adjustment and trailing space.
+     * Uses batch edit to ensure atomic operation.
+     *
+     * @param text The raw transcription text to insert
+     */
+    private void insertTranscriptionText(String text) {
+        if (text == null || text.isEmpty()) {
+            return;
+        }
+        String adjustedText = adjustCapitalization(text);
+        String textToInsert = ensureTrailingSpace(adjustedText);
+        
+        mInputLogic.mConnection.beginBatchEdit();
+        mInputLogic.mConnection.commitText(textToInsert, 1);
+        mInputLogic.mConnection.endBatchEdit();
+    }
+
+    /**
+     * Process any pending voice input items (transcription and new paragraph).
+     * Called after cleanup completes to handle items that arrived during cleanup.
+     */
+    private void processPendingVoiceInput() {
+        // Process any pending transcription first
+        if (mPendingTranscription.length() > 0) {
+            String pending = mPendingTranscription.toString();
+            mPendingTranscription.setLength(0);
+            insertTranscriptionText(pending);
+        }
+        
+        // Then process pending new paragraph
+        if (mPendingNewParagraph) {
+            mPendingNewParagraph = false;
+            mInputLogic.mConnection.commitText("\n\n", 1);
+        }
+    }
+
+    /**
+     * Reset all voice input state variables.
+     * Called when voice input session ends.
+     */
+    private void resetVoiceInputState() {
+        mCleanupInProgress = false;
+        mPendingNewParagraph = false;
+        mPendingTranscription.setLength(0);
     }
 
     private void loadKeyboard() {

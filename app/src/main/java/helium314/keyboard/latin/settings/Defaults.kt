@@ -157,7 +157,7 @@ object Defaults {
     val PREF_TOOLBAR_KEYS = defaultToolbarPref
     const val PREF_AUTO_SHOW_TOOLBAR = false
     const val PREF_AUTO_HIDE_TOOLBAR = false
-    val PREF_CLIPBOARD_TOOLBAR_KEYS = defaultClipboardToolbarPref
+  val PREF_CLIPBOARD_TOOLBAR_KEYS = defaultClipboardToolbarPref
     const val PREF_ABC_AFTER_EMOJI = false
     const val PREF_ABC_AFTER_CLIP = false
     const val PREF_ABC_AFTER_SYMBOL_SPACE = true
@@ -166,10 +166,20 @@ object Defaults {
     const val PREF_SPACE_BAR_TEXT = ""
     const val PREF_TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss"
     const val PREF_WHISPER_API_KEY = ""
+    const val PREF_ANTHROPIC_API_KEY = ""
     const val PREF_WHISPER_PROMPT_SELECTED = 0 // Default to first preset
-    val PREF_WHISPER_PROMPTS = listOf(
+    const val PREF_CLEANUP_PROMPT = """Edit this raw transcription to be written correctly: 
+    
+Add capitalization and punctuation (.!?:,) to sentences. Fix grammar. Combine or split sentences to make them sound natural. Split one sentence into two if it reads better. Add punctuation where it makes sense. If the text is just a word or code then do not add grammatical punctuation or capitalization. Remove short insignificant artifacts like "Um...". 
+
+Capitalize names and products such as "Claude Code". Acronyms should be uppercase (api -> API). If the name of a special character is spelled out like 'open curly bracket', 'open parentheses', 'slash' then convert it into the actual character '{', '(', '/'. Example: 'Open curly bracket quote model unquote colon quote opus dash four dash six quote Close curly bracket' -> '{"model":"claude-opus-4-6"}'
+
+DO NOT add any content. DO NOT complete the sentence. DO NOT remove actual words, even if they are not grammatically correct. The end of this text may be unfinished, transcription still in progress.
+
+Return only the fixed text."""
+    val PREF_TRANSCRIBE_PROMPTS = listOf(
         // Technical/Standard
-        "Capitalize first letter in every sentence. Capitalize first letter in a new line or list item. Capitalize proper nouns, titles, products. Make acronyms UPPERCASE. Add punctuation. Add special characters when they are mentioned.",
+        "",
         // Braindump
         "Braindump. The recording is a long stream of consciousness. It's messy, repetitive, lacks structure, contains mistakes and parts that don't make any sense. Make sense of it. Clean it up. Make the text easier to read.",
         // Casual conversation

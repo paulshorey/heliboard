@@ -8,132 +8,123 @@ import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.prefs
-import java.io.File
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Manages the voice input workflow: recording audio and transcribing via Whisper API.
+ * Manages the voice input workflow using OpenAI Realtime API for streaming transcription.
  *
- * Architecture: Recording and transcription are decoupled and run in parallel.
- * - Recording loop: continuously records, detects silence, saves file, immediately restarts
- * - Transcription: processes saved audio files asynchronously, inserts text when complete
+ * Architecture:
+ * - Recording: VoiceRecorder captures audio at 24kHz and streams chunks
+ * - Transcription: RealtimeTranscriptionClient sends audio via WebSocket to OpenAI
+ * - The server handles Voice Activity Detection (VAD) and returns transcriptions
  *
- * This allows the microphone to always be listening while transcriptions happen in background.
+ * This provides real-time transcription without manual silence detection or file chunking.
  */
 class VoiceInputManager(private val context: Context) {
 
     companion object {
         private const val TAG = "VoiceInputManager"
-
-        // Threshold for short transcription post-processing
-        private const val SHORT_TEXT_THRESHOLD = 25
-
-        // Common sentence punctuation to remove from short transcriptions
-        private val SENTENCE_PUNCTUATION = setOf('.', ',', '!', '?', ';', ':', '…')
-
-        // Duration of silence (in ms) after speech that triggers auto-stop
-        private const val SILENCE_DURATION_MS = 3000L
+        private const val SILENCE_TIMEOUT_MS = 30000L // 30 seconds - cancel recording
+        private const val CLEANUP_DELAY_MS = 3000L // 3 seconds - trigger cleanup after silence
+        private const val NEW_PARAGRAPH_DELAY_MS = 12000L // 12 seconds - start new paragraph after long silence
     }
 
     /**
      * State represents the overall voice input state for UI purposes.
-     * Note: Recording and transcription can happen simultaneously in continuous mode.
      */
     enum class State {
         IDLE,           // Not doing anything
-        RECORDING,      // Actively recording (may also be transcribing in background)
-        TRANSCRIBING    // Only transcribing (recording stopped, e.g., when user clicks to stop)
+        CONNECTING,     // Connecting to Realtime API
+        RECORDING,      // Actively recording and streaming
+        PAUSED          // Recording paused (WebSocket still connected)
     }
 
     interface VoiceInputListener {
         fun onStateChanged(state: State)
+        /** Called with complete transcription of a speech segment */
         fun onTranscriptionResult(text: String)
-        fun onTranscriptionProcessing()  // Called when audio is being sent to API
+        /** Called with partial/incremental transcription (for real-time feedback) */
+        fun onTranscriptionDelta(text: String)
+        /** Called after 3 seconds of silence - time to cleanup the current paragraph */
+        fun onCleanupRequested()
+        /** Called after 12 seconds of silence - time to start a new paragraph */
+        fun onNewParagraphRequested()
         fun onError(error: String)
         fun onPermissionRequired()
     }
 
     private val voiceRecorder = VoiceRecorder(context)
-    private val whisperClient = WhisperApiClient()
+    private val realtimeClient = RealtimeTranscriptionClient()
     private var listener: VoiceInputListener? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    // Recording state
-    private var isRecordingActive = false
-
-    // Transcription state - track pending transcriptions
-    private val pendingTranscriptions = AtomicInteger(0)
-
-    // Continuous recording mode state
-    private var continuousMode = false
-    private var speechDetected = false
-    private var silenceStartTime: Long = 0
-
-    // Flag to skip post-processing (removing caps/punctuation) for auto-stopped recordings
-    // Set to true when silence detection auto-stops, affects all transcriptions in the session
-    private var skipPostProcessing = false
+    // State tracking
+    private var currentState = State.IDLE
+    
+    // Silence timeout - auto-cancel after 30 seconds of no speech
+    private val silenceTimeoutRunnable = Runnable {
+        if (currentState == State.RECORDING) {
+            Log.i(TAG, "Silence timeout - cancelling recording")
+            cancelRecording()
+            listener?.onError("Recording cancelled due to silence")
+        }
+    }
+    
+    // Cleanup timer - trigger cleanup after 3 seconds of silence
+    private val cleanupTimerRunnable = Runnable {
+        if (currentState == State.RECORDING) {
+            Log.i(TAG, "3 second silence - requesting cleanup")
+            listener?.onCleanupRequested()
+        }
+    }
+    
+    // New paragraph timer - insert line breaks after 12 seconds of silence
+    private val newParagraphTimerRunnable = Runnable {
+        if (currentState == State.RECORDING) {
+            Log.i(TAG, "12 second silence - requesting new paragraph")
+            listener?.onNewParagraphRequested()
+        }
+    }
 
     val isRecording: Boolean
-        get() = isRecordingActive
+        get() = currentState == State.RECORDING
 
     val isPaused: Boolean
-        get() = voiceRecorder.isCurrentlyPaused
-
-    val isTranscribing: Boolean
-        get() = pendingTranscriptions.get() > 0
+        get() = currentState == State.PAUSED
 
     val isIdle: Boolean
-        get() = !isRecordingActive && pendingTranscriptions.get() == 0
+        get() = currentState == State.IDLE
 
-    /**
-     * Get the current state for UI purposes.
-     * In continuous mode, we prioritize showing RECORDING state.
-     */
     val state: State
-        get() = when {
-            isRecordingActive -> State.RECORDING
-            pendingTranscriptions.get() > 0 -> State.TRANSCRIBING
-            else -> State.IDLE
-        }
+        get() = currentState
 
     fun setListener(listener: VoiceInputListener?) {
         this.listener = listener
     }
 
     /**
-     * Toggle recording state. If idle, starts recording. If recording, stops continuous mode
-     * and completes the current transcription.
+     * Toggle recording state.
+     * - If idle: starts recording
+     * - If recording: stops recording
+     * - If paused: resumes recording
      */
     fun toggleRecording() {
-        when {
-            isRecordingActive -> {
-                // Stop continuous mode and transcribe the current recording
-                Log.i(TAG, "Toggle: stopping continuous mode and transcribing")
-                continuousMode = false
-                skipPostProcessing = false  // Reset for next session
-                stopRecordingAndTranscribe()
-            }
-            pendingTranscriptions.get() > 0 -> {
-                // Transcription in progress but not recording - just disable continuous mode
-                Log.i(TAG, "Toggle: stopping continuous mode while transcribing")
-                continuousMode = false
-                skipPostProcessing = false  // Reset for next session
-            }
-            else -> {
-                // Idle - start recording
-                startRecording()
+        when (currentState) {
+            State.IDLE -> startRecording()
+            State.RECORDING -> stopRecording()
+            State.PAUSED -> resumeRecording()
+            State.CONNECTING -> {
+                // Cancel connection attempt
+                cancelRecording()
             }
         }
     }
 
     /**
-     * Start recording audio.
-     * @param continuous If true, enables continuous recording mode where recording
-     *                   auto-restarts immediately after stopping (not waiting for transcription).
+     * Start recording and streaming to Realtime API.
      */
-    fun startRecording(continuous: Boolean = true): Boolean {
-        if (isRecordingActive) {
-            Log.w(TAG, "Cannot start recording, already recording")
+    fun startRecording(): Boolean {
+        if (currentState != State.IDLE) {
+            Log.w(TAG, "Cannot start recording, current state: $currentState")
             return false
         }
 
@@ -143,188 +134,168 @@ class VoiceInputManager(private val context: Context) {
             return false
         }
 
-        // Set continuous mode and reset speech detection state
-        continuousMode = continuous
-        speechDetected = false
-        silenceStartTime = 0
-        // Reset post-processing flag - only skip if auto-stopped by silence detection
-        skipPostProcessing = false
+        val apiKey = getApiKey()
+        if (apiKey.isBlank()) {
+            Log.e(TAG, "API key is blank!")
+            listener?.onError("OpenAI API key not configured. Please set it in Settings > Advanced.")
+            return false
+        }
 
-        setupRecorderCallback()
-        return voiceRecorder.startRecording()
+        // Update state to connecting
+        updateState(State.CONNECTING)
+
+        // Get language and prompt settings
+        val language = getCurrentLanguage()
+        val prompt = getPrompt().ifBlank { null }
+
+        Log.i(TAG, "Connecting to Realtime API...")
+
+        // Connect to Realtime API
+        realtimeClient.connect(
+            apiKey = apiKey,
+            language = language,
+            prompt = prompt,
+            callback = object : RealtimeTranscriptionClient.TranscriptionCallback {
+                override fun onConnected() {
+                    Log.i(TAG, "WebSocket connected")
+                }
+
+                override fun onSessionReady() {
+                    Log.i(TAG, "Session ready, starting audio recording")
+                    // Now start the audio recording
+                    startAudioRecording()
+                }
+
+                override fun onTranscriptionDelta(text: String) {
+                    resetSilenceTimeout()
+                    listener?.onTranscriptionDelta(text)
+                }
+
+                override fun onTranscriptionComplete(text: String) {
+                    resetSilenceTimeout()
+                    if (text.isNotBlank()) {
+                        listener?.onTranscriptionResult(text)
+                    }
+                }
+
+                override fun onSpeechStarted() {
+                    // User started speaking - cancel timers
+                    cancelCleanupTimer()
+                    cancelNewParagraphTimer()
+                    resetSilenceTimeout()
+                }
+
+                override fun onSpeechStopped() {
+                    // User stopped speaking - start silence timers
+                    startCleanupTimer()        // 3 seconds - cleanup
+                    startNewParagraphTimer()   // 12 seconds - new paragraph
+                }
+
+                override fun onError(error: String) {
+                    Log.e(TAG, "Realtime API error: $error")
+                    listener?.onError(error)
+                    // Don't stop recording on transient errors
+                }
+
+                override fun onDisconnected() {
+                    Log.i(TAG, "WebSocket disconnected")
+                    if (currentState != State.IDLE) {
+                        // Unexpected disconnect
+                        stopRecordingInternal()
+                        listener?.onError("Connection lost")
+                    }
+                }
+            }
+        )
+
+        return true
     }
 
     /**
-     * Setup the recorder callback. Called when starting recording.
+     * Start the audio recording after WebSocket is ready.
      */
-    private fun setupRecorderCallback() {
-        voiceRecorder.setCallback(object : VoiceRecorder.RecordingCallback {
+    private fun startAudioRecording() {
+        voiceRecorder.setCallback(object : VoiceRecorder.StreamingCallback {
             override fun onRecordingStarted() {
-                Log.i(TAG, "Recording started (continuous=$continuousMode, pendingTranscriptions=${pendingTranscriptions.get()})")
-                isRecordingActive = true
-                speechDetected = false
-                silenceStartTime = 0
-                listener?.onStateChanged(State.RECORDING)
+                Log.i(TAG, "Audio recording started")
+                updateState(State.RECORDING)
+                // Start silence timeout
+                resetSilenceTimeout()
             }
 
-            override fun onRecordingStopped(audioFile: File?, averageRms: Double) {
-                Log.i(TAG, "Recording stopped, file: ${audioFile?.absolutePath}, size: ${audioFile?.length() ?: 0}, rms: $averageRms")
-                isRecordingActive = false
-
-                // CRITICAL: In continuous mode, restart recording IMMEDIATELY
-                // This happens BEFORE we start transcription
-                if (continuousMode) {
-                    Log.i(TAG, "Continuous mode: immediately restarting recording")
-                    mainHandler.post {
-                        if (continuousMode) {
-                            startRecordingInternal()
-                        } else {
-                            // Continuous mode was cancelled while we were stopping
-                            notifyStateChange()
-                        }
-                    }
+            override fun onAudioChunk(audioData: ByteArray) {
+                // Stream audio to Realtime API
+                if (currentState == State.RECORDING && realtimeClient.isReady) {
+                    realtimeClient.sendAudio(audioData)
                 }
+            }
 
-                // Now handle the audio file (transcription runs in parallel)
-                if (averageRms < VoiceRecorder.MIN_RMS_THRESHOLD) {
-                    Log.w(TAG, "Audio too quiet (rms: $averageRms), skipping transcription")
-                    audioFile?.delete()
-                    if (!continuousMode) {
-                        listener?.onError("No speech detected - audio was too quiet")
-                        notifyStateChange()
-                    }
-                    return
-                }
-
-                if (audioFile != null && audioFile.exists() && audioFile.length() > 44) {
-                    Log.i(TAG, "Audio file valid, queuing transcription")
-                    // Transcription runs in background, doesn't block recording
-                    transcribeAudioAsync(audioFile)
-                } else {
-                    Log.e(TAG, "Audio file invalid or empty")
-                    audioFile?.delete()
-                    if (!continuousMode) {
-                        listener?.onError("Recording failed - no audio captured")
-                        notifyStateChange()
-                    }
-                }
+            override fun onRecordingStopped() {
+                Log.i(TAG, "Audio recording stopped")
             }
 
             override fun onRecordingError(error: String) {
                 Log.e(TAG, "Recording error: $error")
-                isRecordingActive = false
-                continuousMode = false
-                listener?.onStateChanged(State.IDLE)
+                stopRecordingInternal()
                 listener?.onError(error)
             }
-
-            override fun onVolumeUpdate(currentRms: Double) {
-                // Handle real-time volume updates for auto-pause detection
-                // Don't process when not recording or when paused
-                if (!isRecordingActive || isPaused) return
-
-                val currentTime = System.currentTimeMillis()
-
-                if (currentRms >= VoiceRecorder.SPEECH_RMS_THRESHOLD) {
-                    // Speech detected
-                    if (!speechDetected) {
-                        Log.i(TAG, "Speech detected (rms: $currentRms)")
-                    }
-                    speechDetected = true
-                    silenceStartTime = 0 // Reset silence timer
-                } else if (speechDetected) {
-                    // Silence after speech was detected
-                    if (silenceStartTime == 0L) {
-                        // Start tracking silence
-                        silenceStartTime = currentTime
-                        Log.i(TAG, "Silence started after speech (rms: $currentRms)")
-                    } else {
-                        // Check if silence has lasted long enough
-                        val silenceDuration = currentTime - silenceStartTime
-                        if (silenceDuration >= SILENCE_DURATION_MS) {
-                            Log.i(TAG, "Auto-stopping after ${silenceDuration}ms of silence")
-                            // Set flag to skip post-processing for all transcriptions in this session
-                            // Since auto-stop was triggered, user is dictating continuously
-                            skipPostProcessing = true
-                            // Auto-stop recording - this will trigger transcription
-                            // Recording will immediately restart in onRecordingStopped
-                            stopRecordingInternal()
-                        }
-                    }
-                }
-            }
         })
+
+        if (!voiceRecorder.startRecording()) {
+            Log.e(TAG, "Failed to start audio recording")
+            realtimeClient.disconnect()
+            updateState(State.IDLE)
+            listener?.onError("Failed to start recording")
+        }
     }
 
     /**
-     * Internal method to start recording without resetting continuous mode.
+     * Stop recording and close WebSocket connection.
      */
-    private fun startRecordingInternal(): Boolean {
-        if (isRecordingActive) {
-            Log.w(TAG, "Cannot start recording internal, already recording")
-            return false
+    fun stopRecording() {
+        if (currentState == State.IDLE) {
+            Log.w(TAG, "Already idle")
+            return
         }
 
-        speechDetected = false
-        silenceStartTime = 0
-        setupRecorderCallback()
-        return voiceRecorder.startRecording()
+        Log.i(TAG, "Stopping recording")
+        stopRecordingInternal()
     }
 
     /**
-     * Internal method to stop recording without changing continuous mode.
+     * Internal method to stop everything.
      */
     private fun stopRecordingInternal() {
-        if (!isRecordingActive) {
-            Log.w(TAG, "Cannot stop recording, not recording")
-            return
-        }
+        cancelSilenceTimeout()
+        cancelCleanupTimer()
+        cancelNewParagraphTimer()
         voiceRecorder.stopRecording()
+        realtimeClient.disconnect()
+        updateState(State.IDLE)
     }
 
     /**
-     * Stop recording and start transcription.
-     */
-    fun stopRecordingAndTranscribe() {
-        if (!isRecordingActive) {
-            Log.w(TAG, "Cannot stop recording, not recording")
-            return
-        }
-
-        voiceRecorder.stopRecording()
-        // Transcription is handled in the callback
-    }
-
-    /**
-     * Cancel recording without transcribing.
-     * This also stops continuous recording mode.
+     * Cancel recording without waiting for final transcription.
      */
     fun cancelRecording() {
-        Log.i(TAG, "cancelRecording called, continuousMode was: $continuousMode")
-        continuousMode = false
-        speechDetected = false
-        silenceStartTime = 0
-        skipPostProcessing = false  // Reset for next session
-
-        if (isRecordingActive) {
-            voiceRecorder.cancelRecording()
-            isRecordingActive = false
-        }
-
-        // Note: pending transcriptions will complete, but results won't restart recording
-        notifyStateChange()
+        Log.i(TAG, "Cancelling recording")
+        realtimeClient.clearAudio()
+        stopRecordingInternal()
     }
 
     /**
-     * Pause recording. Audio will not be captured while paused.
-     * Auto-stop detection is also paused.
+     * Pause recording. WebSocket stays connected but audio is not sent.
      */
     fun pauseRecording() {
-        if (!isRecordingActive) {
+        if (currentState != State.RECORDING) {
             Log.w(TAG, "Cannot pause, not recording")
             return
         }
+        cancelSilenceTimeout()
+        cancelCleanupTimer()
+        cancelNewParagraphTimer()
         voiceRecorder.pauseRecording()
+        updateState(State.PAUSED)
         Log.i(TAG, "Recording paused")
     }
 
@@ -332,14 +303,13 @@ class VoiceInputManager(private val context: Context) {
      * Resume recording after pause.
      */
     fun resumeRecording() {
-        if (!isRecordingActive) {
-            Log.w(TAG, "Cannot resume, not recording")
+        if (currentState != State.PAUSED) {
+            Log.w(TAG, "Cannot resume, not paused")
             return
         }
         voiceRecorder.resumeRecording()
-        // Reset silence detection so we don't immediately auto-stop after resume
-        speechDetected = false
-        silenceStartTime = 0
+        updateState(State.RECORDING)
+        resetSilenceTimeout()
         Log.i(TAG, "Recording resumed")
     }
 
@@ -347,117 +317,72 @@ class VoiceInputManager(private val context: Context) {
      * Toggle pause state.
      */
     fun togglePause() {
-        if (isPaused) {
-            resumeRecording()
-        } else {
-            pauseRecording()
+        when (currentState) {
+            State.RECORDING -> pauseRecording()
+            State.PAUSED -> resumeRecording()
+            else -> Log.w(TAG, "Cannot toggle pause in state: $currentState")
         }
     }
 
     /**
-     * Stop continuous recording mode.
-     * Recording will stop after the current segment completes.
+     * Update state and notify listener.
      */
-    fun stopContinuousMode() {
-        Log.i(TAG, "stopContinuousMode called")
-        continuousMode = false
-    }
-
-    /**
-     * Check if continuous recording mode is active.
-     */
-    val isContinuousMode: Boolean
-        get() = continuousMode
-
-    /**
-     * Notify listener of state change based on current recording/transcription status.
-     */
-    private fun notifyStateChange() {
-        listener?.onStateChanged(state)
-    }
-
-    /**
-     * Transcribe audio file asynchronously. Recording continues independently.
-     */
-    private fun transcribeAudioAsync(audioFile: File) {
-        Log.i(TAG, "transcribeAudioAsync: file=${audioFile.absolutePath}, size=${audioFile.length()}")
-
-        pendingTranscriptions.incrementAndGet()
-        Log.i(TAG, "Pending transcriptions: ${pendingTranscriptions.get()}")
-
-        val apiKey = getApiKey()
-        if (apiKey.isBlank()) {
-            Log.e(TAG, "API key is blank!")
-            audioFile.delete()
-            pendingTranscriptions.decrementAndGet()
-            listener?.onError("OpenAI API key not configured. Please set it in Settings > Advanced.")
-            notifyStateChange()
-            return
+    private fun updateState(newState: State) {
+        if (currentState != newState) {
+            currentState = newState
+            listener?.onStateChanged(newState)
         }
-
-        // Get current keyboard language for better transcription
-        val language = getCurrentLanguage()
-
-        // Get custom prompt for transcription style
-        val prompt = getPrompt()
-        Log.i(TAG, "Starting Whisper API call with language: $language")
-
-        // Notify listener that we're processing (sending to API)
-        mainHandler.post {
-            listener?.onTranscriptionProcessing()
+    }
+    
+    /**
+     * Reset the silence timeout. Called when speech activity is detected.
+     */
+    private fun resetSilenceTimeout() {
+        mainHandler.removeCallbacks(silenceTimeoutRunnable)
+        if (currentState == State.RECORDING) {
+            mainHandler.postDelayed(silenceTimeoutRunnable, SILENCE_TIMEOUT_MS)
         }
-
-        whisperClient.transcribe(
-            audioFile = audioFile,
-            apiKey = apiKey,
-            language = language,
-            prompt = prompt.ifBlank { null },
-            callback = object : WhisperApiClient.TranscriptionCallback {
-                override fun onTranscriptionStarted() {
-                    Log.i(TAG, "Transcription started for ${audioFile.name}")
-                }
-
-                override fun onTranscriptionComplete(text: String) {
-                    Log.i(TAG, "Transcription complete: '$text'")
-
-                    // Clean up this specific audio file
-                    audioFile.delete()
-                    pendingTranscriptions.decrementAndGet()
-                    Log.i(TAG, "Pending transcriptions after completion: ${pendingTranscriptions.get()}")
-
-                    if (text.isNotBlank()) {
-                        // Post-process short transcriptions
-                        val processedText = postProcessTranscription(text)
-                        Log.i(TAG, "Delivering transcription result: '$processedText'")
-                        listener?.onTranscriptionResult(processedText)
-                    } else {
-                        Log.w(TAG, "Transcription returned empty text")
-                        // Don't show error - this is normal for silence segments
-                    }
-
-                    // Notify state change (might go to IDLE if this was last transcription)
-                    if (!isRecordingActive) {
-                        notifyStateChange()
-                    }
-                }
-
-                override fun onTranscriptionError(error: String) {
-                    Log.e(TAG, "Transcription error: $error")
-
-                    // Clean up this specific audio file
-                    audioFile.delete()
-                    pendingTranscriptions.decrementAndGet()
-                    Log.i(TAG, "Pending transcriptions after error: ${pendingTranscriptions.get()}")
-
-                    listener?.onError(error)
-
-                    // Notify state change
-                    if (!isRecordingActive) {
-                        notifyStateChange()
-                    }
-                }
-            }
-        )
+    }
+    
+    /**
+     * Cancel the silence timeout.
+     */
+    private fun cancelSilenceTimeout() {
+        mainHandler.removeCallbacks(silenceTimeoutRunnable)
+    }
+    
+    /**
+     * Start the cleanup timer. Called when speech stops.
+     */
+    private fun startCleanupTimer() {
+        mainHandler.removeCallbacks(cleanupTimerRunnable)
+        if (currentState == State.RECORDING) {
+            mainHandler.postDelayed(cleanupTimerRunnable, CLEANUP_DELAY_MS)
+        }
+    }
+    
+    /**
+     * Cancel the cleanup timer. Called when speech starts again.
+     */
+    private fun cancelCleanupTimer() {
+        mainHandler.removeCallbacks(cleanupTimerRunnable)
+    }
+    
+    /**
+     * Start the new paragraph timer. Called when speech stops.
+     */
+    private fun startNewParagraphTimer() {
+        mainHandler.removeCallbacks(newParagraphTimerRunnable)
+        if (currentState == State.RECORDING) {
+            mainHandler.postDelayed(newParagraphTimerRunnable, NEW_PARAGRAPH_DELAY_MS)
+        }
+    }
+    
+    /**
+     * Cancel the new paragraph timer. Called when speech starts again.
+     */
+    private fun cancelNewParagraphTimer() {
+        mainHandler.removeCallbacks(newParagraphTimerRunnable)
     }
 
     private fun getApiKey(): String {
@@ -476,7 +401,7 @@ class VoiceInputManager(private val context: Context) {
             val selectedIndex = prefs.getInt(Settings.PREF_WHISPER_PROMPT_SELECTED, Defaults.PREF_WHISPER_PROMPT_SELECTED)
             // Get the prompt text for that index
             val key = Settings.PREF_WHISPER_PROMPT_PREFIX + selectedIndex
-            val defaultValue = Defaults.PREF_WHISPER_PROMPTS.getOrElse(selectedIndex) { "" }
+            val defaultValue = Defaults.PREF_TRANSCRIBE_PROMPTS.getOrElse(selectedIndex) { "" }
             prefs.getString(key, defaultValue) ?: defaultValue
         } catch (e: Exception) {
             Log.e(TAG, "Error getting prompt: ${e.message}")
@@ -496,51 +421,10 @@ class VoiceInputManager(private val context: Context) {
     }
 
     /**
-     * Post-process transcription results.
-     * For short texts (< 25 chars), removes sentence punctuation and converts to lowercase.
-     * This helps with short voice inputs like "yes" or "okay" which Whisper tends to
-     * return as "Yes." or "Okay."
-     *
-     * NOTE: This processing is SKIPPED when silence detection auto-stopped the recording,
-     * because in continuous dictation mode we want to preserve the original formatting.
-     */
-    private fun postProcessTranscription(text: String): String {
-        val trimmedText = text.trim()
-
-        // Skip post-processing if auto-stopped by silence detection
-        // In continuous dictation, preserve original capitalization and punctuation
-        if (skipPostProcessing) {
-            Log.i(TAG, "Skipping post-processing (auto-stopped session): '$trimmedText'")
-            return trimmedText
-        }
-
-        // Only apply processing to short transcriptions
-        if (trimmedText.length >= SHORT_TEXT_THRESHOLD) {
-            return trimmedText
-        }
-
-        Log.i(TAG, "Applying short text processing to: '$trimmedText'")
-
-        // Remove sentence punctuation and convert to lowercase
-        val processed = trimmedText
-            .filter { it !in SENTENCE_PUNCTUATION }
-            .lowercase()
-            .trim()
-
-        Log.i(TAG, "Post-processed short text: '$processed'")
-        return processed
-    }
-
-    /**
      * Clean up resources. Call when the keyboard is destroyed.
      */
     fun destroy() {
-        continuousMode = false
-        skipPostProcessing = false
-        if (isRecordingActive) {
-            voiceRecorder.cancelRecording()
-            isRecordingActive = false
-        }
+        stopRecordingInternal()
         listener = null
     }
 }
