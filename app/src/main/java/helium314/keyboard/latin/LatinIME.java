@@ -186,9 +186,11 @@ public class LatinIME extends InputMethodService implements
     private VoiceInputManager mVoiceInputManager;
     // Text cleanup client for GPT-4.1-nano post-processing
     private TextCleanupClient mTextCleanupClient;
+    
+    // Voice input state management for cleanup/transcription coordination
     private boolean mCleanupInProgress = false;
     private boolean mPendingNewParagraph = false;
-    private String mPendingTranscription = null;
+    private final StringBuilder mPendingTranscription = new StringBuilder();
 
     public static final class UIHandler extends LeakGuardHandlerWrapper<LatinIME> {
         private static final int MSG_UPDATE_SHIFT_STATE = 0;
@@ -1622,10 +1624,8 @@ public class LatinIME extends InputMethodService implements
                             break;
                         case IDLE:
                             mSuggestionStripView.setVoiceInputState(VoiceState.IDLE);
-                            // Reset cleanup state when voice input ends
-                            mCleanupInProgress = false;
-                            mPendingNewParagraph = false;
-                            mPendingTranscription = null;
+                            // Reset all voice input state when session ends
+                            resetVoiceInputState();
                             break;
                     }
                 }
@@ -1640,24 +1640,21 @@ public class LatinIME extends InputMethodService implements
                 // If cleanup is in progress, queue this transcription to avoid race condition
                 if (mCleanupInProgress) {
                     Log.d(TAG, "TRANSCRIPTION: cleanup in progress, queueing \"" + text + "\"");
-                    if (mPendingTranscription == null) {
-                        mPendingTranscription = text;
-                    } else {
-                        mPendingTranscription += text;
+                    mPendingTranscription.append(text);
+                    
+                    // Safety limit: if pending buffer gets too large, insert it anyway
+                    // This prevents memory issues if cleanup takes an unusually long time
+                    if (mPendingTranscription.length() > 5000) {
+                        Log.w(TAG, "TRANSCRIPTION: pending buffer too large, inserting now");
+                        String pending = mPendingTranscription.toString();
+                        mPendingTranscription.setLength(0);
+                        insertTranscriptionText(pending);
                     }
                     return;
                 }
                 
-                // Just insert the raw text with basic capitalization fix
-                // Cleanup will happen later when onCleanupRequested is called after 3s silence
-                String adjustedText = adjustCapitalization(text);
-                String textToInsert = ensureTrailingSpace(adjustedText);
-                Log.d(TAG, "TRANSCRIPTION: inserting \"" + textToInsert + "\"");
-                
-                // Use batch edit to ensure atomic operation
-                mInputLogic.mConnection.beginBatchEdit();
-                mInputLogic.mConnection.commitText(textToInsert, 1);
-                mInputLogic.mConnection.endBatchEdit();
+                // Insert the transcription text immediately
+                insertTranscriptionText(text);
             }
 
             @Override
@@ -1667,6 +1664,12 @@ public class LatinIME extends InputMethodService implements
 
             @Override
             public void onCleanupRequested() {
+                // Prevent re-entrant cleanup calls
+                if (mCleanupInProgress) {
+                    Log.d(TAG, "CLEANUP_REQUEST: already in progress, skipping");
+                    return;
+                }
+                
                 // Called after 3 seconds of silence - time to cleanup the current paragraph
                 String anthropicApiKey = KtxKt.prefs(LatinIME.this).getString(Settings.PREF_ANTHROPIC_API_KEY, "");
                 if (anthropicApiKey == null || anthropicApiKey.isEmpty()) {
@@ -1764,26 +1767,9 @@ public class LatinIME extends InputMethodService implements
                             Log.w(TAG, "CLEANUP_COMPLETE: Original paragraph not found, skipping cleanup");
                         }
                         
-                        // Cleanup finished
+                        // Cleanup finished - process any pending items
                         mCleanupInProgress = false;
-                        
-                        // Process any pending transcription that arrived during cleanup
-                        if (mPendingTranscription != null) {
-                            Log.d(TAG, "CLEANUP_COMPLETE: inserting pending transcription \"" + mPendingTranscription + "\"");
-                            String adjustedText = adjustCapitalization(mPendingTranscription);
-                            String textToInsert = ensureTrailingSpace(adjustedText);
-                            mInputLogic.mConnection.beginBatchEdit();
-                            mInputLogic.mConnection.commitText(textToInsert, 1);
-                            mInputLogic.mConnection.endBatchEdit();
-                            mPendingTranscription = null;
-                        }
-                        
-                        // Check if new paragraph was pending
-                        if (mPendingNewParagraph) {
-                            mPendingNewParagraph = false;
-                            Log.d(TAG, "Inserting pending new paragraph after cleanup");
-                            mInputLogic.mConnection.commitText("\n\n", 1);
-                        }
+                        processPendingVoiceInput();
                     }
                     
                     @Override
@@ -1791,26 +1777,9 @@ public class LatinIME extends InputMethodService implements
                         // On error, leave the text as-is (already inserted)
                         Log.e(TAG, "Cleanup error: " + error);
                         
-                        // Cleanup finished (with error)
+                        // Cleanup finished (with error) - process any pending items
                         mCleanupInProgress = false;
-                        
-                        // Process any pending transcription that arrived during cleanup
-                        if (mPendingTranscription != null) {
-                            Log.d(TAG, "Cleanup error: inserting pending transcription \"" + mPendingTranscription + "\"");
-                            String adjustedText = adjustCapitalization(mPendingTranscription);
-                            String textToInsert = ensureTrailingSpace(adjustedText);
-                            mInputLogic.mConnection.beginBatchEdit();
-                            mInputLogic.mConnection.commitText(textToInsert, 1);
-                            mInputLogic.mConnection.endBatchEdit();
-                            mPendingTranscription = null;
-                        }
-                        
-                        // Check if new paragraph was pending
-                        if (mPendingNewParagraph) {
-                            mPendingNewParagraph = false;
-                            Log.d(TAG, "Inserting pending new paragraph after cleanup error");
-                            mInputLogic.mConnection.commitText("\n\n", 1);
-                        }
+                        processPendingVoiceInput();
                     }
                 });
             }
@@ -1913,6 +1882,57 @@ public class LatinIME extends InputMethodService implements
             return text;
         }
         return text + " ";
+    }
+
+    /**
+     * Insert transcription text into the text field.
+     * Handles capitalization adjustment and trailing space.
+     * Uses batch edit to ensure atomic operation.
+     *
+     * @param text The raw transcription text to insert
+     */
+    private void insertTranscriptionText(String text) {
+        if (text == null || text.isEmpty()) {
+            return;
+        }
+        String adjustedText = adjustCapitalization(text);
+        String textToInsert = ensureTrailingSpace(adjustedText);
+        Log.d(TAG, "TRANSCRIPTION: inserting \"" + textToInsert + "\"");
+        
+        mInputLogic.mConnection.beginBatchEdit();
+        mInputLogic.mConnection.commitText(textToInsert, 1);
+        mInputLogic.mConnection.endBatchEdit();
+    }
+
+    /**
+     * Process any pending voice input items (transcription and new paragraph).
+     * Called after cleanup completes to handle items that arrived during cleanup.
+     */
+    private void processPendingVoiceInput() {
+        // Process any pending transcription first
+        if (mPendingTranscription.length() > 0) {
+            String pending = mPendingTranscription.toString();
+            mPendingTranscription.setLength(0); // Clear the buffer
+            Log.d(TAG, "Processing pending transcription: \"" + pending + "\"");
+            insertTranscriptionText(pending);
+        }
+        
+        // Then process pending new paragraph
+        if (mPendingNewParagraph) {
+            mPendingNewParagraph = false;
+            Log.d(TAG, "Inserting pending new paragraph");
+            mInputLogic.mConnection.commitText("\n\n", 1);
+        }
+    }
+
+    /**
+     * Reset all voice input state variables.
+     * Called when voice input session ends.
+     */
+    private void resetVoiceInputState() {
+        mCleanupInProgress = false;
+        mPendingNewParagraph = false;
+        mPendingTranscription.setLength(0);
     }
 
     private void loadKeyboard() {
