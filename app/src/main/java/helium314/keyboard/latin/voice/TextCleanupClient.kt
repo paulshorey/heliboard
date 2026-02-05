@@ -65,11 +65,8 @@ class TextCleanupClient {
             newText
         }
         
-        Log.d(TAG, "CLEANUP_INPUT: $fullText")
-        
         // Skip cleanup if no text to process
         if (fullText.isBlank()) {
-            Log.w(TAG, "CLEANUP_INPUT: Empty text, skipping cleanup")
             mainHandler.post { callback.onCleanupError("Empty text") }
             return
         }
@@ -123,8 +120,6 @@ class TextCleanupClient {
                         ?.optString("text", "")
                         ?.trim()
                         ?: ""
-
-                    Log.d(TAG, "CLEANUP_OUTPUT: \"$cleanedText\"")
 
                     if (cleanedText.isNotEmpty()) {
                         mainHandler.post {
