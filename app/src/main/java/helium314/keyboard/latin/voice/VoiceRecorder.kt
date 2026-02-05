@@ -19,7 +19,7 @@ import kotlin.concurrent.thread
 
 /**
  * Handles audio recording for voice-to-text functionality.
- * Records audio in WAV format suitable for Whisper API transcription.
+ * Records audio in WAV format suitable for Deepgram API transcription.
  */
 class VoiceRecorder(private val context: Context) {
 

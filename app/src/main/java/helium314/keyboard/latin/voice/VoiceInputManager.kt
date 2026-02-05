@@ -12,7 +12,7 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Manages the voice input workflow: recording audio and transcribing via Whisper API.
+ * Manages the voice input workflow: recording audio and transcribing via Deepgram API.
  *
  * Architecture: Recording and transcription are decoupled and run in parallel.
  * - Recording loop: continuously records, detects silence, saves file, immediately restarts
@@ -54,7 +54,7 @@ class VoiceInputManager(private val context: Context) {
     }
 
     private val voiceRecorder = VoiceRecorder(context)
-    private val whisperClient = WhisperApiClient()
+    private val deepgramClient = DeepgramApiClient()
     private var listener: VoiceInputListener? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -390,7 +390,7 @@ class VoiceInputManager(private val context: Context) {
             Log.e(TAG, "API key is blank!")
             audioFile.delete()
             pendingTranscriptions.decrementAndGet()
-            listener?.onError("OpenAI API key not configured. Please set it in Settings > Advanced.")
+            listener?.onError("Deepgram API key not configured. Please set it in Settings > Advanced.")
             notifyStateChange()
             return
         }
@@ -398,21 +398,18 @@ class VoiceInputManager(private val context: Context) {
         // Get current keyboard language for better transcription
         val language = getCurrentLanguage()
 
-        // Get custom prompt for transcription style
-        val prompt = getPrompt()
-        Log.i(TAG, "Starting Whisper API call with language: $language")
+        Log.i(TAG, "Starting Deepgram API call with language: $language")
 
         // Notify listener that we're processing (sending to API)
         mainHandler.post {
             listener?.onTranscriptionProcessing()
         }
 
-        whisperClient.transcribe(
+        deepgramClient.transcribe(
             audioFile = audioFile,
             apiKey = apiKey,
             language = language,
-            prompt = prompt.ifBlank { null },
-            callback = object : WhisperApiClient.TranscriptionCallback {
+            callback = object : DeepgramApiClient.TranscriptionCallback {
                 override fun onTranscriptionStarted() {
                     Log.i(TAG, "Transcription started for ${audioFile.name}")
                 }
@@ -462,24 +459,9 @@ class VoiceInputManager(private val context: Context) {
 
     private fun getApiKey(): String {
         return try {
-            context.prefs().getString(Settings.PREF_WHISPER_API_KEY, "") ?: ""
+            context.prefs().getString(Settings.PREF_DEEPGRAM_API_KEY, "") ?: ""
         } catch (e: Exception) {
             Log.e(TAG, "Error getting API key: ${e.message}")
-            ""
-        }
-    }
-
-    private fun getPrompt(): String {
-        return try {
-            val prefs = context.prefs()
-            // Get the selected preset index
-            val selectedIndex = prefs.getInt(Settings.PREF_WHISPER_PROMPT_SELECTED, Defaults.PREF_WHISPER_PROMPT_SELECTED)
-            // Get the prompt text for that index
-            val key = Settings.PREF_WHISPER_PROMPT_PREFIX + selectedIndex
-            val defaultValue = Defaults.PREF_WHISPER_PROMPTS.getOrElse(selectedIndex) { "" }
-            prefs.getString(key, defaultValue) ?: defaultValue
-        } catch (e: Exception) {
-            Log.e(TAG, "Error getting prompt: ${e.message}")
             ""
         }
     }
@@ -498,7 +480,7 @@ class VoiceInputManager(private val context: Context) {
     /**
      * Post-process transcription results.
      * For short texts (< 25 chars), removes sentence punctuation and converts to lowercase.
-     * This helps with short voice inputs like "yes" or "okay" which Whisper tends to
+     * This helps with short voice inputs like "yes" or "okay" which transcription services tend to
      * return as "Yes." or "Okay."
      *
      * NOTE: This processing is SKIPPED when silence detection auto-stopped the recording,

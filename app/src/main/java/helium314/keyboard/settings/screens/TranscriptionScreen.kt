@@ -57,14 +57,14 @@ fun TranscriptionScreen(
 
     // Load prompt state
     var selectedIndex by remember {
-        mutableIntStateOf(prefs.getInt(Settings.PREF_WHISPER_PROMPT_SELECTED, Defaults.PREF_WHISPER_PROMPT_SELECTED))
+        mutableIntStateOf(prefs.getInt(Settings.PREF_TRANSCRIPTION_PROMPT_SELECTED, Defaults.PREF_TRANSCRIPTION_PROMPT_SELECTED))
     }
 
     val prompts = remember {
         mutableStateListOf<String>().apply {
-            for (i in 0 until Settings.WHISPER_PROMPT_COUNT) {
-                val key = Settings.PREF_WHISPER_PROMPT_PREFIX + i
-                val defaultValue = Defaults.PREF_WHISPER_PROMPTS.getOrElse(i) { "" }
+            for (i in 0 until Settings.TRANSCRIPTION_PROMPT_COUNT) {
+                val key = Settings.PREF_TRANSCRIPTION_PROMPT_PREFIX + i
+                val defaultValue = Defaults.PREF_TRANSCRIPTION_PROMPTS.getOrElse(i) { "" }
                 add(prefs.getString(key, defaultValue) ?: defaultValue)
             }
         }
@@ -82,20 +82,20 @@ fun TranscriptionScreen(
                     .padding(innerPadding)
             ) {
                 // API Key setting
-                SettingsActivity.settingsContainer[Settings.PREF_WHISPER_API_KEY]?.Preference()
+                SettingsActivity.settingsContainer[Settings.PREF_DEEPGRAM_API_KEY]?.Preference()
 
                 // Prompt presets - inline editable
-                for (i in 0 until Settings.WHISPER_PROMPT_COUNT) {
+                for (i in 0 until Settings.TRANSCRIPTION_PROMPT_COUNT) {
                     PromptPresetItem(
                         prompt = prompts[i],
                         isSelected = selectedIndex == i,
                         onSelected = {
                             selectedIndex = i
-                            prefs.edit { putInt(Settings.PREF_WHISPER_PROMPT_SELECTED, i) }
+                            prefs.edit { putInt(Settings.PREF_TRANSCRIPTION_PROMPT_SELECTED, i) }
                         },
                         onPromptChanged = { newPrompt ->
                             prompts[i] = newPrompt
-                            val key = Settings.PREF_WHISPER_PROMPT_PREFIX + i
+                            val key = Settings.PREF_TRANSCRIPTION_PROMPT_PREFIX + i
                             prefs.edit { putString(key, newPrompt) }
                         }
                     )
@@ -106,8 +106,8 @@ fun TranscriptionScreen(
 }
 
 fun createTranscriptionSettings(context: Context) = listOf(
-    Setting(context, Settings.PREF_WHISPER_API_KEY, R.string.whisper_api_key_title, R.string.whisper_api_key_summary) { setting ->
-        TextInputPreference(setting, Defaults.PREF_WHISPER_API_KEY)
+    Setting(context, Settings.PREF_DEEPGRAM_API_KEY, R.string.deepgram_api_key_title, R.string.deepgram_api_key_summary) { setting ->
+        TextInputPreference(setting, Defaults.PREF_DEEPGRAM_API_KEY)
     },
 )
 
