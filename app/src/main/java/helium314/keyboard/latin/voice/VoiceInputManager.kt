@@ -23,6 +23,7 @@ class VoiceInputManager(private val context: Context) {
 
     companion object {
         private const val TAG = "VoiceInputManager"
+        private const val SILENCE_TIMEOUT_MS = 30000L // 30 seconds
     }
 
     /**
@@ -52,6 +53,15 @@ class VoiceInputManager(private val context: Context) {
 
     // State tracking
     private var currentState = State.IDLE
+    
+    // Silence timeout - auto-cancel after 15 seconds of no speech
+    private val silenceTimeoutRunnable = Runnable {
+        if (currentState == State.RECORDING) {
+            Log.i(TAG, "Silence timeout - cancelling recording")
+            cancelRecording()
+            listener?.onError("Recording cancelled due to silence")
+        }
+    }
 
     val isRecording: Boolean
         get() = currentState == State.RECORDING
@@ -135,10 +145,12 @@ class VoiceInputManager(private val context: Context) {
                 }
 
                 override fun onTranscriptionDelta(text: String) {
+                    resetSilenceTimeout()
                     listener?.onTranscriptionDelta(text)
                 }
 
                 override fun onTranscriptionComplete(text: String) {
+                    resetSilenceTimeout()
                     if (text.isNotBlank()) {
                         listener?.onTranscriptionResult(text)
                     }
@@ -172,6 +184,8 @@ class VoiceInputManager(private val context: Context) {
             override fun onRecordingStarted() {
                 Log.i(TAG, "Audio recording started")
                 updateState(State.RECORDING)
+                // Start silence timeout
+                resetSilenceTimeout()
             }
 
             override fun onAudioChunk(audioData: ByteArray) {
@@ -217,6 +231,7 @@ class VoiceInputManager(private val context: Context) {
      * Internal method to stop everything.
      */
     private fun stopRecordingInternal() {
+        cancelSilenceTimeout()
         voiceRecorder.stopRecording()
         realtimeClient.disconnect()
         updateState(State.IDLE)
@@ -239,6 +254,7 @@ class VoiceInputManager(private val context: Context) {
             Log.w(TAG, "Cannot pause, not recording")
             return
         }
+        cancelSilenceTimeout()
         voiceRecorder.pauseRecording()
         updateState(State.PAUSED)
         Log.i(TAG, "Recording paused")
@@ -254,6 +270,7 @@ class VoiceInputManager(private val context: Context) {
         }
         voiceRecorder.resumeRecording()
         updateState(State.RECORDING)
+        resetSilenceTimeout()
         Log.i(TAG, "Recording resumed")
     }
 
@@ -277,6 +294,23 @@ class VoiceInputManager(private val context: Context) {
             listener?.onStateChanged(newState)
         }
     }
+    
+    /**
+     * Reset the silence timeout. Called when speech activity is detected.
+     */
+    private fun resetSilenceTimeout() {
+        mainHandler.removeCallbacks(silenceTimeoutRunnable)
+        if (currentState == State.RECORDING) {
+            mainHandler.postDelayed(silenceTimeoutRunnable, SILENCE_TIMEOUT_MS)
+        }
+    }
+    
+    /**
+     * Cancel the silence timeout.
+     */
+    private fun cancelSilenceTimeout() {
+        mainHandler.removeCallbacks(silenceTimeoutRunnable)
+    }
 
     private fun getApiKey(): String {
         return try {
@@ -294,7 +328,7 @@ class VoiceInputManager(private val context: Context) {
             val selectedIndex = prefs.getInt(Settings.PREF_WHISPER_PROMPT_SELECTED, Defaults.PREF_WHISPER_PROMPT_SELECTED)
             // Get the prompt text for that index
             val key = Settings.PREF_WHISPER_PROMPT_PREFIX + selectedIndex
-            val defaultValue = Defaults.PREF_WHISPER_PROMPTS.getOrElse(selectedIndex) { "" }
+            val defaultValue = Defaults.PREF_TRANSCRIBE_PROMPTS.getOrElse(selectedIndex) { "" }
             prefs.getString(key, defaultValue) ?: defaultValue
         } catch (e: Exception) {
             Log.e(TAG, "Error getting prompt: ${e.message}")

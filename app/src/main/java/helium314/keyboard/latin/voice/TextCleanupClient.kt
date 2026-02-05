@@ -17,7 +17,7 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /**
- * Client for GPT-4.1-nano text cleanup.
+ * Client for GPT text cleanup.
  * Used to intelligently fix capitalization and punctuation in transcribed text.
  */
 class TextCleanupClient {
@@ -25,17 +25,7 @@ class TextCleanupClient {
     companion object {
         private const val TAG = "TextCleanupClient"
         private const val API_URL = "https://api.openai.com/v1/chat/completions"
-        private const val MODEL = "gpt-4.1-nano"
-        
-        private const val SYSTEM_PROMPT = """You are a transcription cleanup assistant. Your task is to fix capitalization and punctuation in transcribed speech.
-
-Rules:
-- Fix capitalization (sentences start with capital letters, proper nouns capitalized)
-- Add or fix punctuation (periods, commas, question marks)
-- Do NOT change any words or the meaning
-- Do NOT add or remove any words
-- Return ONLY the cleaned text, nothing else
-- If the text appears to be a continuation (doesn't start a new sentence), keep the first letter lowercase"""
+        private const val MODEL = "gpt-5-mini"
     }
 
     interface CleanupCallback {
@@ -52,15 +42,17 @@ Rules:
         .build()
 
     /**
-     * Clean up transcribed text using GPT-4.1-nano.
+     * Clean up transcribed text using GPT.
      * 
      * @param apiKey OpenAI API key
+     * @param systemPrompt The system prompt for cleanup instructions
      * @param existingContext Text from last newline to cursor (context)
      * @param newText Newly transcribed text to append
      * @param callback Callback for result
      */
     fun cleanupText(
         apiKey: String,
+        systemPrompt: String,
         existingContext: String,
         newText: String,
         callback: CleanupCallback
@@ -70,13 +62,15 @@ Rules:
         } else {
             newText
         }
+        
+        Log.d(TAG, "CLEANUP_INPUT: \"$existingContext\" + \"$newText\"")
 
         val requestBody = JSONObject().apply {
             put("model", MODEL)
             put("messages", JSONArray().apply {
                 put(JSONObject().apply {
                     put("role", "system")
-                    put("content", SYSTEM_PROMPT)
+                    put("content", systemPrompt)
                 })
                 put(JSONObject().apply {
                     put("role", "user")

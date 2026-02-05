@@ -223,6 +223,8 @@
     <string name="settings_screen_transcription">Transcription</string>
     <string name="whisper_api_key_title">OpenAI Whisper API Key</string>
     <string name="whisper_api_key_summary">API key for voice-to-text transcription. Get your key from platform.openai.com</string>
+    <string name="cleanup_prompt_title">Cleanup Prompt</string>
+    <string name="cleanup_prompt_summary">Prompt for GPT post-processing to fix capitalization and punctuation</string>
     <string name="whisper_prompt_title">Transcription Style</string>
     <string name="whisper_prompt_summary">Edit prompts and select one to use for transcription</string>
     <string name="whisper_prompt_presets_title">Prompt Presets (editable)</string>

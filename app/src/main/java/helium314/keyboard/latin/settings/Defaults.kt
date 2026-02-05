@@ -167,9 +167,16 @@ object Defaults {
     const val PREF_TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss"
     const val PREF_WHISPER_API_KEY = ""
     const val PREF_WHISPER_PROMPT_SELECTED = 0 // Default to first preset
-    val PREF_WHISPER_PROMPTS = listOf(
+    const val PREF_CLEANUP_PROMPT = """Edit this transcription so it makes more sense. Return only the fixed text.
+
+Detect sentences. Separate text into sentences. Add capitalization and punctuation (.!?:,) to sentences. Fix grammar. Combine two sentences if they will sound more natural as one sentence. Split one sentence into two if it reads better. Add punctuation where it makes sense.
+
+If the text is not a sentence, then do not add grammatical punctuation or capitalization. Capitalize names and products such as "Claude Code". Acronyms like IBKR should be uppercase.
+
+Convert spelled out names of special characters ('open curly bracket', 'open parentheses', 'slash') into the actual characters ('{','(','/'). Example: 'Open curly bracket quote model unquote colon quote opus- four-six quote close curly bracket' -> '{"model":"claude-opus-4-6"}'"""
+    val PREF_TRANSCRIBE_PROMPTS = listOf(
         // Technical/Standard
-        "Capitalize first letter in every sentence. Capitalize first letter in a new line or list item. Capitalize proper nouns, titles, products. Make acronyms UPPERCASE. Add punctuation. Add special characters when they are mentioned.",
+        "Capitalize first letter only in a full sentence. Do not capitalize words and phrases. Add punctuation where necessary.",
         // Braindump
         "Braindump. The recording is a long stream of consciousness. It's messy, repetitive, lacks structure, contains mistakes and parts that don't make any sense. Make sense of it. Clean it up. Make the text easier to read.",
         // Casual conversation

@@ -62,6 +62,7 @@ import helium314.keyboard.latin.common.ViewOutlineProviderUtilsKt;
 import helium314.keyboard.latin.define.DebugFlags;
 import helium314.keyboard.latin.inputlogic.InputLogic;
 import helium314.keyboard.latin.personalization.PersonalizationHelper;
+import helium314.keyboard.latin.settings.Defaults;
 import helium314.keyboard.latin.settings.Settings;
 import helium314.keyboard.latin.settings.SettingsValues;
 import helium314.keyboard.latin.suggestions.SuggestionStripView;
@@ -1638,6 +1639,12 @@ public class LatinIME extends InputMethodService implements
                     return;
                 }
                 
+                // Get cleanup prompt from settings
+                String cleanupPrompt = KtxKt.prefs(LatinIME.this).getString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT);
+                if (cleanupPrompt == null || cleanupPrompt.isEmpty()) {
+                    cleanupPrompt = Defaults.PREF_CLEANUP_PROMPT;
+                }
+                
                 // Get text before cursor to find context from last newline
                 CharSequence textBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(2000, 0);
                 String beforeText = textBeforeCursor != null ? textBeforeCursor.toString() : "";
@@ -1659,8 +1666,9 @@ public class LatinIME extends InputMethodService implements
                 // Calculate how many characters to delete when replacing
                 final int charsToDelete = beforeText.length() - contextStartPos;
                 
-                // Send to GPT-4.1-nano for cleanup
-                mTextCleanupClient.cleanupText(apiKey, existingContext, text, new TextCleanupClient.CleanupCallback() {
+                // Send to GPT for cleanup
+                final String prompt = cleanupPrompt;
+                mTextCleanupClient.cleanupText(apiKey, prompt, existingContext, text, new TextCleanupClient.CleanupCallback() {
                     @Override
                     public void onCleanupComplete(String cleanedText) {
                         // Delete the existing context and insert cleaned text

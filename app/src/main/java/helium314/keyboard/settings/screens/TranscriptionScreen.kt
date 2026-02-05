@@ -64,7 +64,7 @@ fun TranscriptionScreen(
         mutableStateListOf<String>().apply {
             for (i in 0 until Settings.WHISPER_PROMPT_COUNT) {
                 val key = Settings.PREF_WHISPER_PROMPT_PREFIX + i
-                val defaultValue = Defaults.PREF_WHISPER_PROMPTS.getOrElse(i) { "" }
+                val defaultValue = Defaults.PREF_TRANSCRIBE_PROMPTS.getOrElse(i) { "" }
                 add(prefs.getString(key, defaultValue) ?: defaultValue)
             }
         }
@@ -83,6 +83,9 @@ fun TranscriptionScreen(
             ) {
                 // API Key setting
                 SettingsActivity.settingsContainer[Settings.PREF_WHISPER_API_KEY]?.Preference()
+
+                // Cleanup prompt setting
+                SettingsActivity.settingsContainer[Settings.PREF_CLEANUP_PROMPT]?.Preference()
 
                 // Prompt presets - inline editable
                 for (i in 0 until Settings.WHISPER_PROMPT_COUNT) {
@@ -108,6 +111,9 @@ fun TranscriptionScreen(
 fun createTranscriptionSettings(context: Context) = listOf(
     Setting(context, Settings.PREF_WHISPER_API_KEY, R.string.whisper_api_key_title, R.string.whisper_api_key_summary) { setting ->
         TextInputPreference(setting, Defaults.PREF_WHISPER_API_KEY)
+    },
+    Setting(context, Settings.PREF_CLEANUP_PROMPT, R.string.cleanup_prompt_title, R.string.cleanup_prompt_summary) { setting ->
+        TextInputPreference(setting, Defaults.PREF_CLEANUP_PROMPT)
     },
 )
 
