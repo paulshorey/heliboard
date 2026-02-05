@@ -17,15 +17,17 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /**
- * Client for GPT text cleanup.
+ * Client for Claude text cleanup.
  * Used to intelligently fix capitalization and punctuation in transcribed text.
+ * Uses Anthropic's Claude API (claude-haiku-4-5).
  */
 class TextCleanupClient {
 
     companion object {
         private const val TAG = "TextCleanupClient"
-        private const val API_URL = "https://api.openai.com/v1/chat/completions"
-        private const val MODEL = "gpt-5-mini"
+        private const val API_URL = "https://api.anthropic.com/v1/messages"
+        private const val MODEL = "claude-haiku-4-5-20251001"
+        private const val ANTHROPIC_VERSION = "2023-06-01"
     }
 
     interface CleanupCallback {
@@ -65,25 +67,23 @@ class TextCleanupClient {
         
         Log.d(TAG, "CLEANUP_INPUT: \"$existingContext\" + \"$newText\"")
 
+        // Anthropic Claude API format
         val requestBody = JSONObject().apply {
             put("model", MODEL)
+            put("max_tokens", 500)
+            put("system", systemPrompt)  // Top-level system prompt for Anthropic
             put("messages", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("role", "system")
-                    put("content", systemPrompt)
-                })
                 put(JSONObject().apply {
                     put("role", "user")
                     put("content", fullText)
                 })
             })
-            put("max_tokens", 500)
-            put("temperature", 0.1)  // Low temperature for consistent output
         }
 
         val request = Request.Builder()
             .url(API_URL)
-            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("x-api-key", apiKey)
+            .addHeader("anthropic-version", ANTHROPIC_VERSION)
             .addHeader("Content-Type", "application/json")
             .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
@@ -109,11 +109,11 @@ class TextCleanupClient {
                     }
 
                     val json = JSONObject(responseBody ?: "{}")
-                    val choices = json.optJSONArray("choices")
-                    val cleanedText = choices
+                    // Anthropic response format: content[0].text
+                    val content = json.optJSONArray("content")
+                    val cleanedText = content
                         ?.optJSONObject(0)
-                        ?.optJSONObject("message")
-                        ?.optString("content", "")
+                        ?.optString("text", "")
                         ?.trim()
                         ?: ""
 

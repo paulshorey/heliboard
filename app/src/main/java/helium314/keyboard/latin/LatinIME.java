@@ -1630,10 +1630,10 @@ public class LatinIME extends InputMethodService implements
                     return;
                 }
                 
-                // Get API key for cleanup
-                String apiKey = KtxKt.prefs(LatinIME.this).getString(Settings.PREF_WHISPER_API_KEY, "");
-                if (apiKey == null || apiKey.isEmpty()) {
-                    // No API key, fall back to simple insertion with client-side fix
+                // Get Anthropic API key for Claude cleanup
+                String anthropicApiKey = KtxKt.prefs(LatinIME.this).getString(Settings.PREF_ANTHROPIC_API_KEY, "");
+                if (anthropicApiKey == null || anthropicApiKey.isEmpty()) {
+                    // No Anthropic API key, fall back to simple insertion with client-side fix
                     String adjustedText = adjustCapitalization(text);
                     mInputLogic.mConnection.commitText(adjustedText + " ", 1);
                     return;
@@ -1666,9 +1666,9 @@ public class LatinIME extends InputMethodService implements
                 // Calculate how many characters to delete when replacing
                 final int charsToDelete = beforeText.length() - contextStartPos;
                 
-                // Send to GPT for cleanup
+                // Send to Claude for cleanup
                 final String prompt = cleanupPrompt;
-                mTextCleanupClient.cleanupText(apiKey, prompt, existingContext, text, new TextCleanupClient.CleanupCallback() {
+                mTextCleanupClient.cleanupText(anthropicApiKey, prompt, existingContext, text, new TextCleanupClient.CleanupCallback() {
                     @Override
                     public void onCleanupComplete(String cleanedText) {
                         // Delete the existing context and insert cleaned text

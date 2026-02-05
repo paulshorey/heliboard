@@ -17,11 +17,13 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -42,7 +44,6 @@ import helium314.keyboard.settings.Setting
 import helium314.keyboard.settings.SettingsActivity
 import helium314.keyboard.settings.SettingsContainer
 import helium314.keyboard.settings.Theme
-import helium314.keyboard.settings.preferences.TextInputPreference
 import helium314.keyboard.settings.previewDark
 
 @Composable
@@ -54,6 +55,17 @@ fun TranscriptionScreen(
     val b = (context.getActivity() as? SettingsActivity)?.prefChanged?.collectAsState()
     if ((b?.value ?: 0) < 0)
         Log.v("irrelevant", "stupid way to trigger recomposition on preference change")
+
+    // Load API keys and cleanup prompt state
+    var openaiApiKey by remember {
+        mutableStateOf(prefs.getString(Settings.PREF_WHISPER_API_KEY, Defaults.PREF_WHISPER_API_KEY) ?: "")
+    }
+    var anthropicApiKey by remember {
+        mutableStateOf(prefs.getString(Settings.PREF_ANTHROPIC_API_KEY, Defaults.PREF_ANTHROPIC_API_KEY) ?: "")
+    }
+    var cleanupPrompt by remember {
+        mutableStateOf(prefs.getString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT) ?: Defaults.PREF_CLEANUP_PROMPT)
+    }
 
     // Load prompt state
     var selectedIndex by remember {
@@ -81,11 +93,41 @@ fun TranscriptionScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(innerPadding)
             ) {
-                // API Key setting
-                SettingsActivity.settingsContainer[Settings.PREF_WHISPER_API_KEY]?.Preference()
+                // OpenAI API Key - inline editable
+                InlineTextField(
+                    label = stringResource(R.string.whisper_api_key_title),
+                    value = openaiApiKey,
+                    onValueChange = { newValue ->
+                        openaiApiKey = newValue
+                        prefs.edit { putString(Settings.PREF_WHISPER_API_KEY, newValue) }
+                    },
+                    minLines = 1,
+                    maxLines = 2
+                )
 
-                // Cleanup prompt setting
-                SettingsActivity.settingsContainer[Settings.PREF_CLEANUP_PROMPT]?.Preference()
+                // Anthropic API Key - inline editable
+                InlineTextField(
+                    label = stringResource(R.string.anthropic_api_key_title),
+                    value = anthropicApiKey,
+                    onValueChange = { newValue ->
+                        anthropicApiKey = newValue
+                        prefs.edit { putString(Settings.PREF_ANTHROPIC_API_KEY, newValue) }
+                    },
+                    minLines = 1,
+                    maxLines = 2
+                )
+
+                // Cleanup prompt - inline editable
+                InlineTextField(
+                    label = stringResource(R.string.cleanup_prompt_title),
+                    value = cleanupPrompt,
+                    onValueChange = { newValue ->
+                        cleanupPrompt = newValue
+                        prefs.edit { putString(Settings.PREF_CLEANUP_PROMPT, newValue) }
+                    },
+                    minLines = 4,
+                    maxLines = 10
+                )
 
                 // Prompt presets - inline editable
                 for (i in 0 until Settings.WHISPER_PROMPT_COUNT) {
@@ -108,14 +150,39 @@ fun TranscriptionScreen(
     }
 }
 
-fun createTranscriptionSettings(context: Context) = listOf(
-    Setting(context, Settings.PREF_WHISPER_API_KEY, R.string.whisper_api_key_title, R.string.whisper_api_key_summary) { setting ->
-        TextInputPreference(setting, Defaults.PREF_WHISPER_API_KEY)
-    },
-    Setting(context, Settings.PREF_CLEANUP_PROMPT, R.string.cleanup_prompt_title, R.string.cleanup_prompt_summary) { setting ->
-        TextInputPreference(setting, Defaults.PREF_CLEANUP_PROMPT)
-    },
-)
+// Settings are now handled inline in the screen, so this returns empty list
+fun createTranscriptionSettings(context: Context) = emptyList<Setting>()
+
+@Composable
+private fun InlineTextField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    minLines: Int = 1,
+    maxLines: Int = 3
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth(),
+            minLines = minLines,
+            maxLines = maxLines,
+            textStyle = MaterialTheme.typography.bodySmall,
+            shape = MaterialTheme.shapes.small,
+        )
+    }
+}
 
 @Composable
 private fun PromptPresetItem(
