@@ -76,6 +76,9 @@ class VoiceInputManager(private val context: Context) {
     val isRecording: Boolean
         get() = isRecordingActive
 
+    val isPaused: Boolean
+        get() = voiceRecorder.isCurrentlyPaused
+
     val isTranscribing: Boolean
         get() = pendingTranscriptions.get() > 0
 
@@ -217,7 +220,8 @@ class VoiceInputManager(private val context: Context) {
 
             override fun onVolumeUpdate(currentRms: Double) {
                 // Handle real-time volume updates for auto-pause detection
-                if (!isRecordingActive) return
+                // Don't process when not recording or when paused
+                if (!isRecordingActive || isPaused) return
 
                 val currentTime = System.currentTimeMillis()
 
@@ -309,6 +313,45 @@ class VoiceInputManager(private val context: Context) {
 
         // Note: pending transcriptions will complete, but results won't restart recording
         notifyStateChange()
+    }
+
+    /**
+     * Pause recording. Audio will not be captured while paused.
+     * Auto-stop detection is also paused.
+     */
+    fun pauseRecording() {
+        if (!isRecordingActive) {
+            Log.w(TAG, "Cannot pause, not recording")
+            return
+        }
+        voiceRecorder.pauseRecording()
+        Log.i(TAG, "Recording paused")
+    }
+
+    /**
+     * Resume recording after pause.
+     */
+    fun resumeRecording() {
+        if (!isRecordingActive) {
+            Log.w(TAG, "Cannot resume, not recording")
+            return
+        }
+        voiceRecorder.resumeRecording()
+        // Reset silence detection so we don't immediately auto-stop after resume
+        speechDetected = false
+        silenceStartTime = 0
+        Log.i(TAG, "Recording resumed")
+    }
+
+    /**
+     * Toggle pause state.
+     */
+    fun togglePause() {
+        if (isPaused) {
+            resumeRecording()
+        } else {
+            pauseRecording()
+        }
     }
 
     /**

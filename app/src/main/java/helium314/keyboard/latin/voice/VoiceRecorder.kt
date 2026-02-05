@@ -54,6 +54,7 @@ class VoiceRecorder(private val context: Context) {
     private var audioRecord: AudioRecord? = null
     private var recordingThread: Thread? = null
     private var isRecording = false
+    private var isPaused = false
     private var outputFile: File? = null
     private var callback: RecordingCallback? = null
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -67,8 +68,44 @@ class VoiceRecorder(private val context: Context) {
     val isCurrentlyRecording: Boolean
         get() = isRecording
 
+    val isCurrentlyPaused: Boolean
+        get() = isPaused
+
     fun setCallback(callback: RecordingCallback?) {
         this.callback = callback
+    }
+
+    /**
+     * Pause recording. Audio will continue to be read but not written to file.
+     * Volume updates will also be paused.
+     */
+    fun pauseRecording() {
+        if (!isRecording) {
+            Log.w(TAG, "Cannot pause, not recording")
+            return
+        }
+        if (isPaused) {
+            Log.w(TAG, "Already paused")
+            return
+        }
+        isPaused = true
+        Log.i(TAG, "Recording paused")
+    }
+
+    /**
+     * Resume recording after pause.
+     */
+    fun resumeRecording() {
+        if (!isRecording) {
+            Log.w(TAG, "Cannot resume, not recording")
+            return
+        }
+        if (!isPaused) {
+            Log.w(TAG, "Not paused")
+            return
+        }
+        isPaused = false
+        Log.i(TAG, "Recording resumed")
     }
 
     fun hasRecordPermission(): Boolean {
@@ -121,6 +158,7 @@ class VoiceRecorder(private val context: Context) {
             sampleCount = 0
             averageRms = 0.0
             lastRmsUpdateTime = 0
+            isPaused = false
 
             audioRecord?.startRecording()
             isRecording = true
@@ -240,6 +278,11 @@ class VoiceRecorder(private val context: Context) {
                 while (isRecording) {
                     val read = audioRecord?.read(data, 0, bufferSize) ?: break
                     if (read > 0) {
+                        // When paused, read audio to keep the stream going but don't write
+                        if (isPaused) {
+                            continue
+                        }
+
                         fos.write(data, 0, read)
 
                         // Reset chunk tracking for this buffer

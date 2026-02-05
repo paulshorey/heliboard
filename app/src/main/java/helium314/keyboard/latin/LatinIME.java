@@ -1577,6 +1577,22 @@ public class LatinIME extends InputMethodService implements
         }
     }
 
+    @Override
+    public void onVoicePauseClicked() {
+        if (mVoiceInputManager != null) {
+            mVoiceInputManager.togglePause();
+            // Update UI immediately to show pause state
+            if (mSuggestionStripView != null) {
+                boolean isPaused = mVoiceInputManager.isPaused();
+                boolean isRecording = mVoiceInputManager.isRecording();
+                boolean isTranscribing = mVoiceInputManager.isTranscribing();
+                boolean isContinuousMode = mVoiceInputManager.isContinuousMode();
+                mSuggestionStripView.setVoiceInputState(isRecording, isTranscribing, isContinuousMode, isPaused);
+                mKeyboardSwitcher.showToast(isPaused ? "Paused" : "Resumed", false);
+            }
+        }
+    }
+
     private void setupVoiceInputListener() {
         if (mVoiceInputManager == null) return;
 
@@ -1586,27 +1602,28 @@ public class LatinIME extends InputMethodService implements
                 boolean isContinuousMode = mVoiceInputManager.isContinuousMode();
                 boolean isRecording = mVoiceInputManager.isRecording();
                 boolean isTranscribing = mVoiceInputManager.isTranscribing();
+                boolean isPaused = mVoiceInputManager.isPaused();
                 Log.i(TAG, "Voice input state changed: " + state + ", continuous: " + isContinuousMode +
-                        ", recording: " + isRecording + ", transcribing: " + isTranscribing);
+                        ", recording: " + isRecording + ", transcribing: " + isTranscribing + ", paused: " + isPaused);
 
                 if (mSuggestionStripView != null) {
                     switch (state) {
                         case RECORDING:
                             // Recording is active (may also be transcribing in background)
-                            mSuggestionStripView.setVoiceInputState(true, isTranscribing, isContinuousMode);
-                            if (!isTranscribing) {
+                            mSuggestionStripView.setVoiceInputState(true, isTranscribing, isContinuousMode, isPaused);
+                            if (!isTranscribing && !isPaused) {
                                 // Only show toast on fresh start, not when restarting while transcribing
                                 mKeyboardSwitcher.showToast("Listening...", false);
                             }
                             break;
                         case TRANSCRIBING:
                             // Only transcribing (user stopped recording manually)
-                            mSuggestionStripView.setVoiceInputState(false, true, isContinuousMode);
+                            mSuggestionStripView.setVoiceInputState(false, true, isContinuousMode, false);
                             mKeyboardSwitcher.showToast("Transcribing...", false);
                             break;
                         case IDLE:
                             // Nothing happening
-                            mSuggestionStripView.setVoiceInputState(false, false, false);
+                            mSuggestionStripView.setVoiceInputState(false, false, false, false);
                             break;
                     }
                 }

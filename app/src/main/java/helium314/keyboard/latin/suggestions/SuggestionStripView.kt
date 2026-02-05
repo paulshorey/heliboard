@@ -76,6 +76,7 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         fun removeExternalSuggestions()
         fun onVoiceInputClicked()
         fun onVoiceCancelClicked()
+        fun onVoicePauseClicked()
     }
 
     private val moreSuggestionsContainer: View
@@ -119,6 +120,7 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
     private val toolbarExpandKey = findViewById<ImageButton>(R.id.suggestions_strip_toolbar_key)
     private val voiceInputKey = findViewById<ImageButton>(R.id.voice_input_key)
     private val voiceCancelKey = findViewById<ImageButton>(R.id.voice_cancel_key)
+    private val voicePauseKey = findViewById<ImageButton>(R.id.voice_pause_key)
     private val incognitoIcon = KeyboardIconsSet.instance.getNewDrawable(ToolbarKey.INCOGNITO.name, context)
     private val toolbarArrowIcon = KeyboardIconsSet.instance.getNewDrawable(KeyboardIconsSet.NAME_TOOLBAR_KEY, context)
     private val voiceIcon = KeyboardIconsSet.instance.getNewDrawable(ToolbarKey.VOICE.name, context)
@@ -173,6 +175,18 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
             AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, this, HapticEvent.KEY_PRESS)
             if (::listener.isInitialized) {
                 listener.onVoiceCancelClicked()
+            }
+        }
+
+        // Voice pause key setup
+        voicePauseKey.layoutParams.height = toolbarHeight
+        voicePauseKey.layoutParams.width = toolbarHeight
+        colors.setColor(voicePauseKey, ColorType.TOOL_BAR_KEY)
+        colors.setBackground(voicePauseKey, ColorType.STRIP_BACKGROUND)
+        voicePauseKey.setOnClickListener {
+            AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, this, HapticEvent.KEY_PRESS)
+            if (::listener.isInitialized) {
+                listener.onVoicePauseClicked()
             }
         }
 
@@ -581,31 +595,53 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
      * @param isRecording true if currently recording, false otherwise
      * @param isTranscribing true if transcribing (processing), false otherwise
      * @param isContinuousMode true if in continuous recording mode (keep cancel visible)
+     * @param isPaused true if recording is paused, false otherwise
      */
-    fun setVoiceInputState(isRecording: Boolean, isTranscribing: Boolean = false, isContinuousMode: Boolean = false) {
+    fun setVoiceInputState(isRecording: Boolean, isTranscribing: Boolean = false, isContinuousMode: Boolean = false, isPaused: Boolean = false) {
         this.isVoiceRecording = isRecording || isContinuousMode
         post {
-            // Show cancel button when recording or in continuous mode (even while transcribing)
-            voiceCancelKey.isVisible = isRecording || isContinuousMode
+            // Show cancel and pause buttons when recording or in continuous mode
+            val showButtons = isRecording || isContinuousMode
+            voiceCancelKey.isVisible = showButtons
+            voicePauseKey.isVisible = showButtons
+
+            // Update pause button icon based on pause state
+            if (isPaused) {
+                voicePauseKey.setImageResource(R.drawable.ic_play)
+                voicePauseKey.contentDescription = context.getString(R.string.voice_input_resume)
+            } else {
+                voicePauseKey.setImageResource(R.drawable.ic_pause)
+                voicePauseKey.contentDescription = context.getString(R.string.voice_input_pause)
+            }
 
             when {
+                isPaused -> {
+                    // Paused state: show yellow tint
+                    voiceInputKey.setColorFilter(Color.YELLOW)
+                    voiceCancelKey.setColorFilter(Color.YELLOW)
+                    voicePauseKey.setColorFilter(Color.YELLOW)
+                }
                 isRecording -> {
                     // Recording state: show red tint
                     voiceInputKey.setColorFilter(Color.RED)
                     voiceCancelKey.setColorFilter(Color.RED)
+                    voicePauseKey.setColorFilter(Color.RED)
                 }
                 isTranscribing -> {
                     // Transcribing state: show orange/amber tint
                     voiceInputKey.setColorFilter(Color.parseColor("#FFA500"))
-                    // Keep cancel button red in continuous mode
+                    // Keep buttons orange in continuous mode
                     if (isContinuousMode) {
                         voiceCancelKey.setColorFilter(Color.parseColor("#FFA500"))
+                        voicePauseKey.setColorFilter(Color.parseColor("#FFA500"))
                     }
                 }
                 else -> {
                     // Idle state: restore normal color
                     voiceInputKey.clearColorFilter()
+                    voicePauseKey.clearColorFilter()
                     Settings.getValues()?.mColors?.setColor(voiceInputKey, ColorType.TOOL_BAR_KEY)
+                    Settings.getValues()?.mColors?.setColor(voicePauseKey, ColorType.TOOL_BAR_KEY)
                 }
             }
         }
