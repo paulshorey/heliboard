@@ -591,22 +591,29 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
     }
 
     /**
-     * Update the voice input button state based on recording status.
-     * @param isRecording true if currently recording, false otherwise
-     * @param isTranscribing true if transcribing (processing), false otherwise
-     * @param isContinuousMode true if in continuous recording mode (keep cancel visible)
-     * @param isPaused true if recording is paused, false otherwise
+     * Voice input state for UI updates.
      */
-    fun setVoiceInputState(isRecording: Boolean, isTranscribing: Boolean = false, isContinuousMode: Boolean = false, isPaused: Boolean = false) {
-        this.isVoiceRecording = isRecording || isContinuousMode
+    enum class VoiceState {
+        IDLE,       // Not doing anything
+        CONNECTING, // Connecting to API
+        RECORDING,  // Actively recording
+        PAUSED      // Recording paused
+    }
+
+    /**
+     * Update the voice input button state based on voice state.
+     * @param state Current voice input state
+     */
+    fun setVoiceInputState(state: VoiceState) {
+        val isActive = state != VoiceState.IDLE
+        this.isVoiceRecording = isActive
         post {
-            // Show cancel and pause buttons when recording or in continuous mode
-            val showButtons = isRecording || isContinuousMode
-            voiceCancelKey.isVisible = showButtons
-            voicePauseKey.isVisible = showButtons
+            // Show cancel and pause buttons when active
+            voiceCancelKey.isVisible = isActive
+            voicePauseKey.isVisible = isActive
 
             // Update pause button icon based on pause state
-            if (isPaused) {
+            if (state == VoiceState.PAUSED) {
                 voicePauseKey.setImageResource(R.drawable.ic_play)
                 voicePauseKey.contentDescription = context.getString(R.string.voice_input_resume)
             } else {
@@ -614,29 +621,26 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
                 voicePauseKey.contentDescription = context.getString(R.string.voice_input_pause)
             }
 
-            when {
-                isPaused -> {
+            when (state) {
+                VoiceState.PAUSED -> {
                     // Paused state: show yellow tint
                     voiceInputKey.setColorFilter(Color.YELLOW)
                     voiceCancelKey.setColorFilter(Color.YELLOW)
                     voicePauseKey.setColorFilter(Color.YELLOW)
                 }
-                isRecording -> {
+                VoiceState.RECORDING -> {
                     // Recording state: show red tint
                     voiceInputKey.setColorFilter(Color.RED)
                     voiceCancelKey.setColorFilter(Color.RED)
                     voicePauseKey.setColorFilter(Color.RED)
                 }
-                isTranscribing -> {
-                    // Transcribing state: show orange/amber tint
+                VoiceState.CONNECTING -> {
+                    // Connecting state: show orange/amber tint
                     voiceInputKey.setColorFilter(Color.parseColor("#FFA500"))
-                    // Keep buttons orange in continuous mode
-                    if (isContinuousMode) {
-                        voiceCancelKey.setColorFilter(Color.parseColor("#FFA500"))
-                        voicePauseKey.setColorFilter(Color.parseColor("#FFA500"))
-                    }
+                    voiceCancelKey.setColorFilter(Color.parseColor("#FFA500"))
+                    voicePauseKey.setColorFilter(Color.parseColor("#FFA500"))
                 }
-                else -> {
+                VoiceState.IDLE -> {
                     // Idle state: restore normal color
                     voiceInputKey.clearColorFilter()
                     voicePauseKey.clearColorFilter()

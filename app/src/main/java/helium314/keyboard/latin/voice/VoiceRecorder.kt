@@ -7,63 +7,63 @@ import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
 import helium314.keyboard.latin.utils.Log
-import java.io.File
-import java.io.FileOutputStream
-import java.io.RandomAccessFile
 import kotlin.concurrent.thread
 
 /**
- * Handles audio recording for voice-to-text functionality.
- * Records audio in WAV format suitable for Whisper API transcription.
+ * Handles audio recording for real-time voice-to-text streaming.
+ * Streams audio in PCM16 format suitable for OpenAI Realtime API.
+ *
+ * Audio format requirements:
+ * - Sample rate: 24kHz (required by Realtime API)
+ * - Channels: Mono
+ * - Format: 16-bit PCM (signed, little-endian)
  */
 class VoiceRecorder(private val context: Context) {
 
     companion object {
         private const val TAG = "VoiceRecorder"
-        private const val SAMPLE_RATE = 16000 // 16kHz - optimal for speech recognition
+
+        // 24kHz - required by OpenAI Realtime API
+        const val SAMPLE_RATE = 24000
         private const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
         private const val AUDIO_SOURCE = MediaRecorder.AudioSource.MIC
 
-        // Volume detection threshold - RMS value below which audio is considered too quiet
-        // 16-bit audio has max amplitude of 32767, typical quiet speech is around 500-2000 RMS
-        // We set a low threshold to detect silence/noise (around 1.5% of max amplitude)
-        const val MIN_RMS_THRESHOLD = 500.0
+        // How often to send audio chunks (in milliseconds)
+        // Smaller = more responsive, larger = more efficient
+        private const val CHUNK_INTERVAL_MS = 100L
 
-        // Speech detection threshold - RMS value above which we consider the user is speaking
-        // This is higher than MIN_RMS_THRESHOLD to avoid triggering on ambient noise
-        const val SPEECH_RMS_THRESHOLD = 800.0
-
-        // How often to report RMS updates (in milliseconds)
-        private const val RMS_UPDATE_INTERVAL_MS = 100L
+        // Calculate bytes per chunk: 24000 samples/sec * 2 bytes/sample * 0.1 sec = 4800 bytes
+        private const val BYTES_PER_CHUNK = (SAMPLE_RATE * 2 * CHUNK_INTERVAL_MS / 1000).toInt()
     }
 
-    interface RecordingCallback {
+    /**
+     * Callback interface for streaming audio data.
+     */
+    interface StreamingCallback {
+        /** Called when recording starts successfully */
         fun onRecordingStarted()
-        fun onRecordingStopped(audioFile: File?, averageRms: Double)
+
+        /** Called with audio chunks for streaming. Audio is PCM16, 24kHz, mono. */
+        fun onAudioChunk(audioData: ByteArray)
+
+        /** Called when recording stops */
+        fun onRecordingStopped()
+
+        /** Called when an error occurs */
         fun onRecordingError(error: String)
-        /** Called periodically with the current RMS volume level during recording */
-        fun onVolumeUpdate(currentRms: Double) {}
     }
 
     private var audioRecord: AudioRecord? = null
     private var recordingThread: Thread? = null
     private var isRecording = false
     private var isPaused = false
-    private var outputFile: File? = null
-    private var callback: RecordingCallback? = null
+    private var callback: StreamingCallback? = null
     private val mainHandler = Handler(Looper.getMainLooper())
-
-    // Volume tracking
-    private var sumSquares: Double = 0.0
-    private var sampleCount: Long = 0
-    private var averageRms: Double = 0.0
-    private var lastRmsUpdateTime: Long = 0
 
     val isCurrentlyRecording: Boolean
         get() = isRecording
@@ -71,13 +71,12 @@ class VoiceRecorder(private val context: Context) {
     val isCurrentlyPaused: Boolean
         get() = isPaused
 
-    fun setCallback(callback: RecordingCallback?) {
+    fun setCallback(callback: StreamingCallback?) {
         this.callback = callback
     }
 
     /**
-     * Pause recording. Audio will continue to be read but not written to file.
-     * Volume updates will also be paused.
+     * Pause recording. Audio capture continues but data is discarded.
      */
     fun pauseRecording() {
         if (!isRecording) {
@@ -115,6 +114,10 @@ class VoiceRecorder(private val context: Context) {
         ) == PackageManager.PERMISSION_GRANTED
     }
 
+    /**
+     * Start recording and streaming audio.
+     * Audio chunks are delivered via the callback.
+     */
     fun startRecording(): Boolean {
         if (isRecording) {
             Log.w(TAG, "Already recording")
@@ -135,12 +138,15 @@ class VoiceRecorder(private val context: Context) {
         }
 
         try {
+            // Use larger buffer for smoother streaming
+            val actualBufferSize = maxOf(bufferSize * 2, BYTES_PER_CHUNK * 2)
+
             audioRecord = AudioRecord(
                 AUDIO_SOURCE,
                 SAMPLE_RATE,
                 CHANNEL_CONFIG,
                 AUDIO_FORMAT,
-                bufferSize * 2
+                actualBufferSize
             )
 
             if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
@@ -150,25 +156,16 @@ class VoiceRecorder(private val context: Context) {
                 return false
             }
 
-            // Create temp file for recording
-            outputFile = File.createTempFile("voice_recording_", ".wav", context.cacheDir)
-
-            // Reset volume tracking
-            sumSquares = 0.0
-            sampleCount = 0
-            averageRms = 0.0
-            lastRmsUpdateTime = 0
             isPaused = false
-
             audioRecord?.startRecording()
             isRecording = true
 
             recordingThread = thread(start = true) {
-                writeAudioDataToFile(bufferSize)
+                streamAudioData()
             }
 
-            callback?.onRecordingStarted()
-            Log.i(TAG, "Recording started")
+            mainHandler.post { callback?.onRecordingStarted() }
+            Log.i(TAG, "Recording started (streaming mode, ${SAMPLE_RATE}Hz)")
             return true
 
         } catch (e: SecurityException) {
@@ -184,16 +181,19 @@ class VoiceRecorder(private val context: Context) {
         }
     }
 
-    fun stopRecording(): File? {
+    /**
+     * Stop recording.
+     */
+    fun stopRecording() {
         if (!isRecording) {
             Log.w(TAG, "Not currently recording")
-            return null
+            return
         }
 
         isRecording = false
 
         try {
-            recordingThread?.join(2000) // Wait up to 2 seconds for thread to finish
+            recordingThread?.join(2000)
         } catch (e: InterruptedException) {
             Log.w(TAG, "Interrupted while waiting for recording thread")
         }
@@ -206,50 +206,15 @@ class VoiceRecorder(private val context: Context) {
 
         releaseRecorder()
 
-        val file = outputFile
-        val finalRms = averageRms
-        Log.i(TAG, "Recording stopped, averageRms: $finalRms, threshold: $MIN_RMS_THRESHOLD")
-        if (file != null && file.exists() && file.length() > 44) { // > WAV header size
-            // Write WAV header
-            writeWavHeader(file)
-            Log.i(TAG, "Recording stopped, file: ${file.absolutePath}, size: ${file.length()}, rms: $finalRms")
-            callback?.onRecordingStopped(file, finalRms)
-            return file
-        } else {
-            Log.w(TAG, "Recording file is empty or doesn't exist")
-            callback?.onRecordingStopped(null, finalRms)
-            return null
-        }
+        Log.i(TAG, "Recording stopped")
+        mainHandler.post { callback?.onRecordingStopped() }
     }
 
+    /**
+     * Cancel recording (same as stop for streaming).
+     */
     fun cancelRecording() {
-        if (!isRecording) return
-
-        isRecording = false
-
-        try {
-            recordingThread?.join(1000)
-        } catch (e: InterruptedException) {
-            // Ignore
-        }
-
-        try {
-            audioRecord?.stop()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error stopping AudioRecord: ${e.message}")
-        }
-
-        releaseRecorder()
-
-        // Delete temp file
-        outputFile?.delete()
-        outputFile = null
-        // Reset volume tracking
-        sumSquares = 0.0
-        sampleCount = 0
-        averageRms = 0.0
-        callback?.onRecordingStopped(null, 0.0)
-        Log.i(TAG, "Recording cancelled")
+        stopRecording()
     }
 
     private fun releaseRecorder() {
@@ -262,113 +227,35 @@ class VoiceRecorder(private val context: Context) {
         recordingThread = null
     }
 
-    private fun writeAudioDataToFile(bufferSize: Int) {
-        val data = ByteArray(bufferSize)
-        val file = outputFile ?: return
+    /**
+     * Continuously read audio data and stream to callback.
+     */
+    private fun streamAudioData() {
+        val chunkBuffer = ByteArray(BYTES_PER_CHUNK)
 
         try {
-            FileOutputStream(file).use { fos ->
-                // Write placeholder WAV header (44 bytes)
-                fos.write(ByteArray(44))
+            while (isRecording) {
+                val read = audioRecord?.read(chunkBuffer, 0, BYTES_PER_CHUNK) ?: break
 
-                // For short-term RMS calculation (per chunk)
-                var chunkSumSquares = 0.0
-                var chunkSampleCount = 0
+                if (read > 0 && !isPaused) {
+                    // Create a properly sized copy of the audio data
+                    val audioChunk = if (read == BYTES_PER_CHUNK) {
+                        chunkBuffer.copyOf()
+                    } else {
+                        chunkBuffer.copyOf(read)
+                    }
 
-                while (isRecording) {
-                    val read = audioRecord?.read(data, 0, bufferSize) ?: break
-                    if (read > 0) {
-                        // When paused, read audio to keep the stream going but don't write
-                        if (isPaused) {
-                            continue
-                        }
-
-                        fos.write(data, 0, read)
-
-                        // Reset chunk tracking for this buffer
-                        chunkSumSquares = 0.0
-                        chunkSampleCount = 0
-
-                        // Calculate RMS for volume detection
-                        // PCM 16-bit: 2 bytes per sample, little-endian
-                        for (i in 0 until read - 1 step 2) {
-                            val sample = (data[i].toInt() and 0xFF) or (data[i + 1].toInt() shl 8)
-                            // Convert to signed 16-bit
-                            val signedSample = if (sample > 32767) sample - 65536 else sample
-                            val squaredSample = signedSample.toDouble() * signedSample.toDouble()
-                            sumSquares += squaredSample
-                            sampleCount++
-                            chunkSumSquares += squaredSample
-                            chunkSampleCount++
-                        }
-
-                        // Report current RMS periodically
-                        val currentTime = System.currentTimeMillis()
-                        if (currentTime - lastRmsUpdateTime >= RMS_UPDATE_INTERVAL_MS && chunkSampleCount > 0) {
-                            lastRmsUpdateTime = currentTime
-                            val currentRms = kotlin.math.sqrt(chunkSumSquares / chunkSampleCount)
-                            mainHandler.post {
-                                callback?.onVolumeUpdate(currentRms)
-                            }
-                        }
+                    // Deliver audio chunk to callback
+                    mainHandler.post {
+                        callback?.onAudioChunk(audioChunk)
                     }
                 }
-
-                // Calculate final average RMS
-                if (sampleCount > 0) {
-                    averageRms = kotlin.math.sqrt(sumSquares / sampleCount)
-                }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error writing audio data: ${e.message}")
-        }
-    }
-
-    private fun writeWavHeader(file: File) {
-        try {
-            val fileSize = file.length()
-            val dataSize = fileSize - 44
-
-            RandomAccessFile(file, "rw").use { raf ->
-                raf.seek(0)
-
-                // RIFF header
-                raf.writeBytes("RIFF")
-                raf.write(intToByteArrayLE((fileSize - 8).toInt()))
-                raf.writeBytes("WAVE")
-
-                // fmt subchunk
-                raf.writeBytes("fmt ")
-                raf.write(intToByteArrayLE(16)) // Subchunk1 size (16 for PCM)
-                raf.write(shortToByteArrayLE(1)) // Audio format (1 = PCM)
-                raf.write(shortToByteArrayLE(1)) // Number of channels (1 = mono)
-                raf.write(intToByteArrayLE(SAMPLE_RATE)) // Sample rate
-                raf.write(intToByteArrayLE(SAMPLE_RATE * 2)) // Byte rate (SampleRate * NumChannels * BitsPerSample/8)
-                raf.write(shortToByteArrayLE(2)) // Block align (NumChannels * BitsPerSample/8)
-                raf.write(shortToByteArrayLE(16)) // Bits per sample
-
-                // data subchunk
-                raf.writeBytes("data")
-                raf.write(intToByteArrayLE(dataSize.toInt()))
+            Log.e(TAG, "Error streaming audio: ${e.message}")
+            mainHandler.post {
+                callback?.onRecordingError("Error streaming audio: ${e.message}")
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error writing WAV header: ${e.message}")
         }
-    }
-
-    private fun intToByteArrayLE(value: Int): ByteArray {
-        return byteArrayOf(
-            (value and 0xFF).toByte(),
-            ((value shr 8) and 0xFF).toByte(),
-            ((value shr 16) and 0xFF).toByte(),
-            ((value shr 24) and 0xFF).toByte()
-        )
-    }
-
-    private fun shortToByteArrayLE(value: Int): ByteArray {
-        return byteArrayOf(
-            (value and 0xFF).toByte(),
-            ((value shr 8) and 0xFF).toByte()
-        )
     }
 }

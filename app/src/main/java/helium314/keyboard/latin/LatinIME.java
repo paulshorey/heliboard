@@ -82,6 +82,7 @@ import helium314.keyboard.latin.utils.SubtypeSettings;
 import helium314.keyboard.latin.utils.SubtypeState;
 import helium314.keyboard.latin.utils.ToolbarMode;
 import helium314.keyboard.latin.voice.VoiceInputManager;
+import helium314.keyboard.latin.suggestions.SuggestionStripView.VoiceState;
 import helium314.keyboard.settings.SettingsActivity2;
 import kotlin.Unit;
 
@@ -1584,10 +1585,7 @@ public class LatinIME extends InputMethodService implements
             // Update UI immediately to show pause state
             if (mSuggestionStripView != null) {
                 boolean isPaused = mVoiceInputManager.isPaused();
-                boolean isRecording = mVoiceInputManager.isRecording();
-                boolean isTranscribing = mVoiceInputManager.isTranscribing();
-                boolean isContinuousMode = mVoiceInputManager.isContinuousMode();
-                mSuggestionStripView.setVoiceInputState(isRecording, isTranscribing, isContinuousMode, isPaused);
+                mSuggestionStripView.setVoiceInputState(isPaused ? VoiceState.PAUSED : VoiceState.RECORDING);
                 mKeyboardSwitcher.showToast(isPaused ? "Paused" : "Resumed", false);
             }
         }
@@ -1599,31 +1597,23 @@ public class LatinIME extends InputMethodService implements
         mVoiceInputManager.setListener(new VoiceInputManager.VoiceInputListener() {
             @Override
             public void onStateChanged(@NonNull VoiceInputManager.State state) {
-                boolean isContinuousMode = mVoiceInputManager.isContinuousMode();
-                boolean isRecording = mVoiceInputManager.isRecording();
-                boolean isTranscribing = mVoiceInputManager.isTranscribing();
-                boolean isPaused = mVoiceInputManager.isPaused();
-                Log.i(TAG, "Voice input state changed: " + state + ", continuous: " + isContinuousMode +
-                        ", recording: " + isRecording + ", transcribing: " + isTranscribing + ", paused: " + isPaused);
+                Log.i(TAG, "Voice input state changed: " + state);
 
                 if (mSuggestionStripView != null) {
                     switch (state) {
                         case RECORDING:
-                            // Recording is active (may also be transcribing in background)
-                            mSuggestionStripView.setVoiceInputState(true, isTranscribing, isContinuousMode, isPaused);
-                            if (!isTranscribing && !isPaused) {
-                                // Only show toast on fresh start, not when restarting while transcribing
-                                mKeyboardSwitcher.showToast("Listening...", false);
-                            }
+                            mSuggestionStripView.setVoiceInputState(VoiceState.RECORDING);
+                            mKeyboardSwitcher.showToast("Listening...", false);
                             break;
-                        case TRANSCRIBING:
-                            // Only transcribing (user stopped recording manually)
-                            mSuggestionStripView.setVoiceInputState(false, true, isContinuousMode, false);
-                            mKeyboardSwitcher.showToast("Transcribing...", false);
+                        case CONNECTING:
+                            mSuggestionStripView.setVoiceInputState(VoiceState.CONNECTING);
+                            mKeyboardSwitcher.showToast("Connecting...", false);
+                            break;
+                        case PAUSED:
+                            mSuggestionStripView.setVoiceInputState(VoiceState.PAUSED);
                             break;
                         case IDLE:
-                            // Nothing happening
-                            mSuggestionStripView.setVoiceInputState(false, false, false, false);
+                            mSuggestionStripView.setVoiceInputState(VoiceState.IDLE);
                             break;
                     }
                 }
@@ -1643,18 +1633,18 @@ public class LatinIME extends InputMethodService implements
             }
 
             @Override
-            public void onTranscriptionProcessing() {
-                Log.i(TAG, "Voice transcription processing started");
-                mKeyboardSwitcher.showToast("...", false);
+            public void onTranscriptionDelta(@NonNull String text) {
+                // Real-time partial transcription feedback
+                // Could be used to show live transcription preview
+                Log.d(TAG, "Voice transcription delta: '" + text + "'");
             }
 
             @Override
             public void onError(@NonNull String error) {
                 Log.e(TAG, "Voice input error: " + error);
-                // Only show error toast for critical errors, not transient ones in continuous mode
-                boolean isContinuousMode = mVoiceInputManager.isContinuousMode();
-                if (!isContinuousMode || error.contains("API key") || error.contains("permission")) {
-                    mKeyboardSwitcher.showToast("X", true);
+                // Show error toast for critical errors
+                if (error.contains("API key") || error.contains("permission") || error.contains("Connection")) {
+                    mKeyboardSwitcher.showToast("Error: " + error, true);
                 }
             }
 
