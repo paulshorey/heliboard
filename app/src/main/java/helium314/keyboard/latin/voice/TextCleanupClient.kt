@@ -65,7 +65,15 @@ class TextCleanupClient {
             newText
         }
         
-        Log.d(TAG, "CLEANUP_INPUT: \"$existingContext\" + \"$newText\"")
+        Log.d(TAG, "CLEANUP_INPUT_CONTEXT: $existingContext")
+        Log.d(TAG, "CLEANUP_INPUT_NEW: $newText")
+        
+        // Skip cleanup if no text to process
+        if (fullText.isBlank()) {
+            Log.w(TAG, "CLEANUP_INPUT: Empty text, skipping cleanup")
+            mainHandler.post { callback.onCleanupError("Empty text") }
+            return
+        }
 
         // Anthropic Claude API format
         val requestBody = JSONObject().apply {
@@ -108,6 +116,8 @@ class TextCleanupClient {
                         return
                     }
 
+                    Log.d(TAG, "CLEANUP_RESPONSE: $responseBody")
+                    
                     val json = JSONObject(responseBody ?: "{}")
                     // Anthropic response format: content[0].text
                     val content = json.optJSONArray("content")
@@ -116,6 +126,8 @@ class TextCleanupClient {
                         ?.optString("text", "")
                         ?.trim()
                         ?: ""
+
+                    Log.d(TAG, "CLEANUP_OUTPUT: \"$cleanedText\"")
 
                     if (cleanedText.isNotEmpty()) {
                         mainHandler.post {
