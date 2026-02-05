@@ -219,25 +219,25 @@
     <string name="backup_restored">Backup restored</string>
     <!-- Preferences item for format for timestamp keycode -->
     <string name="timestamp_format_title">Format for timestamp key</string>
-    <!-- Voice Input (Whisper API) settings -->
+    <!-- Voice Input (Deepgram API) settings -->
     <string name="settings_screen_transcription">Transcription</string>
-    <string name="whisper_api_key_title">OpenAI Whisper API Key</string>
-    <string name="whisper_api_key_summary">API key for voice-to-text transcription. Get your key from platform.openai.com</string>
-    <string name="whisper_prompt_title">Transcription Style</string>
-    <string name="whisper_prompt_summary">Edit prompts and select one to use for transcription</string>
-    <string name="whisper_prompt_presets_title">Prompt Presets (editable)</string>
-    <string name="whisper_prompt_current">Active prompt: %s</string>
-    <string name="whisper_prompt_none_active">No prompt selected (raw transcription)</string>
-    <string name="whisper_prompt_edit_hint">Edit this prompt…</string>
-    <string name="whisper_prompt_empty_hint">Leave empty for raw transcription</string>
+    <string name="deepgram_api_key_title">Deepgram API Key</string>
+    <string name="deepgram_api_key_summary">API key for voice-to-text transcription. Get your key from console.deepgram.com</string>
+    <string name="transcription_prompt_title">Transcription Style</string>
+    <string name="transcription_prompt_summary">Edit prompts and select one to use for transcription</string>
+    <string name="transcription_prompt_presets_title">Prompt Presets (editable)</string>
+    <string name="transcription_prompt_current">Active prompt: %s</string>
+    <string name="transcription_prompt_none_active">No prompt selected (raw transcription)</string>
+    <string name="transcription_prompt_edit_hint">Edit this prompt…</string>
+    <string name="transcription_prompt_empty_hint">Leave empty for raw transcription</string>
     <!-- Prompt preset labels -->
-    <string name="whisper_prompt_none">Technical/Standard</string>
-    <string name="whisper_prompt_standard">Braindump</string>
-    <string name="whisper_prompt_paragraphs">Casual conversation</string>
-    <string name="whisper_prompt_casual">Professional business</string>
-    <string name="whisper_prompt_formal">Creative/satirical</string>
-    <string name="whisper_prompt_texting">Academic research</string>
-    <string name="whisper_prompt_technical">Creative writing</string>
+    <string name="transcription_prompt_none">Technical/Standard</string>
+    <string name="transcription_prompt_standard">Braindump</string>
+    <string name="transcription_prompt_paragraphs">Casual conversation</string>
+    <string name="transcription_prompt_casual">Professional business</string>
+    <string name="transcription_prompt_formal">Creative/satirical</string>
+    <string name="transcription_prompt_texting">Academic research</string>
+    <string name="transcription_prompt_technical">Creative writing</string>
     <!-- Preferences item for choosing secondary language -->
     <string name="secondary_locale">Multilingual typing</string>
     <!-- Clarification which locales are available for multilingual typing -->

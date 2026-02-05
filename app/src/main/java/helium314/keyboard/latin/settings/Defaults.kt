@@ -165,9 +165,9 @@ object Defaults {
     const val PREF_REMOVE_REDUNDANT_POPUPS = false
     const val PREF_SPACE_BAR_TEXT = ""
     const val PREF_TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss"
-    const val PREF_WHISPER_API_KEY = ""
-    const val PREF_WHISPER_PROMPT_SELECTED = 0 // Default to first preset
-    val PREF_WHISPER_PROMPTS = listOf(
+    const val PREF_DEEPGRAM_API_KEY = ""
+    const val PREF_TRANSCRIPTION_PROMPT_SELECTED = 0 // Default to first preset
+    val PREF_TRANSCRIPTION_PROMPTS = listOf(
         // Technical/Standard
         "Capitalize first letter in every sentence. Capitalize first letter in a new line or list item. Capitalize proper nouns, titles, products. Make acronyms UPPERCASE. Add punctuation. Add special characters when they are mentioned.",
         // Braindump

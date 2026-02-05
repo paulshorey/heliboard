@@ -179,11 +179,11 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
     public static final String PREF_TOOLBAR_MODE = "toolbar_mode";
     public static final String PREF_TOOLBAR_HIDING_GLOBAL = "toolbar_hiding_global";
 
-    // Voice Input (Whisper API)
-    public static final String PREF_WHISPER_API_KEY = "whisper_api_key";
-    public static final String PREF_WHISPER_PROMPT_PREFIX = "whisper_prompt_";
-    public static final String PREF_WHISPER_PROMPT_SELECTED = "whisper_prompt_selected";
-    public static final int WHISPER_PROMPT_COUNT = 7;
+    // Voice Input (Deepgram API)
+    public static final String PREF_DEEPGRAM_API_KEY = "deepgram_api_key";
+    public static final String PREF_TRANSCRIPTION_PROMPT_PREFIX = "transcription_prompt_";
+    public static final String PREF_TRANSCRIPTION_PROMPT_SELECTED = "transcription_prompt_selected";
+    public static final int TRANSCRIPTION_PROMPT_COUNT = 7;
 
     // Emoji
     public static final String PREF_EMOJI_MAX_SDK = "emoji_max_sdk";

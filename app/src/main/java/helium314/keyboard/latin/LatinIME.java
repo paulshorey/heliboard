@@ -179,7 +179,7 @@ public class LatinIME extends InputMethodService implements
 
     private final ClipboardHistoryManager mClipboardHistoryManager = new ClipboardHistoryManager(this);
 
-    // Voice input manager for Whisper API transcription
+    // Voice input manager for Deepgram API transcription
     private VoiceInputManager mVoiceInputManager;
 
     public static final class UIHandler extends LeakGuardHandlerWrapper<LatinIME> {
