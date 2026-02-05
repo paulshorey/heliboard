@@ -219,10 +219,10 @@
     <string name="backup_restored">Backup restored</string>
     <!-- Preferences item for format for timestamp keycode -->
     <string name="timestamp_format_title">Format for timestamp key</string>
-    <!-- Voice Input (GPT-4o Transcription) settings -->
+    <!-- Voice Input (Whisper API) settings -->
     <string name="settings_screen_transcription">Transcription</string>
     <string name="whisper_api_key_title">OpenAI API Key</string>
-    <string name="whisper_api_key_summary">API key for voice-to-text transcription using GPT-4o. Get your key from platform.openai.com</string>
+    <string name="whisper_api_key_summary">API key for voice-to-text transcription using Whisper. Get your key from platform.openai.com</string>
     <string name="whisper_prompt_title">Transcription Style</string>
     <string name="whisper_prompt_summary">Edit prompts and select one to use for transcription</string>
     <string name="whisper_prompt_presets_title">Prompt Presets (editable)</string>

@@ -12,7 +12,7 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Manages the voice input workflow: recording audio and transcribing via GPT-4o API.
+ * Manages the voice input workflow: recording audio and transcribing via Whisper API.
  * Coordinates between VoiceRecorder and WhisperApiClient.
  *
  * Architecture: Recording and transcription are decoupled and run in parallel.
@@ -401,7 +401,7 @@ class VoiceInputManager(private val context: Context) {
 
         // Get custom prompt for transcription style
         val prompt = getPrompt()
-        Log.i(TAG, "Starting GPT-4o transcription API call with language: $language")
+        Log.i(TAG, "Starting Whisper API call with language: $language")
 
         // Notify listener that we're processing (sending to API)
         mainHandler.post {
@@ -499,7 +499,7 @@ class VoiceInputManager(private val context: Context) {
     /**
      * Post-process transcription results.
      * For short texts (< 25 chars), removes sentence punctuation and converts to lowercase.
-     * This helps with short voice inputs like "yes" or "okay" which GPT-4o transcription tends to
+     * This helps with short voice inputs like "yes" or "okay" which Whisper tends to
      * return as "Yes." or "Okay."
      *
      * NOTE: This processing is SKIPPED when silence detection auto-stopped the recording,
