@@ -1020,6 +1020,13 @@ public class LatinIME extends InputMethodService implements
         super.onFinishInput();
         Log.i(TAG, "onFinishInput");
 
+        // Stop voice recording when disconnecting from the text field (e.g., user navigated
+        // away, app was backgrounded, or the text field was removed).
+        if (mVoiceInputManager != null && !mVoiceInputManager.isIdle()) {
+            Log.i(TAG, "Input finished while recording — stopping voice input");
+            mVoiceInputManager.stopRecording();
+        }
+
         mDictionaryFacilitator.onFinishInput();
         final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
         if (mainKeyboardView != null) {
@@ -1055,6 +1062,24 @@ public class LatinIME extends InputMethodService implements
             Log.i(TAG, "onUpdateSelection: oss=" + oldSelStart + ", ose=" + oldSelEnd
                     + ", nss=" + newSelStart + ", nse=" + newSelEnd
                     + ", cs=" + composingSpanStart + ", ce=" + composingSpanEnd);
+        }
+
+        // Detect text field clearing while voice recording is active.
+        // When a user submits text (e.g., sends a message), the app clears the text field,
+        // which causes the cursor to jump to position (0,0). We detect this and stop recording
+        // since the user is done typing in that field.
+        if (mVoiceInputManager != null && !mVoiceInputManager.isIdle()
+                && newSelStart == 0 && newSelEnd == 0
+                && (oldSelStart > 0 || oldSelEnd > 0)) {
+            // Cursor jumped to beginning — check if the text field is actually empty
+            final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
+            final CharSequence after = mInputLogic.mConnection.getTextAfterCursor(1, 0);
+            final boolean isEmpty = (before == null || before.length() == 0)
+                    && (after == null || after.length() == 0);
+            if (isEmpty) {
+                Log.i(TAG, "Text field cleared while recording — stopping voice input");
+                mVoiceInputManager.stopRecording();
+            }
         }
 
         // This call happens whether our view is displayed or not, but if it's not then we should
