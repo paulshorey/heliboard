@@ -12,7 +12,7 @@ This guide covers how to set up your development environment, build, debug, and 
 gita && ./gradlew assembleDebug && ./gradlew installDebug
 
 // With debugging:
-./gradlew assembleDebug && ./gradlew installDebug && adb logcat | grep -E "(voice|whisper|prompt)"
+./gradlew assembleDebug && ./gradlew installDebug && adb logcat | grep -E "(voice|deepgram|transcri|cleanup)"
 ```
 
 # Configuring

@@ -6,7 +6,7 @@ https://github.com/Helium314/HeliBoard
 
 ## This project rewrites HeliBoard with custom experimental features
 
-1. Voice to text (using OpenAI Whisper API)
+1. Voice to text (using Deepgram Nova-3 transcription + Anthropic Claude cleanup)
 2. Smart auto-capitalization
 3. UI features
 

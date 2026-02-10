@@ -182,9 +182,9 @@ public class LatinIME extends InputMethodService implements
 
     private final ClipboardHistoryManager mClipboardHistoryManager = new ClipboardHistoryManager(this);
 
-    // Voice input manager for Whisper API transcription
+    // Voice input manager (local recording + Deepgram transcription)
     private VoiceInputManager mVoiceInputManager;
-    // Text cleanup client for GPT-4.1-nano post-processing
+    // Text cleanup client (Anthropic Claude post-processing)
     private TextCleanupClient mTextCleanupClient;
     
     // Voice input state management for cleanup/transcription coordination
@@ -1690,10 +1690,6 @@ public class LatinIME extends InputMethodService implements
                             mVoiceSessionId++;
                             resetVoiceInputState();
                             break;
-                        case CONNECTING:
-                            mSuggestionStripView.setVoiceInputState(VoiceState.CONNECTING);
-                            mKeyboardSwitcher.showToast("Connecting...", false);
-                            break;
                         case PAUSED:
                             mSuggestionStripView.setVoiceInputState(VoiceState.PAUSED);
                             break;
@@ -1711,17 +1707,15 @@ public class LatinIME extends InputMethodService implements
                     return;
                 }
 
-                // Discard late-arriving WebSocket messages that were queued before disconnect.
+                // Discard late-arriving results that were queued before recording stopped.
                 if (mVoiceInputManager.isIdle()) {
                     Log.i(TAG, "Discarding transcription result — voice input is idle");
                     return;
                 }
-                
-                // If cleanup is in progress, queue this transcription to avoid race condition
+
+                // If cleanup is in progress, queue to avoid race condition
                 if (mCleanupInProgress) {
                     mPendingTranscription.append(text);
-                    
-                    // Safety limit: if pending buffer gets too large, insert it anyway
                     if (mPendingTranscription.length() > 5000) {
                         Log.w(TAG, "Pending transcription buffer overflow, inserting now");
                         String pending = mPendingTranscription.toString();
@@ -1730,65 +1724,48 @@ public class LatinIME extends InputMethodService implements
                     }
                     return;
                 }
-                
+
                 insertTranscriptionText(text);
             }
 
             @Override
-            public void onTranscriptionDelta(@NonNull String text) {
-                // Real-time partial transcription - could be used for live preview
-            }
-
-            @Override
             public void onCleanupRequested() {
-                // Prevent re-entrant cleanup calls
                 if (mCleanupInProgress) {
                     return;
                 }
-                
-                // Called after 3 seconds of silence - time to cleanup the current paragraph
+
                 String anthropicApiKey = KtxKt.prefs(LatinIME.this).getString(Settings.PREF_ANTHROPIC_API_KEY, "");
                 if (anthropicApiKey == null || anthropicApiKey.isEmpty()) {
                     return;
                 }
-                
-                // Get cleanup prompt from settings
+
                 String cleanupPrompt = KtxKt.prefs(LatinIME.this).getString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT);
                 if (cleanupPrompt == null || cleanupPrompt.isEmpty()) {
                     cleanupPrompt = Defaults.PREF_CLEANUP_PROMPT;
                 }
-                
-                // Get text before cursor to find the current paragraph
+
+                // Extract the current paragraph (text since last newline)
                 CharSequence textBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(2000, 0);
                 String beforeText = textBeforeCursor != null ? textBeforeCursor.toString() : "";
-                
                 if (beforeText.isEmpty()) {
                     return;
                 }
-                
-                // Find the last newline position
+
                 int lastNewlinePos = beforeText.lastIndexOf('\n');
-                
-                // Extract current paragraph from last newline (or start if no newline)
-                final String originalParagraph;
-                if (lastNewlinePos >= 0) {
-                    originalParagraph = beforeText.substring(lastNewlinePos + 1);
-                } else {
-                    originalParagraph = beforeText;
-                }
-                
+                final String originalParagraph = (lastNewlinePos >= 0)
+                        ? beforeText.substring(lastNewlinePos + 1)
+                        : beforeText;
+
                 if (originalParagraph.trim().isEmpty()) {
                     return;
                 }
-                
-                // Mark cleanup as in progress to prevent race conditions with new paragraph
+
                 mCleanupInProgress = true;
-                
+
                 // Capture session ID so we can discard stale callbacks if the session
                 // was cancelled or a new session started before cleanup completes.
                 final int sessionId = mVoiceSessionId;
-                
-                // Send current paragraph to Claude for cleanup
+
                 final String prompt = cleanupPrompt;
                 mTextCleanupClient.cleanupText(anthropicApiKey, prompt, "", originalParagraph, new TextCleanupClient.CleanupCallback() {
                     @Override
@@ -1808,27 +1785,19 @@ public class LatinIME extends InputMethodService implements
 
                         // Strip invisible characters from the cleanup API response
                         String sanitizedCleanedText = stripInvisibleChars(cleanedText);
-                        
-                        // Find and replace the original paragraph
+
                         CharSequence currentTextBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(4000, 0);
                         String currentText = currentTextBeforeCursor != null ? currentTextBeforeCursor.toString() : "";
-                        
-                        // Find where the original paragraph is in the current text
+
                         int originalPos = currentText.lastIndexOf(originalParagraph);
-                        
                         if (originalPos >= 0) {
-                            // Calculate text added during cleanup (to preserve it)
                             int endOfOriginal = originalPos + originalParagraph.length();
                             String textAfterOriginal = currentText.substring(endOfOriginal);
-                            
-                            // Delete from original position to end
                             int charsToDelete = currentText.length() - originalPos;
-                            
-                            // Post-process cleaned text and combine with any new text
+
                             String processedText = ensureTrailingSpace(sanitizedCleanedText);
                             String finalText = processedText + textAfterOriginal;
-                            
-                            // Atomic delete+commit operation
+
                             mInputLogic.mConnection.beginBatchEdit();
                             if (charsToDelete > 0) {
                                 mInputLogic.mConnection.deleteTextBeforeCursor(charsToDelete);
@@ -1836,13 +1805,11 @@ public class LatinIME extends InputMethodService implements
                             mInputLogic.mConnection.commitText(finalText, 1);
                             mInputLogic.mConnection.endBatchEdit();
                         }
-                        // If original paragraph not found, skip cleanup (text changed too much)
-                        
-                        // Cleanup finished - process any pending items
+
                         mCleanupInProgress = false;
                         processPendingVoiceInput();
                     }
-                    
+
                     @Override
                     public void onCleanupError(String error) {
                         // Discard if the voice session has changed
@@ -1850,11 +1817,8 @@ public class LatinIME extends InputMethodService implements
                             Log.i(TAG, "Cleanup error discarded — voice session changed");
                             return;
                         }
-                        
-                        // On error, leave the text as-is (already inserted)
+
                         Log.e(TAG, "Cleanup error: " + error);
-                        
-                        // Cleanup finished (with error) - process any pending items
                         mCleanupInProgress = false;
                         processPendingVoiceInput();
                     }
@@ -1863,9 +1827,7 @@ public class LatinIME extends InputMethodService implements
 
             @Override
             public void onNewParagraphRequested() {
-                // Called after 12 seconds of silence - insert two line breaks to start new paragraph
                 if (mCleanupInProgress) {
-                    // Defer new paragraph until cleanup completes
                     mPendingNewParagraph = true;
                 } else {
                     mInputLogic.finishInput();
@@ -1876,8 +1838,7 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onError(@NonNull String error) {
                 Log.e(TAG, "Voice input error: " + error);
-                // Show error toast for critical errors
-                if (error.contains("API key") || error.contains("permission") || error.contains("Connection")) {
+                if (error.contains("API key") || error.contains("permission") || error.contains("failed")) {
                     mKeyboardSwitcher.showToast("Error: " + error, true);
                 }
             }

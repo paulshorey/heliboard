@@ -2,55 +2,57 @@
 
 Quick reference for the external APIs used in voice transcription.
 
-## OpenAI Realtime API (Transcription)
+## Deepgram Pre-recorded API (Transcription)
 
-### Connection
+### Endpoint
 ```
-WebSocket: wss://api.openai.com/v1/realtime?intent=transcription
+POST https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&punctuate=true&language=en
 Headers:
-  Authorization: Bearer <OPENAI_API_KEY>
-  OpenAI-Beta: realtime=v1
-```
-
-### Session Configuration
-```json
-{
-  "type": "transcription_session.update",
-  "session": {
-    "input_audio_format": "pcm16",
-    "input_audio_transcription": {
-      "model": "gpt-4o-transcribe",
-      "language": "en",
-      "prompt": "Capitalize first letter in every sentence. Add punctuation where necessary."
-    },
-    "turn_detection": {
-      "type": "server_vad",
-      "threshold": 0.5,
-      "prefix_padding_ms": 300,
-      "silence_duration_ms": 500
-    },
-    "input_audio_noise_reduction": {
-      "type": "near_field"
-    }
-  }
-}
+  Authorization: Token <DEEPGRAM_API_KEY>
+  Content-Type: audio/wav
+Body: <raw WAV file bytes>
 ```
 
 ### Audio Format
 - **Encoding**: PCM16 (16-bit signed, little-endian)
-- **Sample Rate**: 24kHz
+- **Sample Rate**: 16kHz
 - **Channels**: Mono
-- **Transmission**: Base64 encoded
+- **Container**: WAV (44-byte RIFF header + PCM data)
+- **Transmission**: Raw binary in request body
 
-### Key Events
-| Event Type | Direction | Description |
-|------------|-----------|-------------|
-| `transcription_session.update` | Send | Configure session |
-| `input_audio_buffer.append` | Send | Stream audio data |
-| `input_audio_buffer.speech_started` | Receive | User started speaking |
-| `input_audio_buffer.speech_stopped` | Receive | User stopped speaking |
-| `conversation.item.input_audio_transcription.delta` | Receive | Partial transcription |
-| `conversation.item.input_audio_transcription.completed` | Receive | Final transcription |
+### Query Parameters
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `model` | `nova-3` | Deepgram's latest speech model |
+| `smart_format` | `true` | Auto-format numbers, dates, etc. |
+| `punctuate` | `true` | Add punctuation |
+| `language` | `en` (optional) | ISO-639-1 language hint |
+
+### Response Format
+```json
+{
+  "results": {
+    "channels": [
+      {
+        "alternatives": [
+          {
+            "transcript": "the transcribed text",
+            "confidence": 0.98,
+            "words": [...]
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Error Codes
+| Code | Meaning |
+|------|---------|
+| 401/403 | Invalid API key |
+| 429 | Rate limited |
+| 400 | Corrupt/unsupported audio format |
 
 ---
 
@@ -92,28 +94,14 @@ Headers:
 }
 ```
 
-### Default Cleanup Prompt
-```
-Process this transcribed flow of consciousness. Return only the corrected text.
-Do not explain. Do not return anything other than the fixed text.
-Add capitalization and punctuation to complete sentences. Fix structure.
-Make sure names of products such as "Claude Code" are capitalized.
-Acronyms like IBKR should be uppercase.
-Add or remove punctuation as needed, so the final text is grammatically correct.
-If the text is a technical term, name, or file, such as "upgrade-gpt-transcribe"
-or "./gradle/apk" then do not add grammatical punctuation or capitalization.
-If you notice the name of any special character spelled out, such as
-"slashsrcslashappslashpagedottsx" rewrite it to use the actual symbols
-like this: "/src/app/page.tsx".
-```
-
 ---
 
 ## Settings Keys
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `PREF_WHISPER_API_KEY` | String | OpenAI API key for transcription |
+| `PREF_DEEPGRAM_API_KEY` | String | Deepgram API key for transcription |
 | `PREF_ANTHROPIC_API_KEY` | String | Anthropic API key for cleanup |
-| `PREF_CLEANUP_PROMPT` | String | Custom cleanup instructions |
-| `PREF_TRANSCRIBE_PROMPTS` | String | Transcription style prompts |
+| `PREF_CLEANUP_PROMPT` | String | Custom cleanup instructions for Claude |
+| `PREF_TRANSCRIPTION_PROMPT_PREFIX` | String | Transcription style prompt presets |
+| `PREF_TRANSCRIPTION_PROMPT_SELECTED` | Int | Index of selected prompt preset |
