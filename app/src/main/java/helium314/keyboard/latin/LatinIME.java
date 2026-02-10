@@ -1009,6 +1009,13 @@ public class LatinIME extends InputMethodService implements
     public void onWindowHidden() {
         super.onWindowHidden();
         Log.i(TAG, "onWindowHidden");
+        // Stop voice recording when the keyboard window is hidden (e.g., user pressed Back,
+        // app dismissed the keyboard, or user tapped outside the text field).
+        // This is important because onFinishInput is not always called reliably.
+        if (mVoiceInputManager != null && !mVoiceInputManager.isIdle()) {
+            Log.i(TAG, "Keyboard hidden while recording — stopping voice input");
+            mVoiceInputManager.stopRecording();
+        }
         final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
         if (mainKeyboardView != null) {
             mainKeyboardView.closing();
@@ -1439,6 +1446,8 @@ public class LatinIME extends InputMethodService implements
     }
 
     public void onStartBatchInput() {
+        // Stop voice recording if user starts glide/swipe typing.
+        stopVoiceRecordingOnUserInput();
         mInputLogic.onStartBatchInput(mSettings.getCurrent(), mKeyboardSwitcher, mHandler);
         mGestureConsumer.onGestureStarted(mRichImm.getCurrentSubtypeLocale(), mKeyboardSwitcher.getKeyboard());
     }
@@ -1541,6 +1550,8 @@ public class LatinIME extends InputMethodService implements
     // interface
     @Override
     public void pickSuggestionManually(final SuggestedWordInfo suggestionInfo) {
+        // Stop voice recording if user picks a suggestion from the strip.
+        stopVoiceRecordingOnUserInput();
         final InputTransaction completeInputTransaction = mInputLogic.onPickSuggestionManually(
                 mSettings.getCurrent(), suggestionInfo,
                 mKeyboardSwitcher.getKeyboardShiftMode(),
@@ -2013,6 +2024,8 @@ public class LatinIME extends InputMethodService implements
     // Hooks for hardware keyboard
     @Override
     public boolean onKeyDown(final int keyCode, final KeyEvent keyEvent) {
+        // Stop voice recording if user types on a hardware/Bluetooth keyboard.
+        stopVoiceRecordingOnUserInput();
         if (mKeyboardActionListener.onKeyDown(keyCode, keyEvent))
             return true;
         return super.onKeyDown(keyCode, keyEvent);
