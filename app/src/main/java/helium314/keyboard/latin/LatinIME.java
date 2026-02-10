@@ -1709,6 +1709,16 @@ public class LatinIME extends InputMethodService implements
                 mTextCleanupClient.cleanupText(anthropicApiKey, prompt, "", originalParagraph, new TextCleanupClient.CleanupCallback() {
                     @Override
                     public void onCleanupComplete(String cleanedText) {
+                        // Reset InputLogic composing state before direct connection manipulation.
+                        // Without this, the WordComposer can remain in a stale composing state
+                        // after commitText clears the connection's composing text, causing
+                        // subsequent backspace presses to modify a phantom composing buffer
+                        // instead of actually deleting text in the editor.
+                        mInputLogic.finishInput();
+                        
+                        // Strip invisible characters from the cleanup API response
+                        String sanitizedCleanedText = stripInvisibleChars(cleanedText);
+                        
                         // Find and replace the original paragraph
                         CharSequence currentTextBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(4000, 0);
                         String currentText = currentTextBeforeCursor != null ? currentTextBeforeCursor.toString() : "";
@@ -1725,7 +1735,7 @@ public class LatinIME extends InputMethodService implements
                             int charsToDelete = currentText.length() - originalPos;
                             
                             // Post-process cleaned text and combine with any new text
-                            String processedText = ensureTrailingSpace(cleanedText);
+                            String processedText = ensureTrailingSpace(sanitizedCleanedText);
                             String finalText = processedText + textAfterOriginal;
                             
                             // Atomic delete+commit operation
@@ -1762,6 +1772,7 @@ public class LatinIME extends InputMethodService implements
                     // Defer new paragraph until cleanup completes
                     mPendingNewParagraph = true;
                 } else {
+                    mInputLogic.finishInput();
                     mInputLogic.mConnection.commitText("\n\n", 1);
                 }
             }
@@ -1831,6 +1842,47 @@ public class LatinIME extends InputMethodService implements
     }
 
     /**
+     * Strip invisible and zero-width Unicode characters from text.
+     *
+     * The OpenAI Realtime transcription API and the Claude cleanup API can return
+     * invisible Unicode characters such as zero-width spaces (U+200B), word joiners
+     * (U+2060), byte order marks (U+FEFF), direction marks (U+200E/U+200F), and
+     * others. These characters are inserted into the text field but are invisible
+     * and have no width, making it appear that backspace "doesn't work" because
+     * the user must delete each invisible character individually before reaching
+     * the visible text behind them.
+     *
+     * @param text The text to sanitize
+     * @return The text with invisible characters removed
+     */
+    private String stripInvisibleChars(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+        // Remove characters that are invisible / zero-width in typical text rendering:
+        // U+200B  Zero-width space
+        // U+200C  Zero-width non-joiner
+        // U+200D  Zero-width joiner
+        // U+200E  Left-to-right mark
+        // U+200F  Right-to-left mark
+        // U+2060  Word joiner
+        // U+2061  Function application (invisible math operator)
+        // U+2062  Invisible times
+        // U+2063  Invisible separator
+        // U+2064  Invisible plus
+        // U+FEFF  Zero-width no-break space (byte order mark)
+        // U+00AD  Soft hyphen
+        // U+034F  Combining grapheme joiner
+        // U+061C  Arabic letter mark
+        // U+115F  Hangul choseong filler
+        // U+1160  Hangul jungseong filler
+        // U+17B4  Khmer vowel inherent AQ
+        // U+17B5  Khmer vowel inherent AA
+        // U+180E  Mongolian vowel separator
+        return text.replaceAll("[\\u200B\\u200C\\u200D\\u200E\\u200F\\u2060-\\u2064\\uFEFF\\u00AD\\u034F\\u061C\\u115F\\u1160\\u17B4\\u17B5\\u180E]", "");
+    }
+
+    /**
      * Ensure the text ends with a trailing space.
      * This ensures proper spacing after transcribed text.
      */
@@ -1849,15 +1901,28 @@ public class LatinIME extends InputMethodService implements
      * Handles capitalization adjustment and trailing space.
      * Uses batch edit to ensure atomic operation.
      *
+     * IMPORTANT: We must call mInputLogic.finishInput() before committing text
+     * through the connection directly. Without this, the InputLogic's WordComposer
+     * remains in a composing state while the connection's composing text is cleared
+     * by commitText(). This desync causes subsequent backspace presses to modify
+     * a phantom composing buffer instead of actually deleting text in the editor.
+     *
      * @param text The raw transcription text to insert
      */
     private void insertTranscriptionText(String text) {
         if (text == null || text.isEmpty()) {
             return;
         }
-        String adjustedText = adjustCapitalization(text);
+        String sanitized = stripInvisibleChars(text);
+        if (sanitized.isEmpty()) {
+            return;
+        }
+        String adjustedText = adjustCapitalization(sanitized);
         String textToInsert = ensureTrailingSpace(adjustedText);
         
+        // Reset InputLogic composing state before direct connection manipulation.
+        // This ensures the WordComposer is properly synchronized with the connection.
+        mInputLogic.finishInput();
         mInputLogic.mConnection.beginBatchEdit();
         mInputLogic.mConnection.commitText(textToInsert, 1);
         mInputLogic.mConnection.endBatchEdit();
@@ -1878,6 +1943,7 @@ public class LatinIME extends InputMethodService implements
         // Then process pending new paragraph
         if (mPendingNewParagraph) {
             mPendingNewParagraph = false;
+            mInputLogic.finishInput();
             mInputLogic.mConnection.commitText("\n\n", 1);
         }
     }
