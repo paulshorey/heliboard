@@ -195,7 +195,7 @@ public class LatinIME extends InputMethodService implements
     // Fullscreen extract view mode for voice input
     private boolean mForceFullscreenMode = false;
     private View mFullscreenExtractView;
-    private android.widget.EditText mFullscreenEditText;
+    // Saved original text for the "close" (discard) action
     private String mOriginalFieldText = "";
 
     public static final class UIHandler extends LeakGuardHandlerWrapper<LatinIME> {
@@ -811,7 +811,6 @@ public class LatinIME extends InputMethodService implements
         if (mForceFullscreenMode) {
             mForceFullscreenMode = false;
             mFullscreenExtractView = null;
-            mFullscreenEditText = null;
             mOriginalFieldText = "";
         }
         mHandler.onFinishInput();
@@ -1130,7 +1129,6 @@ public class LatinIME extends InputMethodService implements
         if (mForceFullscreenMode) {
             mForceFullscreenMode = false;
             mFullscreenExtractView = null;
-            mFullscreenEditText = null;
             mOriginalFieldText = "";
         }
         if (hasSuggestionStripView() && mSettings.getCurrent().mToolbarMode == ToolbarMode.EXPANDABLE)
@@ -1299,40 +1297,51 @@ public class LatinIME extends InputMethodService implements
 
     /**
      * Enter fullscreen extract view mode for voice input.
-     * Captures the current text from the original text field,
-     * then switches the keyboard into fullscreen mode with a custom text area.
+     *
+     * Uses the framework's fullscreen/extract mechanism with our custom layout
+     * containing an ExtractEditText (@android:id/inputExtractEditText). The
+     * framework automatically routes keyboard input to this ExtractEditText and
+     * keeps it in sync with the original field's InputConnection.
+     *
+     * The original text is saved so the "close" (discard) action can restore it.
      */
     public void enterFullscreenMode() {
+        if (mForceFullscreenMode) {
+            return; // Already in fullscreen
+        }
         Log.i(TAG, "Entering fullscreen extract view mode");
 
-        // Capture the current text from the original text field
+        // Save the original text so we can restore it on "close" (discard)
         mOriginalFieldText = getOriginalFieldText();
 
         // Set the flag to force fullscreen
         mForceFullscreenMode = true;
 
-        // Create and set our custom extract view
+        // Create and set our custom extract view with ExtractEditText + toolbar
         mFullscreenExtractView = getLayoutInflater().inflate(
                 R.layout.fullscreen_extract_view, null);
-        mFullscreenEditText = mFullscreenExtractView.findViewById(R.id.fullscreen_edit_text);
 
-        final android.widget.Button submitButton = mFullscreenExtractView.findViewById(R.id.fullscreen_submit_button);
-        submitButton.setOnClickListener(v -> commitFullscreenTextAndClose());
+        // Wire up the three toolbar buttons
+        final android.widget.Button backButton =
+                mFullscreenExtractView.findViewById(R.id.fullscreen_back_button);
+        backButton.setOnClickListener(v -> onFullscreenBack());
 
-        final android.widget.Button cancelButton = mFullscreenExtractView.findViewById(R.id.fullscreen_cancel_button);
-        cancelButton.setOnClickListener(v -> cancelFullscreenMode());
+        final android.widget.Button submitButton =
+                mFullscreenExtractView.findViewById(R.id.fullscreen_submit_button);
+        submitButton.setOnClickListener(v -> onFullscreenSubmit());
 
-        // Set the custom extract view into the framework
+        final android.widget.Button closeButton =
+                mFullscreenExtractView.findViewById(R.id.fullscreen_close_button);
+        closeButton.setOnClickListener(v -> onFullscreenClose());
+
+        // Install our custom extract view into the framework.
+        // Because the layout contains an ExtractEditText with @android:id/inputExtractEditText,
+        // the framework will route keyboard input to it and keep it synced with the
+        // original field. The user types normally and sees text in our custom view.
         setExtractView(mFullscreenExtractView);
 
         // Force the framework to re-evaluate fullscreen mode (will now return true)
         updateFullscreenMode();
-
-        // Populate the EditText with the original field text
-        if (mFullscreenEditText != null && mOriginalFieldText != null) {
-            mFullscreenEditText.setText(mOriginalFieldText);
-            mFullscreenEditText.setSelection(mFullscreenEditText.getText().length());
-        }
     }
 
     /**
@@ -1371,64 +1380,69 @@ public class LatinIME extends InputMethodService implements
         return sb.toString();
     }
 
+    // ---- Fullscreen toolbar button handlers ----
+
     /**
-     * Commit the text from the fullscreen edit text back to the original field
-     * and exit fullscreen mode.
+     * "Back" button: The edited text is already synced to the original field
+     * (via the framework's ExtractEditText). Just exit fullscreen mode
+     * and return to the normal split keyboard view. Keyboard stays open.
      */
-    private void commitFullscreenTextAndClose() {
-        Log.i(TAG, "Committing fullscreen text and closing");
+    private void onFullscreenBack() {
+        Log.i(TAG, "Fullscreen Back: returning to normal keyboard");
+        stopVoiceIfActive();
+        exitFullscreenMode();
+    }
 
-        final String newText = (mFullscreenEditText != null && mFullscreenEditText.getText() != null)
-                ? mFullscreenEditText.getText().toString()
-                : "";
+    /**
+     * "Submit" button: The edited text is already synced to the original field.
+     * Exit fullscreen mode AND hide the keyboard completely.
+     */
+    private void onFullscreenSubmit() {
+        Log.i(TAG, "Fullscreen Submit: committing and hiding keyboard");
+        stopVoiceIfActive();
+        exitFullscreenMode();
+        requestHideSelf(0);
+    }
 
-        // Stop voice recording if still active
-        if (mVoiceInputManager != null && !mVoiceInputManager.isIdle()) {
-            mVoiceInputManager.stopRecording();
-        }
+    /**
+     * "Close" button: Discard all edits. Restore the original text that was
+     * in the field before fullscreen mode was entered, then hide the keyboard.
+     */
+    private void onFullscreenClose() {
+        Log.i(TAG, "Fullscreen Close: discarding edits and hiding keyboard");
+        stopVoiceIfActive();
 
+        // Restore the original field text (discard whatever was typed/transcribed)
         final android.view.inputmethod.InputConnection ic = getCurrentInputConnection();
-        if (ic != null) {
+        if (ic != null && mOriginalFieldText != null) {
             ic.beginBatchEdit();
             try {
-                // Select all text in the original field using setSelection.
-                // This is more reliable than performContextMenuAction(selectAll)
-                // which some apps don't implement correctly.
-                // First, read current text length to know the extent.
+                // Get current text length to select all
                 final android.view.inputmethod.ExtractedTextRequest req =
                         new android.view.inputmethod.ExtractedTextRequest();
                 req.hintMaxChars = Integer.MAX_VALUE;
                 req.token = 0;
                 final android.view.inputmethod.ExtractedText et = ic.getExtractedText(req, 0);
-
                 if (et != null && et.text != null) {
-                    final int textLength = et.text.length();
-                    // Select all text
-                    ic.setSelection(0, textLength);
+                    ic.setSelection(0, et.text.length());
                 }
-
-                // Replace selection (or just commit if selection failed)
-                ic.commitText(newText, 1);
+                ic.commitText(mOriginalFieldText, 1);
             } finally {
                 ic.endBatchEdit();
             }
         }
 
         exitFullscreenMode();
+        requestHideSelf(0);
     }
 
     /**
-     * Cancel the fullscreen mode without committing changes.
-     * The original text field is left unchanged.
-     * Stops voice recording if active.
+     * Stop voice recording if currently active.
      */
-    private void cancelFullscreenMode() {
-        Log.i(TAG, "Cancelling fullscreen mode");
-        // Stop voice recording if still active
+    private void stopVoiceIfActive() {
         if (mVoiceInputManager != null && !mVoiceInputManager.isIdle()) {
-            mVoiceInputManager.cancelRecording();
+            mVoiceInputManager.stopRecording();
         }
-        exitFullscreenMode();
     }
 
     /**
@@ -1441,13 +1455,11 @@ public class LatinIME extends InputMethodService implements
         Log.i(TAG, "Exiting fullscreen mode");
         mForceFullscreenMode = false;
         mFullscreenExtractView = null;
-        mFullscreenEditText = null;
         mOriginalFieldText = "";
 
         // Restore the default extract view so that if the framework enters fullscreen
         // mode later (e.g., landscape rotation), it uses the standard extract layout
-        // instead of our stale custom one. setExtractView() properly updates the
-        // framework's internal mExtractView and mExtractEditText references.
+        // instead of our stale custom one.
         try {
             View defaultExtractView = super.onCreateExtractTextView();
             if (defaultExtractView != null) {
@@ -1467,14 +1479,6 @@ public class LatinIME extends InputMethodService implements
      */
     public boolean isInFullscreenExtractMode() {
         return mForceFullscreenMode;
-    }
-
-    /**
-     * Get the fullscreen EditText for external components (e.g., voice input)
-     * to insert transcription text into.
-     */
-    public android.widget.EditText getFullscreenEditText() {
-        return mFullscreenEditText;
     }
 
     @Override
@@ -1781,23 +1785,24 @@ public class LatinIME extends InputMethodService implements
     @Override
     public void onVoiceInputClicked() {
         if (mVoiceInputManager != null) {
-            // If voice input is idle (not yet started), enter fullscreen mode first
+            // First mic press while idle: enter fullscreen mode, then start recording
             if (mVoiceInputManager.isIdle() && !mForceFullscreenMode) {
                 enterFullscreenMode();
             }
+            // Toggle recording (start/stop). This does NOT exit fullscreen mode.
+            // The user stays in fullscreen and can press mic again to record more,
+            // or use the toolbar buttons (Back/Submit/Close) to leave fullscreen.
             mVoiceInputManager.toggleRecording();
         }
     }
 
     @Override
     public void onVoiceCancelClicked() {
-        // Stop voice recording first
+        // Cancel button only cancels the active voice recording.
+        // It does NOT exit fullscreen mode. The user uses the toolbar
+        // buttons (Back/Submit/Close) to leave fullscreen.
         if (mVoiceInputManager != null && !mVoiceInputManager.isIdle()) {
             mVoiceInputManager.cancelRecording();
-        }
-        // Then exit fullscreen mode without committing
-        if (mForceFullscreenMode) {
-            exitFullscreenMode();
         }
     }
 
@@ -1850,22 +1855,15 @@ public class LatinIME extends InputMethodService implements
                     return;
                 }
 
-                // In fullscreen mode, append transcription to our custom EditText
-                if (mForceFullscreenMode && mFullscreenEditText != null) {
-                    mHandler.post(() -> {
-                        if (mFullscreenEditText != null) {
-                            // Use the fullscreen EditText content for capitalization context
-                            // instead of the original field's InputConnection
-                            int cursorPos = mFullscreenEditText.getSelectionEnd();
-                            if (cursorPos < 0) cursorPos = mFullscreenEditText.getText().length();
-                            String adjustedText = adjustCapitalizationForFullscreen(text, cursorPos);
-                            String textToInsert = ensureTrailingSpace(adjustedText);
-                            mFullscreenEditText.getText().insert(cursorPos, textToInsert);
-                        }
-                    });
+                // In fullscreen mode, transcription goes through the normal
+                // InputConnection path. The framework's ExtractEditText mirrors
+                // the InputConnection, so text appears in our fullscreen view
+                // automatically. We skip cleanup queuing in fullscreen mode.
+                if (mForceFullscreenMode) {
+                    insertTranscriptionText(text);
                     return;
                 }
-                
+
                 // If cleanup is in progress, queue this transcription to avoid race condition
                 if (mCleanupInProgress) {
                     mPendingTranscription.append(text);
@@ -1885,17 +1883,12 @@ public class LatinIME extends InputMethodService implements
 
             @Override
             public void onTranscriptionDelta(@NonNull String text) {
-                // Real-time partial transcription - for live preview in fullscreen mode
-                if (mForceFullscreenMode && mFullscreenEditText != null) {
-                    // Could show partial transcription as a hint or overlay
-                    // For now, we just log it
-                    Log.d(TAG, "Transcription delta in fullscreen: " + text);
-                }
+                // Real-time partial transcription - could be used for live preview
             }
 
             @Override
             public void onCleanupRequested() {
-                // In fullscreen mode, skip cleanup (user edits directly in our EditText)
+                // In fullscreen mode, skip cleanup (user edits directly)
                 if (mForceFullscreenMode) {
                     return;
                 }
@@ -1995,15 +1988,10 @@ public class LatinIME extends InputMethodService implements
 
             @Override
             public void onNewParagraphRequested() {
-                // In fullscreen mode, insert new paragraph into our EditText
-                if (mForceFullscreenMode && mFullscreenEditText != null) {
-                    mHandler.post(() -> {
-                        if (mFullscreenEditText != null) {
-                            int cursorPos = mFullscreenEditText.getSelectionEnd();
-                            if (cursorPos < 0) cursorPos = mFullscreenEditText.getText().length();
-                            mFullscreenEditText.getText().insert(cursorPos, "\n\n");
-                        }
-                    });
+                // In fullscreen mode, just insert via InputConnection (framework mirrors
+                // to ExtractEditText). Skip cleanup queuing.
+                if (mForceFullscreenMode) {
+                    mInputLogic.mConnection.commitText("\n\n", 1);
                     return;
                 }
                 // Called after 12 seconds of silence - insert two line breaks to start new paragraph
@@ -2030,54 +2018,6 @@ public class LatinIME extends InputMethodService implements
                 mKeyboardSwitcher.showToast("Microphone permission required. Please grant permission in Settings.", true);
             }
         });
-    }
-
-    /**
-     * Adjust capitalization for fullscreen mode, using the EditText content
-     * instead of the InputConnection.
-     * @param text The transcription text to adjust
-     * @param cursorPos The current cursor position in the fullscreen EditText
-     */
-    private String adjustCapitalizationForFullscreen(String text, int cursorPos) {
-        if (text == null || text.isEmpty() || mFullscreenEditText == null) {
-            return text;
-        }
-
-        CharSequence editable = mFullscreenEditText.getText();
-        if (editable == null || cursorPos <= 0) {
-            return text; // At start of text, keep original capitalization
-        }
-
-        // Get up to 5 chars before cursor
-        int start = Math.max(0, cursorPos - 5);
-        String beforeText = editable.subSequence(start, cursorPos).toString();
-
-        // Find the last non-space character
-        char lastChar = ' ';
-        for (int i = beforeText.length() - 1; i >= 0; i--) {
-            char c = beforeText.charAt(i);
-            if (c != ' ') {
-                lastChar = c;
-                break;
-            }
-        }
-
-        // Check if last character is sentence-ending punctuation
-        boolean isSentenceEnd = (lastChar == '.' || lastChar == '!' || lastChar == '?' ||
-                                  lastChar == '\n' || lastChar == ' ');
-
-        // If previous text ends a sentence, keep original capitalization
-        if (isSentenceEnd) {
-            return text;
-        }
-
-        // Otherwise, lowercase the first letter if it's uppercase
-        char firstChar = text.charAt(0);
-        if (Character.isUpperCase(firstChar)) {
-            return Character.toLowerCase(firstChar) + text.substring(1);
-        }
-
-        return text;
     }
 
     /**
