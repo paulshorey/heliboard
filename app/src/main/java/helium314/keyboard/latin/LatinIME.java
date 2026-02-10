@@ -1709,6 +1709,13 @@ public class LatinIME extends InputMethodService implements
                 mTextCleanupClient.cleanupText(anthropicApiKey, prompt, "", originalParagraph, new TextCleanupClient.CleanupCallback() {
                     @Override
                     public void onCleanupComplete(String cleanedText) {
+                        // Reset InputLogic composing state before direct connection manipulation.
+                        // Without this, the WordComposer can remain in a stale composing state
+                        // after commitText clears the connection's composing text, causing
+                        // subsequent backspace presses to modify a phantom composing buffer
+                        // instead of actually deleting text in the editor.
+                        mInputLogic.finishInput();
+                        
                         // Find and replace the original paragraph
                         CharSequence currentTextBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(4000, 0);
                         String currentText = currentTextBeforeCursor != null ? currentTextBeforeCursor.toString() : "";
@@ -1762,6 +1769,7 @@ public class LatinIME extends InputMethodService implements
                     // Defer new paragraph until cleanup completes
                     mPendingNewParagraph = true;
                 } else {
+                    mInputLogic.finishInput();
                     mInputLogic.mConnection.commitText("\n\n", 1);
                 }
             }
@@ -1849,6 +1857,12 @@ public class LatinIME extends InputMethodService implements
      * Handles capitalization adjustment and trailing space.
      * Uses batch edit to ensure atomic operation.
      *
+     * IMPORTANT: We must call mInputLogic.finishInput() before committing text
+     * through the connection directly. Without this, the InputLogic's WordComposer
+     * remains in a composing state while the connection's composing text is cleared
+     * by commitText(). This desync causes subsequent backspace presses to modify
+     * a phantom composing buffer instead of actually deleting text in the editor.
+     *
      * @param text The raw transcription text to insert
      */
     private void insertTranscriptionText(String text) {
@@ -1858,6 +1872,9 @@ public class LatinIME extends InputMethodService implements
         String adjustedText = adjustCapitalization(text);
         String textToInsert = ensureTrailingSpace(adjustedText);
         
+        // Reset InputLogic composing state before direct connection manipulation.
+        // This ensures the WordComposer is properly synchronized with the connection.
+        mInputLogic.finishInput();
         mInputLogic.mConnection.beginBatchEdit();
         mInputLogic.mConnection.commitText(textToInsert, 1);
         mInputLogic.mConnection.endBatchEdit();
@@ -1878,6 +1895,7 @@ public class LatinIME extends InputMethodService implements
         // Then process pending new paragraph
         if (mPendingNewParagraph) {
             mPendingNewParagraph = false;
+            mInputLogic.finishInput();
             mInputLogic.mConnection.commitText("\n\n", 1);
         }
     }
