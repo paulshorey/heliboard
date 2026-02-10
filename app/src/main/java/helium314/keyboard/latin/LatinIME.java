@@ -191,12 +191,9 @@ public class LatinIME extends InputMethodService implements
     private boolean mCleanupInProgress = false;
     private boolean mPendingNewParagraph = false;
     private final StringBuilder mPendingTranscription = new StringBuilder();
-    // Session tracking for graceful vs abrupt stop behavior.
-    // mVoiceSessionId is incremented on each new recording session and on abrupt cancel,
-    // used to invalidate stale cleanup callbacks from previous sessions.
+    // Voice session ID — incremented when a new recording starts and when recording is
+    // cancelled. Used to invalidate stale async cleanup callbacks from previous sessions.
     private int mVoiceSessionId = 0;
-    // When true, any incoming transcription results are discarded (set by abrupt cancel).
-    private boolean mVoiceInputDiscardResults = false;
 
     public static final class UIHandler extends LeakGuardHandlerWrapper<LatinIME> {
         private static final int MSG_UPDATE_SHIFT_STATE = 0;
@@ -1015,11 +1012,10 @@ public class LatinIME extends InputMethodService implements
     public void onWindowHidden() {
         super.onWindowHidden();
         Log.i(TAG, "onWindowHidden");
-        // Gracefully stop voice recording when the keyboard is hidden (e.g., user pressed Back,
-        // app dismissed the keyboard). The user didn't modify text, so allow any pending
-        // transcription to be flushed. This is important because onFinishInput is not always
-        // called reliably.
-        stopVoiceRecordingGracefully();
+        // Cancel voice recording when the keyboard is hidden (e.g., user pressed Back,
+        // app dismissed the keyboard). Important because onFinishInput is not always called
+        // reliably on all Android versions.
+        cancelVoiceRecordingAbruptly();
         final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
         if (mainKeyboardView != null) {
             mainKeyboardView.closing();
@@ -1630,46 +1626,23 @@ public class LatinIME extends InputMethodService implements
     }
 
     /**
-     * Gracefully stop voice recording. Used when the user did NOT modify text
-     * (e.g., keyboard hidden, input disconnected). Equivalent to pressing the mic button:
-     * recording stops, but any already-transcribed text pending insertion is flushed
-     * into the text field, and any in-flight cleanup is allowed to complete.
-     */
-    private void stopVoiceRecordingGracefully() {
-        if (mVoiceInputManager == null || mVoiceInputManager.isIdle()) return;
-        Log.i(TAG, "Gracefully stopping voice input");
-        mVoiceInputManager.stopRecording();
-        // Flush any pending transcription into the text field now.
-        // If a cleanup is in-flight, its find-and-replace will preserve this text
-        // (it appends anything added after the original paragraph).
-        if (mPendingTranscription.length() > 0) {
-            String pending = mPendingTranscription.toString();
-            mPendingTranscription.setLength(0);
-            insertTranscriptionText(pending);
-        }
-        if (mPendingNewParagraph) {
-            mPendingNewParagraph = false;
-            mInputLogic.mConnection.commitText("\n\n", 1);
-        }
-    }
-
-    /**
-     * Abruptly cancel voice recording. Used when the user modified text or moved the cursor.
-     * Everything is discarded: pending transcription, in-flight cleanup, queued results.
-     * The voice session ID is incremented so stale async callbacks are ignored.
+     * Cancel voice recording and discard all pending work. Called whenever voice input
+     * should stop: user typed, moved cursor, keyboard hidden, text field cleared, etc.
+     * Increments the voice session ID so any in-flight async cleanup callbacks are
+     * silently discarded when they return.
      */
     private void cancelVoiceRecordingAbruptly() {
         if (mVoiceInputManager == null || mVoiceInputManager.isIdle()) return;
-        Log.i(TAG, "Abruptly cancelling voice input — discarding all pending work");
-        mVoiceInputDiscardResults = true;
+        Log.i(TAG, "Cancelling voice input — discarding all pending work");
         mVoiceSessionId++;
         resetVoiceInputState();
         mVoiceInputManager.cancelRecording();
     }
 
     /**
-     * Convenience wrapper: abruptly cancel voice recording when the user performs
-     * an action that modifies text (typing, suggestion pick, glide, hw keyboard).
+     * Convenience wrapper: cancel voice recording when the user performs an action that
+     * indicates they want to interact with the text field manually (typing, suggestion
+     * pick, glide/swipe, hardware keyboard).
      */
     private void stopVoiceRecordingOnUserInput() {
         cancelVoiceRecordingAbruptly();
@@ -1713,9 +1686,8 @@ public class LatinIME extends InputMethodService implements
                         case RECORDING:
                             mSuggestionStripView.setVoiceInputState(VoiceState.RECORDING);
                             mKeyboardSwitcher.showToast("Listening...", false);
-                            // New recording session — reset stale state and accept results
+                            // New recording session — invalidate stale cleanup callbacks
                             mVoiceSessionId++;
-                            mVoiceInputDiscardResults = false;
                             resetVoiceInputState();
                             break;
                         case CONNECTING:
@@ -1727,12 +1699,7 @@ public class LatinIME extends InputMethodService implements
                             break;
                         case IDLE:
                             mSuggestionStripView.setVoiceInputState(VoiceState.IDLE);
-                            // For graceful stops: process any remaining pending items.
-                            // For abrupt cancels: pending state was already cleared by
-                            // cancelVoiceRecordingAbruptly(), so this is a no-op.
-                            if (!mCleanupInProgress) {
-                                processPendingVoiceInput();
-                            }
+                            resetVoiceInputState();
                             break;
                     }
                 }
@@ -1744,10 +1711,9 @@ public class LatinIME extends InputMethodService implements
                     return;
                 }
 
-                // Discard if voice input was abruptly cancelled (e.g., user typed or moved cursor).
-                // This catches late-arriving WebSocket messages queued before disconnect.
-                if (mVoiceInputDiscardResults) {
-                    Log.i(TAG, "Discarding transcription result — voice input was cancelled");
+                // Discard late-arriving WebSocket messages that were queued before disconnect.
+                if (mVoiceInputManager.isIdle()) {
+                    Log.i(TAG, "Discarding transcription result — voice input is idle");
                     return;
                 }
                 
