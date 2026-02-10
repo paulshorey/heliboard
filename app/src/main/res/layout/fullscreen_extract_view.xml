@@ -65,10 +65,13 @@
         android:layout_height="1dp"
         android:background="#FF0F3460" />
 
-    <!-- Custom text area for editing - this replaces the standard ExtractEditText.
-         The android:id must be @android:id/inputExtractEditText for the framework
-         to properly mirror text from the original field. However, we manage text
-         ourselves in fullscreen voice mode. -->
+    <!-- Custom text area for editing.
+         Voice transcription text is inserted programmatically.
+         The user can view and scroll the text, and use touch gestures
+         (select, copy, paste) to edit. Keyboard key presses continue to
+         flow through the InputConnection to the original field, so manual
+         keyboard editing is not directly supported in this view.
+         Text is committed back to the original field only when Submit is pressed. -->
     <EditText
         android:id="@+id/fullscreen_edit_text"
         android:layout_width="match_parent"
@@ -80,15 +83,15 @@
         android:background="#FF1A1A2E"
         android:textColor="#FFFFFFFF"
         android:textColorHint="#80FFFFFF"
-        android:hint="Start typing or use voice input..."
+        android:hint="Transcribed text will appear here..."
         android:textSize="16sp"
         android:lineSpacingMultiplier="1.3"
         android:padding="16dp"
         android:cursorVisible="true"
         android:textCursorDrawable="@null"
-        android:focusable="false"
-        android:focusableInTouchMode="false"
-        android:clickable="false"
-        android:longClickable="false" />
+        android:focusable="true"
+        android:focusableInTouchMode="true"
+        android:clickable="true"
+        android:longClickable="true" />
 
 </LinearLayout>
