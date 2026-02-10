@@ -174,17 +174,11 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
     }
 
     override fun onMoveDeletePointer(steps: Int) {
+        inputLogic.finishInput()
         val end = connection.expectedSelectionEnd
         val actualSteps = actualSteps(steps)
         val start = connection.expectedSelectionStart + actualSteps
         if (start > end) return
-        // Skip if the resulting selection is the same as the current state.
-        // This prevents unnecessary finishInput/setSelection calls that cause
-        // cursor jitter when the finger moves slightly on the delete key
-        // (e.g., rightward movement with no existing selection, or jittery movement
-        // that cancels out).
-        if (start == connection.expectedSelectionStart && end == connection.expectedSelectionEnd) return
-        inputLogic.finishInput()
         gestureMoveBackHaptics()
         connection.setSelection(start, end)
     }
@@ -209,16 +203,8 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
     }
 
     override fun onUpWithDeletePointerActive() {
-        // Always send a delete keypress when the delete key is released after swipe mode
-        // was activated. If a selection was created by the swipe, the delete will remove
-        // the selected text. If no selection exists (e.g., finger jittered without creating
-        // a meaningful selection), the delete acts as a normal backspace.
-        // This fixes the bug where slight finger movement on the delete key would
-        // activate swipe mode, cancel the key repeat timer, and then swallow the delete
-        // keypress entirely when no selection was created.
-        if (connection.hasSelection()) {
-            inputLogic.finishInput()
-        }
+        if (!connection.hasSelection()) return
+        inputLogic.finishInput()
         onCodeInput(KeyCode.DELETE, Constants.NOT_A_COORDINATE, Constants.NOT_A_COORDINATE, false)
     }
 
