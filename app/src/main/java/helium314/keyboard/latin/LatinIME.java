@@ -1073,19 +1073,34 @@ public class LatinIME extends InputMethodService implements
                     + ", cs=" + composingSpanStart + ", ce=" + composingSpanEnd);
         }
 
-        // Abruptly cancel voice recording when the user moves the cursor or the text field
-        // is cleared. We use isBelatedExpectedUpdate to distinguish user-initiated cursor
-        // changes from cursor changes caused by the keyboard's own text operations (e.g.,
-        // transcription insertion, cleanup replace). If the update is NOT a belated expected
-        // update, it means something external moved the cursor — either the user tapped in
-        // the text field, or the app cleared/modified the text (e.g., after sending a message).
+        // Abruptly cancel voice recording when the user moves the cursor away from the end
+        // of the text, or when the text field is cleared. We use isBelatedExpectedUpdate to
+        // distinguish user-initiated cursor changes from cursor changes caused by the
+        // keyboard's own text operations (e.g., transcription insertion, cleanup replace).
         if (mVoiceInputManager != null && !mVoiceInputManager.isIdle()
                 && (oldSelStart != newSelStart || oldSelEnd != newSelEnd)
                 && !mInputLogic.mConnection.isBelatedExpectedUpdate(
                         oldSelStart, newSelStart, oldSelEnd, newSelEnd,
                         composingSpanStart, composingSpanEnd)) {
-            Log.i(TAG, "User cursor movement detected while recording — cancelling voice input");
-            cancelVoiceRecordingAbruptly();
+            // Check if the cursor ended up at the end of existing text.
+            // If so, don't cancel — the user may have tapped the text field but the
+            // cursor is still where transcription inserts text, so dictation continues.
+            // Exception: if the text field is empty (was cleared, e.g. message sent),
+            // still cancel because the user is done with that field.
+            final CharSequence afterCursor = mInputLogic.mConnection.getTextAfterCursor(1, 0);
+            final boolean cursorAtEnd = (afterCursor == null || afterCursor.length() == 0);
+            if (cursorAtEnd) {
+                final CharSequence beforeCursor = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
+                final boolean fieldEmpty = (beforeCursor == null || beforeCursor.length() == 0);
+                if (fieldEmpty) {
+                    Log.i(TAG, "Text field cleared while recording — cancelling voice input");
+                    cancelVoiceRecordingAbruptly();
+                }
+                // else: cursor at end of existing text — continue recording
+            } else {
+                Log.i(TAG, "Cursor moved away from end while recording — cancelling voice input");
+                cancelVoiceRecordingAbruptly();
+            }
         }
 
         // This call happens whether our view is displayed or not, but if it's not then we should
