@@ -191,6 +191,9 @@ public class LatinIME extends InputMethodService implements
     private boolean mCleanupInProgress = false;
     private boolean mPendingNewParagraph = false;
     private final StringBuilder mPendingTranscription = new StringBuilder();
+    // Voice session ID — incremented when a new recording starts and when recording is
+    // cancelled. Used to invalidate stale async cleanup callbacks from previous sessions.
+    private int mVoiceSessionId = 0;
 
     public static final class UIHandler extends LeakGuardHandlerWrapper<LatinIME> {
         private static final int MSG_UPDATE_SHIFT_STATE = 0;
@@ -1009,6 +1012,10 @@ public class LatinIME extends InputMethodService implements
     public void onWindowHidden() {
         super.onWindowHidden();
         Log.i(TAG, "onWindowHidden");
+        // Cancel voice recording when the keyboard is hidden (e.g., user pressed Back,
+        // app dismissed the keyboard). Important because onFinishInput is not always called
+        // reliably on all Android versions.
+        cancelVoiceRecordingAbruptly();
         final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
         if (mainKeyboardView != null) {
             mainKeyboardView.closing();
@@ -1019,6 +1026,11 @@ public class LatinIME extends InputMethodService implements
     void onFinishInputInternal() {
         super.onFinishInput();
         Log.i(TAG, "onFinishInput");
+
+        // Abruptly cancel voice recording when disconnecting from the text field (e.g., user
+        // navigated away, app was backgrounded, or the text field was removed).
+        // The InputConnection is about to become invalid, so we cannot flush pending text.
+        cancelVoiceRecordingAbruptly();
 
         mDictionaryFacilitator.onFinishInput();
         final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
@@ -1055,6 +1067,36 @@ public class LatinIME extends InputMethodService implements
             Log.i(TAG, "onUpdateSelection: oss=" + oldSelStart + ", ose=" + oldSelEnd
                     + ", nss=" + newSelStart + ", nse=" + newSelEnd
                     + ", cs=" + composingSpanStart + ", ce=" + composingSpanEnd);
+        }
+
+        // Abruptly cancel voice recording when the user moves the cursor away from the end
+        // of the text, or when the text field is cleared. We use isBelatedExpectedUpdate to
+        // distinguish user-initiated cursor changes from cursor changes caused by the
+        // keyboard's own text operations (e.g., transcription insertion, cleanup replace).
+        if (mVoiceInputManager != null && !mVoiceInputManager.isIdle()
+                && (oldSelStart != newSelStart || oldSelEnd != newSelEnd)
+                && !mInputLogic.mConnection.isBelatedExpectedUpdate(
+                        oldSelStart, newSelStart, oldSelEnd, newSelEnd,
+                        composingSpanStart, composingSpanEnd)) {
+            // Check if the cursor ended up at the end of existing text.
+            // If so, don't cancel — the user may have tapped the text field but the
+            // cursor is still where transcription inserts text, so dictation continues.
+            // Exception: if the text field is empty (was cleared, e.g. message sent),
+            // still cancel because the user is done with that field.
+            final CharSequence afterCursor = mInputLogic.mConnection.getTextAfterCursor(1, 0);
+            final boolean cursorAtEnd = (afterCursor == null || afterCursor.length() == 0);
+            if (cursorAtEnd) {
+                final CharSequence beforeCursor = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
+                final boolean fieldEmpty = (beforeCursor == null || beforeCursor.length() == 0);
+                if (fieldEmpty) {
+                    Log.i(TAG, "Text field cleared while recording — cancelling voice input");
+                    cancelVoiceRecordingAbruptly();
+                }
+                // else: cursor at end of existing text — continue recording
+            } else {
+                Log.i(TAG, "Cursor moved away from end while recording — cancelling voice input");
+                cancelVoiceRecordingAbruptly();
+            }
         }
 
         // This call happens whether our view is displayed or not, but if it's not then we should
@@ -1392,6 +1434,9 @@ public class LatinIME extends InputMethodService implements
         if (KeyCode.VOICE_INPUT == event.getKeyCode()) {
             mRichImm.switchToShortcutIme(this);
         }
+        // Stop voice recording if user starts typing on the keyboard.
+        // This indicates the user wants to manually type instead of dictating.
+        stopVoiceRecordingOnUserInput();
         final InputTransaction completeInputTransaction =
                 mInputLogic.onCodeInput(mSettings.getCurrent(), event,
                         mKeyboardSwitcher.getKeyboardShiftMode(),
@@ -1401,6 +1446,8 @@ public class LatinIME extends InputMethodService implements
     }
 
     public void onTextInput(final String rawText) {
+        // Stop voice recording if user starts typing on the keyboard.
+        stopVoiceRecordingOnUserInput();
         // TODO: have the keyboard pass the correct key code when we need it.
         final Event event = Event.createSoftwareTextEvent(rawText, KeyCode.MULTIPLE_CODE_POINTS, null);
         final InputTransaction completeInputTransaction =
@@ -1412,6 +1459,8 @@ public class LatinIME extends InputMethodService implements
     }
 
     public void onStartBatchInput() {
+        // Stop voice recording if user starts glide/swipe typing.
+        stopVoiceRecordingOnUserInput();
         mInputLogic.onStartBatchInput(mSettings.getCurrent(), mKeyboardSwitcher, mHandler);
         mGestureConsumer.onGestureStarted(mRichImm.getCurrentSubtypeLocale(), mKeyboardSwitcher.getKeyboard());
     }
@@ -1514,6 +1563,8 @@ public class LatinIME extends InputMethodService implements
     // interface
     @Override
     public void pickSuggestionManually(final SuggestedWordInfo suggestionInfo) {
+        // Stop voice recording if user picks a suggestion from the strip.
+        stopVoiceRecordingOnUserInput();
         final InputTransaction completeInputTransaction = mInputLogic.onPickSuggestionManually(
                 mSettings.getCurrent(), suggestionInfo,
                 mKeyboardSwitcher.getKeyboardShiftMode(),
@@ -1574,6 +1625,29 @@ public class LatinIME extends InputMethodService implements
         mHandler.postResumeSuggestions(false);
     }
 
+    /**
+     * Cancel voice recording and discard all pending work. Called whenever voice input
+     * should stop: user typed, moved cursor, keyboard hidden, text field cleared, etc.
+     * Increments the voice session ID so any in-flight async cleanup callbacks are
+     * silently discarded when they return.
+     */
+    private void cancelVoiceRecordingAbruptly() {
+        if (mVoiceInputManager == null || mVoiceInputManager.isIdle()) return;
+        Log.i(TAG, "Cancelling voice input — discarding all pending work");
+        mVoiceSessionId++;
+        resetVoiceInputState();
+        mVoiceInputManager.cancelRecording();
+    }
+
+    /**
+     * Convenience wrapper: cancel voice recording when the user performs an action that
+     * indicates they want to interact with the text field manually (typing, suggestion
+     * pick, glide/swipe, hardware keyboard).
+     */
+    private void stopVoiceRecordingOnUserInput() {
+        cancelVoiceRecordingAbruptly();
+    }
+
     @Override
     public void onVoiceInputClicked() {
         if (mVoiceInputManager != null) {
@@ -1583,9 +1657,7 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public void onVoiceCancelClicked() {
-        if (mVoiceInputManager != null) {
-            mVoiceInputManager.cancelRecording();
-        }
+        cancelVoiceRecordingAbruptly();
     }
 
     @Override
@@ -1614,6 +1686,9 @@ public class LatinIME extends InputMethodService implements
                         case RECORDING:
                             mSuggestionStripView.setVoiceInputState(VoiceState.RECORDING);
                             mKeyboardSwitcher.showToast("Listening...", false);
+                            // New recording session — invalidate stale cleanup callbacks
+                            mVoiceSessionId++;
+                            resetVoiceInputState();
                             break;
                         case CONNECTING:
                             mSuggestionStripView.setVoiceInputState(VoiceState.CONNECTING);
@@ -1624,7 +1699,6 @@ public class LatinIME extends InputMethodService implements
                             break;
                         case IDLE:
                             mSuggestionStripView.setVoiceInputState(VoiceState.IDLE);
-                            // Reset all voice input state when session ends
                             resetVoiceInputState();
                             break;
                     }
@@ -1634,6 +1708,12 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onTranscriptionResult(@NonNull String text) {
                 if (text == null || text.isEmpty()) {
+                    return;
+                }
+
+                // Discard late-arriving WebSocket messages that were queued before disconnect.
+                if (mVoiceInputManager.isIdle()) {
+                    Log.i(TAG, "Discarding transcription result — voice input is idle");
                     return;
                 }
                 
@@ -1704,11 +1784,31 @@ public class LatinIME extends InputMethodService implements
                 // Mark cleanup as in progress to prevent race conditions with new paragraph
                 mCleanupInProgress = true;
                 
+                // Capture session ID so we can discard stale callbacks if the session
+                // was cancelled or a new session started before cleanup completes.
+                final int sessionId = mVoiceSessionId;
+                
                 // Send current paragraph to Claude for cleanup
                 final String prompt = cleanupPrompt;
                 mTextCleanupClient.cleanupText(anthropicApiKey, prompt, "", originalParagraph, new TextCleanupClient.CleanupCallback() {
                     @Override
                     public void onCleanupComplete(String cleanedText) {
+                        // Discard if the voice session has changed (abrupt cancel or new session)
+                        if (sessionId != mVoiceSessionId) {
+                            Log.i(TAG, "Cleanup result discarded — voice session changed");
+                            return;
+                        }
+
+                        // Reset InputLogic composing state before direct connection manipulation.
+                        // Without this, the WordComposer can remain in a stale composing state
+                        // after commitText clears the connection's composing text, causing
+                        // subsequent backspace presses to modify a phantom composing buffer
+                        // instead of actually deleting text in the editor.
+                        mInputLogic.finishInput();
+
+                        // Strip invisible characters from the cleanup API response
+                        String sanitizedCleanedText = stripInvisibleChars(cleanedText);
+                        
                         // Find and replace the original paragraph
                         CharSequence currentTextBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(4000, 0);
                         String currentText = currentTextBeforeCursor != null ? currentTextBeforeCursor.toString() : "";
@@ -1725,7 +1825,7 @@ public class LatinIME extends InputMethodService implements
                             int charsToDelete = currentText.length() - originalPos;
                             
                             // Post-process cleaned text and combine with any new text
-                            String processedText = ensureTrailingSpace(cleanedText);
+                            String processedText = ensureTrailingSpace(sanitizedCleanedText);
                             String finalText = processedText + textAfterOriginal;
                             
                             // Atomic delete+commit operation
@@ -1745,6 +1845,12 @@ public class LatinIME extends InputMethodService implements
                     
                     @Override
                     public void onCleanupError(String error) {
+                        // Discard if the voice session has changed
+                        if (sessionId != mVoiceSessionId) {
+                            Log.i(TAG, "Cleanup error discarded — voice session changed");
+                            return;
+                        }
+                        
                         // On error, leave the text as-is (already inserted)
                         Log.e(TAG, "Cleanup error: " + error);
                         
@@ -1762,6 +1868,7 @@ public class LatinIME extends InputMethodService implements
                     // Defer new paragraph until cleanup completes
                     mPendingNewParagraph = true;
                 } else {
+                    mInputLogic.finishInput();
                     mInputLogic.mConnection.commitText("\n\n", 1);
                 }
             }
@@ -1831,6 +1938,47 @@ public class LatinIME extends InputMethodService implements
     }
 
     /**
+     * Strip invisible and zero-width Unicode characters from text.
+     *
+     * The OpenAI Realtime transcription API and the Claude cleanup API can return
+     * invisible Unicode characters such as zero-width spaces (U+200B), word joiners
+     * (U+2060), byte order marks (U+FEFF), direction marks (U+200E/U+200F), and
+     * others. These characters are inserted into the text field but are invisible
+     * and have no width, making it appear that backspace "doesn't work" because
+     * the user must delete each invisible character individually before reaching
+     * the visible text behind them.
+     *
+     * @param text The text to sanitize
+     * @return The text with invisible characters removed
+     */
+    private String stripInvisibleChars(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+        // Remove characters that are invisible / zero-width in typical text rendering:
+        // U+200B  Zero-width space
+        // U+200C  Zero-width non-joiner
+        // U+200D  Zero-width joiner
+        // U+200E  Left-to-right mark
+        // U+200F  Right-to-left mark
+        // U+2060  Word joiner
+        // U+2061  Function application (invisible math operator)
+        // U+2062  Invisible times
+        // U+2063  Invisible separator
+        // U+2064  Invisible plus
+        // U+FEFF  Zero-width no-break space (byte order mark)
+        // U+00AD  Soft hyphen
+        // U+034F  Combining grapheme joiner
+        // U+061C  Arabic letter mark
+        // U+115F  Hangul choseong filler
+        // U+1160  Hangul jungseong filler
+        // U+17B4  Khmer vowel inherent AQ
+        // U+17B5  Khmer vowel inherent AA
+        // U+180E  Mongolian vowel separator
+        return text.replaceAll("[\\u200B\\u200C\\u200D\\u200E\\u200F\\u2060-\\u2064\\uFEFF\\u00AD\\u034F\\u061C\\u115F\\u1160\\u17B4\\u17B5\\u180E]", "");
+    }
+
+    /**
      * Ensure the text ends with a trailing space.
      * This ensures proper spacing after transcribed text.
      */
@@ -1849,15 +1997,28 @@ public class LatinIME extends InputMethodService implements
      * Handles capitalization adjustment and trailing space.
      * Uses batch edit to ensure atomic operation.
      *
+     * IMPORTANT: We must call mInputLogic.finishInput() before committing text
+     * through the connection directly. Without this, the InputLogic's WordComposer
+     * remains in a composing state while the connection's composing text is cleared
+     * by commitText(). This desync causes subsequent backspace presses to modify
+     * a phantom composing buffer instead of actually deleting text in the editor.
+     *
      * @param text The raw transcription text to insert
      */
     private void insertTranscriptionText(String text) {
         if (text == null || text.isEmpty()) {
             return;
         }
-        String adjustedText = adjustCapitalization(text);
+        String sanitized = stripInvisibleChars(text);
+        if (sanitized.isEmpty()) {
+            return;
+        }
+        String adjustedText = adjustCapitalization(sanitized);
         String textToInsert = ensureTrailingSpace(adjustedText);
         
+        // Reset InputLogic composing state before direct connection manipulation.
+        // This ensures the WordComposer is properly synchronized with the connection.
+        mInputLogic.finishInput();
         mInputLogic.mConnection.beginBatchEdit();
         mInputLogic.mConnection.commitText(textToInsert, 1);
         mInputLogic.mConnection.endBatchEdit();
@@ -1878,6 +2039,7 @@ public class LatinIME extends InputMethodService implements
         // Then process pending new paragraph
         if (mPendingNewParagraph) {
             mPendingNewParagraph = false;
+            mInputLogic.finishInput();
             mInputLogic.mConnection.commitText("\n\n", 1);
         }
     }
@@ -1974,6 +2136,8 @@ public class LatinIME extends InputMethodService implements
     // Hooks for hardware keyboard
     @Override
     public boolean onKeyDown(final int keyCode, final KeyEvent keyEvent) {
+        // Stop voice recording if user types on a hardware/Bluetooth keyboard.
+        stopVoiceRecordingOnUserInput();
         if (mKeyboardActionListener.onKeyDown(keyCode, keyEvent))
             return true;
         return super.onKeyDown(keyCode, keyEvent);
