@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Custom fullscreen extract view for voice input mode.
+    Replaces the default extract view when keyboard enters fullscreen mode.
+
+    Uses android.inputmethodservice.ExtractEditText with the framework ID
+    @android:id/inputExtractEditText so the keyboard input naturally flows
+    into this text area (the framework routes InputConnection through it).
+
+    The top toolbar has three buttons:
+    - Back:   commits edited text to the original field, exits fullscreen
+              back to normal split keyboard (keyboard stays open)
+    - Submit: commits edited text to the original field, then hides the
+              keyboard completely
+    - Close:  discards edits (restores original text), then hides the
+              keyboard completely
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#FF1A1A2E">
+
+    <!-- Top toolbar with fullscreen action buttons -->
+    <LinearLayout
+        android:id="@+id/fullscreen_toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:background="#FF16213E">
+
+        <!-- Back: commit text, return to normal keyboard -->
+        <Button
+            android:id="@+id/fullscreen_back_button"
+            android:layout_width="0dp"
+            android:layout_height="34dp"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:text="Back"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFFFF"
+            android:textSize="13sp"
+            android:background="#FF0F3460" />
+
+        <!-- Submit: commit text, close keyboard -->
+        <Button
+            android:id="@+id/fullscreen_submit_button"
+            android:layout_width="0dp"
+            android:layout_height="34dp"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:text="Submit"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:background="#FF1B6B2A" />
+
+        <!-- Close: discard edits, close keyboard -->
+        <Button
+            android:id="@+id/fullscreen_close_button"
+            android:layout_width="0dp"
+            android:layout_height="34dp"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:text="Close"
+            android:textAllCaps="false"
+            android:textColor="#FFAAAAAA"
+            android:textSize="13sp"
+            android:background="#FF2A2A3E" />
+    </LinearLayout>
+
+    <!-- Divider -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#FF0F3460" />
+
+    <!-- ExtractEditText with the framework ID so keyboard input flows here.
+         The framework mirrors this text area with the original field's
+         InputConnection, so edits here update the original field in real-time. -->
+    <android.inputmethodservice.ExtractEditText
+        android:id="@android:id/inputExtractEditText"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="top|start"
+        android:inputType="textMultiLine"
+        android:scrollbars="vertical"
+        android:background="#FF1A1A2E"
+        android:textColor="#FFFFFFFF"
+        android:textColorHint="#80FFFFFF"
+        android:hint="Start typing or use voice input..."
+        android:textSize="16sp"
+        android:lineSpacingMultiplier="1.3"
+        android:padding="16dp"
+        android:cursorVisible="true"
+        android:textCursorDrawable="@null" />
+
+    <!-- The framework also looks for an optional inputExtractAction button.
+         We hide it since we have our own toolbar buttons above. -->
+    <Button
+        android:id="@android:id/inputExtractAction"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone" />
+
+</LinearLayout>
