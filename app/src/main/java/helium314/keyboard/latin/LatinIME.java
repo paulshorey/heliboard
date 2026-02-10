@@ -1361,8 +1361,10 @@ public class LatinIME extends InputMethodService implements
         }
 
         // Fallback: try to get text before and after cursor
-        final CharSequence before = ic.getTextBeforeCursor(Integer.MAX_VALUE, 0);
-        final CharSequence after = ic.getTextAfterCursor(Integer.MAX_VALUE, 0);
+        // Use a large but reasonable limit to avoid potential OOM in some apps
+        final int FALLBACK_MAX_CHARS = 100000;
+        final CharSequence before = ic.getTextBeforeCursor(FALLBACK_MAX_CHARS, 0);
+        final CharSequence after = ic.getTextAfterCursor(FALLBACK_MAX_CHARS, 0);
         final StringBuilder sb = new StringBuilder();
         if (before != null) sb.append(before);
         if (after != null) sb.append(after);
@@ -1380,13 +1382,36 @@ public class LatinIME extends InputMethodService implements
                 ? mFullscreenEditText.getText().toString()
                 : "";
 
+        // Stop voice recording if still active
+        if (mVoiceInputManager != null && !mVoiceInputManager.isIdle()) {
+            mVoiceInputManager.stopRecording();
+        }
+
         final android.view.inputmethod.InputConnection ic = getCurrentInputConnection();
         if (ic != null) {
             ic.beginBatchEdit();
-            // Select all existing text in the original field and replace it
-            ic.performContextMenuAction(android.R.id.selectAll);
-            ic.commitText(newText, 1);
-            ic.endBatchEdit();
+            try {
+                // Select all text in the original field using setSelection.
+                // This is more reliable than performContextMenuAction(selectAll)
+                // which some apps don't implement correctly.
+                // First, read current text length to know the extent.
+                final android.view.inputmethod.ExtractedTextRequest req =
+                        new android.view.inputmethod.ExtractedTextRequest();
+                req.hintMaxChars = Integer.MAX_VALUE;
+                req.token = 0;
+                final android.view.inputmethod.ExtractedText et = ic.getExtractedText(req, 0);
+
+                if (et != null && et.text != null) {
+                    final int textLength = et.text.length();
+                    // Select all text
+                    ic.setSelection(0, textLength);
+                }
+
+                // Replace selection (or just commit if selection failed)
+                ic.commitText(newText, 1);
+            } finally {
+                ic.endBatchEdit();
+            }
         }
 
         exitFullscreenMode();
@@ -1395,10 +1420,11 @@ public class LatinIME extends InputMethodService implements
     /**
      * Cancel the fullscreen mode without committing changes.
      * The original text field is left unchanged.
+     * Stops voice recording if active.
      */
     private void cancelFullscreenMode() {
         Log.i(TAG, "Cancelling fullscreen mode");
-        // If voice input is active, stop it
+        // Stop voice recording if still active
         if (mVoiceInputManager != null && !mVoiceInputManager.isIdle()) {
             mVoiceInputManager.cancelRecording();
         }
@@ -1409,19 +1435,30 @@ public class LatinIME extends InputMethodService implements
      * Exit fullscreen extract view mode and return to normal keyboard display.
      */
     private void exitFullscreenMode() {
+        if (!mForceFullscreenMode) {
+            return; // Already exited, guard against double-call
+        }
         Log.i(TAG, "Exiting fullscreen mode");
         mForceFullscreenMode = false;
         mFullscreenExtractView = null;
         mFullscreenEditText = null;
         mOriginalFieldText = "";
 
-        // Restore the default extract view
-        View defaultExtractView = super.onCreateExtractTextView();
-        if (defaultExtractView != null) {
-            setExtractView(defaultExtractView);
+        // Restore the default extract view so that if the framework enters fullscreen
+        // mode later (e.g., landscape rotation), it uses the standard extract layout
+        // instead of our stale custom one. setExtractView() properly updates the
+        // framework's internal mExtractView and mExtractEditText references.
+        try {
+            View defaultExtractView = super.onCreateExtractTextView();
+            if (defaultExtractView != null) {
+                setExtractView(defaultExtractView);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to restore default extract view: " + e.getMessage());
         }
 
-        // Re-evaluate fullscreen mode (will now return false since flag is cleared)
+        // Re-evaluate fullscreen mode (will now return false since flag is cleared).
+        // The framework will hide the extract area and restore normal keyboard layout.
         updateFullscreenMode();
     }
 
@@ -1754,12 +1791,13 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public void onVoiceCancelClicked() {
-        if (mVoiceInputManager != null) {
+        // Stop voice recording first
+        if (mVoiceInputManager != null && !mVoiceInputManager.isIdle()) {
             mVoiceInputManager.cancelRecording();
         }
-        // If in fullscreen mode, cancel it too
+        // Then exit fullscreen mode without committing
         if (mForceFullscreenMode) {
-            cancelFullscreenMode();
+            exitFullscreenMode();
         }
     }
 
@@ -1816,10 +1854,12 @@ public class LatinIME extends InputMethodService implements
                 if (mForceFullscreenMode && mFullscreenEditText != null) {
                     mHandler.post(() -> {
                         if (mFullscreenEditText != null) {
-                            String adjustedText = adjustCapitalization(text);
-                            String textToInsert = ensureTrailingSpace(adjustedText);
+                            // Use the fullscreen EditText content for capitalization context
+                            // instead of the original field's InputConnection
                             int cursorPos = mFullscreenEditText.getSelectionEnd();
                             if (cursorPos < 0) cursorPos = mFullscreenEditText.getText().length();
+                            String adjustedText = adjustCapitalizationForFullscreen(text, cursorPos);
+                            String textToInsert = ensureTrailingSpace(adjustedText);
                             mFullscreenEditText.getText().insert(cursorPos, textToInsert);
                         }
                     });
@@ -1990,6 +2030,54 @@ public class LatinIME extends InputMethodService implements
                 mKeyboardSwitcher.showToast("Microphone permission required. Please grant permission in Settings.", true);
             }
         });
+    }
+
+    /**
+     * Adjust capitalization for fullscreen mode, using the EditText content
+     * instead of the InputConnection.
+     * @param text The transcription text to adjust
+     * @param cursorPos The current cursor position in the fullscreen EditText
+     */
+    private String adjustCapitalizationForFullscreen(String text, int cursorPos) {
+        if (text == null || text.isEmpty() || mFullscreenEditText == null) {
+            return text;
+        }
+
+        CharSequence editable = mFullscreenEditText.getText();
+        if (editable == null || cursorPos <= 0) {
+            return text; // At start of text, keep original capitalization
+        }
+
+        // Get up to 5 chars before cursor
+        int start = Math.max(0, cursorPos - 5);
+        String beforeText = editable.subSequence(start, cursorPos).toString();
+
+        // Find the last non-space character
+        char lastChar = ' ';
+        for (int i = beforeText.length() - 1; i >= 0; i--) {
+            char c = beforeText.charAt(i);
+            if (c != ' ') {
+                lastChar = c;
+                break;
+            }
+        }
+
+        // Check if last character is sentence-ending punctuation
+        boolean isSentenceEnd = (lastChar == '.' || lastChar == '!' || lastChar == '?' ||
+                                  lastChar == '\n' || lastChar == ' ');
+
+        // If previous text ends a sentence, keep original capitalization
+        if (isSentenceEnd) {
+            return text;
+        }
+
+        // Otherwise, lowercase the first letter if it's uppercase
+        char firstChar = text.charAt(0);
+        if (Character.isUpperCase(firstChar)) {
+            return Character.toLowerCase(firstChar) + text.substring(1);
+        }
+
+        return text;
     }
 
     /**
