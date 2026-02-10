@@ -46,7 +46,7 @@ class TextCleanupClient {
     /**
      * Clean up transcribed text using GPT.
      * 
-     * @param apiKey OpenAI API key
+     * @param apiKey Anthropic API key
      * @param systemPrompt The system prompt for cleanup instructions
      * @param existingContext Text from last newline to cursor (context)
      * @param newText Newly transcribed text to append
