@@ -56,9 +56,9 @@ fun TranscriptionScreen(
     if ((b?.value ?: 0) < 0)
         Log.v("irrelevant", "stupid way to trigger recomposition on preference change")
 
-    // Load API keys and cleanup prompt state
-    var openaiApiKey by remember {
-        mutableStateOf(prefs.getString(Settings.PREF_WHISPER_API_KEY, Defaults.PREF_WHISPER_API_KEY) ?: "")
+    // API keys
+    var deepgramApiKey by remember {
+        mutableStateOf(prefs.getString(Settings.PREF_DEEPGRAM_API_KEY, Defaults.PREF_DEEPGRAM_API_KEY) ?: "")
     }
     var anthropicApiKey by remember {
         mutableStateOf(prefs.getString(Settings.PREF_ANTHROPIC_API_KEY, Defaults.PREF_ANTHROPIC_API_KEY) ?: "")
@@ -67,15 +67,15 @@ fun TranscriptionScreen(
         mutableStateOf(prefs.getString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT) ?: Defaults.PREF_CLEANUP_PROMPT)
     }
 
-    // Load prompt state
+    // Prompt presets
     var selectedIndex by remember {
-        mutableIntStateOf(prefs.getInt(Settings.PREF_WHISPER_PROMPT_SELECTED, Defaults.PREF_WHISPER_PROMPT_SELECTED))
+        mutableIntStateOf(prefs.getInt(Settings.PREF_TRANSCRIPTION_PROMPT_SELECTED, Defaults.PREF_TRANSCRIPTION_PROMPT_SELECTED))
     }
 
     val prompts = remember {
         mutableStateListOf<String>().apply {
-            for (i in 0 until Settings.WHISPER_PROMPT_COUNT) {
-                val key = Settings.PREF_WHISPER_PROMPT_PREFIX + i
+            for (i in 0 until Settings.TRANSCRIPTION_PROMPT_COUNT) {
+                val key = Settings.PREF_TRANSCRIPTION_PROMPT_PREFIX + i
                 val defaultValue = Defaults.PREF_TRANSCRIBE_PROMPTS.getOrElse(i) { "" }
                 add(prefs.getString(key, defaultValue) ?: defaultValue)
             }
@@ -93,19 +93,19 @@ fun TranscriptionScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(innerPadding)
             ) {
-                // OpenAI API Key - inline editable
+                // Deepgram API Key
                 InlineTextField(
-                    label = stringResource(R.string.whisper_api_key_title),
-                    value = openaiApiKey,
+                    label = stringResource(R.string.deepgram_api_key_title),
+                    value = deepgramApiKey,
                     onValueChange = { newValue ->
-                        openaiApiKey = newValue
-                        prefs.edit { putString(Settings.PREF_WHISPER_API_KEY, newValue) }
+                        deepgramApiKey = newValue
+                        prefs.edit { putString(Settings.PREF_DEEPGRAM_API_KEY, newValue) }
                     },
                     minLines = 1,
                     maxLines = 2
                 )
 
-                // Anthropic API Key - inline editable
+                // Anthropic API Key
                 InlineTextField(
                     label = stringResource(R.string.anthropic_api_key_title),
                     value = anthropicApiKey,
@@ -117,7 +117,7 @@ fun TranscriptionScreen(
                     maxLines = 2
                 )
 
-                // Cleanup prompt - inline editable
+                // Cleanup prompt
                 InlineTextField(
                     label = stringResource(R.string.cleanup_prompt_title),
                     value = cleanupPrompt,
@@ -129,18 +129,18 @@ fun TranscriptionScreen(
                     maxLines = 10
                 )
 
-                // Prompt presets - inline editable
-                for (i in 0 until Settings.WHISPER_PROMPT_COUNT) {
+                // Prompt presets
+                for (i in 0 until Settings.TRANSCRIPTION_PROMPT_COUNT) {
                     PromptPresetItem(
                         prompt = prompts[i],
                         isSelected = selectedIndex == i,
                         onSelected = {
                             selectedIndex = i
-                            prefs.edit { putInt(Settings.PREF_WHISPER_PROMPT_SELECTED, i) }
+                            prefs.edit { putInt(Settings.PREF_TRANSCRIPTION_PROMPT_SELECTED, i) }
                         },
                         onPromptChanged = { newPrompt ->
                             prompts[i] = newPrompt
-                            val key = Settings.PREF_WHISPER_PROMPT_PREFIX + i
+                            val key = Settings.PREF_TRANSCRIPTION_PROMPT_PREFIX + i
                             prefs.edit { putString(key, newPrompt) }
                         }
                     )
@@ -150,7 +150,7 @@ fun TranscriptionScreen(
     }
 }
 
-// Settings are now handled inline in the screen, so this returns empty list
+// Settings are handled inline in the screen
 fun createTranscriptionSettings(context: Context) = emptyList<Setting>()
 
 @Composable
@@ -194,7 +194,6 @@ private fun PromptPresetItem(
     Column(
         modifier = Modifier.fillMaxWidth()
     ) {
-        // Radio button on its own line
         RadioButton(
             selected = isSelected,
             onClick = onSelected,
@@ -207,7 +206,6 @@ private fun PromptPresetItem(
                 .padding(start = 4.dp, top = 8.dp, bottom = 0.dp)
         )
 
-        // Text area immediately below, edge to edge
         OutlinedTextField(
             value = prompt,
             onValueChange = onPromptChanged,

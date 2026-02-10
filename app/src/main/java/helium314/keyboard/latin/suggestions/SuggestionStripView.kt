@@ -595,7 +595,6 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
      */
     enum class VoiceState {
         IDLE,       // Not doing anything
-        CONNECTING, // Connecting to API
         RECORDING,  // Actively recording
         PAUSED      // Recording paused
     }
@@ -633,12 +632,6 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
                     voiceInputKey.setColorFilter(Color.RED)
                     voiceCancelKey.setColorFilter(Color.RED)
                     voicePauseKey.setColorFilter(Color.RED)
-                }
-                VoiceState.CONNECTING -> {
-                    // Connecting state: show orange/amber tint
-                    voiceInputKey.setColorFilter(Color.parseColor("#FFA500"))
-                    voiceCancelKey.setColorFilter(Color.parseColor("#FFA500"))
-                    voicePauseKey.setColorFilter(Color.parseColor("#FFA500"))
                 }
                 VoiceState.IDLE -> {
                     // Idle state: restore normal color
