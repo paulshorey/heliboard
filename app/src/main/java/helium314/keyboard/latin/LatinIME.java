@@ -1064,22 +1064,19 @@ public class LatinIME extends InputMethodService implements
                     + ", cs=" + composingSpanStart + ", ce=" + composingSpanEnd);
         }
 
-        // Detect text field clearing while voice recording is active.
-        // When a user submits text (e.g., sends a message), the app clears the text field,
-        // which causes the cursor to jump to position (0,0). We detect this and stop recording
-        // since the user is done typing in that field.
+        // Stop voice recording when the user moves the cursor or the text field is cleared.
+        // We use isBelatedExpectedUpdate to distinguish user-initiated cursor changes from
+        // cursor changes caused by the keyboard's own text operations (e.g., transcription
+        // insertion, cleanup replace). If the update is NOT a belated expected update,
+        // it means something external moved the cursor — either the user tapped in the text
+        // field, or the app cleared/modified the text (e.g., after sending a message).
         if (mVoiceInputManager != null && !mVoiceInputManager.isIdle()
-                && newSelStart == 0 && newSelEnd == 0
-                && (oldSelStart > 0 || oldSelEnd > 0)) {
-            // Cursor jumped to beginning — check if the text field is actually empty
-            final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
-            final CharSequence after = mInputLogic.mConnection.getTextAfterCursor(1, 0);
-            final boolean isEmpty = (before == null || before.length() == 0)
-                    && (after == null || after.length() == 0);
-            if (isEmpty) {
-                Log.i(TAG, "Text field cleared while recording — stopping voice input");
-                mVoiceInputManager.stopRecording();
-            }
+                && (oldSelStart != newSelStart || oldSelEnd != newSelEnd)
+                && !mInputLogic.mConnection.isBelatedExpectedUpdate(
+                        oldSelStart, newSelStart, oldSelEnd, newSelEnd,
+                        composingSpanStart, composingSpanEnd)) {
+            Log.i(TAG, "User cursor movement detected while recording — stopping voice input");
+            mVoiceInputManager.stopRecording();
         }
 
         // This call happens whether our view is displayed or not, but if it's not then we should
@@ -1417,6 +1414,9 @@ public class LatinIME extends InputMethodService implements
         if (KeyCode.VOICE_INPUT == event.getKeyCode()) {
             mRichImm.switchToShortcutIme(this);
         }
+        // Stop voice recording if user starts typing on the keyboard.
+        // This indicates the user wants to manually type instead of dictating.
+        stopVoiceRecordingOnUserInput();
         final InputTransaction completeInputTransaction =
                 mInputLogic.onCodeInput(mSettings.getCurrent(), event,
                         mKeyboardSwitcher.getKeyboardShiftMode(),
@@ -1426,6 +1426,8 @@ public class LatinIME extends InputMethodService implements
     }
 
     public void onTextInput(final String rawText) {
+        // Stop voice recording if user starts typing on the keyboard.
+        stopVoiceRecordingOnUserInput();
         // TODO: have the keyboard pass the correct key code when we need it.
         final Event event = Event.createSoftwareTextEvent(rawText, KeyCode.MULTIPLE_CODE_POINTS, null);
         final InputTransaction completeInputTransaction =
@@ -1597,6 +1599,18 @@ public class LatinIME extends InputMethodService implements
     public void removeExternalSuggestions() {
         setNeutralSuggestionStrip();
         mHandler.postResumeSuggestions(false);
+    }
+
+    /**
+     * Stop voice recording if the user performs an action that indicates they want to
+     * interact with the text field manually (e.g., typing a character, tapping a suggestion).
+     * This is a no-op if voice recording is not active.
+     */
+    private void stopVoiceRecordingOnUserInput() {
+        if (mVoiceInputManager != null && !mVoiceInputManager.isIdle()) {
+            Log.i(TAG, "User keyboard input detected while recording — stopping voice input");
+            mVoiceInputManager.stopRecording();
+        }
     }
 
     @Override
