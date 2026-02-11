@@ -70,45 +70,66 @@ class TextCleanupClient {
     /**
      * Clean up transcribed text using Claude.
      *
+     * The context is split into two parts to protect paragraph breaks:
+     * - [referenceContext]: Text from earlier paragraphs (before the last line break).
+     *   Included in the system prompt so Claude can understand the surrounding context,
+     *   but Claude is instructed not to include it in its response.
+     * - [editableText]: Text in the current paragraph (after the last line break).
+     *   This is the text Claude will clean up and return. Only this portion is replaced
+     *   in the editor, so paragraph breaks are never touched.
+     *
      * @param apiKey Anthropic API key
      * @param systemPrompt The system prompt for cleanup instructions
-     * @param existingContext Recent text before the cursor (last ~3 sentences).
-     *                        This provides context so Claude can correct in context.
-     * @param newText Newly transcribed text to append after the existing context.
+     * @param referenceContext Read-only context from earlier paragraphs. Goes into the
+     *                         system prompt so Claude can understand surrounding text.
+     *                         Empty string when the context doesn't cross paragraph breaks.
+     * @param editableText Text from the current paragraph (after last line break).
+     *                      This is what Claude cleans up and what gets replaced in the editor.
+     * @param newText Newly transcribed text to append after the editable text.
      * @param callback Callback for result (called on main thread)
      */
     fun cleanupText(
         apiKey: String,
         systemPrompt: String,
-        existingContext: String,
+        referenceContext: String,
+        editableText: String,
         newText: String,
         callback: CleanupCallback
     ) {
-        // Build the full text: existing context + new transcription.
-        // Trim trailing whitespace from context to avoid double-spaces when the
-        // previous insertion added a trailing space.
-        val trimmedContext = existingContext.trimEnd()
-        val fullText = if (trimmedContext.isNotEmpty()) {
-            "$trimmedContext $newText"
+        // Build the user message: current paragraph + new transcription.
+        // Trim trailing whitespace from editable text to avoid double-spaces
+        // when the previous insertion added a trailing space.
+        val trimmedEditable = editableText.trimEnd()
+        val userMessage = if (trimmedEditable.isNotEmpty()) {
+            "$trimmedEditable $newText"
         } else {
             newText
         }
 
         // Skip cleanup if no text to process
-        if (fullText.isBlank()) {
+        if (userMessage.isBlank()) {
             mainHandler.post { callback.onCleanupError("Empty text") }
             return
+        }
+
+        // Build system prompt: cleanup instructions + optional reference context.
+        // The reference context gives Claude understanding of the surrounding text
+        // without being part of the editable scope.
+        val fullSystemPrompt = if (referenceContext.isNotBlank()) {
+            "$systemPrompt\n\nPrevious context for reference (do not include in your response):\n$referenceContext"
+        } else {
+            systemPrompt
         }
 
         // Anthropic Claude API format
         val requestBody = JSONObject().apply {
             put("model", MODEL)
             put("max_tokens", MAX_TOKENS)
-            put("system", systemPrompt)  // Top-level system prompt for Anthropic
+            put("system", fullSystemPrompt)
             put("messages", JSONArray().apply {
                 put(JSONObject().apply {
                     put("role", "user")
-                    put("content", fullText)
+                    put("content", userMessage)
                 })
             })
         }
@@ -121,7 +142,11 @@ class TextCleanupClient {
             .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
-        Log.i(TAG, "VOICE_STEP_5 send to Anthropic cleanup (${fullText.length} chars)")
+        Log.i(
+            TAG,
+            "VOICE_STEP_5 send to Anthropic cleanup " +
+                "(editable=${userMessage.length} chars, reference=${referenceContext.length} chars)"
+        )
 
         enqueueWithRetry(request, callback, retriesRemaining = 1)
     }

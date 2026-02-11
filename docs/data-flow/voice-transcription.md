@@ -65,9 +65,10 @@ Orchestrates the voice input flow and manages timers.
 HTTP client for Anthropic's Claude API.
 - **Model**: `claude-haiku-4-5-20251001`
 - **Purpose**: Intelligent capitalization, punctuation, and grammar cleanup
-- **Input**: `{recent context (last 3 sentences)} + {new transcription}` (trimmed to avoid double-spaces)
-- **Output**: Full corrected context (replaces the context window in editor)
-- **max_tokens**: 4096 (accommodates full context responses)
+- **Input (system prompt)**: Cleanup instructions + optional reference context from earlier paragraphs
+- **Input (user message)**: `{current paragraph text} + {new transcription}`
+- **Output**: Corrected current paragraph (only this portion is replaced in editor)
+- **max_tokens**: 4096 (accommodates full paragraph responses)
 - **Cancellation**: Tracks active HTTP calls; `cancelAll()` cancels in-flight requests
 - **Retry**: Single automatic retry after 2s on transient failures (5xx, 408, timeout, connection error)
 
@@ -95,7 +96,7 @@ User speaks...
     → onSegmentReady(wavData) callback
 ```
 
-### 3. Transcription + Cleanup + Replace Context
+### 3. Transcription + Cleanup + Replace Current Paragraph
 ```
 VoiceInputManager.enqueueSegment(wavData)
     → DeepgramTranscriptionClient.transcribe(wavData)
@@ -103,19 +104,29 @@ VoiceInputManager.enqueueSegment(wavData)
     → Deepgram returns JSON with transcript
     → onTranscriptionComplete(text)
     → LatinIME captures recent context (last 3 sentences or 300 chars)
-    → LatinIME sends {recent context} + {new text} to Anthropic cleanup
-    → Anthropic returns corrected text
+    → Split at last newline:
+        referenceContext = text before last \n  (read-only, for Claude's understanding)
+        editableText    = text after last \n   (current paragraph, will be replaced)
+    → Send to Claude:
+        system prompt += referenceContext (do not include in response)
+        user message   = editableText + new transcription
+    → Claude returns corrected current paragraph
     → LatinIME.replaceContextWithCleanedText():
-        1. Delete old context text (before cursor)
+        1. Delete editableText.length() chars before cursor
         2. Insert corrected text + trailing space
-    → Corrected text appears in text field
+    → Paragraph breaks untouched; corrected text appears in text field
 ```
 
-**Context window**: Claude receives the last ~3 sentences as context (detected by
+**Context window**: The last ~3 sentences are gathered as context (detected by
 simplified punctuation matching: `.!?:;=`). If fewer than 3 sentence boundaries exist,
-up to 300 characters are sent. This crosses newline/paragraph boundaries — even at the
-start of a new line, Claude always has adequate context. The old context text is then
-replaced with Claude's corrected version.
+up to 300 characters are used. This crosses newline/paragraph boundaries — even at the
+start of a new line, Claude always has adequate context.
+
+**Paragraph break protection**: The context is split at the last `\n`. Text before it
+(earlier paragraphs) is passed to Claude in the system prompt for understanding only —
+Claude is told not to include it in its response. Text after it (the current paragraph)
+is sent as the user message and is what Claude cleans up. Only this current-paragraph
+portion is replaced in the editor, so `\n` and `\n\n` paragraph breaks are never touched.
 
 **Retry**: Both transcription and cleanup requests automatically retry once after a
 2-second delay on transient failures (5xx, 408, socket timeout, connection error).
@@ -157,10 +168,12 @@ mVoiceSessionId         // incremented on cancel/new session; stale callbacks ar
 - `TextCleanupClient.cancelAll()` is called on session cancellation to cancel HTTP requests.
 
 **Context replacement safety:**
-- The `existingContextLength` is captured *before* the cleanup request is sent and
-  closed over in the callback. Since `mCleanupInProgress` prevents any text insertion
-  during cleanup, the text before the cursor is guaranteed to be unchanged when the
-  callback fires (within the same session).
+- The `replacementLength` (editable text after last `\n`) is captured *before* the
+  cleanup request is sent and closed over in the callback. Since `mCleanupInProgress`
+  prevents any text insertion during cleanup, the text before the cursor is guaranteed
+  to be unchanged when the callback fires (within the same session).
+- Paragraph breaks (`\n`, `\n\n`) are outside the replacement scope — they are never
+  deleted or overwritten.
 
 ## Configuration
 
