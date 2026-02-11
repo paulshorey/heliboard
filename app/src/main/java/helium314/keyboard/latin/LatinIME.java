@@ -194,6 +194,7 @@ public class LatinIME extends InputMethodService implements
     // Voice session ID — incremented when a new recording starts and when recording is
     // cancelled. Used to invalidate stale async cleanup callbacks from previous sessions.
     private int mVoiceSessionId = 0;
+    private long mLastVoiceErrorToastTimeMs = 0L;
 
     public static final class UIHandler extends LeakGuardHandlerWrapper<LatinIME> {
         private static final int MSG_UPDATE_SHIFT_STATE = 0;
@@ -1706,6 +1707,7 @@ public class LatinIME extends InputMethodService implements
                 if (text == null || text.isEmpty()) {
                     return;
                 }
+                Log.i(TAG, "VOICE_STEP_4 transcription arrived in IME (" + text.length() + " chars)");
 
                 // If cleanup is in progress, queue to avoid race condition
                 if (mCleanupInProgress) {
@@ -1754,6 +1756,12 @@ public class LatinIME extends InputMethodService implements
                     return;
                 }
 
+                Log.i(
+                        TAG,
+                        "VOICE_STEP_5 sending paragraph to Anthropic cleanup (" +
+                                originalParagraph.length() + " chars): \"" +
+                                sanitizeLogText(originalParagraph) + "\""
+                );
                 mCleanupInProgress = true;
 
                 // Capture session ID so we can discard stale callbacks if the session
@@ -1779,6 +1787,11 @@ public class LatinIME extends InputMethodService implements
 
                         // Strip invisible characters from the cleanup API response
                         String sanitizedCleanedText = stripInvisibleChars(cleanedText);
+                        Log.i(
+                                TAG,
+                                "Cleanup response received (" + sanitizedCleanedText.length() + " chars): \"" +
+                                        sanitizeLogText(sanitizedCleanedText) + "\""
+                        );
 
                         CharSequence currentTextBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(4000, 0);
                         String currentText = currentTextBeforeCursor != null ? currentTextBeforeCursor.toString() : "";
@@ -1813,6 +1826,7 @@ public class LatinIME extends InputMethodService implements
                         }
 
                         Log.e(TAG, "Cleanup error: " + error);
+                        showVoiceErrorToast("Cleanup failed: " + error);
                         mCleanupInProgress = false;
                         processPendingVoiceInput();
                     }
@@ -1824,6 +1838,7 @@ public class LatinIME extends InputMethodService implements
                 if (mCleanupInProgress) {
                     mPendingNewParagraph = true;
                 } else {
+                    Log.i(TAG, "New paragraph break inserted (recording remains active)");
                     mInputLogic.finishInput();
                     mInputLogic.mConnection.commitText("\n\n", 1);
                 }
@@ -1832,9 +1847,7 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onError(@NonNull String error) {
                 Log.e(TAG, "Voice input error: " + error);
-                if (error.contains("API key") || error.contains("permission") || error.contains("failed")) {
-                    mKeyboardSwitcher.showToast("Error: " + error, true);
-                }
+                showVoiceErrorToast(error);
             }
 
             @Override
@@ -1970,6 +1983,11 @@ public class LatinIME extends InputMethodService implements
         }
         String adjustedText = adjustCapitalization(sanitized);
         String textToInsert = ensureTrailingSpace(adjustedText);
+        String paragraphBefore = getCurrentParagraphForLogging();
+        Log.i(
+                TAG,
+                "VOICE_STEP_6 paragraph before insert: \"" + sanitizeLogText(paragraphBefore) + "\""
+        );
         
         // Reset InputLogic composing state before direct connection manipulation.
         // This ensures the WordComposer is properly synchronized with the connection.
@@ -1977,6 +1995,12 @@ public class LatinIME extends InputMethodService implements
         mInputLogic.mConnection.beginBatchEdit();
         mInputLogic.mConnection.commitText(textToInsert, 1);
         mInputLogic.mConnection.endBatchEdit();
+
+        String paragraphAfter = getCurrentParagraphForLogging();
+        Log.i(
+                TAG,
+                "VOICE_STEP_6 paragraph after insert: \"" + sanitizeLogText(paragraphAfter) + "\""
+        );
     }
 
     /**
@@ -2007,6 +2031,37 @@ public class LatinIME extends InputMethodService implements
         mCleanupInProgress = false;
         mPendingNewParagraph = false;
         mPendingTranscription.setLength(0);
+    }
+
+    @NonNull
+    private String getCurrentParagraphForLogging() {
+        CharSequence beforeCursor = mInputLogic.mConnection.getTextBeforeCursor(4000, 0);
+        String text = beforeCursor != null ? beforeCursor.toString() : "";
+        int lastNewlinePos = text.lastIndexOf('\n');
+        return (lastNewlinePos >= 0) ? text.substring(lastNewlinePos + 1) : text;
+    }
+
+    @NonNull
+    private String sanitizeLogText(@NonNull String text) {
+        String normalized = text.replace("\n", "\\n");
+        final int maxLen = 500;
+        if (normalized.length() <= maxLen) {
+            return normalized;
+        }
+        int remaining = normalized.length() - maxLen;
+        return normalized.substring(0, maxLen) + "...(" + remaining + " more chars)";
+    }
+
+    private void showVoiceErrorToast(@NonNull final String error) {
+        final long now = System.currentTimeMillis();
+        if (now - mLastVoiceErrorToastTimeMs < 1500) {
+            Log.i(TAG, "Suppressing repeated voice error toast: " + error);
+            return;
+        }
+        mLastVoiceErrorToastTimeMs = now;
+        if (mKeyboardSwitcher != null) {
+            mKeyboardSwitcher.showToast("Voice error: " + error, true);
+        }
     }
 
     private void loadKeyboard() {

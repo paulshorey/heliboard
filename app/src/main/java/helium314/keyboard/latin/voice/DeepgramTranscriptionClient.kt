@@ -13,6 +13,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import org.json.JSONObject
 import java.io.IOException
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.Collections
 import java.util.concurrent.TimeUnit
 
@@ -81,7 +84,10 @@ class DeepgramTranscriptionClient {
             .post(requestBody)
             .build()
 
-        Log.i(TAG, "Sending ${wavData.size} bytes to Deepgram...")
+        Log.i(
+            TAG,
+            "VOICE_STEP_3 send to Deepgram (${wavData.size} bytes, language=${language ?: "auto"})"
+        )
 
         val call = client.newCall(request)
         activeCalls.add(call)
@@ -94,7 +100,7 @@ class DeepgramTranscriptionClient {
                 }
                 Log.e(TAG, "Transcription request failed: ${e.message}")
                 mainHandler.post {
-                    callback.onTranscriptionError("Network error: ${e.message}")
+                    callback.onTranscriptionError(mapNetworkError(e))
                 }
             }
 
@@ -107,6 +113,8 @@ class DeepgramTranscriptionClient {
                         val errorMsg = when (response.code) {
                             401, 403 -> "Invalid Deepgram API key"
                             429 -> "Rate limited — too many requests"
+                            408 -> "Deepgram request timed out"
+                            in 500..599 -> "Deepgram service error (${response.code})"
                             else -> "API error ${response.code}"
                         }
                         mainHandler.post { callback.onTranscriptionError(errorMsg) }
@@ -135,6 +143,15 @@ class DeepgramTranscriptionClient {
         }
         for (call in calls) {
             call.cancel()
+        }
+    }
+
+    private fun mapNetworkError(e: IOException): String {
+        return when (e) {
+            is UnknownHostException -> "No internet connection"
+            is SocketTimeoutException -> "Transcription request timed out"
+            is ConnectException -> "Could not connect to Deepgram"
+            else -> "Network error: ${e.message ?: "unknown"}"
         }
     }
 

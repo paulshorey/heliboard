@@ -43,8 +43,8 @@ is sent for transcription.
 ### VoiceRecorder.kt
 Captures audio from the microphone with client-side silence detection.
 - **Format**: PCM16, 16kHz, mono
-- **Silence detection**: RMS energy threshold on each 100ms chunk
-- **Segmentation**: After 3s of silence, emits accumulated audio as a WAV file
+- **Silence detection**: Adaptive RMS threshold on each 100ms chunk
+- **Segmentation**: After configured silence duration, emits accumulated audio as a WAV file
 - **Output**: Complete WAV files (44-byte header + PCM data)
 
 ### DeepgramTranscriptionClient.kt
@@ -57,9 +57,9 @@ HTTP client for Deepgram's pre-recorded transcription API.
 ### VoiceInputManager.kt
 Orchestrates the voice input flow and manages timers.
 - **State machine**: IDLE → RECORDING ↔ PAUSED → IDLE
-- **Chunk Watchdog** (20s): Forces a segment flush if silence detection misses a boundary
+- **Chunk Watchdog** (dynamic): Forces a segment flush if silence detection misses a boundary
 - **Cleanup Timer** (3s): Trigger text cleanup after transcription
-- **New Paragraph Timer** (12s): Insert paragraph break after long silence
+- **New Paragraph Timer** (configurable): Insert paragraph break after long silence
 
 ### TextCleanupClient.kt
 HTTP client for Anthropic's Claude API.
@@ -85,14 +85,14 @@ User taps mic button
 ```
 User speaks...
     → VoiceRecorder accumulates PCM data
-    → User pauses (3 seconds of silence detected)
+    → User pauses (configured silence duration detected)
     → VoiceRecorder wraps PCM data in WAV header
     → onSegmentReady(wavData) callback
 ```
 
 ### 3. Transcription
 ```
-VoiceInputManager.processSegment(wavData)
+VoiceInputManager.enqueueSegment(wavData)
     → DeepgramTranscriptionClient.transcribe(wavData)
     → POST /v1/listen with audio/wav body
     → Deepgram returns JSON with transcript
@@ -115,11 +115,11 @@ Transcription inserted
     → Find and replace original paragraph with cleaned text
 ```
 
-### 5. New Paragraph (after 12s silence)
+### 5. New Paragraph (after configured silence window)
 ```
 Speech stops
     → VoiceInputManager starts new paragraph timer
-    → 12 seconds pass with no speech
+    → Configured delay passes with no speech
     → LatinIME.onNewParagraphRequested()
     → Insert "\n\n" to start new paragraph
 ```
@@ -132,7 +132,6 @@ IDLE       → User taps mic    → RECORDING
 RECORDING  → User taps mic    → IDLE (stop)
 RECORDING  → User taps pause  → PAUSED
 PAUSED     → User taps pause  → RECORDING (resume)
-RECORDING  → 60s silence      → IDLE (auto-cancel)
 ```
 
 ### Race Condition Prevention
@@ -152,18 +151,21 @@ to keep insertion order deterministic.
 - **Deepgram API Key**: Required for transcription
 - **Anthropic API Key**: Required for cleanup (optional feature)
 - **Cleanup Prompt**: Customizable instructions for Claude
+- **Chunk Silence Duration**: Silence window before cutting a chunk
+- **Silence Threshold**: RMS threshold floor for silence/speech detection
+- **New Paragraph Silence Duration**: Delay before inserting a paragraph break
 
-### Timeouts (VoiceInputManager.kt)
+### Timers (VoiceInputManager.kt)
 ```kotlin
-CHUNK_WATCHDOG_MS = 20000L     // Force segment flush if split stalls
+MIN_CHUNK_WATCHDOG_MS = 20000L // Base watchdog lower bound
 CLEANUP_DELAY_MS = 3000L       // Cleanup after 3s post-transcription
-NEW_PARAGRAPH_DELAY_MS = 12000L // New paragraph after 12s silence
+newParagraphDelayMs (configurable via settings)
 ```
 
 ### Silence Detection (VoiceRecorder.kt)
 ```kotlin
-SILENCE_THRESHOLD = 400.0      // RMS energy threshold
-SILENCE_DURATION_MS = 3000L    // 3s silence to split segment
+silenceThreshold (configurable via settings) // RMS threshold floor
+silenceDurationMs (configurable via settings)
 MIN_SEGMENT_MS = 500L          // Minimum segment length
 MAX_SEGMENT_MS = 60000L        // Force-split at 60s
 ```
@@ -171,7 +173,7 @@ MAX_SEGMENT_MS = 60000L        // Force-split at 60s
 ## Error Handling
 
 - **Network errors**: Audio is captured locally; if transcription fails, the segment is lost but recording continues
-- **API errors**: Logged, user notified for critical errors (invalid key, etc.)
+- **API errors**: Logged and surfaced to user (invalid key, timeout, service errors, etc.)
 - **Empty transcriptions**: Silently ignored
 - **Cleanup errors**: Original text preserved (graceful degradation)
 

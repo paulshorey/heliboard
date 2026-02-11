@@ -20,7 +20,7 @@ import kotlin.math.sqrt
  *
  * Starts recording instantly on the device (no network dependency).
  * Accumulates audio into chunks, splitting on detected silence pauses.
- * When a pause is detected (silence exceeding [SILENCE_DURATION_MS]),
+ * When a pause is detected (silence exceeding the configured silence duration),
  * the accumulated audio segment is delivered via [RecordingCallback.onSegmentReady].
  *
  * Audio format: PCM 16-bit, 16kHz, mono — compatible with Deepgram and most speech APIs.
@@ -49,8 +49,8 @@ class VoiceRecorder(private val context: Context) {
          * This is more robust than a single fixed threshold across environments.
          */
         private const val INITIAL_NOISE_FLOOR = 120.0
-        private const val MIN_SPEECH_THRESHOLD = 360.0
-        private const val MIN_SILENCE_THRESHOLD = 220.0
+        private const val DEFAULT_SILENCE_THRESHOLD = 220.0
+        private const val SPEECH_HYSTERESIS = 140.0
         private const val SPEECH_MARGIN = 260.0
         private const val SILENCE_MARGIN = 140.0
         private const val ENERGY_SMOOTHING_ALPHA = 0.2
@@ -58,8 +58,12 @@ class VoiceRecorder(private val context: Context) {
         private const val NOISE_FLOOR_MIN = 40.0
         private const val NOISE_FLOOR_MAX = 2500.0
 
-        /** Duration of continuous silence (ms) before we split a segment. */
-        private const val SILENCE_DURATION_MS = 3000L
+        /** Default silence duration (ms) before splitting a segment. */
+        private const val DEFAULT_SILENCE_DURATION_MS = 3000L
+        private const val MIN_SILENCE_DURATION_MS = 1000L
+        private const val MAX_SILENCE_DURATION_MS = 30_000L
+        private const val MIN_ALLOWED_SILENCE_THRESHOLD = 40.0
+        private const val MAX_ALLOWED_SILENCE_THRESHOLD = 5000.0
 
         /** Minimum segment length (ms) to emit — avoids sending tiny noise blips. */
         private const val MIN_SEGMENT_MS = 500L
@@ -94,11 +98,17 @@ class VoiceRecorder(private val context: Context) {
         fun onRecordingError(error: String)
     }
 
+    private data class SilenceConfig(
+        val silenceDurationMs: Long = DEFAULT_SILENCE_DURATION_MS,
+        val silenceThreshold: Double = DEFAULT_SILENCE_THRESHOLD
+    )
+
     private var audioRecord: AudioRecord? = null
     private var recordingThread: Thread? = null
     @Volatile private var isRecording = false
     @Volatile private var isPaused = false
     @Volatile private var forceFlushRequested = false
+    @Volatile private var silenceConfig = SilenceConfig()
     private var callback: RecordingCallback? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -107,6 +117,25 @@ class VoiceRecorder(private val context: Context) {
 
     fun setCallback(callback: RecordingCallback?) {
         this.callback = callback
+    }
+
+    /**
+     * Update silence detection configuration for subsequent recording sessions.
+     */
+    fun updateSilenceConfig(silenceDurationMs: Long, silenceThreshold: Double) {
+        val sanitizedDuration = silenceDurationMs.coerceIn(MIN_SILENCE_DURATION_MS, MAX_SILENCE_DURATION_MS)
+        val sanitizedThreshold = silenceThreshold.coerceIn(
+            MIN_ALLOWED_SILENCE_THRESHOLD,
+            MAX_ALLOWED_SILENCE_THRESHOLD
+        )
+        silenceConfig = SilenceConfig(
+            silenceDurationMs = sanitizedDuration,
+            silenceThreshold = sanitizedThreshold
+        )
+        Log.i(
+            TAG,
+            "Silence config updated: duration=${sanitizedDuration}ms, threshold=${sanitizedThreshold}"
+        )
     }
 
     fun hasRecordPermission(): Boolean {
@@ -159,7 +188,13 @@ class VoiceRecorder(private val context: Context) {
 
             val callbackSnapshot = callback
             mainHandler.post { callbackSnapshot?.onRecordingStarted() }
-            Log.i(TAG, "Recording started (${SAMPLE_RATE}Hz, adaptive silence detection enabled)")
+            val configSnapshot = silenceConfig
+            Log.i(
+                TAG,
+                "VOICE_STEP_1 recording started (${SAMPLE_RATE}Hz), " +
+                    "silenceDuration=${configSnapshot.silenceDurationMs}ms, " +
+                    "silenceThreshold=${configSnapshot.silenceThreshold}"
+            )
             return true
         } catch (e: SecurityException) {
             Log.e(TAG, "SecurityException: ${e.message}")
@@ -217,6 +252,7 @@ class VoiceRecorder(private val context: Context) {
     fun requestSegmentFlush() {
         if (isRecording && !isPaused) {
             forceFlushRequested = true
+            Log.i(TAG, "Chunk flush requested by watchdog")
         }
     }
 
@@ -236,6 +272,9 @@ class VoiceRecorder(private val context: Context) {
         var isSpeaking = false
         var noiseFloor = INITIAL_NOISE_FLOOR
         var smoothedEnergy = INITIAL_NOISE_FLOOR
+        val configSnapshot = silenceConfig
+        val minSilenceThreshold = configSnapshot.silenceThreshold
+        val minSpeechThreshold = minSilenceThreshold + SPEECH_HYSTERESIS
 
         try {
             while (isRecording) {
@@ -261,8 +300,8 @@ class VoiceRecorder(private val context: Context) {
                 smoothedEnergy = (ENERGY_SMOOTHING_ALPHA * energy) +
                     ((1.0 - ENERGY_SMOOTHING_ALPHA) * smoothedEnergy)
 
-                val speechThreshold = maxOf(MIN_SPEECH_THRESHOLD, noiseFloor + SPEECH_MARGIN)
-                val silenceThreshold = maxOf(MIN_SILENCE_THRESHOLD, noiseFloor + SILENCE_MARGIN)
+                val speechThreshold = maxOf(minSpeechThreshold, noiseFloor + SPEECH_MARGIN)
+                val silenceThreshold = maxOf(minSilenceThreshold, noiseFloor + SILENCE_MARGIN)
                 val chunkMs = (bytesRead.toLong() * 1000) / (SAMPLE_RATE * BYTES_PER_SAMPLE)
                 val hasSpeech = if (isSpeaking) {
                     smoothedEnergy >= silenceThreshold
@@ -295,12 +334,18 @@ class VoiceRecorder(private val context: Context) {
                         segmentDurationMs += chunkMs
                     }
 
-                    if (segmentBuffer.size() > 0 && silenceDurationMs >= SILENCE_DURATION_MS) {
+                    if (segmentBuffer.size() > 0 && silenceDurationMs >= configSnapshot.silenceDurationMs) {
                         if (isSpeaking) {
                             isSpeaking = false
                             val callbackSnapshot = callback
                             mainHandler.post { callbackSnapshot?.onSpeechStopped() }
                         }
+                        Log.i(
+                            TAG,
+                            "VOICE_STEP_2 silence detected (${silenceDurationMs}ms " +
+                                ">= ${configSnapshot.silenceDurationMs}ms), " +
+                                "energy=${smoothedEnergy.toInt()}, threshold=${silenceThreshold.toInt()} — cutting chunk"
+                        )
 
                         // Silence threshold reached — emit segment
                         if (segmentDurationMs >= MIN_SEGMENT_MS) {
@@ -315,11 +360,13 @@ class VoiceRecorder(private val context: Context) {
                 if (forceFlushRequested) {
                     forceFlushRequested = false
                     if (segmentBuffer.size() > 0 && segmentDurationMs >= MIN_SEGMENT_MS) {
-                        if (isSpeaking) {
-                            isSpeaking = false
-                            val callbackSnapshot = callback
-                            mainHandler.post { callbackSnapshot?.onSpeechStopped() }
-                        }
+                        Log.i(
+                            TAG,
+                            "VOICE_STEP_2 watchdog flush forcing chunk at ${segmentDurationMs}ms"
+                        )
+                        // Watchdog flush is a fallback split and not necessarily real silence,
+                        // so avoid emitting onSpeechStopped here to prevent false paragraph timers.
+                        isSpeaking = false
                         emitSegment(segmentBuffer, segmentDurationMs)
                         segmentBuffer.reset()
                         segmentDurationMs = 0L

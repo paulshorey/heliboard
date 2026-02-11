@@ -14,6 +14,9 @@ import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -92,12 +95,14 @@ class TextCleanupClient {
             .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
+        Log.i(TAG, "VOICE_STEP_5 send to Anthropic cleanup (${fullText.length} chars)")
+
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 Log.e(TAG, "Cleanup request failed: ${e.message}")
                 mainHandler.post {
                     // On error, return the original text (graceful degradation)
-                    callback.onCleanupError(e.message ?: "Network error")
+                    callback.onCleanupError(mapNetworkError(e))
                 }
             }
 
@@ -106,8 +111,15 @@ class TextCleanupClient {
                     val responseBody = response.body?.string()
                     if (!response.isSuccessful) {
                         Log.e(TAG, "Cleanup API error: ${response.code} - $responseBody")
+                        val message = when (response.code) {
+                            401, 403 -> "Invalid Anthropic API key"
+                            408 -> "Cleanup request timed out"
+                            429 -> "Anthropic rate limited — too many requests"
+                            in 500..599 -> "Anthropic service error (${response.code})"
+                            else -> "Cleanup API error: ${response.code}"
+                        }
                         mainHandler.post {
-                            callback.onCleanupError("API error: ${response.code}")
+                            callback.onCleanupError(message)
                         }
                         return
                     }
@@ -138,5 +150,14 @@ class TextCleanupClient {
                 }
             }
         })
+    }
+
+    private fun mapNetworkError(e: IOException): String {
+        return when (e) {
+            is UnknownHostException -> "No internet connection"
+            is SocketTimeoutException -> "Cleanup request timed out"
+            is ConnectException -> "Could not connect to Anthropic cleanup API"
+            else -> e.message ?: "Network error"
+        }
     }
 }
