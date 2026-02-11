@@ -23,6 +23,7 @@ import android.view.inputmethod.InputMethodSubtype;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -69,6 +70,8 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
     private FrameLayout mStripContainer;
     private ClipboardHistoryView mClipboardHistoryView;
     private TextView mFakeToastView;
+    private ProgressBar mProcessingIndicator;
+    private Runnable mHideProcessingIndicatorRunnable;
     private LatinIME mLatinIME;
     private RichInputMethodManager mRichImm;
     private boolean mIsHardwareAcceleratedDrawingEnabled;
@@ -586,6 +589,35 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         }, timeMillis);
     }
 
+    /**
+     * Show the small processing spinner indicator (centered on the keyboard).
+     * Stays visible until {@link #hideProcessingIndicator()} is called.
+     */
+    public void showProcessingIndicator() {
+        if (mProcessingIndicator == null) return;
+        // Cancel any pending hide so a rapid show/hide/show sequence doesn't flicker.
+        if (mHideProcessingIndicatorRunnable != null) {
+            mProcessingIndicator.removeCallbacks(mHideProcessingIndicatorRunnable);
+            mHideProcessingIndicatorRunnable = null;
+        }
+        if (mProcessingIndicator.getVisibility() == View.VISIBLE) return;
+        mProcessingIndicator.setVisibility(View.VISIBLE);
+        mProcessingIndicator.bringToFront();
+    }
+
+    /**
+     * Hide the processing spinner indicator.
+     */
+    public void hideProcessingIndicator() {
+        if (mProcessingIndicator == null) return;
+        // Cancel any pending hide first.
+        if (mHideProcessingIndicatorRunnable != null) {
+            mProcessingIndicator.removeCallbacks(mHideProcessingIndicatorRunnable);
+            mHideProcessingIndicatorRunnable = null;
+        }
+        mProcessingIndicator.setVisibility(View.GONE);
+    }
+
     // Implements {@link KeyboardState.SwitchActions}.
     @Override
     public boolean isInDoubleTapShiftKeyTimeout() {
@@ -705,6 +737,7 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         mEmojiPalettesView = mCurrentInputView.findViewById(R.id.emoji_palettes_view);
         mClipboardHistoryView = mCurrentInputView.findViewById(R.id.clipboard_history_view);
         mFakeToastView = mCurrentInputView.findViewById(R.id.fakeToast);
+        mProcessingIndicator = mCurrentInputView.findViewById(R.id.voice_processing_indicator);
 
         mKeyboardViewWrapper = mCurrentInputView.findViewById(R.id.keyboard_view_wrapper);
         mKeyboardViewWrapper.setKeyboardActionListener(mLatinIME.mKeyboardActionListener);
