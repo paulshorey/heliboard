@@ -16,8 +16,7 @@ import helium314.keyboard.latin.utils.prefs
  * 2. When silence is detected, [VoiceRecorder] emits a WAV segment.
  * 3. Segment is sent to Deepgram for transcription.
  * 4. Transcription result is delivered to [VoiceInputListener.onTranscriptionResult].
- * 5. After transcription is inserted, cleanup is requested so the caller
- *    can send the current paragraph to Anthropic for post-processing.
+ *    The listener is responsible for cleanup-before-insert ordering.
  *
  * State machine: IDLE → RECORDING ↔ PAUSED → IDLE
  * (No CONNECTING state — recording starts instantly with no network dependency.)
@@ -33,9 +32,6 @@ class VoiceInputManager(private val context: Context) {
          */
         private const val MIN_CHUNK_WATCHDOG_MS = 20_000L
         private const val CHUNK_WATCHDOG_EXTRA_MS = 12_000L
-
-        /** After transcription is inserted, wait this long then request cleanup. */
-        private const val CLEANUP_DELAY_MS = 3000L
 
         private const val MIN_CHUNK_SILENCE_SECONDS = 1
         private const val MAX_CHUNK_SILENCE_SECONDS = 30
@@ -56,9 +52,6 @@ class VoiceInputManager(private val context: Context) {
 
         /** A segment was transcribed — insert this text. */
         fun onTranscriptionResult(text: String)
-
-        /** Cleanup delay after last transcription — time to clean up the paragraph. */
-        fun onCleanupRequested()
 
         /** Configured silence window elapsed — start a new paragraph. */
         fun onNewParagraphRequested()
@@ -99,14 +92,6 @@ class VoiceInputManager(private val context: Context) {
                 "Chunk watchdog fired after ${chunkWatchdogMs}ms — forcing segment flush"
             )
             voiceRecorder.requestSegmentFlush()
-        }
-    }
-
-    // Cleanup timer — trigger cleanup after silence following transcription
-    private val cleanupTimerRunnable = Runnable {
-        if (currentState == State.RECORDING || currentState == State.IDLE) {
-            Log.i(TAG, "VOICE_STEP_5B cleanup timer fired — requesting Anthropic cleanup send")
-            listener?.onCleanupRequested()
         }
     }
 
@@ -180,7 +165,6 @@ class VoiceInputManager(private val context: Context) {
 
             override fun onSpeechStarted() {
                 if (sessionId != activeSessionId) return
-                cancelCleanupTimer()
                 cancelNewParagraphTimer()
                 resetChunkWatchdog()
             }
@@ -228,7 +212,6 @@ class VoiceInputManager(private val context: Context) {
     fun pauseRecording() {
         if (currentState != State.RECORDING) return
         cancelChunkWatchdog()
-        cancelCleanupTimer()
         cancelNewParagraphTimer()
         voiceRecorder.pauseRecording()
         updateState(State.PAUSED)
@@ -271,7 +254,6 @@ class VoiceInputManager(private val context: Context) {
 
     private fun stopRecordingInternal(cancelPending: Boolean) {
         cancelChunkWatchdog()
-        cancelCleanupTimer()
         cancelNewParagraphTimer()
         if (cancelPending) {
             invalidateActiveSession("recording cancelled")
@@ -387,8 +369,6 @@ class VoiceInputManager(private val context: Context) {
                                 TAG,
                                 "VOICE_STEP_4 transcription received (${text.length} chars) — applying post-processing"
                             )
-                            // Schedule cleanup after the configured silence window.
-                            startCleanupTimer()
                             listener?.onTranscriptionResult(text)
                         }
                     }
@@ -438,20 +418,6 @@ class VoiceInputManager(private val context: Context) {
 
     private fun cancelChunkWatchdog() {
         mainHandler.removeCallbacks(chunkWatchdogRunnable)
-    }
-
-    private fun startCleanupTimer() {
-        mainHandler.removeCallbacks(cleanupTimerRunnable)
-        Log.i(
-            TAG,
-            "VOICE_STEP_5 cleanup timer started (${CLEANUP_DELAY_MS}ms) " +
-                "— Anthropic send happens after this silence window"
-        )
-        mainHandler.postDelayed(cleanupTimerRunnable, CLEANUP_DELAY_MS)
-    }
-
-    private fun cancelCleanupTimer() {
-        mainHandler.removeCallbacks(cleanupTimerRunnable)
     }
 
     private fun startNewParagraphTimer() {

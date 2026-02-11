@@ -11,8 +11,8 @@ HeliBoard includes a built-in voice-to-text feature that uses Deepgram's Nova-3 
 1. **Recording**: When you tap the microphone button, HeliBoard starts recording audio instantly using your device's microphone.
 2. **Silence Detection**: The recorder automatically detects pauses in speech (3 seconds of silence).
 3. **Transcription**: Each audio segment is sent to Deepgram's API for transcription.
-4. **Text Insertion**: The transcribed text is automatically inserted into the text field.
-5. **Cleanup**: After insertion, the current paragraph is sent to Anthropic's Claude for intelligent cleanup (capitalization, punctuation, grammar).
+4. **Cleanup**: The transcript is sent to Anthropic's Claude for cleanup (if configured).
+5. **Text Insertion**: The cleaned text is then inserted into the text field.
 
 ## Setup Instructions
 
@@ -72,13 +72,13 @@ When you first tap the microphone button, Android will ask for microphone permis
 
 ```
 Speech → [configured chunk silence] → Audio segment (WAV)
-  → Deepgram transcription → Insert text
-  → [3s more silence] → Anthropic cleanup → Replace paragraph
+  → Deepgram transcription → Anthropic cleanup
+  → Insert cleaned text
 ```
 
 1. **Transcription**: Each audio segment is transcribed independently via Deepgram
-2. **Text insertion**: Transcribed text is inserted with smart capitalization
-3. **Cleanup**: After 3 more seconds of silence, the entire current paragraph is sent to Claude for cleanup
+2. **Cleanup**: Transcript is sent to Claude (if configured)
+3. **Text insertion**: Cleaned text is inserted with smart capitalization
 4. **New paragraph**: After the configured new-paragraph silence duration (default 12s), a new paragraph is started
 
 ## Troubleshooting
@@ -96,7 +96,7 @@ Speech → [configured chunk silence] → Audio segment (WAV)
 
 ### No cleanup happening
 - Make sure your Anthropic API key is set
-- Cleanup only runs after 3 seconds of silence following transcription
+- If Anthropic key is missing or cleanup fails, raw transcription is inserted as fallback
 
 ## API Costs
 

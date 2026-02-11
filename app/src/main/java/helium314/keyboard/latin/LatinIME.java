@@ -1709,128 +1709,13 @@ public class LatinIME extends InputMethodService implements
                 }
                 Log.i(TAG, "VOICE_STEP_4 transcription arrived in IME (" + text.length() + " chars)");
 
-                // If cleanup is in progress, queue to avoid race condition
+                // If cleanup is in progress, queue this transcription to preserve ordering.
                 if (mCleanupInProgress) {
-                    mPendingTranscription.append(text);
-                    if (mPendingTranscription.length() > 5000) {
-                        Log.w(TAG, "Pending transcription buffer overflow, inserting now");
-                        String pending = mPendingTranscription.toString();
-                        mPendingTranscription.setLength(0);
-                        insertTranscriptionText(pending);
-                    }
+                    appendPendingTranscription(text);
                     return;
                 }
 
-                insertTranscriptionText(text);
-            }
-
-            @Override
-            public void onCleanupRequested() {
-                if (mCleanupInProgress) {
-                    return;
-                }
-
-                String anthropicApiKey = KtxKt.prefs(LatinIME.this).getString(Settings.PREF_ANTHROPIC_API_KEY, "");
-                if (anthropicApiKey == null || anthropicApiKey.isEmpty()) {
-                    return;
-                }
-
-                String cleanupPrompt = KtxKt.prefs(LatinIME.this).getString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT);
-                if (cleanupPrompt == null || cleanupPrompt.isEmpty()) {
-                    cleanupPrompt = Defaults.PREF_CLEANUP_PROMPT;
-                }
-
-                // Extract the current paragraph (text since last newline)
-                CharSequence textBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(2000, 0);
-                String beforeText = textBeforeCursor != null ? textBeforeCursor.toString() : "";
-                if (beforeText.isEmpty()) {
-                    return;
-                }
-
-                int lastNewlinePos = beforeText.lastIndexOf('\n');
-                final String originalParagraph = (lastNewlinePos >= 0)
-                        ? beforeText.substring(lastNewlinePos + 1)
-                        : beforeText;
-
-                if (originalParagraph.trim().isEmpty()) {
-                    return;
-                }
-
-                Log.i(
-                        TAG,
-                        "VOICE_STEP_5B sending paragraph to Anthropic cleanup (" +
-                                originalParagraph.length() + " chars): \"" +
-                                sanitizeLogText(originalParagraph) + "\""
-                );
-                mCleanupInProgress = true;
-
-                // Capture session ID so we can discard stale callbacks if the session
-                // was cancelled or a new session started before cleanup completes.
-                final int sessionId = mVoiceSessionId;
-
-                final String prompt = cleanupPrompt;
-                mTextCleanupClient.cleanupText(anthropicApiKey, prompt, "", originalParagraph, new TextCleanupClient.CleanupCallback() {
-                    @Override
-                    public void onCleanupComplete(String cleanedText) {
-                        // Discard if the voice session has changed (abrupt cancel or new session)
-                        if (sessionId != mVoiceSessionId) {
-                            Log.i(TAG, "Cleanup result discarded — voice session changed");
-                            return;
-                        }
-
-                        // Reset InputLogic composing state before direct connection manipulation.
-                        // Without this, the WordComposer can remain in a stale composing state
-                        // after commitText clears the connection's composing text, causing
-                        // subsequent backspace presses to modify a phantom composing buffer
-                        // instead of actually deleting text in the editor.
-                        mInputLogic.finishInput();
-
-                        // Strip invisible characters from the cleanup API response
-                        String sanitizedCleanedText = stripInvisibleChars(cleanedText);
-                        Log.i(
-                                TAG,
-                                "VOICE_STEP_5C cleanup response received (" + sanitizedCleanedText.length() + " chars): \"" +
-                                        sanitizeLogText(sanitizedCleanedText) + "\""
-                        );
-
-                        CharSequence currentTextBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(4000, 0);
-                        String currentText = currentTextBeforeCursor != null ? currentTextBeforeCursor.toString() : "";
-
-                        int originalPos = currentText.lastIndexOf(originalParagraph);
-                        if (originalPos >= 0) {
-                            int endOfOriginal = originalPos + originalParagraph.length();
-                            String textAfterOriginal = currentText.substring(endOfOriginal);
-                            int charsToDelete = currentText.length() - originalPos;
-
-                            String processedText = ensureTrailingSpace(sanitizedCleanedText);
-                            String finalText = processedText + textAfterOriginal;
-
-                            mInputLogic.mConnection.beginBatchEdit();
-                            if (charsToDelete > 0) {
-                                mInputLogic.mConnection.deleteTextBeforeCursor(charsToDelete);
-                            }
-                            mInputLogic.mConnection.commitText(finalText, 1);
-                            mInputLogic.mConnection.endBatchEdit();
-                        }
-
-                        mCleanupInProgress = false;
-                        processPendingVoiceInput();
-                    }
-
-                    @Override
-                    public void onCleanupError(String error) {
-                        // Discard if the voice session has changed
-                        if (sessionId != mVoiceSessionId) {
-                            Log.i(TAG, "Cleanup error discarded — voice session changed");
-                            return;
-                        }
-
-                        Log.e(TAG, "Cleanup error: " + error);
-                        showVoiceErrorToast("Cleanup failed: " + error);
-                        mCleanupInProgress = false;
-                        processPendingVoiceInput();
-                    }
-                });
+                processTranscriptionResult(text);
             }
 
             @Override
@@ -1986,7 +1871,7 @@ public class LatinIME extends InputMethodService implements
         String paragraphBefore = getCurrentParagraphForLogging();
         Log.i(
                 TAG,
-                "VOICE_STEP_6 pre-cleanup paragraph before insert: \"" + sanitizeLogText(paragraphBefore) + "\""
+                "VOICE_STEP_6 paragraph before insert: \"" + sanitizeLogText(paragraphBefore) + "\""
         );
         
         // Reset InputLogic composing state before direct connection manipulation.
@@ -1999,8 +1884,109 @@ public class LatinIME extends InputMethodService implements
         String paragraphAfter = getCurrentParagraphForLogging();
         Log.i(
                 TAG,
-                "VOICE_STEP_6 pre-cleanup paragraph after insert: \"" + sanitizeLogText(paragraphAfter) + "\""
+                "VOICE_STEP_6 paragraph after insert: \"" + sanitizeLogText(paragraphAfter) + "\""
         );
+    }
+
+    /**
+     * Process transcription through cleanup (if configured) before inserting into the editor.
+     * This enforces pipeline order: Deepgram transcript -> Anthropic cleanup -> text insertion.
+     */
+    private void processTranscriptionResult(@NonNull final String transcriptionText) {
+        final String anthropicApiKey = KtxKt.prefs(this).getString(Settings.PREF_ANTHROPIC_API_KEY, "");
+        if (anthropicApiKey == null || anthropicApiKey.isEmpty()) {
+            Log.i(TAG, "VOICE_STEP_5 cleanup skipped (no Anthropic API key configured)");
+            insertTranscriptionText(transcriptionText);
+            return;
+        }
+
+        String cleanupPrompt = KtxKt.prefs(this).getString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT);
+        if (cleanupPrompt == null || cleanupPrompt.isEmpty()) {
+            cleanupPrompt = Defaults.PREF_CLEANUP_PROMPT;
+        }
+
+        final String existingParagraph = getCurrentParagraphForLogging();
+        final int sessionId = mVoiceSessionId;
+        final String prompt = cleanupPrompt;
+
+        mCleanupInProgress = true;
+        Log.i(
+                TAG,
+                "VOICE_STEP_5 sending text to Anthropic cleanup " +
+                        "(newTranscription=" + transcriptionText.length() +
+                        " chars, localParagraphContext=" + existingParagraph.length() +
+                        " chars)"
+        );
+
+        mTextCleanupClient.cleanupText(
+                anthropicApiKey,
+                prompt,
+                "",
+                transcriptionText,
+                new TextCleanupClient.CleanupCallback() {
+                    @Override
+                    public void onCleanupComplete(String cleanedText) {
+                        // Discard if the voice session has changed (abrupt cancel or new session)
+                        if (sessionId != mVoiceSessionId) {
+                            Log.i(TAG, "Cleanup result discarded — voice session changed");
+                            return;
+                        }
+
+                        String sanitizedCleanedText = stripInvisibleChars(cleanedText);
+                        Log.i(
+                                TAG,
+                                "VOICE_STEP_5C cleanup response received (" +
+                                        sanitizedCleanedText.length() + " chars): \"" +
+                                        sanitizeLogText(sanitizedCleanedText) + "\""
+                        );
+
+                        if (sanitizedCleanedText.isEmpty()) {
+                            Log.w(TAG, "Cleanup returned empty text, falling back to raw transcription insert");
+                            insertTranscriptionText(transcriptionText);
+                        } else {
+                            insertTranscriptionText(sanitizedCleanedText);
+                        }
+
+                        mCleanupInProgress = false;
+                        processPendingVoiceInput();
+                    }
+
+                    @Override
+                    public void onCleanupError(String error) {
+                        // Discard if the voice session has changed
+                        if (sessionId != mVoiceSessionId) {
+                            Log.i(TAG, "Cleanup error discarded — voice session changed");
+                            return;
+                        }
+
+                        Log.e(TAG, "Cleanup error: " + error);
+                        showVoiceErrorToast("Cleanup failed: " + error);
+
+                        // Do not lose user dictation on cleanup failures.
+                        insertTranscriptionText(transcriptionText);
+
+                        mCleanupInProgress = false;
+                        processPendingVoiceInput();
+                    }
+                }
+        );
+    }
+
+    private void appendPendingTranscription(@NonNull final String text) {
+        if (text.isEmpty()) {
+            return;
+        }
+        if (mPendingTranscription.length() > 0) {
+            final char lastPending = mPendingTranscription.charAt(mPendingTranscription.length() - 1);
+            final char firstIncoming = text.charAt(0);
+            if (!Character.isWhitespace(lastPending) && !Character.isWhitespace(firstIncoming)) {
+                mPendingTranscription.append(' ');
+            }
+        }
+        mPendingTranscription.append(text);
+        if (mPendingTranscription.length() > 12000) {
+            Log.w(TAG, "Pending transcription buffer is large: " + mPendingTranscription.length());
+        }
     }
 
     /**
@@ -2012,7 +1998,11 @@ public class LatinIME extends InputMethodService implements
         if (mPendingTranscription.length() > 0) {
             String pending = mPendingTranscription.toString();
             mPendingTranscription.setLength(0);
-            insertTranscriptionText(pending);
+            processTranscriptionResult(pending);
+            if (mCleanupInProgress) {
+                // Wait for cleanup callback before applying paragraph operations.
+                return;
+            }
         }
         
         // Then process pending new paragraph

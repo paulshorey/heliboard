@@ -58,7 +58,6 @@ HTTP client for Deepgram's pre-recorded transcription API.
 Orchestrates the voice input flow and manages timers.
 - **State machine**: IDLE → RECORDING ↔ PAUSED → IDLE
 - **Chunk Watchdog** (dynamic): Forces a segment flush if silence detection misses a boundary
-- **Cleanup Timer** (3s): Trigger text cleanup after transcription
 - **New Paragraph Timer** (configurable): Insert paragraph break after long silence
 
 ### TextCleanupClient.kt
@@ -90,32 +89,20 @@ User speaks...
     → onSegmentReady(wavData) callback
 ```
 
-### 3. Transcription
+### 3. Transcription + Cleanup + Insert
 ```
 VoiceInputManager.enqueueSegment(wavData)
     → DeepgramTranscriptionClient.transcribe(wavData)
     → POST /v1/listen with audio/wav body
     → Deepgram returns JSON with transcript
     → onTranscriptionComplete(text)
-    → VoiceInputManager.listener.onTranscriptionResult(text)
-    → LatinIME.insertTranscriptionText(text)
+    → LatinIME sends transcript text to Anthropic cleanup
+    → Anthropic returns cleaned/corrected text
+    → LatinIME.insertTranscriptionText(cleanedText)
     → Text appears in text field
 ```
 
-### 4. Cleanup Processing (after 3s silence following transcription)
-```
-Transcription inserted
-    → VoiceInputManager starts cleanup timer
-    → 3 seconds pass with no new speech
-    → LatinIME.onCleanupRequested()
-    → Extract current paragraph (text since last newline)
-    → TextCleanupClient.cleanupText(paragraph)
-    → Claude processes text
-    → LatinIME.onCleanupComplete(cleanedText)
-    → Find and replace original paragraph with cleaned text
-```
-
-### 5. New Paragraph (after configured silence window)
+### 4. New Paragraph (after configured silence window)
 ```
 Speech stops
     → VoiceInputManager starts new paragraph timer
@@ -158,7 +145,6 @@ to keep insertion order deterministic.
 ### Timers (VoiceInputManager.kt)
 ```kotlin
 MIN_CHUNK_WATCHDOG_MS = 20000L // Base watchdog lower bound
-CLEANUP_DELAY_MS = 3000L       // Cleanup after 3s post-transcription
 newParagraphDelayMs (configurable via settings)
 ```
 
