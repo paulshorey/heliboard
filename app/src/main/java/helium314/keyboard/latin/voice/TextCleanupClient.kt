@@ -23,9 +23,12 @@ import java.util.concurrent.TimeUnit
 /**
  * Client for Claude text cleanup.
  *
- * Sends the **full current paragraph** (existing context + new transcription) to
- * Claude and receives the corrected paragraph back. The caller is responsible for
- * replacing the old paragraph text with the cleaned result.
+ * Sends recent context (last ~3 sentences + new transcription) to Claude and
+ * receives the corrected text back. The caller is responsible for replacing the
+ * old context in the editor with the cleaned result.
+ *
+ * Automatically retries once on transient failures (5xx, 408, timeout,
+ * connection error).
  *
  * Uses Anthropic's Claude API (claude-haiku-4-5).
  */
@@ -39,11 +42,14 @@ class TextCleanupClient {
 
         /**
          * Maximum output tokens for the cleanup response.
-         * Must be large enough to accommodate the full corrected paragraph,
-         * since the response contains the entire paragraph (not just the new chunk).
-         * 4096 tokens ≈ 3000 words — generous for any reasonable paragraph.
+         * Must be large enough to accommodate the full corrected context,
+         * since the response contains the entire context window (not just the new chunk).
+         * 4096 tokens ≈ 3000 words — generous for any reasonable context window.
          */
         private const val MAX_TOKENS = 4096
+
+        /** Delay before a single retry on transient failures. */
+        private const val RETRY_DELAY_MS = 2000L
     }
 
     interface CleanupCallback {
@@ -66,8 +72,8 @@ class TextCleanupClient {
      *
      * @param apiKey Anthropic API key
      * @param systemPrompt The system prompt for cleanup instructions
-     * @param existingContext Current paragraph text (from last newline to cursor).
-     *                        This provides context so Claude can correct the whole paragraph.
+     * @param existingContext Recent text before the cursor (last ~3 sentences).
+     *                        This provides context so Claude can correct in context.
      * @param newText Newly transcribed text to append after the existing context.
      * @param callback Callback for result (called on main thread)
      */
@@ -78,7 +84,7 @@ class TextCleanupClient {
         newText: String,
         callback: CleanupCallback
     ) {
-        // Build the full text: existing paragraph context + new transcription.
+        // Build the full text: existing context + new transcription.
         // Trim trailing whitespace from context to avoid double-spaces when the
         // previous insertion added a trailing space.
         val trimmedContext = existingContext.trimEnd()
@@ -117,6 +123,34 @@ class TextCleanupClient {
 
         Log.i(TAG, "VOICE_STEP_5 send to Anthropic cleanup (${fullText.length} chars)")
 
+        enqueueWithRetry(request, callback, retriesRemaining = 1)
+    }
+
+    /** Cancel all in-flight cleanup requests (best effort). */
+    fun cancelAll() {
+        val calls = synchronized(activeCalls) {
+            val snapshot = activeCalls.toList()
+            activeCalls.clear()
+            snapshot
+        }
+        for (call in calls) {
+            call.cancel()
+        }
+        if (calls.isNotEmpty()) {
+            Log.i(TAG, "Cancelled ${calls.size} in-flight cleanup request(s)")
+        }
+    }
+
+    // ── Internal ──────────────────────────────────────────────────────────
+
+    /**
+     * Enqueue [request] with automatic single retry on transient failures.
+     */
+    private fun enqueueWithRetry(
+        request: Request,
+        callback: CleanupCallback,
+        retriesRemaining: Int
+    ) {
         val call = client.newCall(request)
         activeCalls.add(call)
         call.enqueue(object : Callback {
@@ -124,6 +158,13 @@ class TextCleanupClient {
                 activeCalls.remove(call)
                 if (call.isCanceled()) {
                     Log.i(TAG, "Cleanup request cancelled")
+                    return
+                }
+                if (retriesRemaining > 0 && isRetryableError(e)) {
+                    Log.w(TAG, "Cleanup failed (${e.message}), retrying in ${RETRY_DELAY_MS}ms...")
+                    mainHandler.postDelayed({
+                        enqueueWithRetry(request, callback, retriesRemaining - 1)
+                    }, RETRY_DELAY_MS)
                     return
                 }
                 Log.e(TAG, "Cleanup request failed: ${e.message}")
@@ -137,6 +178,13 @@ class TextCleanupClient {
                 try {
                     val responseBody = response.body?.string()
                     if (!response.isSuccessful) {
+                        if (retriesRemaining > 0 && isRetryableStatus(response.code)) {
+                            Log.w(TAG, "Cleanup API error ${response.code}, retrying in ${RETRY_DELAY_MS}ms...")
+                            mainHandler.postDelayed({
+                                enqueueWithRetry(request, callback, retriesRemaining - 1)
+                            }, RETRY_DELAY_MS)
+                            return
+                        }
                         Log.e(TAG, "Cleanup API error: ${response.code} - $responseBody")
                         val message = when (response.code) {
                             401, 403 -> "Invalid Anthropic API key"
@@ -179,19 +227,14 @@ class TextCleanupClient {
         })
     }
 
-    /** Cancel all in-flight cleanup requests (best effort). */
-    fun cancelAll() {
-        val calls = synchronized(activeCalls) {
-            val snapshot = activeCalls.toList()
-            activeCalls.clear()
-            snapshot
-        }
-        for (call in calls) {
-            call.cancel()
-        }
-        if (calls.isNotEmpty()) {
-            Log.i(TAG, "Cancelled ${calls.size} in-flight cleanup request(s)")
-        }
+    /** Whether the IOException is a transient network error worth retrying. */
+    private fun isRetryableError(e: IOException): Boolean {
+        return e is SocketTimeoutException || e is ConnectException
+    }
+
+    /** Whether the HTTP status code indicates a transient server error worth retrying. */
+    private fun isRetryableStatus(code: Int): Boolean {
+        return code == 408 || code in 500..599
     }
 
     private fun mapNetworkError(e: IOException): String {
