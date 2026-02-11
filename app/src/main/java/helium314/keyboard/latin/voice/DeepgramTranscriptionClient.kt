@@ -13,6 +13,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import org.json.JSONObject
 import java.io.IOException
+import java.util.Collections
 import java.util.concurrent.TimeUnit
 
 /**
@@ -47,6 +48,8 @@ class DeepgramTranscriptionClient {
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    private val activeCalls = Collections.synchronizedSet(mutableSetOf<Call>())
+
     /**
      * Transcribe a WAV audio segment using Deepgram's pre-recorded API.
      *
@@ -80,8 +83,15 @@ class DeepgramTranscriptionClient {
 
         Log.i(TAG, "Sending ${wavData.size} bytes to Deepgram...")
 
-        client.newCall(request).enqueue(object : Callback {
+        val call = client.newCall(request)
+        activeCalls.add(call)
+        call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
+                activeCalls.remove(call)
+                if (call.isCanceled()) {
+                    Log.i(TAG, "Transcription request cancelled")
+                    return
+                }
                 Log.e(TAG, "Transcription request failed: ${e.message}")
                 mainHandler.post {
                     callback.onTranscriptionError("Network error: ${e.message}")
@@ -89,6 +99,7 @@ class DeepgramTranscriptionClient {
             }
 
             override fun onResponse(call: Call, response: Response) {
+                activeCalls.remove(call)
                 try {
                     val body = response.body?.string()
                     if (!response.isSuccessful) {
@@ -113,6 +124,18 @@ class DeepgramTranscriptionClient {
                 }
             }
         })
+    }
+
+    /** Cancel all in-flight transcription requests (best effort). */
+    fun cancelAll() {
+        val calls = synchronized(activeCalls) {
+            val snapshot = activeCalls.toList()
+            activeCalls.clear()
+            snapshot
+        }
+        for (call in calls) {
+            call.cancel()
+        }
     }
 
     /**

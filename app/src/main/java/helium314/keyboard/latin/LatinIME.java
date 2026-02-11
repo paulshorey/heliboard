@@ -1707,12 +1707,6 @@ public class LatinIME extends InputMethodService implements
                     return;
                 }
 
-                // Discard late-arriving results that were queued before recording stopped.
-                if (mVoiceInputManager.isIdle()) {
-                    Log.i(TAG, "Discarding transcription result — voice input is idle");
-                    return;
-                }
-
                 // If cleanup is in progress, queue to avoid race condition
                 if (mCleanupInProgress) {
                     mPendingTranscription.append(text);

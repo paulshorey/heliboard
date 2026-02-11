@@ -57,7 +57,7 @@ HTTP client for Deepgram's pre-recorded transcription API.
 ### VoiceInputManager.kt
 Orchestrates the voice input flow and manages timers.
 - **State machine**: IDLE → RECORDING ↔ PAUSED → IDLE
-- **Silence Timeout** (60s): Auto-cancel recording after prolonged silence
+- **Chunk Watchdog** (20s): Forces a segment flush if silence detection misses a boundary
 - **Cleanup Timer** (3s): Trigger text cleanup after transcription
 - **New Paragraph Timer** (12s): Insert paragraph break after long silence
 
@@ -143,6 +143,8 @@ mPendingTranscription   // StringBuilder for queued transcription during cleanup
 ```
 
 When cleanup is in progress, new transcriptions are queued and applied after cleanup completes.
+At the manager layer, audio chunks are also transcribed in FIFO order (one request at a time)
+to keep insertion order deterministic.
 
 ## Configuration
 
@@ -153,7 +155,7 @@ When cleanup is in progress, new transcriptions are queued and applied after cle
 
 ### Timeouts (VoiceInputManager.kt)
 ```kotlin
-SILENCE_TIMEOUT_MS = 60000L    // Auto-cancel after 60s silence
+CHUNK_WATCHDOG_MS = 20000L     // Force segment flush if split stalls
 CLEANUP_DELAY_MS = 3000L       // Cleanup after 3s post-transcription
 NEW_PARAGRAPH_DELAY_MS = 12000L // New paragraph after 12s silence
 ```

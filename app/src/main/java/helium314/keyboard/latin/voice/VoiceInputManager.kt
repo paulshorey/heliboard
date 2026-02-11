@@ -4,7 +4,6 @@ package helium314.keyboard.latin.voice
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.prefs
@@ -27,8 +26,11 @@ class VoiceInputManager(private val context: Context) {
     companion object {
         private const val TAG = "VoiceInputManager"
 
-        /** Auto-cancel recording after this much total silence (ms). */
-        private const val SILENCE_TIMEOUT_MS = 60_000L
+        /**
+         * Fallback watchdog: if we stay in RECORDING too long without a detected
+         * chunk boundary, ask [VoiceRecorder] to flush the current segment.
+         */
+        private const val CHUNK_WATCHDOG_MS = 20_000L
 
         /** After transcription is inserted, wait this long then request cleanup. */
         private const val CLEANUP_DELAY_MS = 3000L
@@ -59,19 +61,31 @@ class VoiceInputManager(private val context: Context) {
         fun onPermissionRequired()
     }
 
+    private data class PendingSegment(
+        val sessionId: Long,
+        val wavData: ByteArray
+    )
+
     private val voiceRecorder = VoiceRecorder(context)
     private val transcriptionClient = DeepgramTranscriptionClient()
     private var listener: VoiceInputListener? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private var currentState = State.IDLE
+    private var activeSessionId = 0L
 
-    // Silence timeout — auto-cancel after prolonged silence
-    private val silenceTimeoutRunnable = Runnable {
+    // Transcription pipeline: queue chunks and process strictly in order.
+    private val pendingSegments = ArrayDeque<PendingSegment>()
+    private var isTranscribingSegment = false
+    private var inFlightRequestToken = 0L
+    private var nextRequestToken = 0L
+
+    // Chunk watchdog — force a flush if silence detection misses a split.
+    private val chunkWatchdogRunnable = Runnable {
         if (currentState == State.RECORDING) {
-            Log.i(TAG, "Silence timeout — cancelling recording")
-            stopRecording()
-            listener?.onError("Recording stopped — no speech detected")
+            Log.w(TAG, "Chunk watchdog fired — forcing segment flush")
+            voiceRecorder.requestSegmentFlush()
+            resetChunkWatchdog()
         }
     }
 
@@ -128,42 +142,51 @@ class VoiceInputManager(private val context: Context) {
             return false
         }
 
+        beginNewSession()
+        val sessionId = activeSessionId
+
         // Wire up the recorder callback
         voiceRecorder.setCallback(object : VoiceRecorder.RecordingCallback {
             override fun onRecordingStarted() {
+                if (sessionId != activeSessionId) return
                 updateState(State.RECORDING)
-                resetSilenceTimeout()
+                resetChunkWatchdog()
             }
 
             override fun onSegmentReady(wavData: ByteArray) {
-                // Send segment to Deepgram for transcription
-                processSegment(wavData)
+                if (sessionId != activeSessionId) return
+                enqueueSegment(wavData, sessionId)
+                resetChunkWatchdog()
             }
 
             override fun onSpeechStarted() {
+                if (sessionId != activeSessionId) return
                 cancelCleanupTimer()
                 cancelNewParagraphTimer()
-                resetSilenceTimeout()
+                resetChunkWatchdog()
             }
 
             override fun onSpeechStopped() {
+                if (sessionId != activeSessionId) return
                 startNewParagraphTimer()
             }
 
             override fun onRecordingStopped() {
+                if (sessionId != activeSessionId) return
                 Log.i(TAG, "Audio recording stopped")
             }
 
             override fun onRecordingError(error: String) {
+                if (sessionId != activeSessionId) return
                 Log.e(TAG, "Recording error: $error")
-                stopRecordingInternal()
+                stopRecordingInternal(cancelPending = true)
                 listener?.onError(error)
             }
         })
 
         if (!voiceRecorder.startRecording()) {
             Log.e(TAG, "Failed to start audio recording")
-            updateState(State.IDLE)
+            stopRecordingInternal(cancelPending = true)
             listener?.onError("Failed to start recording")
             return false
         }
@@ -174,17 +197,17 @@ class VoiceInputManager(private val context: Context) {
     fun stopRecording() {
         if (currentState == State.IDLE) return
         Log.i(TAG, "Stopping recording")
-        stopRecordingInternal()
+        stopRecordingInternal(cancelPending = false)
     }
 
     fun cancelRecording() {
         Log.i(TAG, "Cancelling recording")
-        stopRecordingInternal()
+        stopRecordingInternal(cancelPending = true)
     }
 
     fun pauseRecording() {
         if (currentState != State.RECORDING) return
-        cancelSilenceTimeout()
+        cancelChunkWatchdog()
         cancelCleanupTimer()
         cancelNewParagraphTimer()
         voiceRecorder.pauseRecording()
@@ -195,7 +218,7 @@ class VoiceInputManager(private val context: Context) {
         if (currentState != State.PAUSED) return
         voiceRecorder.resumeRecording()
         updateState(State.RECORDING)
-        resetSilenceTimeout()
+        resetChunkWatchdog()
     }
 
     fun togglePause() {
@@ -207,16 +230,32 @@ class VoiceInputManager(private val context: Context) {
     }
 
     fun destroy() {
-        stopRecordingInternal()
+        stopRecordingInternal(cancelPending = true)
         listener = null
     }
 
     // ── Private helpers ────────────────────────────────────────────────
 
-    private fun stopRecordingInternal() {
-        cancelSilenceTimeout()
+    private fun beginNewSession() {
+        invalidateActiveSession("new recording session")
+    }
+
+    private fun invalidateActiveSession(reason: String) {
+        activeSessionId += 1
+        pendingSegments.clear()
+        isTranscribingSegment = false
+        inFlightRequestToken = 0L
+        transcriptionClient.cancelAll()
+        Log.i(TAG, "Voice session invalidated ($reason), sessionId=$activeSessionId")
+    }
+
+    private fun stopRecordingInternal(cancelPending: Boolean) {
+        cancelChunkWatchdog()
         cancelCleanupTimer()
         cancelNewParagraphTimer()
+        if (cancelPending) {
+            invalidateActiveSession("recording cancelled")
+        }
         voiceRecorder.stopRecording()
         updateState(State.IDLE)
     }
@@ -229,50 +268,104 @@ class VoiceInputManager(private val context: Context) {
     }
 
     /**
-     * Send a completed audio segment to Deepgram, then deliver
-     * the transcription to the listener and schedule cleanup.
+     * Queue a segment for transcription in strict FIFO order.
      */
-    private fun processSegment(wavData: ByteArray) {
+    private fun enqueueSegment(wavData: ByteArray, sessionId: Long) {
+        if (sessionId != activeSessionId) {
+            Log.i(TAG, "Dropping segment from stale session $sessionId")
+            return
+        }
+        if (wavData.isEmpty()) return
+        pendingSegments.addLast(PendingSegment(sessionId, wavData))
+        processNextSegment()
+    }
+
+    /**
+     * Process queued segments sequentially to keep transcript order deterministic
+     * and avoid overlapping requests/race conditions.
+     */
+    private fun processNextSegment() {
+        if (isTranscribingSegment) return
+
+        val segment = pendingSegments.removeFirstOrNull() ?: return
+        if (segment.sessionId != activeSessionId) {
+            Log.i(TAG, "Skipping queued segment from stale session ${segment.sessionId}")
+            processNextSegment()
+            return
+        }
+
         val apiKey = getApiKey()
         if (apiKey.isBlank()) {
             listener?.onError("Deepgram API key not configured")
+            processNextSegment()
             return
         }
+
+        val requestToken = ++nextRequestToken
+        inFlightRequestToken = requestToken
+        isTranscribingSegment = true
 
         val language = getCurrentLanguage()
 
         transcriptionClient.transcribe(
             apiKey = apiKey,
-            wavData = wavData,
+            wavData = segment.wavData,
             language = language,
             callback = object : DeepgramTranscriptionClient.TranscriptionCallback {
                 override fun onTranscriptionComplete(text: String) {
-                    if (text.isNotBlank()) {
-                        listener?.onTranscriptionResult(text)
-                        // Schedule cleanup after transcription is inserted
-                        startCleanupTimer()
+                    completeTranscriptionRequest(requestToken, segment.sessionId) {
+                        if (text.isNotBlank()) {
+                            listener?.onTranscriptionResult(text)
+                            // Schedule cleanup after transcription is inserted
+                            startCleanupTimer()
+                        }
                     }
                 }
 
                 override fun onTranscriptionError(error: String) {
-                    Log.e(TAG, "Transcription error: $error")
-                    listener?.onError(error)
+                    completeTranscriptionRequest(requestToken, segment.sessionId) {
+                        Log.e(TAG, "Transcription error: $error")
+                        listener?.onError(error)
+                    }
                 }
             }
         )
     }
 
+    private fun completeTranscriptionRequest(
+        requestToken: Long,
+        sessionId: Long,
+        onCurrentSession: () -> Unit
+    ) {
+        if (inFlightRequestToken != requestToken) {
+            // Session was invalidated and this callback belongs to an old request.
+            Log.i(TAG, "Ignoring stale transcription callback token=$requestToken")
+            return
+        }
+
+        inFlightRequestToken = 0L
+        isTranscribingSegment = false
+
+        if (sessionId == activeSessionId) {
+            onCurrentSession()
+        } else {
+            Log.i(TAG, "Ignoring transcription callback from stale session $sessionId")
+        }
+
+        processNextSegment()
+    }
+
     // ── Timers ─────────────────────────────────────────────────────────
 
-    private fun resetSilenceTimeout() {
-        mainHandler.removeCallbacks(silenceTimeoutRunnable)
+    private fun resetChunkWatchdog() {
+        mainHandler.removeCallbacks(chunkWatchdogRunnable)
         if (currentState == State.RECORDING) {
-            mainHandler.postDelayed(silenceTimeoutRunnable, SILENCE_TIMEOUT_MS)
+            mainHandler.postDelayed(chunkWatchdogRunnable, CHUNK_WATCHDOG_MS)
         }
     }
 
-    private fun cancelSilenceTimeout() {
-        mainHandler.removeCallbacks(silenceTimeoutRunnable)
+    private fun cancelChunkWatchdog() {
+        mainHandler.removeCallbacks(chunkWatchdogRunnable)
     }
 
     private fun startCleanupTimer() {
