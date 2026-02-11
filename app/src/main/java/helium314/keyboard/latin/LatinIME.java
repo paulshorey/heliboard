@@ -1717,9 +1717,9 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onProcessingStarted() {
                 try {
-                    mKeyboardSwitcher.showToast("...", false);
+                    mKeyboardSwitcher.showProcessingIndicator();
                 } catch (Exception e) {
-                    Log.e(TAG, "Error showing processing notification: " + e.getMessage());
+                    Log.e(TAG, "Error showing processing indicator: " + e.getMessage());
                 }
             }
 
@@ -1761,6 +1761,7 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onError(@NonNull String error) {
                 Log.e(TAG, "Voice input error: " + error);
+                mKeyboardSwitcher.hideProcessingIndicator();
                 showVoiceErrorToast(error);
             }
 
@@ -1921,6 +1922,9 @@ public class LatinIME extends InputMethodService implements
             mInputLogic.mConnection.commitText(textToInsert, 1);
             mInputLogic.mConnection.endBatchEdit();
 
+            // Text has been inserted — hide the processing spinner.
+            mKeyboardSwitcher.hideProcessingIndicator();
+
             String contextAfter = getRecentContext();
             Log.i(
                     TAG,
@@ -1928,6 +1932,7 @@ public class LatinIME extends InputMethodService implements
             );
         } catch (Exception e) {
             Log.e(TAG, "Error inserting transcription text: " + e.getMessage(), e);
+            mKeyboardSwitcher.hideProcessingIndicator();
         }
     }
 
@@ -1970,6 +1975,9 @@ public class LatinIME extends InputMethodService implements
             mInputLogic.mConnection.commitText(textToInsert, 1);
             mInputLogic.mConnection.endBatchEdit();
 
+            // Cleaned text has been inserted — hide the processing spinner.
+            mKeyboardSwitcher.hideProcessingIndicator();
+
             String contextAfter = getRecentContext();
             Log.i(
                     TAG,
@@ -1977,6 +1985,7 @@ public class LatinIME extends InputMethodService implements
             );
         } catch (Exception e) {
             Log.e(TAG, "Error replacing context with cleaned text: " + e.getMessage(), e);
+            mKeyboardSwitcher.hideProcessingIndicator();
         }
     }
 
@@ -2177,6 +2186,7 @@ public class LatinIME extends InputMethodService implements
         mCleanupInProgress = false;
         mPendingNewParagraph = false;
         mPendingTranscription.setLength(0);
+        mKeyboardSwitcher.hideProcessingIndicator();
     }
 
     /**

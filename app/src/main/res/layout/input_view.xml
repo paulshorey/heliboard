@@ -13,6 +13,14 @@
     <include
         android:id="@+id/fakeToast"
         layout="@layout/fake_toast" />
+    <ProgressBar
+        android:id="@+id/voice_processing_indicator"
+        style="?android:attr/progressBarStyleSmall"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:layout_gravity="center"
+        android:indeterminate="true"
+        android:visibility="gone" />
     <include
         android:id="@+id/main_keyboard_frame"
         layout="@layout/main_keyboard_frame" />
