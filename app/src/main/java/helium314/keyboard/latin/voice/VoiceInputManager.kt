@@ -85,7 +85,6 @@ class VoiceInputManager(private val context: Context) {
         if (currentState == State.RECORDING) {
             Log.w(TAG, "Chunk watchdog fired — forcing segment flush")
             voiceRecorder.requestSegmentFlush()
-            resetChunkWatchdog()
         }
     }
 
@@ -156,7 +155,6 @@ class VoiceInputManager(private val context: Context) {
             override fun onSegmentReady(wavData: ByteArray) {
                 if (sessionId != activeSessionId) return
                 enqueueSegment(wavData, sessionId)
-                resetChunkWatchdog()
             }
 
             override fun onSpeechStarted() {
@@ -168,6 +166,7 @@ class VoiceInputManager(private val context: Context) {
 
             override fun onSpeechStopped() {
                 if (sessionId != activeSessionId) return
+                cancelChunkWatchdog()
                 startNewParagraphTimer()
             }
 
