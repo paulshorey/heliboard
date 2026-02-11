@@ -105,7 +105,7 @@ class VoiceInputManager(private val context: Context) {
     // Cleanup timer — trigger cleanup after silence following transcription
     private val cleanupTimerRunnable = Runnable {
         if (currentState == State.RECORDING || currentState == State.IDLE) {
-            Log.i(TAG, "Cleanup timer fired")
+            Log.i(TAG, "VOICE_STEP_5B cleanup timer fired — requesting Anthropic cleanup send")
             listener?.onCleanupRequested()
         }
     }
@@ -387,9 +387,9 @@ class VoiceInputManager(private val context: Context) {
                                 TAG,
                                 "VOICE_STEP_4 transcription received (${text.length} chars) — applying post-processing"
                             )
-                            listener?.onTranscriptionResult(text)
-                            // Schedule cleanup after transcription is inserted
+                            // Schedule cleanup after the configured silence window.
                             startCleanupTimer()
+                            listener?.onTranscriptionResult(text)
                         }
                     }
                 }
@@ -442,6 +442,11 @@ class VoiceInputManager(private val context: Context) {
 
     private fun startCleanupTimer() {
         mainHandler.removeCallbacks(cleanupTimerRunnable)
+        Log.i(
+            TAG,
+            "VOICE_STEP_5 cleanup timer started (${CLEANUP_DELAY_MS}ms) " +
+                "— Anthropic send happens after this silence window"
+        )
         mainHandler.postDelayed(cleanupTimerRunnable, CLEANUP_DELAY_MS)
     }
 

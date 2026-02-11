@@ -1758,7 +1758,7 @@ public class LatinIME extends InputMethodService implements
 
                 Log.i(
                         TAG,
-                        "VOICE_STEP_5 sending paragraph to Anthropic cleanup (" +
+                        "VOICE_STEP_5B sending paragraph to Anthropic cleanup (" +
                                 originalParagraph.length() + " chars): \"" +
                                 sanitizeLogText(originalParagraph) + "\""
                 );
@@ -1789,7 +1789,7 @@ public class LatinIME extends InputMethodService implements
                         String sanitizedCleanedText = stripInvisibleChars(cleanedText);
                         Log.i(
                                 TAG,
-                                "Cleanup response received (" + sanitizedCleanedText.length() + " chars): \"" +
+                                "VOICE_STEP_5C cleanup response received (" + sanitizedCleanedText.length() + " chars): \"" +
                                         sanitizeLogText(sanitizedCleanedText) + "\""
                         );
 
@@ -1986,7 +1986,7 @@ public class LatinIME extends InputMethodService implements
         String paragraphBefore = getCurrentParagraphForLogging();
         Log.i(
                 TAG,
-                "VOICE_STEP_6 paragraph before insert: \"" + sanitizeLogText(paragraphBefore) + "\""
+                "VOICE_STEP_6 pre-cleanup paragraph before insert: \"" + sanitizeLogText(paragraphBefore) + "\""
         );
         
         // Reset InputLogic composing state before direct connection manipulation.
@@ -1999,7 +1999,7 @@ public class LatinIME extends InputMethodService implements
         String paragraphAfter = getCurrentParagraphForLogging();
         Log.i(
                 TAG,
-                "VOICE_STEP_6 paragraph after insert: \"" + sanitizeLogText(paragraphAfter) + "\""
+                "VOICE_STEP_6 pre-cleanup paragraph after insert: \"" + sanitizeLogText(paragraphAfter) + "\""
         );
     }
 

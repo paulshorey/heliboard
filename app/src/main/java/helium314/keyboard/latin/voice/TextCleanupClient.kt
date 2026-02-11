@@ -95,7 +95,7 @@ class TextCleanupClient {
             .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
-        Log.i(TAG, "VOICE_STEP_5 send to Anthropic cleanup (${fullText.length} chars)")
+        Log.i(TAG, "VOICE_STEP_5B send to Anthropic cleanup (${fullText.length} chars)")
 
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
