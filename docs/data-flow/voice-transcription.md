@@ -7,7 +7,7 @@ This document describes the architecture and data flow for voice transcription w
 The voice input system uses a **local recording + batch transcription** architecture:
 1. **VoiceRecorder** — captures audio locally, detects silence, emits WAV segments
 2. **Deepgram API** — transcribes each audio segment into text
-3. **Anthropic Claude API** — cleans up the transcribed paragraph (capitalization, punctuation, grammar)
+3. **Anthropic Claude API** — cleans up the transcribed text with recent context (capitalization, punctuation, grammar)
 
 ## Architecture
 
@@ -53,6 +53,7 @@ HTTP client for Deepgram's pre-recorded transcription API.
 - **Model**: `nova-3`
 - **Content-Type**: `audio/wav` (raw bytes in request body)
 - **Features**: `smart_format=true`, `punctuate=true`
+- **Retry**: Single automatic retry after 2s on transient failures (5xx, 408, timeout, connection error)
 
 ### VoiceInputManager.kt
 Orchestrates the voice input flow and manages timers.
@@ -64,10 +65,11 @@ Orchestrates the voice input flow and manages timers.
 HTTP client for Anthropic's Claude API.
 - **Model**: `claude-haiku-4-5-20251001`
 - **Purpose**: Intelligent capitalization, punctuation, and grammar cleanup
-- **Input**: `{existing paragraph context} + {new transcription}` (trimmed to avoid double-spaces)
-- **Output**: Full corrected paragraph (replaces existing paragraph in editor)
-- **max_tokens**: 4096 (accommodates full paragraph responses)
+- **Input**: `{recent context (last 3 sentences)} + {new transcription}` (trimmed to avoid double-spaces)
+- **Output**: Full corrected context (replaces the context window in editor)
+- **max_tokens**: 4096 (accommodates full context responses)
 - **Cancellation**: Tracks active HTTP calls; `cancelAll()` cancels in-flight requests
+- **Retry**: Single automatic retry after 2s on transient failures (5xx, 408, timeout, connection error)
 
 ### LatinIME.java
 Main orchestrator that coordinates all components and manages text insertion.
@@ -93,25 +95,31 @@ User speaks...
     → onSegmentReady(wavData) callback
 ```
 
-### 3. Transcription + Cleanup + Replace Paragraph
+### 3. Transcription + Cleanup + Replace Context
 ```
 VoiceInputManager.enqueueSegment(wavData)
     → DeepgramTranscriptionClient.transcribe(wavData)
     → POST /v1/listen with audio/wav body
     → Deepgram returns JSON with transcript
     → onTranscriptionComplete(text)
-    → LatinIME captures current paragraph as context
-    → LatinIME sends {current paragraph} + {new text} to Anthropic cleanup
-    → Anthropic returns corrected full paragraph
-    → LatinIME.replaceCurrentParagraphWithCleanedText():
-        1. Delete old paragraph text (before cursor)
-        2. Insert corrected paragraph + trailing space
+    → LatinIME captures recent context (last 3 sentences or 300 chars)
+    → LatinIME sends {recent context} + {new text} to Anthropic cleanup
+    → Anthropic returns corrected text
+    → LatinIME.replaceContextWithCleanedText():
+        1. Delete old context text (before cursor)
+        2. Insert corrected text + trailing space
     → Corrected text appears in text field
 ```
 
-**Key detail**: Claude receives the *full paragraph* (existing + new) so it can correct
-capitalization, punctuation, and grammar in context — not just the latest chunk. The old
-paragraph text is then replaced with Claude's corrected version.
+**Context window**: Claude receives the last ~3 sentences as context (detected by
+simplified punctuation matching: `.!?:;=`). If fewer than 3 sentence boundaries exist,
+up to 300 characters are sent. This crosses newline/paragraph boundaries — even at the
+start of a new line, Claude always has adequate context. The old context text is then
+replaced with Claude's corrected version.
+
+**Retry**: Both transcription and cleanup requests automatically retry once after a
+2-second delay on transient failures (5xx, 408, socket timeout, connection error).
+Non-retryable errors (4xx) are reported immediately.
 
 ### 4. New Paragraph (after configured silence window)
 ```
@@ -148,8 +156,8 @@ mVoiceSessionId         // incremented on cancel/new session; stale callbacks ar
   (user typed, cursor moved, recording cancelled, etc.).
 - `TextCleanupClient.cancelAll()` is called on session cancellation to cancel HTTP requests.
 
-**Paragraph replacement safety:**
-- The `existingParagraphLength` is captured *before* the cleanup request is sent and
+**Context replacement safety:**
+- The `existingContextLength` is captured *before* the cleanup request is sent and
   closed over in the callback. Since `mCleanupInProgress` prevents any text insertion
   during cleanup, the text before the cursor is guaranteed to be unchanged when the
   callback fires (within the same session).
@@ -180,8 +188,9 @@ MAX_SEGMENT_MS = 60000L        // Force-split at 60s
 
 ## Error Handling
 
-- **Network errors**: Audio is captured locally; if transcription fails, the segment is lost but recording continues
-- **API errors**: Logged and surfaced to user (invalid key, timeout, service errors, etc.)
+- **Transient failures** (5xx, 408, timeout, connection): Automatically retried once after 2s delay
+- **Network errors**: Audio is captured locally; if transcription fails after retry, the segment is lost but recording continues
+- **API errors**: Logged and surfaced to user (invalid key, rate limit, etc.)
 - **Empty transcriptions**: Silently ignored
 - **Cleanup errors**: Raw transcription is inserted as fallback (graceful degradation — no text is lost)
 - **Session cancellation**: Both Deepgram and Anthropic in-flight HTTP requests are cancelled;

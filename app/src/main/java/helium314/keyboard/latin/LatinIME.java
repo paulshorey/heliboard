@@ -1872,10 +1872,10 @@ public class LatinIME extends InputMethodService implements
         }
         String adjustedText = adjustCapitalization(sanitized);
         String textToInsert = ensureTrailingSpace(adjustedText);
-        String paragraphBefore = getCurrentParagraph();
+        String contextBefore = getRecentContext();
         Log.i(
                 TAG,
-                "VOICE_STEP_6 paragraph before insert: \"" + sanitizeLogText(paragraphBefore) + "\""
+                "VOICE_STEP_6 context before insert: \"" + sanitizeLogText(contextBefore) + "\""
         );
         
         // Reset InputLogic composing state before direct connection manipulation.
@@ -1885,28 +1885,28 @@ public class LatinIME extends InputMethodService implements
         mInputLogic.mConnection.commitText(textToInsert, 1);
         mInputLogic.mConnection.endBatchEdit();
 
-        String paragraphAfter = getCurrentParagraph();
+        String contextAfter = getRecentContext();
         Log.i(
                 TAG,
-                "VOICE_STEP_6 paragraph after insert: \"" + sanitizeLogText(paragraphAfter) + "\""
+                "VOICE_STEP_6 context after insert: \"" + sanitizeLogText(contextAfter) + "\""
         );
     }
 
     /**
-     * Replace the current paragraph with cleaned text from Claude.
+     * Replace the recent context with cleaned text from Claude.
      *
-     * Claude receives the full paragraph (existing context + new transcription) and returns
-     * the corrected paragraph. This method deletes the old paragraph text that was sent as
-     * context, then inserts Claude's corrected version.
+     * Claude receives the recent context (last 3 sentences + new transcription) and
+     * returns the corrected text. This method deletes the old context that was sent,
+     * then inserts Claude's corrected version.
      *
      * Claude already handles capitalization and punctuation, so we do NOT apply
      * {@link #adjustCapitalization} here — only invisible-char stripping and trailing space.
      *
-     * @param cleanedText   The full corrected paragraph returned by Claude
-     * @param oldParagraphLength  The length of the paragraph that was in the editor when the
-     *                            cleanup request was sent (number of chars to delete before cursor)
+     * @param cleanedText      The corrected text returned by Claude
+     * @param oldContextLength The length of the context that was in the editor when the
+     *                         cleanup request was sent (number of chars to delete before cursor)
      */
-    private void replaceCurrentParagraphWithCleanedText(String cleanedText, int oldParagraphLength) {
+    private void replaceContextWithCleanedText(String cleanedText, int oldContextLength) {
         if (cleanedText == null || cleanedText.isEmpty()) {
             return;
         }
@@ -1918,23 +1918,23 @@ public class LatinIME extends InputMethodService implements
 
         Log.i(
                 TAG,
-                "VOICE_STEP_6 replacing paragraph (" + oldParagraphLength +
+                "VOICE_STEP_6 replacing context (" + oldContextLength +
                         " chars) with cleaned text (" + textToInsert.length() + " chars)"
         );
 
         // Reset InputLogic composing state before direct connection manipulation.
         mInputLogic.finishInput();
         mInputLogic.mConnection.beginBatchEdit();
-        if (oldParagraphLength > 0) {
-            mInputLogic.mConnection.deleteTextBeforeCursor(oldParagraphLength);
+        if (oldContextLength > 0) {
+            mInputLogic.mConnection.deleteTextBeforeCursor(oldContextLength);
         }
         mInputLogic.mConnection.commitText(textToInsert, 1);
         mInputLogic.mConnection.endBatchEdit();
 
-        String paragraphAfter = getCurrentParagraph();
+        String contextAfter = getRecentContext();
         Log.i(
                 TAG,
-                "VOICE_STEP_6 paragraph after replace: \"" + sanitizeLogText(paragraphAfter) + "\""
+                "VOICE_STEP_6 context after replace: \"" + sanitizeLogText(contextAfter) + "\""
         );
     }
 
@@ -1965,10 +1965,11 @@ public class LatinIME extends InputMethodService implements
             cleanupPrompt = Defaults.PREF_CLEANUP_PROMPT;
         }
 
-        // Capture the current paragraph text. This is the "before" snapshot that will be
-        // sent as context to Claude and later deleted/replaced with Claude's response.
-        final String existingParagraph = getCurrentParagraph();
-        final int existingParagraphLength = existingParagraph.length();
+        // Capture the recent context (last 3 sentences or up to 300 chars).
+        // This is the "before" snapshot that will be sent to Claude and later
+        // deleted/replaced with Claude's corrected response.
+        final String existingContext = getRecentContext();
+        final int existingContextLength = existingContext.length();
         final int sessionId = mVoiceSessionId;
         final String prompt = cleanupPrompt;
 
@@ -1976,7 +1977,7 @@ public class LatinIME extends InputMethodService implements
         Log.i(
                 TAG,
                 "VOICE_STEP_5 sending to Anthropic cleanup " +
-                        "(existingParagraph=" + existingParagraphLength +
+                        "(existingContext=" + existingContextLength +
                         " chars, newTranscription=" + transcriptionText.length() +
                         " chars)"
         );
@@ -1984,7 +1985,7 @@ public class LatinIME extends InputMethodService implements
         mTextCleanupClient.cleanupText(
                 anthropicApiKey,
                 prompt,
-                existingParagraph,
+                existingContext,
                 transcriptionText,
                 new TextCleanupClient.CleanupCallback() {
                     @Override
@@ -2007,9 +2008,9 @@ public class LatinIME extends InputMethodService implements
                             Log.w(TAG, "Cleanup returned empty text, falling back to raw transcription insert");
                             insertTranscriptionText(transcriptionText);
                         } else {
-                            // Replace the old paragraph with the full corrected paragraph.
-                            replaceCurrentParagraphWithCleanedText(
-                                    sanitizedCleanedText, existingParagraphLength);
+                            // Replace the old context with the corrected text.
+                            replaceContextWithCleanedText(
+                                    sanitizedCleanedText, existingContextLength);
                         }
 
                         mCleanupInProgress = false;
@@ -2089,19 +2090,42 @@ public class LatinIME extends InputMethodService implements
     }
 
     /**
-     * Return the current paragraph: all text from the last newline (or start of field)
-     * up to the cursor position.  Used both for logging and as context sent to the
-     * Claude cleanup API so it can correct the entire paragraph.
+     * Return recent context for Claude cleanup: the last 3 sentences before the cursor,
+     * or up to 300 characters if fewer than 3 sentence boundaries are found.
      *
-     * The 4000-character look-back is generous for dictation; paragraphs longer than
-     * that are extremely unlikely in keyboard input.
+     * Sentence boundaries are detected by simplified punctuation matching: . ! ? : ; =
+     * This intentionally crosses newline and paragraph boundaries so that context is
+     * always available — even at the very start of a new line.
+     *
+     * The 300-character fallback ensures a reasonable context window when the user is
+     * dictating a single long sentence without much punctuation.
      */
     @NonNull
-    private String getCurrentParagraph() {
+    private String getRecentContext() {
         CharSequence beforeCursor = mInputLogic.mConnection.getTextBeforeCursor(4000, 0);
-        String text = beforeCursor != null ? beforeCursor.toString() : "";
-        int lastNewlinePos = text.lastIndexOf('\n');
-        return (lastNewlinePos >= 0) ? text.substring(lastNewlinePos + 1) : text;
+        if (beforeCursor == null || beforeCursor.length() == 0) {
+            return "";
+        }
+        String text = beforeCursor.toString();
+
+        // Scan backwards for sentence-ending punctuation
+        int boundaryCount = 0;
+        for (int i = text.length() - 1; i >= 0; i--) {
+            char c = text.charAt(i);
+            if (c == '.' || c == '!' || c == '?' || c == ':' || c == ';' || c == '=') {
+                boundaryCount++;
+                if (boundaryCount >= 3) {
+                    // Return everything after this boundary character
+                    return text.substring(i + 1);
+                }
+            }
+        }
+
+        // Fewer than 3 sentence boundaries: return up to 300 chars
+        if (text.length() <= 300) {
+            return text;
+        }
+        return text.substring(text.length() - 300);
     }
 
     @NonNull

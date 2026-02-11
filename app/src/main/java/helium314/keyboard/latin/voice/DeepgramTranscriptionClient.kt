@@ -33,6 +33,9 @@ class DeepgramTranscriptionClient {
     companion object {
         private const val TAG = "DeepgramTranscription"
         private const val BASE_URL = "https://api.deepgram.com/v1/listen"
+
+        /** Delay before a single retry on transient failures. */
+        private const val RETRY_DELAY_MS = 2000L
     }
 
     interface TranscriptionCallback {
@@ -55,6 +58,10 @@ class DeepgramTranscriptionClient {
 
     /**
      * Transcribe a WAV audio segment using Deepgram's pre-recorded API.
+     *
+     * Automatically retries once on transient failures (5xx, 408, timeout,
+     * connection error) after a short delay. Non-retryable errors (4xx client
+     * errors) are reported immediately.
      *
      * @param apiKey   Deepgram API key
      * @param wavData  Complete WAV file bytes (header + PCM data)
@@ -89,6 +96,34 @@ class DeepgramTranscriptionClient {
             "VOICE_STEP_3 send to Deepgram (${wavData.size} bytes, language=${language ?: "auto"})"
         )
 
+        enqueueWithRetry(request, callback, retriesRemaining = 1)
+    }
+
+    /** Cancel all in-flight transcription requests (best effort). */
+    fun cancelAll() {
+        val calls = synchronized(activeCalls) {
+            val snapshot = activeCalls.toList()
+            activeCalls.clear()
+            snapshot
+        }
+        for (call in calls) {
+            call.cancel()
+        }
+    }
+
+    // ── Internal ──────────────────────────────────────────────────────────
+
+    /**
+     * Enqueue [request] with automatic single retry on transient failures.
+     *
+     * On a retryable error the same [Request] object is re-used (OkHttp requests are
+     * immutable value objects, and byte-array request bodies can be written multiple times).
+     */
+    private fun enqueueWithRetry(
+        request: Request,
+        callback: TranscriptionCallback,
+        retriesRemaining: Int
+    ) {
         val call = client.newCall(request)
         activeCalls.add(call)
         call.enqueue(object : Callback {
@@ -96,6 +131,13 @@ class DeepgramTranscriptionClient {
                 activeCalls.remove(call)
                 if (call.isCanceled()) {
                     Log.i(TAG, "Transcription request cancelled")
+                    return
+                }
+                if (retriesRemaining > 0 && isRetryableError(e)) {
+                    Log.w(TAG, "Transcription failed (${e.message}), retrying in ${RETRY_DELAY_MS}ms...")
+                    mainHandler.postDelayed({
+                        enqueueWithRetry(request, callback, retriesRemaining - 1)
+                    }, RETRY_DELAY_MS)
                     return
                 }
                 Log.e(TAG, "Transcription request failed: ${e.message}")
@@ -109,6 +151,13 @@ class DeepgramTranscriptionClient {
                 try {
                     val body = response.body?.string()
                     if (!response.isSuccessful) {
+                        if (retriesRemaining > 0 && isRetryableStatus(response.code)) {
+                            Log.w(TAG, "Deepgram API error ${response.code}, retrying in ${RETRY_DELAY_MS}ms...")
+                            mainHandler.postDelayed({
+                                enqueueWithRetry(request, callback, retriesRemaining - 1)
+                            }, RETRY_DELAY_MS)
+                            return
+                        }
                         Log.e(TAG, "Deepgram API error: ${response.code} - $body")
                         val errorMsg = when (response.code) {
                             401, 403 -> "Invalid Deepgram API key"
@@ -134,16 +183,14 @@ class DeepgramTranscriptionClient {
         })
     }
 
-    /** Cancel all in-flight transcription requests (best effort). */
-    fun cancelAll() {
-        val calls = synchronized(activeCalls) {
-            val snapshot = activeCalls.toList()
-            activeCalls.clear()
-            snapshot
-        }
-        for (call in calls) {
-            call.cancel()
-        }
+    /** Whether the IOException is a transient network error worth retrying. */
+    private fun isRetryableError(e: IOException): Boolean {
+        return e is SocketTimeoutException || e is ConnectException
+    }
+
+    /** Whether the HTTP status code indicates a transient server error worth retrying. */
+    private fun isRetryableStatus(code: Int): Boolean {
+        return code == 408 || code in 500..599
     }
 
     private fun mapNetworkError(e: IOException): String {
