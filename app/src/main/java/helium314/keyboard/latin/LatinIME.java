@@ -1715,6 +1715,15 @@ public class LatinIME extends InputMethodService implements
             }
 
             @Override
+            public void onProcessingStarted() {
+                try {
+                    mKeyboardSwitcher.showToast("...", false);
+                } catch (Exception e) {
+                    Log.e(TAG, "Error showing processing notification: " + e.getMessage());
+                }
+            }
+
+            @Override
             public void onTranscriptionResult(@NonNull String text) {
                 try {
                     if (text == null || text.isEmpty()) {
@@ -2011,14 +2020,21 @@ public class LatinIME extends InputMethodService implements
         // but paragraph breaks are never touched.
         final int lastNewline = recentContext.lastIndexOf('\n');
         final String referenceContext;
-        final String editableText;
+        final String rawEditableText;
         if (lastNewline >= 0) {
             referenceContext = recentContext.substring(0, lastNewline + 1); // includes the \n
-            editableText = recentContext.substring(lastNewline + 1);
+            rawEditableText = recentContext.substring(lastNewline + 1);
         } else {
             referenceContext = "";
-            editableText = recentContext;
+            rawEditableText = recentContext;
         }
+
+        // Strip leading whitespace from the editable text so we don't delete it
+        // during replacement. The leading whitespace (space between the sentence
+        // boundary and the start of this context chunk) must be preserved in the
+        // editor — Claude's response gets .trim()'d which would lose it.
+        final String editableText = rawEditableText.replaceAll("^\\s+", "");
+        final int leadingWhitespaceLen = rawEditableText.length() - editableText.length();
         final int replacementLength = editableText.length();
 
         final int sessionId = mVoiceSessionId;

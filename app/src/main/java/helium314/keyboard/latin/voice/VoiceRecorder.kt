@@ -59,7 +59,7 @@ class VoiceRecorder(private val context: Context) {
         private const val NOISE_FLOOR_MAX = 2500.0
 
         /** Default silence duration (ms) before splitting a segment. */
-        private const val DEFAULT_SILENCE_DURATION_MS = 3000L
+        private const val DEFAULT_SILENCE_DURATION_MS = 2000L
         private const val MIN_SILENCE_DURATION_MS = 1000L
         private const val MAX_SILENCE_DURATION_MS = 30_000L
         private const val MIN_ALLOWED_SILENCE_THRESHOLD = 40.0
