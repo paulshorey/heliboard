@@ -1893,18 +1893,17 @@ public class LatinIME extends InputMethodService implements
     }
 
     /**
-     * Replace the recent context with cleaned text from Claude.
+     * Replace the current paragraph text with cleaned text from Claude.
      *
-     * Claude receives the recent context (last 3 sentences + new transcription) and
-     * returns the corrected text. This method deletes the old context that was sent,
-     * then inserts Claude's corrected version.
+     * Only the editable portion (text after the last line break in the context) is
+     * deleted and replaced. Paragraph breaks and earlier text remain untouched.
      *
      * Claude already handles capitalization and punctuation, so we do NOT apply
      * {@link #adjustCapitalization} here — only invisible-char stripping and trailing space.
      *
-     * @param cleanedText      The corrected text returned by Claude
-     * @param oldContextLength The length of the context that was in the editor when the
-     *                         cleanup request was sent (number of chars to delete before cursor)
+     * @param cleanedText      The corrected text returned by Claude (current paragraph only)
+     * @param oldContextLength The length of the editable text that was in the editor when
+     *                         the cleanup request was sent (chars to delete before cursor)
      */
     private void replaceContextWithCleanedText(String cleanedText, int oldContextLength) {
         if (cleanedText == null || cleanedText.isEmpty()) {
@@ -1941,13 +1940,16 @@ public class LatinIME extends InputMethodService implements
     /**
      * Process transcription through cleanup (if configured) before inserting into the editor.
      *
-     * Pipeline: Deepgram transcript → Anthropic cleanup → replace paragraph in editor.
+     * Pipeline: Deepgram transcript → Anthropic cleanup → replace current paragraph.
      *
-     * When cleanup is enabled, the **full current paragraph** (existing context + new
-     * transcription) is sent to Claude. Claude returns the corrected paragraph, which
-     * then **replaces** the old paragraph text in the editor. This gives Claude enough
-     * context to fix capitalization, punctuation, and grammar across the entire paragraph
-     * — not just the latest chunk.
+     * The recent context (last 3 sentences) may span multiple paragraphs. To protect
+     * paragraph breaks, we split the context at the last newline:
+     * <ul>
+     *   <li><b>referenceContext</b> — text before the last newline (read-only, for Claude's
+     *       understanding). Included in the system prompt but NOT replaced in the editor.</li>
+     *   <li><b>editableText</b> — text after the last newline (current paragraph). This is
+     *       what Claude cleans up and what gets replaced in the editor.</li>
+     * </ul>
      *
      * When cleanup is disabled (no Anthropic key), the raw transcription is simply
      * appended with basic capitalization adjustment.
@@ -1966,10 +1968,25 @@ public class LatinIME extends InputMethodService implements
         }
 
         // Capture the recent context (last 3 sentences or up to 300 chars).
-        // This is the "before" snapshot that will be sent to Claude and later
-        // deleted/replaced with Claude's corrected response.
-        final String existingContext = getRecentContext();
-        final int existingContextLength = existingContext.length();
+        // This may span multiple paragraphs.
+        final String recentContext = getRecentContext();
+
+        // Split at the last newline to separate read-only context from editable text.
+        // Only the editable portion (current paragraph) will be replaced in the editor.
+        // The reference context (earlier paragraphs) is sent to Claude for understanding
+        // but paragraph breaks are never touched.
+        final int lastNewline = recentContext.lastIndexOf('\n');
+        final String referenceContext;
+        final String editableText;
+        if (lastNewline >= 0) {
+            referenceContext = recentContext.substring(0, lastNewline + 1); // includes the \n
+            editableText = recentContext.substring(lastNewline + 1);
+        } else {
+            referenceContext = "";
+            editableText = recentContext;
+        }
+        final int replacementLength = editableText.length();
+
         final int sessionId = mVoiceSessionId;
         final String prompt = cleanupPrompt;
 
@@ -1977,7 +1994,8 @@ public class LatinIME extends InputMethodService implements
         Log.i(
                 TAG,
                 "VOICE_STEP_5 sending to Anthropic cleanup " +
-                        "(existingContext=" + existingContextLength +
+                        "(reference=" + referenceContext.length() +
+                        " chars, editable=" + replacementLength +
                         " chars, newTranscription=" + transcriptionText.length() +
                         " chars)"
         );
@@ -1985,7 +2003,8 @@ public class LatinIME extends InputMethodService implements
         mTextCleanupClient.cleanupText(
                 anthropicApiKey,
                 prompt,
-                existingContext,
+                referenceContext,
+                editableText,
                 transcriptionText,
                 new TextCleanupClient.CleanupCallback() {
                     @Override
@@ -2008,9 +2027,10 @@ public class LatinIME extends InputMethodService implements
                             Log.w(TAG, "Cleanup returned empty text, falling back to raw transcription insert");
                             insertTranscriptionText(transcriptionText);
                         } else {
-                            // Replace the old context with the corrected text.
+                            // Replace only the current paragraph (editable portion).
+                            // Paragraph breaks and earlier text stay untouched.
                             replaceContextWithCleanedText(
-                                    sanitizedCleanedText, existingContextLength);
+                                    sanitizedCleanedText, replacementLength);
                         }
 
                         mCleanupInProgress = false;
