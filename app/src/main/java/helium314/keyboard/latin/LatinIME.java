@@ -1074,30 +1074,38 @@ public class LatinIME extends InputMethodService implements
         // of the text, or when the text field is cleared. We use isBelatedExpectedUpdate to
         // distinguish user-initiated cursor changes from cursor changes caused by the
         // keyboard's own text operations (e.g., transcription insertion, cleanup replace).
-        if (mVoiceInputManager != null && !mVoiceInputManager.isIdle()
-                && (oldSelStart != newSelStart || oldSelEnd != newSelEnd)
-                && !mInputLogic.mConnection.isBelatedExpectedUpdate(
-                        oldSelStart, newSelStart, oldSelEnd, newSelEnd,
-                        composingSpanStart, composingSpanEnd)) {
-            // Check if the cursor ended up at the end of existing text.
-            // If so, don't cancel — the user may have tapped the text field but the
-            // cursor is still where transcription inserts text, so dictation continues.
-            // Exception: if the text field is empty (was cleared, e.g. message sent),
-            // still cancel because the user is done with that field.
-            final CharSequence afterCursor = mInputLogic.mConnection.getTextAfterCursor(1, 0);
-            final boolean cursorAtEnd = (afterCursor == null || afterCursor.length() == 0);
-            if (cursorAtEnd) {
-                final CharSequence beforeCursor = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
-                final boolean fieldEmpty = (beforeCursor == null || beforeCursor.length() == 0);
-                if (fieldEmpty) {
-                    Log.i(TAG, "Text field cleared while recording — cancelling voice input");
+        // Wrapped in try-catch because the InputConnection may be in an invalid state
+        // (e.g., text field removed while recording is active).
+        try {
+            if (mVoiceInputManager != null && !mVoiceInputManager.isIdle()
+                    && (oldSelStart != newSelStart || oldSelEnd != newSelEnd)
+                    && !mInputLogic.mConnection.isBelatedExpectedUpdate(
+                            oldSelStart, newSelStart, oldSelEnd, newSelEnd,
+                            composingSpanStart, composingSpanEnd)) {
+                // Check if the cursor ended up at the end of existing text.
+                // If so, don't cancel — the user may have tapped the text field but the
+                // cursor is still where transcription inserts text, so dictation continues.
+                // Exception: if the text field is empty (was cleared, e.g. message sent),
+                // still cancel because the user is done with that field.
+                final CharSequence afterCursor = mInputLogic.mConnection.getTextAfterCursor(1, 0);
+                final boolean cursorAtEnd = (afterCursor == null || afterCursor.length() == 0);
+                if (cursorAtEnd) {
+                    final CharSequence beforeCursor = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
+                    final boolean fieldEmpty = (beforeCursor == null || beforeCursor.length() == 0);
+                    if (fieldEmpty) {
+                        Log.i(TAG, "Text field cleared while recording — cancelling voice input");
+                        cancelVoiceRecordingAbruptly();
+                    }
+                    // else: cursor at end of existing text — continue recording
+                } else {
+                    Log.i(TAG, "Cursor moved away from end while recording — cancelling voice input");
                     cancelVoiceRecordingAbruptly();
                 }
-                // else: cursor at end of existing text — continue recording
-            } else {
-                Log.i(TAG, "Cursor moved away from end while recording — cancelling voice input");
-                cancelVoiceRecordingAbruptly();
             }
+        } catch (Exception e) {
+            Log.e(TAG, "Error in voice input onUpdateSelection guard: " + e.getMessage());
+            // Fail-safe: cancel voice recording if we can't determine cursor state
+            cancelVoiceRecordingAbruptly();
         }
 
         // This call happens whether our view is displayed or not, but if it's not then we should
@@ -1708,28 +1716,36 @@ public class LatinIME extends InputMethodService implements
 
             @Override
             public void onTranscriptionResult(@NonNull String text) {
-                if (text == null || text.isEmpty()) {
-                    return;
-                }
-                Log.i(TAG, "VOICE_STEP_4 transcription arrived in IME (" + text.length() + " chars)");
+                try {
+                    if (text == null || text.isEmpty()) {
+                        return;
+                    }
+                    Log.i(TAG, "VOICE_STEP_4 transcription arrived in IME (" + text.length() + " chars)");
 
-                // If cleanup is in progress, queue this transcription to preserve ordering.
-                if (mCleanupInProgress) {
-                    appendPendingTranscription(text);
-                    return;
-                }
+                    // If cleanup is in progress, queue this transcription to preserve ordering.
+                    if (mCleanupInProgress) {
+                        appendPendingTranscription(text);
+                        return;
+                    }
 
-                processTranscriptionResult(text);
+                    processTranscriptionResult(text);
+                } catch (Exception e) {
+                    Log.e(TAG, "Error processing transcription result: " + e.getMessage(), e);
+                }
             }
 
             @Override
             public void onNewParagraphRequested() {
-                if (mCleanupInProgress) {
-                    mPendingNewParagraph = true;
-                } else {
-                    Log.i(TAG, "New paragraph break inserted (recording remains active)");
-                    mInputLogic.finishInput();
-                    mInputLogic.mConnection.commitText("\n\n", 1);
+                try {
+                    if (mCleanupInProgress) {
+                        mPendingNewParagraph = true;
+                    } else {
+                        Log.i(TAG, "New paragraph break inserted (recording remains active)");
+                        mInputLogic.finishInput();
+                        mInputLogic.mConnection.commitText("\n\n", 1);
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Error inserting paragraph break: " + e.getMessage(), e);
                 }
             }
 
@@ -1754,41 +1770,45 @@ public class LatinIME extends InputMethodService implements
      */
     private String adjustCapitalization(String text) {
         if (text == null || text.isEmpty()) {
-            return text;
+            return text != null ? text : "";
         }
 
-        // Get text before cursor to check context
-        CharSequence textBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(5, 0);
-        
-        // If no text before cursor or at start, keep original capitalization
-        if (textBeforeCursor == null || textBeforeCursor.length() == 0) {
-            return text;
-        }
+        try {
+            // Get text before cursor to check context
+            CharSequence textBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(5, 0);
 
-        // Find the last non-space character
-        String beforeText = textBeforeCursor.toString();
-        char lastChar = ' ';
-        for (int i = beforeText.length() - 1; i >= 0; i--) {
-            char c = beforeText.charAt(i);
-            if (c != ' ') {
-                lastChar = c;
-                break;
+            // If no text before cursor or at start, keep original capitalization
+            if (textBeforeCursor == null || textBeforeCursor.length() == 0) {
+                return text;
             }
-        }
 
-        // Check if last character is sentence-ending punctuation
-        boolean isSentenceEnd = (lastChar == '.' || lastChar == '!' || lastChar == '?' || 
-                                  lastChar == '\n' || lastChar == ' '); // space at position 0 means start
+            // Find the last non-space character
+            String beforeText = textBeforeCursor.toString();
+            char lastChar = ' ';
+            for (int i = beforeText.length() - 1; i >= 0; i--) {
+                char c = beforeText.charAt(i);
+                if (c != ' ') {
+                    lastChar = c;
+                    break;
+                }
+            }
 
-        // If previous text ends a sentence, keep original capitalization
-        if (isSentenceEnd || lastChar == ' ') {
-            return text;
-        }
+            // Check if last character is sentence-ending punctuation
+            boolean isSentenceEnd = (lastChar == '.' || lastChar == '!' || lastChar == '?' ||
+                                      lastChar == '\n' || lastChar == ' '); // space at position 0 means start
 
-        // Otherwise, lowercase the first letter if it's uppercase
-        char firstChar = text.charAt(0);
-        if (Character.isUpperCase(firstChar)) {
-            return Character.toLowerCase(firstChar) + text.substring(1);
+            // If previous text ends a sentence, keep original capitalization
+            if (isSentenceEnd || lastChar == ' ') {
+                return text;
+            }
+
+            // Otherwise, lowercase the first letter if it's uppercase
+            char firstChar = text.charAt(0);
+            if (Character.isUpperCase(firstChar)) {
+                return Character.toLowerCase(firstChar) + text.substring(1);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error adjusting capitalization: " + e.getMessage());
         }
 
         return text;
@@ -1809,7 +1829,10 @@ public class LatinIME extends InputMethodService implements
      * @return The text with invisible characters removed
      */
     private String stripInvisibleChars(String text) {
-        if (text == null || text.isEmpty()) {
+        if (text == null) {
+            return "";
+        }
+        if (text.isEmpty()) {
             return text;
         }
         // Remove characters that are invisible / zero-width in typical text rendering:
@@ -1840,8 +1863,11 @@ public class LatinIME extends InputMethodService implements
      * This ensures proper spacing after transcribed text.
      */
     private String ensureTrailingSpace(String text) {
-        if (text == null || text.isEmpty()) {
-            return text;
+        if (text == null) {
+            return " ";
+        }
+        if (text.isEmpty()) {
+            return " ";
         }
         if (text.endsWith(" ")) {
             return text;
@@ -1870,26 +1896,30 @@ public class LatinIME extends InputMethodService implements
         if (sanitized.isEmpty()) {
             return;
         }
-        String adjustedText = adjustCapitalization(sanitized);
-        String textToInsert = ensureTrailingSpace(adjustedText);
-        String contextBefore = getRecentContext();
-        Log.i(
-                TAG,
-                "VOICE_STEP_6 context before insert: \"" + sanitizeLogText(contextBefore) + "\""
-        );
-        
-        // Reset InputLogic composing state before direct connection manipulation.
-        // This ensures the WordComposer is properly synchronized with the connection.
-        mInputLogic.finishInput();
-        mInputLogic.mConnection.beginBatchEdit();
-        mInputLogic.mConnection.commitText(textToInsert, 1);
-        mInputLogic.mConnection.endBatchEdit();
+        try {
+            String adjustedText = adjustCapitalization(sanitized);
+            String textToInsert = ensureTrailingSpace(adjustedText);
+            String contextBefore = getRecentContext();
+            Log.i(
+                    TAG,
+                    "VOICE_STEP_6 context before insert: \"" + sanitizeLogText(contextBefore) + "\""
+            );
 
-        String contextAfter = getRecentContext();
-        Log.i(
-                TAG,
-                "VOICE_STEP_6 context after insert: \"" + sanitizeLogText(contextAfter) + "\""
-        );
+            // Reset InputLogic composing state before direct connection manipulation.
+            // This ensures the WordComposer is properly synchronized with the connection.
+            mInputLogic.finishInput();
+            mInputLogic.mConnection.beginBatchEdit();
+            mInputLogic.mConnection.commitText(textToInsert, 1);
+            mInputLogic.mConnection.endBatchEdit();
+
+            String contextAfter = getRecentContext();
+            Log.i(
+                    TAG,
+                    "VOICE_STEP_6 context after insert: \"" + sanitizeLogText(contextAfter) + "\""
+            );
+        } catch (Exception e) {
+            Log.e(TAG, "Error inserting transcription text: " + e.getMessage(), e);
+        }
     }
 
     /**
@@ -1913,28 +1943,32 @@ public class LatinIME extends InputMethodService implements
         if (sanitized.isEmpty()) {
             return;
         }
-        String textToInsert = ensureTrailingSpace(sanitized);
+        try {
+            String textToInsert = ensureTrailingSpace(sanitized);
 
-        Log.i(
-                TAG,
-                "VOICE_STEP_6 replacing context (" + oldContextLength +
-                        " chars) with cleaned text (" + textToInsert.length() + " chars)"
-        );
+            Log.i(
+                    TAG,
+                    "VOICE_STEP_6 replacing context (" + oldContextLength +
+                            " chars) with cleaned text (" + textToInsert.length() + " chars)"
+            );
 
-        // Reset InputLogic composing state before direct connection manipulation.
-        mInputLogic.finishInput();
-        mInputLogic.mConnection.beginBatchEdit();
-        if (oldContextLength > 0) {
-            mInputLogic.mConnection.deleteTextBeforeCursor(oldContextLength);
+            // Reset InputLogic composing state before direct connection manipulation.
+            mInputLogic.finishInput();
+            mInputLogic.mConnection.beginBatchEdit();
+            if (oldContextLength > 0) {
+                mInputLogic.mConnection.deleteTextBeforeCursor(oldContextLength);
+            }
+            mInputLogic.mConnection.commitText(textToInsert, 1);
+            mInputLogic.mConnection.endBatchEdit();
+
+            String contextAfter = getRecentContext();
+            Log.i(
+                    TAG,
+                    "VOICE_STEP_6 context after replace: \"" + sanitizeLogText(contextAfter) + "\""
+            );
+        } catch (Exception e) {
+            Log.e(TAG, "Error replacing context with cleaned text: " + e.getMessage(), e);
         }
-        mInputLogic.mConnection.commitText(textToInsert, 1);
-        mInputLogic.mConnection.endBatchEdit();
-
-        String contextAfter = getRecentContext();
-        Log.i(
-                TAG,
-                "VOICE_STEP_6 context after replace: \"" + sanitizeLogText(contextAfter) + "\""
-        );
     }
 
     /**
@@ -2009,28 +2043,39 @@ public class LatinIME extends InputMethodService implements
                 new TextCleanupClient.CleanupCallback() {
                     @Override
                     public void onCleanupComplete(String cleanedText) {
-                        // Discard if the voice session has changed (abrupt cancel or new session)
+                        // Discard if the voice session has changed (abrupt cancel or new session).
+                        // Do NOT touch mCleanupInProgress — it may belong to the new session.
                         if (sessionId != mVoiceSessionId) {
                             Log.i(TAG, "Cleanup result discarded — voice session changed");
                             return;
                         }
 
-                        String sanitizedCleanedText = stripInvisibleChars(cleanedText);
-                        Log.i(
-                                TAG,
-                                "VOICE_STEP_5C cleanup response received (" +
-                                        sanitizedCleanedText.length() + " chars): \"" +
-                                        sanitizeLogText(sanitizedCleanedText) + "\""
-                        );
+                        try {
+                            String sanitizedCleanedText = stripInvisibleChars(cleanedText);
+                            Log.i(
+                                    TAG,
+                                    "VOICE_STEP_5C cleanup response received (" +
+                                            sanitizedCleanedText.length() + " chars): \"" +
+                                            sanitizeLogText(sanitizedCleanedText) + "\""
+                            );
 
-                        if (sanitizedCleanedText.isEmpty()) {
-                            Log.w(TAG, "Cleanup returned empty text, falling back to raw transcription insert");
-                            insertTranscriptionText(transcriptionText);
-                        } else {
-                            // Replace only the current paragraph (editable portion).
-                            // Paragraph breaks and earlier text stay untouched.
-                            replaceContextWithCleanedText(
-                                    sanitizedCleanedText, replacementLength);
+                            if (sanitizedCleanedText.isEmpty()) {
+                                Log.w(TAG, "Cleanup returned empty text, falling back to raw transcription insert");
+                                insertTranscriptionText(transcriptionText);
+                            } else {
+                                // Replace only the current paragraph (editable portion).
+                                // Paragraph breaks and earlier text stay untouched.
+                                replaceContextWithCleanedText(
+                                        sanitizedCleanedText, replacementLength);
+                            }
+                        } catch (Exception e) {
+                            Log.e(TAG, "Exception in cleanup callback: " + e.getMessage(), e);
+                            // Attempt graceful fallback: insert raw transcription
+                            try {
+                                insertTranscriptionText(transcriptionText);
+                            } catch (Exception fallbackEx) {
+                                Log.e(TAG, "Fallback insertion also failed: " + fallbackEx.getMessage());
+                            }
                         }
 
                         mCleanupInProgress = false;
@@ -2039,17 +2084,22 @@ public class LatinIME extends InputMethodService implements
 
                     @Override
                     public void onCleanupError(String error) {
-                        // Discard if the voice session has changed
+                        // Discard if the voice session has changed.
+                        // Do NOT touch mCleanupInProgress — it may belong to the new session.
                         if (sessionId != mVoiceSessionId) {
                             Log.i(TAG, "Cleanup error discarded — voice session changed");
                             return;
                         }
 
-                        Log.e(TAG, "Cleanup error: " + error);
-                        showVoiceErrorToast("Cleanup failed: " + error);
+                        try {
+                            Log.e(TAG, "Cleanup error: " + error);
+                            showVoiceErrorToast("Cleanup failed: " + error);
 
-                        // Graceful degradation: insert raw transcription (append, no replace).
-                        insertTranscriptionText(transcriptionText);
+                            // Graceful degradation: insert raw transcription (append, no replace).
+                            insertTranscriptionText(transcriptionText);
+                        } catch (Exception e) {
+                            Log.e(TAG, "Exception in cleanup error callback: " + e.getMessage(), e);
+                        }
 
                         mCleanupInProgress = false;
                         processPendingVoiceInput();
@@ -2080,22 +2130,26 @@ public class LatinIME extends InputMethodService implements
      * Called after cleanup completes to handle items that arrived during cleanup.
      */
     private void processPendingVoiceInput() {
-        // Process any pending transcription first
-        if (mPendingTranscription.length() > 0) {
-            String pending = mPendingTranscription.toString();
-            mPendingTranscription.setLength(0);
-            processTranscriptionResult(pending);
-            if (mCleanupInProgress) {
-                // Wait for cleanup callback before applying paragraph operations.
-                return;
+        try {
+            // Process any pending transcription first
+            if (mPendingTranscription.length() > 0) {
+                String pending = mPendingTranscription.toString();
+                mPendingTranscription.setLength(0);
+                processTranscriptionResult(pending);
+                if (mCleanupInProgress) {
+                    // Wait for cleanup callback before applying paragraph operations.
+                    return;
+                }
             }
-        }
-        
-        // Then process pending new paragraph
-        if (mPendingNewParagraph) {
-            mPendingNewParagraph = false;
-            mInputLogic.finishInput();
-            mInputLogic.mConnection.commitText("\n\n", 1);
+
+            // Then process pending new paragraph
+            if (mPendingNewParagraph) {
+                mPendingNewParagraph = false;
+                mInputLogic.finishInput();
+                mInputLogic.mConnection.commitText("\n\n", 1);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error processing pending voice input: " + e.getMessage(), e);
         }
     }
 
@@ -2122,30 +2176,35 @@ public class LatinIME extends InputMethodService implements
      */
     @NonNull
     private String getRecentContext() {
-        CharSequence beforeCursor = mInputLogic.mConnection.getTextBeforeCursor(4000, 0);
-        if (beforeCursor == null || beforeCursor.length() == 0) {
-            return "";
-        }
-        String text = beforeCursor.toString();
+        try {
+            CharSequence beforeCursor = mInputLogic.mConnection.getTextBeforeCursor(4000, 0);
+            if (beforeCursor == null || beforeCursor.length() == 0) {
+                return "";
+            }
+            String text = beforeCursor.toString();
 
-        // Scan backwards for sentence-ending punctuation
-        int boundaryCount = 0;
-        for (int i = text.length() - 1; i >= 0; i--) {
-            char c = text.charAt(i);
-            if (c == '.' || c == '!' || c == '?' || c == ':' || c == ';' || c == '=') {
-                boundaryCount++;
-                if (boundaryCount >= 3) {
-                    // Return everything after this boundary character
-                    return text.substring(i + 1);
+            // Scan backwards for sentence-ending punctuation
+            int boundaryCount = 0;
+            for (int i = text.length() - 1; i >= 0; i--) {
+                char c = text.charAt(i);
+                if (c == '.' || c == '!' || c == '?' || c == ':' || c == ';' || c == '=') {
+                    boundaryCount++;
+                    if (boundaryCount >= 3) {
+                        // Return everything after this boundary character
+                        return text.substring(i + 1);
+                    }
                 }
             }
-        }
 
-        // Fewer than 3 sentence boundaries: return up to 300 chars
-        if (text.length() <= 300) {
-            return text;
+            // Fewer than 3 sentence boundaries: return up to 300 chars
+            if (text.length() <= 300) {
+                return text;
+            }
+            return text.substring(text.length() - 300);
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting recent context: " + e.getMessage());
+            return "";
         }
-        return text.substring(text.length() - 300);
     }
 
     @NonNull
