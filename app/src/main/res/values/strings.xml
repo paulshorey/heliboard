@@ -227,6 +227,9 @@
     <string name="anthropic_api_key_summary">API key for text cleanup (Claude). Get from console.anthropic.com</string>
     <string name="cleanup_prompt_title">Cleanup Prompt</string>
     <string name="cleanup_prompt_summary">Prompt for Claude post-processing to fix capitalization and punctuation</string>
+    <string name="voice_chunk_silence_seconds_title">Chunk silence duration (seconds)</string>
+    <string name="voice_silence_threshold_title">Silence threshold (RMS loudness)</string>
+    <string name="voice_new_paragraph_silence_seconds_title">New paragraph silence duration (seconds)</string>
     <!-- Preferences item for choosing secondary language -->
     <string name="secondary_locale">Multilingual typing</string>
     <!-- Clarification which locales are available for multilingual typing -->

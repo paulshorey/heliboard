@@ -43,8 +43,8 @@ is sent for transcription.
 ### VoiceRecorder.kt
 Captures audio from the microphone with client-side silence detection.
 - **Format**: PCM16, 16kHz, mono
-- **Silence detection**: RMS energy threshold on each 100ms chunk
-- **Segmentation**: After 3s of silence, emits accumulated audio as a WAV file
+- **Silence detection**: Adaptive RMS threshold on each 100ms chunk
+- **Segmentation**: After configured silence duration, emits accumulated audio as a WAV file
 - **Output**: Complete WAV files (44-byte header + PCM data)
 
 ### DeepgramTranscriptionClient.kt
@@ -57,14 +57,17 @@ HTTP client for Deepgram's pre-recorded transcription API.
 ### VoiceInputManager.kt
 Orchestrates the voice input flow and manages timers.
 - **State machine**: IDLE → RECORDING ↔ PAUSED → IDLE
-- **Silence Timeout** (60s): Auto-cancel recording after prolonged silence
-- **Cleanup Timer** (3s): Trigger text cleanup after transcription
-- **New Paragraph Timer** (12s): Insert paragraph break after long silence
+- **Chunk Watchdog** (dynamic): Forces a segment flush if silence detection misses a boundary
+- **New Paragraph Timer** (configurable): Insert paragraph break after long silence
 
 ### TextCleanupClient.kt
 HTTP client for Anthropic's Claude API.
 - **Model**: `claude-haiku-4-5-20251001`
 - **Purpose**: Intelligent capitalization, punctuation, and grammar cleanup
+- **Input**: `{existing paragraph context} + {new transcription}` (trimmed to avoid double-spaces)
+- **Output**: Full corrected paragraph (replaces existing paragraph in editor)
+- **max_tokens**: 4096 (accommodates full paragraph responses)
+- **Cancellation**: Tracks active HTTP calls; `cancelAll()` cancels in-flight requests
 
 ### LatinIME.java
 Main orchestrator that coordinates all components and manages text insertion.
@@ -85,41 +88,36 @@ User taps mic button
 ```
 User speaks...
     → VoiceRecorder accumulates PCM data
-    → User pauses (3 seconds of silence detected)
+    → User pauses (configured silence duration detected)
     → VoiceRecorder wraps PCM data in WAV header
     → onSegmentReady(wavData) callback
 ```
 
-### 3. Transcription
+### 3. Transcription + Cleanup + Replace Paragraph
 ```
-VoiceInputManager.processSegment(wavData)
+VoiceInputManager.enqueueSegment(wavData)
     → DeepgramTranscriptionClient.transcribe(wavData)
     → POST /v1/listen with audio/wav body
     → Deepgram returns JSON with transcript
     → onTranscriptionComplete(text)
-    → VoiceInputManager.listener.onTranscriptionResult(text)
-    → LatinIME.insertTranscriptionText(text)
-    → Text appears in text field
+    → LatinIME captures current paragraph as context
+    → LatinIME sends {current paragraph} + {new text} to Anthropic cleanup
+    → Anthropic returns corrected full paragraph
+    → LatinIME.replaceCurrentParagraphWithCleanedText():
+        1. Delete old paragraph text (before cursor)
+        2. Insert corrected paragraph + trailing space
+    → Corrected text appears in text field
 ```
 
-### 4. Cleanup Processing (after 3s silence following transcription)
-```
-Transcription inserted
-    → VoiceInputManager starts cleanup timer
-    → 3 seconds pass with no new speech
-    → LatinIME.onCleanupRequested()
-    → Extract current paragraph (text since last newline)
-    → TextCleanupClient.cleanupText(paragraph)
-    → Claude processes text
-    → LatinIME.onCleanupComplete(cleanedText)
-    → Find and replace original paragraph with cleaned text
-```
+**Key detail**: Claude receives the *full paragraph* (existing + new) so it can correct
+capitalization, punctuation, and grammar in context — not just the latest chunk. The old
+paragraph text is then replaced with Claude's corrected version.
 
-### 5. New Paragraph (after 12s silence)
+### 4. New Paragraph (after configured silence window)
 ```
 Speech stops
     → VoiceInputManager starts new paragraph timer
-    → 12 seconds pass with no speech
+    → Configured delay passes with no speech
     → LatinIME.onNewParagraphRequested()
     → Insert "\n\n" to start new paragraph
 ```
@@ -132,7 +130,6 @@ IDLE       → User taps mic    → RECORDING
 RECORDING  → User taps mic    → IDLE (stop)
 RECORDING  → User taps pause  → PAUSED
 PAUSED     → User taps pause  → RECORDING (resume)
-RECORDING  → 60s silence      → IDLE (auto-cancel)
 ```
 
 ### Race Condition Prevention
@@ -140,9 +137,22 @@ RECORDING  → 60s silence      → IDLE (auto-cancel)
 mCleanupInProgress      // true while cleanup API call is in flight
 mPendingNewParagraph    // true if paragraph break waiting for cleanup
 mPendingTranscription   // StringBuilder for queued transcription during cleanup
+mVoiceSessionId         // incremented on cancel/new session; stale callbacks are discarded
 ```
 
-When cleanup is in progress, new transcriptions are queued and applied after cleanup completes.
+**Ordering guarantees:**
+- When cleanup is in progress, new transcriptions are queued in `mPendingTranscription`
+  and applied (with a fresh cleanup round) after the current cleanup completes.
+- At the manager layer, audio chunks are transcribed in FIFO order (one request at a time).
+- `mVoiceSessionId` invalidates all in-flight async callbacks when the session changes
+  (user typed, cursor moved, recording cancelled, etc.).
+- `TextCleanupClient.cancelAll()` is called on session cancellation to cancel HTTP requests.
+
+**Paragraph replacement safety:**
+- The `existingParagraphLength` is captured *before* the cleanup request is sent and
+  closed over in the callback. Since `mCleanupInProgress` prevents any text insertion
+  during cleanup, the text before the cursor is guaranteed to be unchanged when the
+  callback fires (within the same session).
 
 ## Configuration
 
@@ -150,18 +160,20 @@ When cleanup is in progress, new transcriptions are queued and applied after cle
 - **Deepgram API Key**: Required for transcription
 - **Anthropic API Key**: Required for cleanup (optional feature)
 - **Cleanup Prompt**: Customizable instructions for Claude
+- **Chunk Silence Duration**: Silence window before cutting a chunk
+- **Silence Threshold**: RMS threshold floor for silence/speech detection
+- **New Paragraph Silence Duration**: Delay before inserting a paragraph break
 
-### Timeouts (VoiceInputManager.kt)
+### Timers (VoiceInputManager.kt)
 ```kotlin
-SILENCE_TIMEOUT_MS = 60000L    // Auto-cancel after 60s silence
-CLEANUP_DELAY_MS = 3000L       // Cleanup after 3s post-transcription
-NEW_PARAGRAPH_DELAY_MS = 12000L // New paragraph after 12s silence
+MIN_CHUNK_WATCHDOG_MS = 20000L // Base watchdog lower bound
+newParagraphDelayMs (configurable via settings)
 ```
 
 ### Silence Detection (VoiceRecorder.kt)
 ```kotlin
-SILENCE_THRESHOLD = 400.0      // RMS energy threshold
-SILENCE_DURATION_MS = 3000L    // 3s silence to split segment
+silenceThreshold (configurable via settings) // RMS threshold floor
+silenceDurationMs (configurable via settings)
 MIN_SEGMENT_MS = 500L          // Minimum segment length
 MAX_SEGMENT_MS = 60000L        // Force-split at 60s
 ```
@@ -169,9 +181,11 @@ MAX_SEGMENT_MS = 60000L        // Force-split at 60s
 ## Error Handling
 
 - **Network errors**: Audio is captured locally; if transcription fails, the segment is lost but recording continues
-- **API errors**: Logged, user notified for critical errors (invalid key, etc.)
+- **API errors**: Logged and surfaced to user (invalid key, timeout, service errors, etc.)
 - **Empty transcriptions**: Silently ignored
-- **Cleanup errors**: Original text preserved (graceful degradation)
+- **Cleanup errors**: Raw transcription is inserted as fallback (graceful degradation — no text is lost)
+- **Session cancellation**: Both Deepgram and Anthropic in-flight HTTP requests are cancelled;
+  any stale callbacks are discarded via `mVoiceSessionId` check
 
 ## Thread Safety
 

@@ -66,6 +66,30 @@ fun TranscriptionScreen(
     var cleanupPrompt by remember {
         mutableStateOf(prefs.getString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT) ?: Defaults.PREF_CLEANUP_PROMPT)
     }
+    var chunkSilenceSeconds by remember {
+        mutableStateOf(
+            prefs.getInt(
+                Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS,
+                Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS
+            ).toString()
+        )
+    }
+    var silenceThreshold by remember {
+        mutableStateOf(
+            prefs.getInt(
+                Settings.PREF_VOICE_SILENCE_THRESHOLD,
+                Defaults.PREF_VOICE_SILENCE_THRESHOLD
+            ).toString()
+        )
+    }
+    var newParagraphSilenceSeconds by remember {
+        mutableStateOf(
+            prefs.getInt(
+                Settings.PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS,
+                Defaults.PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS
+            ).toString()
+        )
+    }
 
     // Prompt presets
     var selectedIndex by remember {
@@ -127,6 +151,60 @@ fun TranscriptionScreen(
                     },
                     minLines = 4,
                     maxLines = 10
+                )
+
+                InlineTextField(
+                    label = stringResource(R.string.voice_chunk_silence_seconds_title),
+                    value = chunkSilenceSeconds,
+                    onValueChange = { newValue ->
+                        chunkSilenceSeconds = newValue
+                        newValue.toIntOrNull()?.let { parsed ->
+                            prefs.edit {
+                                putInt(
+                                    Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS,
+                                    parsed.coerceIn(1, 30)
+                                )
+                            }
+                        }
+                    },
+                    minLines = 1,
+                    maxLines = 1
+                )
+
+                InlineTextField(
+                    label = stringResource(R.string.voice_silence_threshold_title),
+                    value = silenceThreshold,
+                    onValueChange = { newValue ->
+                        silenceThreshold = newValue
+                        newValue.toIntOrNull()?.let { parsed ->
+                            prefs.edit {
+                                putInt(
+                                    Settings.PREF_VOICE_SILENCE_THRESHOLD,
+                                    parsed.coerceIn(40, 5000)
+                                )
+                            }
+                        }
+                    },
+                    minLines = 1,
+                    maxLines = 1
+                )
+
+                InlineTextField(
+                    label = stringResource(R.string.voice_new_paragraph_silence_seconds_title),
+                    value = newParagraphSilenceSeconds,
+                    onValueChange = { newValue ->
+                        newParagraphSilenceSeconds = newValue
+                        newValue.toIntOrNull()?.let { parsed ->
+                            prefs.edit {
+                                putInt(
+                                    Settings.PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS,
+                                    parsed.coerceIn(3, 120)
+                                )
+                            }
+                        }
+                    },
+                    minLines = 1,
+                    maxLines = 1
                 )
 
                 // Prompt presets
