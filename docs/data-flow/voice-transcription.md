@@ -64,6 +64,10 @@ Orchestrates the voice input flow and manages timers.
 HTTP client for Anthropic's Claude API.
 - **Model**: `claude-haiku-4-5-20251001`
 - **Purpose**: Intelligent capitalization, punctuation, and grammar cleanup
+- **Input**: `{existing paragraph context} + {new transcription}` (trimmed to avoid double-spaces)
+- **Output**: Full corrected paragraph (replaces existing paragraph in editor)
+- **max_tokens**: 4096 (accommodates full paragraph responses)
+- **Cancellation**: Tracks active HTTP calls; `cancelAll()` cancels in-flight requests
 
 ### LatinIME.java
 Main orchestrator that coordinates all components and manages text insertion.
@@ -89,18 +93,25 @@ User speaks...
     → onSegmentReady(wavData) callback
 ```
 
-### 3. Transcription + Cleanup + Insert
+### 3. Transcription + Cleanup + Replace Paragraph
 ```
 VoiceInputManager.enqueueSegment(wavData)
     → DeepgramTranscriptionClient.transcribe(wavData)
     → POST /v1/listen with audio/wav body
     → Deepgram returns JSON with transcript
     → onTranscriptionComplete(text)
-    → LatinIME sends transcript text to Anthropic cleanup
-    → Anthropic returns cleaned/corrected text
-    → LatinIME.insertTranscriptionText(cleanedText)
-    → Text appears in text field
+    → LatinIME captures current paragraph as context
+    → LatinIME sends {current paragraph} + {new text} to Anthropic cleanup
+    → Anthropic returns corrected full paragraph
+    → LatinIME.replaceCurrentParagraphWithCleanedText():
+        1. Delete old paragraph text (before cursor)
+        2. Insert corrected paragraph + trailing space
+    → Corrected text appears in text field
 ```
+
+**Key detail**: Claude receives the *full paragraph* (existing + new) so it can correct
+capitalization, punctuation, and grammar in context — not just the latest chunk. The old
+paragraph text is then replaced with Claude's corrected version.
 
 ### 4. New Paragraph (after configured silence window)
 ```
@@ -126,11 +137,22 @@ PAUSED     → User taps pause  → RECORDING (resume)
 mCleanupInProgress      // true while cleanup API call is in flight
 mPendingNewParagraph    // true if paragraph break waiting for cleanup
 mPendingTranscription   // StringBuilder for queued transcription during cleanup
+mVoiceSessionId         // incremented on cancel/new session; stale callbacks are discarded
 ```
 
-When cleanup is in progress, new transcriptions are queued and applied after cleanup completes.
-At the manager layer, audio chunks are also transcribed in FIFO order (one request at a time)
-to keep insertion order deterministic.
+**Ordering guarantees:**
+- When cleanup is in progress, new transcriptions are queued in `mPendingTranscription`
+  and applied (with a fresh cleanup round) after the current cleanup completes.
+- At the manager layer, audio chunks are transcribed in FIFO order (one request at a time).
+- `mVoiceSessionId` invalidates all in-flight async callbacks when the session changes
+  (user typed, cursor moved, recording cancelled, etc.).
+- `TextCleanupClient.cancelAll()` is called on session cancellation to cancel HTTP requests.
+
+**Paragraph replacement safety:**
+- The `existingParagraphLength` is captured *before* the cleanup request is sent and
+  closed over in the callback. Since `mCleanupInProgress` prevents any text insertion
+  during cleanup, the text before the cursor is guaranteed to be unchanged when the
+  callback fires (within the same session).
 
 ## Configuration
 
@@ -161,7 +183,9 @@ MAX_SEGMENT_MS = 60000L        // Force-split at 60s
 - **Network errors**: Audio is captured locally; if transcription fails, the segment is lost but recording continues
 - **API errors**: Logged and surfaced to user (invalid key, timeout, service errors, etc.)
 - **Empty transcriptions**: Silently ignored
-- **Cleanup errors**: Original text preserved (graceful degradation)
+- **Cleanup errors**: Raw transcription is inserted as fallback (graceful degradation — no text is lost)
+- **Session cancellation**: Both Deepgram and Anthropic in-flight HTTP requests are cancelled;
+  any stale callbacks are discarded via `mVoiceSessionId` check
 
 ## Thread Safety
 

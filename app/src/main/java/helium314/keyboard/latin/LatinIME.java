@@ -1638,6 +1638,10 @@ public class LatinIME extends InputMethodService implements
         mVoiceSessionId++;
         resetVoiceInputState();
         mVoiceInputManager.cancelRecording();
+        // Cancel any in-flight cleanup request to avoid wasting API calls.
+        if (mTextCleanupClient != null) {
+            mTextCleanupClient.cancelAll();
+        }
     }
 
     /**
@@ -1868,7 +1872,7 @@ public class LatinIME extends InputMethodService implements
         }
         String adjustedText = adjustCapitalization(sanitized);
         String textToInsert = ensureTrailingSpace(adjustedText);
-        String paragraphBefore = getCurrentParagraphForLogging();
+        String paragraphBefore = getCurrentParagraph();
         Log.i(
                 TAG,
                 "VOICE_STEP_6 paragraph before insert: \"" + sanitizeLogText(paragraphBefore) + "\""
@@ -1881,7 +1885,7 @@ public class LatinIME extends InputMethodService implements
         mInputLogic.mConnection.commitText(textToInsert, 1);
         mInputLogic.mConnection.endBatchEdit();
 
-        String paragraphAfter = getCurrentParagraphForLogging();
+        String paragraphAfter = getCurrentParagraph();
         Log.i(
                 TAG,
                 "VOICE_STEP_6 paragraph after insert: \"" + sanitizeLogText(paragraphAfter) + "\""
@@ -1889,8 +1893,64 @@ public class LatinIME extends InputMethodService implements
     }
 
     /**
+     * Replace the current paragraph with cleaned text from Claude.
+     *
+     * Claude receives the full paragraph (existing context + new transcription) and returns
+     * the corrected paragraph. This method deletes the old paragraph text that was sent as
+     * context, then inserts Claude's corrected version.
+     *
+     * Claude already handles capitalization and punctuation, so we do NOT apply
+     * {@link #adjustCapitalization} here — only invisible-char stripping and trailing space.
+     *
+     * @param cleanedText   The full corrected paragraph returned by Claude
+     * @param oldParagraphLength  The length of the paragraph that was in the editor when the
+     *                            cleanup request was sent (number of chars to delete before cursor)
+     */
+    private void replaceCurrentParagraphWithCleanedText(String cleanedText, int oldParagraphLength) {
+        if (cleanedText == null || cleanedText.isEmpty()) {
+            return;
+        }
+        String sanitized = stripInvisibleChars(cleanedText);
+        if (sanitized.isEmpty()) {
+            return;
+        }
+        String textToInsert = ensureTrailingSpace(sanitized);
+
+        Log.i(
+                TAG,
+                "VOICE_STEP_6 replacing paragraph (" + oldParagraphLength +
+                        " chars) with cleaned text (" + textToInsert.length() + " chars)"
+        );
+
+        // Reset InputLogic composing state before direct connection manipulation.
+        mInputLogic.finishInput();
+        mInputLogic.mConnection.beginBatchEdit();
+        if (oldParagraphLength > 0) {
+            mInputLogic.mConnection.deleteTextBeforeCursor(oldParagraphLength);
+        }
+        mInputLogic.mConnection.commitText(textToInsert, 1);
+        mInputLogic.mConnection.endBatchEdit();
+
+        String paragraphAfter = getCurrentParagraph();
+        Log.i(
+                TAG,
+                "VOICE_STEP_6 paragraph after replace: \"" + sanitizeLogText(paragraphAfter) + "\""
+        );
+    }
+
+    /**
      * Process transcription through cleanup (if configured) before inserting into the editor.
-     * This enforces pipeline order: Deepgram transcript -> Anthropic cleanup -> text insertion.
+     *
+     * Pipeline: Deepgram transcript → Anthropic cleanup → replace paragraph in editor.
+     *
+     * When cleanup is enabled, the **full current paragraph** (existing context + new
+     * transcription) is sent to Claude. Claude returns the corrected paragraph, which
+     * then **replaces** the old paragraph text in the editor. This gives Claude enough
+     * context to fix capitalization, punctuation, and grammar across the entire paragraph
+     * — not just the latest chunk.
+     *
+     * When cleanup is disabled (no Anthropic key), the raw transcription is simply
+     * appended with basic capitalization adjustment.
      */
     private void processTranscriptionResult(@NonNull final String transcriptionText) {
         final String anthropicApiKey = KtxKt.prefs(this).getString(Settings.PREF_ANTHROPIC_API_KEY, "");
@@ -1905,23 +1965,26 @@ public class LatinIME extends InputMethodService implements
             cleanupPrompt = Defaults.PREF_CLEANUP_PROMPT;
         }
 
-        final String existingParagraph = getCurrentParagraphForLogging();
+        // Capture the current paragraph text. This is the "before" snapshot that will be
+        // sent as context to Claude and later deleted/replaced with Claude's response.
+        final String existingParagraph = getCurrentParagraph();
+        final int existingParagraphLength = existingParagraph.length();
         final int sessionId = mVoiceSessionId;
         final String prompt = cleanupPrompt;
 
         mCleanupInProgress = true;
         Log.i(
                 TAG,
-                "VOICE_STEP_5 sending text to Anthropic cleanup " +
-                        "(newTranscription=" + transcriptionText.length() +
-                        " chars, localParagraphContext=" + existingParagraph.length() +
+                "VOICE_STEP_5 sending to Anthropic cleanup " +
+                        "(existingParagraph=" + existingParagraphLength +
+                        " chars, newTranscription=" + transcriptionText.length() +
                         " chars)"
         );
 
         mTextCleanupClient.cleanupText(
                 anthropicApiKey,
                 prompt,
-                "",
+                existingParagraph,
                 transcriptionText,
                 new TextCleanupClient.CleanupCallback() {
                     @Override
@@ -1944,7 +2007,9 @@ public class LatinIME extends InputMethodService implements
                             Log.w(TAG, "Cleanup returned empty text, falling back to raw transcription insert");
                             insertTranscriptionText(transcriptionText);
                         } else {
-                            insertTranscriptionText(sanitizedCleanedText);
+                            // Replace the old paragraph with the full corrected paragraph.
+                            replaceCurrentParagraphWithCleanedText(
+                                    sanitizedCleanedText, existingParagraphLength);
                         }
 
                         mCleanupInProgress = false;
@@ -1962,7 +2027,7 @@ public class LatinIME extends InputMethodService implements
                         Log.e(TAG, "Cleanup error: " + error);
                         showVoiceErrorToast("Cleanup failed: " + error);
 
-                        // Do not lose user dictation on cleanup failures.
+                        // Graceful degradation: insert raw transcription (append, no replace).
                         insertTranscriptionText(transcriptionText);
 
                         mCleanupInProgress = false;
@@ -2023,8 +2088,16 @@ public class LatinIME extends InputMethodService implements
         mPendingTranscription.setLength(0);
     }
 
+    /**
+     * Return the current paragraph: all text from the last newline (or start of field)
+     * up to the cursor position.  Used both for logging and as context sent to the
+     * Claude cleanup API so it can correct the entire paragraph.
+     *
+     * The 4000-character look-back is generous for dictation; paragraphs longer than
+     * that are extremely unlikely in keyboard input.
+     */
     @NonNull
-    private String getCurrentParagraphForLogging() {
+    private String getCurrentParagraph() {
         CharSequence beforeCursor = mInputLogic.mConnection.getTextBeforeCursor(4000, 0);
         String text = beforeCursor != null ? beforeCursor.toString() : "";
         int lastNewlinePos = text.lastIndexOf('\n');
