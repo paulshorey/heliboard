@@ -39,6 +39,13 @@ class VoiceInputManager(private val context: Context) {
         private const val MAX_NEW_PARAGRAPH_SILENCE_SECONDS = 120
         private const val MIN_SILENCE_THRESHOLD = 40
         private const val MAX_SILENCE_THRESHOLD = 5000
+
+        /**
+         * Auto-stop recording after this many milliseconds of continuous silence
+         * (no speech detected). Prevents the recording from running indefinitely
+         * when the user walks away or stops talking.
+         */
+        private const val AUTO_STOP_SILENCE_MS = 36_000L
     }
 
     enum class State {
@@ -52,6 +59,9 @@ class VoiceInputManager(private val context: Context) {
 
         /** A segment was transcribed — insert this text. */
         fun onTranscriptionResult(text: String)
+
+        /** An audio chunk is being sent for transcription/processing. */
+        fun onProcessingStarted()
 
         /** Configured silence window elapsed — start a new paragraph. */
         fun onNewParagraphRequested()
@@ -104,6 +114,17 @@ class VoiceInputManager(private val context: Context) {
                     "(paragraph break only; recording continues)"
             )
             listener?.onNewParagraphRequested()
+        }
+    }
+
+    // Auto-stop timer — stop recording after prolonged silence (no speech)
+    private val autoStopSilenceRunnable = Runnable {
+        if (currentState == State.RECORDING) {
+            Log.i(
+                TAG,
+                "Auto-stop timer fired after ${AUTO_STOP_SILENCE_MS}ms of silence — stopping recording"
+            )
+            stopRecording()
         }
     }
 
@@ -166,6 +187,7 @@ class VoiceInputManager(private val context: Context) {
             override fun onSpeechStarted() {
                 if (sessionId != activeSessionId) return
                 cancelNewParagraphTimer()
+                cancelAutoStopTimer()
                 resetChunkWatchdog()
             }
 
@@ -173,6 +195,7 @@ class VoiceInputManager(private val context: Context) {
                 if (sessionId != activeSessionId) return
                 cancelChunkWatchdog()
                 startNewParagraphTimer()
+                startAutoStopTimer()
             }
 
             override fun onRecordingStopped() {
@@ -213,6 +236,7 @@ class VoiceInputManager(private val context: Context) {
         if (currentState != State.RECORDING) return
         cancelChunkWatchdog()
         cancelNewParagraphTimer()
+        cancelAutoStopTimer()
         voiceRecorder.pauseRecording()
         updateState(State.PAUSED)
     }
@@ -255,6 +279,7 @@ class VoiceInputManager(private val context: Context) {
     private fun stopRecordingInternal(cancelPending: Boolean) {
         cancelChunkWatchdog()
         cancelNewParagraphTimer()
+        cancelAutoStopTimer()
         if (cancelPending) {
             invalidateActiveSession("recording cancelled")
         }
@@ -357,6 +382,10 @@ class VoiceInputManager(private val context: Context) {
                 "queuedAfterSend=${pendingSegments.size}, session=${segment.sessionId}"
         )
 
+        // Notify the listener that processing has started so the UI can
+        // show a "..." indicator while transcription + cleanup run.
+        listener?.onProcessingStarted()
+
         transcriptionClient.transcribe(
             apiKey = apiKey,
             wavData = segment.wavData,
@@ -430,6 +459,18 @@ class VoiceInputManager(private val context: Context) {
 
     private fun cancelNewParagraphTimer() {
         mainHandler.removeCallbacks(newParagraphTimerRunnable)
+    }
+
+    private fun startAutoStopTimer() {
+        mainHandler.removeCallbacks(autoStopSilenceRunnable)
+        if (currentState == State.RECORDING) {
+            Log.i(TAG, "Starting auto-stop timer: ${AUTO_STOP_SILENCE_MS}ms")
+            mainHandler.postDelayed(autoStopSilenceRunnable, AUTO_STOP_SILENCE_MS)
+        }
+    }
+
+    private fun cancelAutoStopTimer() {
+        mainHandler.removeCallbacks(autoStopSilenceRunnable)
     }
 
     // ── Settings ───────────────────────────────────────────────────────
