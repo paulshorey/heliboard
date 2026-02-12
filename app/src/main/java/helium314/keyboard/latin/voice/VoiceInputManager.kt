@@ -176,6 +176,9 @@ class VoiceInputManager(private val context: Context) {
                 if (sessionId != activeSessionId) return
                 updateState(State.RECORDING)
                 resetChunkWatchdog()
+                // Start the auto-stop timer immediately so that recording stops
+                // after prolonged silence even if the user never speaks.
+                startAutoStopTimer()
                 Log.i(TAG, "VOICE_STEP_1 recording callback received")
             }
 

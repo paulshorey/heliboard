@@ -16,6 +16,7 @@ SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-only
     <!-- Voice-to-text feature permissions -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application android:label="@string/english_ime_name"
             android:name="helium314.keyboard.latin.App"

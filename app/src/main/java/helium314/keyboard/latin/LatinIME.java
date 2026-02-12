@@ -21,12 +21,14 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Debug;
 import android.os.Message;
+import android.os.PowerManager;
 import android.os.Process;
 import android.util.PrintWriterPrinter;
 import android.util.Printer;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.Window;
+import android.view.WindowManager;
 import android.view.inputmethod.CompletionInfo;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InlineSuggestion;
@@ -186,6 +188,8 @@ public class LatinIME extends InputMethodService implements
     private VoiceInputManager mVoiceInputManager;
     // Text cleanup client (Anthropic Claude post-processing)
     private TextCleanupClient mTextCleanupClient;
+    // Wake lock to prevent CPU sleep during voice recording
+    private PowerManager.WakeLock mVoiceWakeLock;
     
     // Voice input state management for cleanup/transcription coordination
     private boolean mCleanupInProgress = false;
@@ -701,6 +705,7 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public void onDestroy() {
+        releaseVoiceWakeLock();
         if (mVoiceInputManager != null) {
             mVoiceInputManager.destroy();
         }
@@ -1013,10 +1018,24 @@ public class LatinIME extends InputMethodService implements
     public void onWindowHidden() {
         super.onWindowHidden();
         Log.i(TAG, "onWindowHidden");
-        // Cancel voice recording when the keyboard is hidden (e.g., user pressed Back,
-        // app dismissed the keyboard). Important because onFinishInput is not always called
-        // reliably on all Android versions.
-        cancelVoiceRecordingAbruptly();
+        // The keyboard window can be hidden for two very different reasons:
+        //   1. Screen turned off (power button, timeout) — recording should CONTINUE.
+        //   2. User action (Back button, app dismissed keyboard) — gracefully stop.
+        // We distinguish them via PowerManager.isInteractive(): false means the screen
+        // is off, true means a user/app action hid the keyboard while the screen is on.
+        if (mVoiceInputManager != null && !mVoiceInputManager.isIdle()) {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            boolean screenOn = (pm != null && pm.isInteractive());
+            if (screenOn) {
+                Log.i(TAG, "Keyboard hidden while screen on — gracefully stopping voice input");
+                stopVoiceRecordingGracefully();
+            } else {
+                Log.i(TAG, "Keyboard hidden because screen turned off — recording continues");
+                // Don't stop recording. The PARTIAL_WAKE_LOCK keeps the CPU alive,
+                // and the recording thread + transcription pipeline keep running.
+                // When the user returns, they can stop via the mic button or X.
+            }
+        }
         final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
         if (mainKeyboardView != null) {
             mainKeyboardView.closing();
@@ -1032,6 +1051,16 @@ public class LatinIME extends InputMethodService implements
         // navigated away, app was backgrounded, or the text field was removed).
         // The InputConnection is about to become invalid, so we cannot flush pending text.
         cancelVoiceRecordingAbruptly();
+        // Also cancel any in-flight work from a prior graceful stop (recording already
+        // stopped but transcription/cleanup callbacks may still be pending).
+        if (mCleanupInProgress || mPendingTranscription.length() > 0) {
+            Log.i(TAG, "Cancelling residual voice work on input disconnect");
+            mVoiceSessionId++;
+            resetVoiceInputState();
+            if (mTextCleanupClient != null) {
+                mTextCleanupClient.cancelAll();
+            }
+        }
 
         mDictionaryFacilitator.onFinishInput();
         final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
@@ -1098,14 +1127,16 @@ public class LatinIME extends InputMethodService implements
                     }
                     // else: cursor at end of existing text — continue recording
                 } else {
-                    Log.i(TAG, "Cursor moved away from end while recording — cancelling voice input");
-                    cancelVoiceRecordingAbruptly();
+                    // User moved cursor away from the end — gracefully stop so
+                    // pending transcription/cleanup still completes and inserts text.
+                    Log.i(TAG, "Cursor moved away from end while recording — stopping voice input gracefully");
+                    stopVoiceRecordingGracefully();
                 }
             }
         } catch (Exception e) {
             Log.e(TAG, "Error in voice input onUpdateSelection guard: " + e.getMessage());
-            // Fail-safe: cancel voice recording if we can't determine cursor state
-            cancelVoiceRecordingAbruptly();
+            // Fail-safe: gracefully stop rather than discarding work
+            stopVoiceRecordingGracefully();
         }
 
         // This call happens whether our view is displayed or not, but if it's not then we should
@@ -1650,15 +1681,86 @@ public class LatinIME extends InputMethodService implements
         if (mTextCleanupClient != null) {
             mTextCleanupClient.cancelAll();
         }
+        releaseVoiceWakeLock();
     }
 
     /**
-     * Convenience wrapper: cancel voice recording when the user performs an action that
-     * indicates they want to interact with the text field manually (typing, suggestion
-     * pick, glide/swipe, hardware keyboard).
+     * Gracefully stop voice recording: stop the microphone but let pending transcription
+     * and cleanup work complete naturally. The final audio segment is flushed and sent
+     * for transcription. Use this when the user performs an action that should stop
+     * recording but not discard in-progress work (e.g., cursor move, text edit, back
+     * button, keyboard hidden).
+     */
+    private void stopVoiceRecordingGracefully() {
+        if (mVoiceInputManager == null || mVoiceInputManager.isIdle()) return;
+        Log.i(TAG, "Gracefully stopping voice input — pending work will complete");
+        mVoiceInputManager.stopRecording();
+        // Don't increment session ID or reset state — pending transcription/cleanup
+        // callbacks are still valid and will insert text when they complete.
+        // The wake lock is released by onStateChanged(IDLE).
+    }
+
+    /**
+     * Convenience wrapper: gracefully stop voice recording when the user performs an
+     * action that indicates they want to interact with the text field manually (typing,
+     * suggestion pick, glide/swipe, hardware keyboard). Pending transcription and
+     * cleanup work will complete and insert text.
      */
     private void stopVoiceRecordingOnUserInput() {
-        cancelVoiceRecordingAbruptly();
+        stopVoiceRecordingGracefully();
+    }
+
+    /**
+     * Acquire a wake lock and set FLAG_KEEP_SCREEN_ON to prevent the device from
+     * sleeping while voice recording is active. Called when recording starts.
+     */
+    private void acquireVoiceWakeLock() {
+        try {
+            // Keep the screen on via the IME window flag.
+            // This prevents the screen timeout from firing while the keyboard is visible.
+            Window window = getWindow().getWindow();
+            if (window != null) {
+                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            }
+            // Also hold a partial wake lock as a backup to keep the CPU alive even
+            // if the screen somehow turns off (e.g., notification shade interaction).
+            if (mVoiceWakeLock == null) {
+                PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                if (pm != null) {
+                    mVoiceWakeLock = pm.newWakeLock(
+                            PowerManager.PARTIAL_WAKE_LOCK,
+                            "HeliBoard:VoiceRecording"
+                    );
+                    mVoiceWakeLock.setReferenceCounted(false);
+                }
+            }
+            if (mVoiceWakeLock != null && !mVoiceWakeLock.isHeld()) {
+                // Safety timeout: release after 10 minutes to avoid infinite battery drain.
+                mVoiceWakeLock.acquire(10 * 60 * 1000L);
+                Log.i(TAG, "Voice wake lock acquired");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error acquiring voice wake lock: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Release the wake lock and clear FLAG_KEEP_SCREEN_ON. Called when recording
+     * stops (gracefully or abruptly).
+     */
+    private void releaseVoiceWakeLock() {
+        try {
+            Window window = getWindow().getWindow();
+            if (window != null) {
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            }
+            if (mVoiceWakeLock != null && mVoiceWakeLock.isHeld()) {
+                mVoiceWakeLock.release();
+                Log.i(TAG, "Voice wake lock released");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error releasing voice wake lock: " + e.getMessage());
+        }
     }
 
     @Override
@@ -1702,13 +1804,21 @@ public class LatinIME extends InputMethodService implements
                             // New recording session — invalidate stale cleanup callbacks
                             mVoiceSessionId++;
                             resetVoiceInputState();
+                            // Keep screen on and CPU alive while recording
+                            acquireVoiceWakeLock();
                             break;
                         case PAUSED:
                             mSuggestionStripView.setVoiceInputState(VoiceState.PAUSED);
+                            // Keep wake lock held during pause (user intends to resume)
                             break;
                         case IDLE:
                             mSuggestionStripView.setVoiceInputState(VoiceState.IDLE);
-                            resetVoiceInputState();
+                            releaseVoiceWakeLock();
+                            // Note: we do NOT call resetVoiceInputState() here because
+                            // there may still be pending transcription/cleanup from a
+                            // graceful stop. State is reset explicitly by
+                            // cancelVoiceRecordingAbruptly() or cleaned up naturally
+                            // as pending work completes.
                             break;
                     }
                 }
