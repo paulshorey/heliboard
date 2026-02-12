@@ -80,8 +80,9 @@ class VoiceRecorder(private val context: Context) {
         /** Minimum segment length (ms) to emit — avoids sending tiny noise blips. */
         private const val MIN_SEGMENT_MS = 500L
 
-        /** How much trailing silence to keep when retroactively trimming a segment (ms). */
-        private const val SILENCE_TAIL_PADDING_MS = 100L
+        /** Fraction of detected silence to trim from the end of a segment (0.0-1.0).
+         *  0.5 = cut at the midpoint of the silence period. */
+        private const val SILENCE_TRIM_FRACTION = 0.5
 
         /** Pre-speech lookback buffer duration (ms) — captures speech onset missed by energy smoothing. */
         private const val PRE_SPEECH_BUFFER_MS = 300L
@@ -416,7 +417,7 @@ class VoiceRecorder(private val context: Context) {
                         // Retroactive trim: cut back into the silence period so the
                         // emitted segment ends cleanly near where speech actually stopped,
                         // rather than at the current (lagging) detection point.
-                        val trimBackMs = maxOf(0L, silenceDurationMs - SILENCE_TAIL_PADDING_MS)
+                        val trimBackMs = 0L // disabled for testing; was: Math.round(silenceDurationMs * SILENCE_TRIM_FRACTION)
                         // Don't trim so much that the emitted segment is shorter than MIN_SEGMENT_MS
                         val maxTrimForMinSegment = maxOf(0L, segmentDurationMs - MIN_SEGMENT_MS)
                         val effectiveTrimMs = minOf(trimBackMs, maxTrimForMinSegment)
