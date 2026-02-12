@@ -71,7 +71,7 @@ class VoiceRecorder(private val context: Context) {
         private const val NOISE_FLOOR_RECALC_INTERVAL = 10
 
         /** Default silence duration (ms) before splitting a segment. */
-        private const val DEFAULT_SILENCE_DURATION_MS = 2000L
+        private const val DEFAULT_SILENCE_DURATION_MS = 1000L
         private const val MIN_SILENCE_DURATION_MS = 1000L
         private const val MAX_SILENCE_DURATION_MS = 30_000L
         private const val MIN_ALLOWED_SILENCE_THRESHOLD = 40.0
@@ -81,10 +81,10 @@ class VoiceRecorder(private val context: Context) {
         private const val MIN_SEGMENT_MS = 500L
 
         /** How much trailing silence to keep when retroactively trimming a segment (ms). */
-        private const val SILENCE_TAIL_PADDING_MS = 200L
+        private const val SILENCE_TAIL_PADDING_MS = 100L
 
         /** Pre-speech lookback buffer duration (ms) — captures speech onset missed by energy smoothing. */
-        private const val PRE_SPEECH_BUFFER_MS = 500L
+        private const val PRE_SPEECH_BUFFER_MS = 300L
 
         /** Minimum amount of actual speech (not silence) required in a segment to emit it (ms).
          *  Prevents sending noise-spike-only segments to the transcription API. */
