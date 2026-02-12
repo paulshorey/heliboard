@@ -86,9 +86,14 @@ class VoiceRecorder(private val context: Context) {
         /** Pre-speech lookback buffer duration (ms) — captures speech onset missed by energy smoothing. */
         private const val PRE_SPEECH_BUFFER_MS = 300L
 
-        /** Minimum amount of actual speech (not silence) required in a segment to emit it (ms).
-         *  Prevents sending noise-spike-only segments to the transcription API. */
-        private const val MIN_SPEECH_IN_SEGMENT_MS = 300L
+        /** Minimum speech required for the FIRST segment after recording starts (ms).
+         *  Lower threshold allows single-word utterances right after pressing the mic. */
+        private const val MIN_SPEECH_FIRST_SEGMENT_MS = 300L
+
+        /** Minimum speech required for subsequent segments (ms).
+         *  Higher threshold filters background noise (dog barks, coughs, etc.)
+         *  that accumulates less than 1 second of detected speech energy. */
+        private const val MIN_SPEECH_ONGOING_MS = 1000L
 
         /** Maximum segment length (ms) — force-split very long speech. */
         private const val MAX_SEGMENT_MS = 60_000L
@@ -292,6 +297,7 @@ class VoiceRecorder(private val context: Context) {
         var silenceDurationMs = 0L
         var segmentDurationMs = 0L
         var speechDurationMs = 0L   // only counts chunks where hasSpeech was true
+        var segmentsEmitted = 0     // tracks how many segments have been sent this session
         var isSpeaking = false
         var noiseFloor = INITIAL_NOISE_FLOOR
         var smoothedEnergy = INITIAL_NOISE_FLOOR
@@ -316,8 +322,10 @@ class VoiceRecorder(private val context: Context) {
                 if (isPaused) {
                     // If there was accumulated speech, emit it before we start discarding
                     if (segmentBuffer.size() > 0) {
-                        if (speechDurationMs >= MIN_SPEECH_IN_SEGMENT_MS) {
+                        val minSpeechMs = if (segmentsEmitted == 0) MIN_SPEECH_FIRST_SEGMENT_MS else MIN_SPEECH_ONGOING_MS
+                        if (speechDurationMs >= minSpeechMs) {
                             emitSegment(segmentBuffer, segmentDurationMs)
+                            segmentsEmitted++
                         }
                         segmentBuffer.reset()
                         segmentDurationMs = 0L
@@ -427,12 +435,14 @@ class VoiceRecorder(private val context: Context) {
                         )
 
                         // Emit the retroactively trimmed segment (only if it contains real speech)
-                        if (emitDurationMs >= MIN_SEGMENT_MS && speechDurationMs >= MIN_SPEECH_IN_SEGMENT_MS) {
+                        val minSpeechMs = if (segmentsEmitted == 0) MIN_SPEECH_FIRST_SEGMENT_MS else MIN_SPEECH_ONGOING_MS
+                        if (emitDurationMs >= MIN_SEGMENT_MS && speechDurationMs >= minSpeechMs) {
                             val emitPcm = if (actualTrimBytes > 0) pcmData.copyOfRange(0, emitEndIndex) else pcmData
                             emitSegmentPcm(emitPcm, emitDurationMs)
-                        } else if (speechDurationMs < MIN_SPEECH_IN_SEGMENT_MS) {
+                            segmentsEmitted++
+                        } else if (speechDurationMs < minSpeechMs) {
                             Log.i(TAG, "Segment dropped: only ${speechDurationMs}ms of speech " +
-                                "(minimum ${MIN_SPEECH_IN_SEGMENT_MS}ms required)")
+                                "(minimum ${minSpeechMs}ms required, segments emitted=$segmentsEmitted)")
                         }
 
                         // Seed lookback buffer with the trimmed tail so that if speech
@@ -488,8 +498,9 @@ class VoiceRecorder(private val context: Context) {
             }
 
             // ── Recording ended: emit any remaining audio ──
+            val minSpeechMs = if (segmentsEmitted == 0) MIN_SPEECH_FIRST_SEGMENT_MS else MIN_SPEECH_ONGOING_MS
             if (segmentBuffer.size() > 0 && segmentDurationMs >= MIN_SEGMENT_MS
-                && speechDurationMs >= MIN_SPEECH_IN_SEGMENT_MS) {
+                && speechDurationMs >= minSpeechMs) {
                 emitSegment(segmentBuffer, segmentDurationMs)
             }
         } catch (e: Exception) {
