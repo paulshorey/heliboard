@@ -46,6 +46,11 @@ class VoiceInputManager(private val context: Context) {
          * when the user walks away or stops talking.
          */
         private const val AUTO_STOP_SILENCE_MS = 36_000L
+
+        /** Maximum segments waiting in the transcription queue.
+         *  Prevents backlog when noisy environments produce segments faster
+         *  than Deepgram can process them. Oldest segments are dropped. */
+        private const val MAX_PENDING_SEGMENTS = 3
     }
 
     enum class State {
@@ -349,6 +354,11 @@ class VoiceInputManager(private val context: Context) {
             return
         }
         if (wavData.isEmpty()) return
+        // Limit queue to avoid backlog when segments arrive faster than processing
+        while (pendingSegments.size >= MAX_PENDING_SEGMENTS) {
+            pendingSegments.removeFirst()
+            Log.w(TAG, "Dropped oldest queued segment (queue full at $MAX_PENDING_SEGMENTS)")
+        }
         pendingSegments.addLast(PendingSegment(sessionId, wavData))
         processNextSegment()
     }
