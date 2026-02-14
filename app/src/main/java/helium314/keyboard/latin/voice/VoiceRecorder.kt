@@ -109,6 +109,12 @@ class VoiceRecorder(private val context: Context) {
         fun onRecordingStarted()
 
         /**
+         * Raw PCM16 microphone chunk from the live stream.
+         * Chunk cadence is roughly every [READ_INTERVAL_MS] while recording.
+         */
+        fun onAudioChunk(pcmData: ByteArray)
+
+        /**
          * A complete audio segment is ready for transcription.
          * [wavData] is a self-contained WAV file (header + PCM data).
          */
@@ -340,6 +346,11 @@ class VoiceRecorder(private val context: Context) {
 
                 val chunk = if (bytesRead == BYTES_PER_READ) readBuffer.copyOf()
                             else readBuffer.copyOf(bytesRead)
+
+                // Always forward the live PCM stream; streaming transcription consumes
+                // this path instead of relying on locally cut WAV segments.
+                val callbackSnapshot = callback
+                mainHandler.post { callbackSnapshot?.onAudioChunk(chunk) }
 
                 val energy = rmsEnergy(chunk)
                 smoothedEnergy = (ENERGY_SMOOTHING_ALPHA * energy) +

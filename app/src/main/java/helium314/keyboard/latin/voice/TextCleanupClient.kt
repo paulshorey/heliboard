@@ -63,6 +63,7 @@ class TextCleanupClient {
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .writeTimeout(10, TimeUnit.SECONDS)
+        .callTimeout(25, TimeUnit.SECONDS) // hard cap so cleanup can't stall queue forever
         .build()
 
     private val activeCalls = Collections.synchronizedSet(mutableSetOf<Call>())
