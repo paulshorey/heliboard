@@ -15,6 +15,14 @@ gita && ./gradlew assembleDebug && ./gradlew installDebug
 ./gradlew assembleDebug && ./gradlew installDebug && adb logcat | grep -E "(voice|deepgram|transcri|cleanup)"
 ```
 
+# Debug Gradle
+
+```
+./gradlew --stop && rm -rf ~/.gradle/caches/8.14 .gradle build app/build && ./gradlew clean assembleDebug
+# or to clear all cache
+./gradlew --stop && rm -rf ~/.gradle/caches/* .gradle build app/build && ./gradlew clean assembleDebug
+```
+
 # Configuring
 
 app/src/main/java/helium314/keyboard/latin/settings/Defaults.kt
