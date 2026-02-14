@@ -89,6 +89,8 @@ class VoiceInputManager(private val context: Context) {
     private var currentState = State.IDLE
     private var activeSessionId = 0L
 
+    // Local speech-boundary detection window used by VoiceRecorder callbacks
+    // (paragraph/auto-stop behavior). Deepgram chunking/finalization is server-managed.
     private var chunkSilenceDurationMs = Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS * 1000L
     private var chunkSilenceThreshold = Defaults.PREF_VOICE_SILENCE_THRESHOLD.toDouble()
     private var newParagraphDelayMs = Defaults.PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS * 1000L
@@ -319,7 +321,6 @@ class VoiceInputManager(private val context: Context) {
         transcriptionClient.startStreaming(
             apiKey = apiKey,
             language = language,
-            endpointingMs = chunkSilenceDurationMs,
             callback = object : DeepgramTranscriptionClient.StreamingCallback {
                 override fun onStreamReady() {
                     if (sessionId != activeSessionId) return
@@ -506,7 +507,7 @@ class VoiceInputManager(private val context: Context) {
 
         Log.i(
             TAG,
-            "Voice config loaded: deepgramEndpointing=${chunkSilenceDurationMs}ms, " +
+            "Voice config loaded: localSpeechSilence=${chunkSilenceDurationMs}ms, " +
                 "silenceThreshold=${chunkSilenceThreshold}, " +
                 "newParagraphSilence=${newParagraphDelayMs}ms"
         )

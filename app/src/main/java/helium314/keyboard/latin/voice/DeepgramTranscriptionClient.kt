@@ -30,10 +30,6 @@ class DeepgramTranscriptionClient {
     companion object {
         private const val TAG = "DeepgramTranscription"
         private const val STREAMING_BASE_URL = "wss://api.deepgram.com/v1/listen"
-
-        // Deepgram expects endpointing in milliseconds.
-        private const val MIN_ENDPOINTING_MS = 500L
-        private const val MAX_ENDPOINTING_MS = 30_000L
     }
 
     interface StreamingCallback {
@@ -86,7 +82,6 @@ class DeepgramTranscriptionClient {
     fun startStreaming(
         apiKey: String,
         language: String? = null,
-        endpointingMs: Long,
         callback: StreamingCallback
     ) {
         val newToken = activeConnectionToken + 1
@@ -98,7 +93,7 @@ class DeepgramTranscriptionClient {
         isOpen = false
         lastFinalResultFingerprint = ""
 
-        val url = buildStreamingUrl(language, endpointingMs)
+        val url = buildStreamingUrl(language)
         val request = Request.Builder()
             .url(url)
             .addHeader("Authorization", "Token $apiKey")
@@ -107,7 +102,7 @@ class DeepgramTranscriptionClient {
         Log.i(
             TAG,
             "VOICE_STEP_3 opening Deepgram streaming socket " +
-                "(language=${language ?: "auto"}, endpointingMs=$endpointingMs)"
+                "(language=${language ?: "auto"}, endpointing=deepgram-default)"
         )
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
@@ -216,8 +211,7 @@ class DeepgramTranscriptionClient {
         }
     }
 
-    private fun buildStreamingUrl(language: String?, endpointingMs: Long): String {
-        val normalizedEndpointing = endpointingMs.coerceIn(MIN_ENDPOINTING_MS, MAX_ENDPOINTING_MS)
+    private fun buildStreamingUrl(language: String?): String {
         return buildString {
             append(STREAMING_BASE_URL)
             append("?model=nova-3")
@@ -228,7 +222,6 @@ class DeepgramTranscriptionClient {
             append("&channels=1")
             append("&interim_results=true")
             append("&vad_events=true")
-            append("&endpointing=").append(normalizedEndpointing)
             if (!language.isNullOrBlank()) {
                 append("&language=").append(language)
             }
