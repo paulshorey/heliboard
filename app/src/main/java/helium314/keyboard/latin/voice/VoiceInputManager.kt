@@ -29,15 +29,10 @@ class VoiceInputManager(private val context: Context) {
         private const val MAX_CHUNK_SILENCE_SECONDS = 30
         private const val MIN_NEW_PARAGRAPH_SILENCE_SECONDS = 3
         private const val MAX_NEW_PARAGRAPH_SILENCE_SECONDS = 120
+        private const val MIN_AUTO_STOP_SILENCE_SECONDS = 5
+        private const val MAX_AUTO_STOP_SILENCE_SECONDS = 300
         private const val MIN_SILENCE_THRESHOLD = 40
         private const val MAX_SILENCE_THRESHOLD = 5000
-
-        /**
-         * Auto-stop recording after this many milliseconds of continuous silence
-         * (no speech detected). Prevents the recording from running indefinitely
-         * when the user walks away or stops talking.
-         */
-        private const val AUTO_STOP_SILENCE_MS = 30_000L
 
         /** Maximum buffered raw PCM chunks while waiting for socket readiness. */
         private const val MAX_PENDING_AUDIO_CHUNKS = 300
@@ -94,6 +89,7 @@ class VoiceInputManager(private val context: Context) {
     private var chunkSilenceDurationMs = Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS * 1000L
     private var chunkSilenceThreshold = Defaults.PREF_VOICE_SILENCE_THRESHOLD.toDouble()
     private var newParagraphDelayMs = Defaults.PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS * 1000L
+    private var autoStopSilenceMs = Defaults.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS * 1000L
 
     // Streaming state
     private var streamSessionId = 0L
@@ -125,7 +121,7 @@ class VoiceInputManager(private val context: Context) {
         if (currentState == State.RECORDING) {
             Log.i(
                 TAG,
-                "Auto-stop timer fired after ${AUTO_STOP_SILENCE_MS}ms of silence — stopping recording"
+                "Auto-stop timer fired after ${autoStopSilenceMs}ms of silence — stopping recording"
             )
             stopRecording()
         }
@@ -491,6 +487,14 @@ class VoiceInputManager(private val context: Context) {
             MAX_NEW_PARAGRAPH_SILENCE_SECONDS
         )
 
+        val autoStopSilenceSeconds = prefs.getInt(
+            Settings.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS,
+            Defaults.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS
+        ).coerceIn(
+            MIN_AUTO_STOP_SILENCE_SECONDS,
+            MAX_AUTO_STOP_SILENCE_SECONDS
+        )
+
         val silenceThreshold = prefs.getInt(
             Settings.PREF_VOICE_SILENCE_THRESHOLD,
             Defaults.PREF_VOICE_SILENCE_THRESHOLD
@@ -498,6 +502,7 @@ class VoiceInputManager(private val context: Context) {
 
         chunkSilenceDurationMs = chunkSilenceSeconds * 1000L
         newParagraphDelayMs = paragraphSilenceSeconds * 1000L
+        autoStopSilenceMs = autoStopSilenceSeconds * 1000L
         chunkSilenceThreshold = silenceThreshold.toDouble()
 
         voiceRecorder.updateSilenceConfig(
@@ -509,7 +514,8 @@ class VoiceInputManager(private val context: Context) {
             TAG,
             "Voice config loaded: localSpeechSilence=${chunkSilenceDurationMs}ms, " +
                 "silenceThreshold=${chunkSilenceThreshold}, " +
-                "newParagraphSilence=${newParagraphDelayMs}ms"
+                "newParagraphSilence=${newParagraphDelayMs}ms, " +
+                "autoStopSilence=${autoStopSilenceMs}ms"
         )
     }
 
@@ -537,8 +543,8 @@ class VoiceInputManager(private val context: Context) {
     private fun startAutoStopTimer() {
         mainHandler.removeCallbacks(autoStopSilenceRunnable)
         if (currentState == State.RECORDING) {
-            Log.i(TAG, "Starting auto-stop timer: ${AUTO_STOP_SILENCE_MS}ms")
-            mainHandler.postDelayed(autoStopSilenceRunnable, AUTO_STOP_SILENCE_MS)
+            Log.i(TAG, "Starting auto-stop timer: ${autoStopSilenceMs}ms")
+            mainHandler.postDelayed(autoStopSilenceRunnable, autoStopSilenceMs)
         }
     }
 
