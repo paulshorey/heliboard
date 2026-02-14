@@ -30,8 +30,8 @@ class VoiceInputManager(private val context: Context) {
          * Fallback watchdog: if we stay in RECORDING too long without a detected
          * chunk boundary, ask [VoiceRecorder] to flush the current segment.
          */
-        private const val MIN_CHUNK_WATCHDOG_MS = 20_000L
-        private const val CHUNK_WATCHDOG_EXTRA_MS = 12_000L
+        private const val MIN_CHUNK_WATCHDOG_MS = 8_000L
+        private const val CHUNK_WATCHDOG_EXTRA_MS = 4_000L
 
         private const val MIN_CHUNK_SILENCE_SECONDS = 1
         private const val MAX_CHUNK_SILENCE_SECONDS = 30
@@ -67,6 +67,9 @@ class VoiceInputManager(private val context: Context) {
 
         /** An audio chunk is being sent for transcription/processing. */
         fun onProcessingStarted()
+
+        /** No segment is currently transcribing and queue is drained. */
+        fun onProcessingIdle()
 
         /** Configured silence window elapsed — start a new paragraph. */
         fun onNewParagraphRequested()
@@ -107,6 +110,9 @@ class VoiceInputManager(private val context: Context) {
                 "Chunk watchdog fired after ${chunkWatchdogMs}ms — forcing segment flush"
             )
             voiceRecorder.requestSegmentFlush()
+            // Keep fallback active while recording in case a single flush
+            // does not produce a clean boundary.
+            resetChunkWatchdog()
         }
     }
 
@@ -281,6 +287,7 @@ class VoiceInputManager(private val context: Context) {
         isTranscribingSegment = false
         inFlightRequestToken = 0L
         transcriptionClient.cancelAll()
+        notifyProcessingIdleIfDrained()
         Log.i(TAG, "Voice session invalidated ($reason), sessionId=$activeSessionId")
     }
 
@@ -370,7 +377,11 @@ class VoiceInputManager(private val context: Context) {
     private fun processNextSegment() {
         if (isTranscribingSegment) return
 
-        val segment = pendingSegments.removeFirstOrNull() ?: return
+        val segment = pendingSegments.removeFirstOrNull()
+        if (segment == null) {
+            notifyProcessingIdleIfDrained()
+            return
+        }
         if (segment.sessionId != activeSessionId) {
             Log.i(TAG, "Skipping queued segment from stale session ${segment.sessionId}")
             processNextSegment()
@@ -411,8 +422,15 @@ class VoiceInputManager(private val context: Context) {
                                 TAG,
                                 "VOICE_STEP_4 transcription received (${text.length} chars) — applying post-processing"
                             )
-                            listener?.onTranscriptionResult(text)
+                        } else {
+                            Log.i(
+                                TAG,
+                                "VOICE_STEP_4 transcription returned empty text for segment"
+                            )
                         }
+                        // Forward all results (including empty) so the IME can
+                        // reliably clear processing state for no-speech chunks.
+                        listener?.onTranscriptionResult(text)
                     }
                 }
 
@@ -447,6 +465,12 @@ class VoiceInputManager(private val context: Context) {
         }
 
         processNextSegment()
+    }
+
+    private fun notifyProcessingIdleIfDrained() {
+        if (!isTranscribingSegment && pendingSegments.isEmpty()) {
+            listener?.onProcessingIdle()
+        }
     }
 
     // ── Timers ─────────────────────────────────────────────────────────

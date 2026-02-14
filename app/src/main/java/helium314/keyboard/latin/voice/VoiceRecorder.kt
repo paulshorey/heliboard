@@ -55,7 +55,8 @@ class VoiceRecorder(private val context: Context) {
         private const val SILENCE_MARGIN = 140.0
         private const val ENERGY_SMOOTHING_ALPHA = 0.2
         private const val NOISE_FLOOR_MIN = 40.0
-        private const val NOISE_FLOOR_MAX = 2500.0
+        private const val NOISE_FLOOR_MAX = 1000.0
+        private const val NOISE_FLOOR_MAX_STEP_UP = 50.0
 
         /** Rolling window size for percentile-based noise floor estimation (iterations).
          *  300 iterations at 100ms = 30 seconds of audio history. */
@@ -353,10 +354,9 @@ class VoiceRecorder(private val context: Context) {
                     smoothedEnergy >= speechThreshold
                 }
 
-                // Percentile-based noise floor: track ALL energy readings (not just
-                // silence) so the floor adapts even when sustained background noise
-                // is misclassified as speech by the hysteresis logic.
-                energyHistory.addLast(smoothedEnergy)
+                // Percentile-based noise floor: track raw RMS energy (not EMA-smoothed)
+                // to avoid speech->silence lag contaminating the low-percentile baseline.
+                energyHistory.addLast(energy)
                 if (energyHistory.size > NOISE_FLOOR_WINDOW_SIZE) {
                     energyHistory.removeFirst()
                 }
@@ -366,7 +366,13 @@ class VoiceRecorder(private val context: Context) {
                     val sorted = energyHistory.toList().sorted()
                     val idx = (sorted.size * NOISE_FLOOR_PERCENTILE).toInt()
                         .coerceIn(0, sorted.size - 1)
-                    noiseFloor = sorted[idx].coerceIn(NOISE_FLOOR_MIN, NOISE_FLOOR_MAX)
+                    val targetNoiseFloor = sorted[idx].coerceIn(NOISE_FLOOR_MIN, NOISE_FLOOR_MAX)
+                    noiseFloor = if (targetNoiseFloor > noiseFloor) {
+                        minOf(targetNoiseFloor, noiseFloor + NOISE_FLOOR_MAX_STEP_UP)
+                    } else {
+                        // Let the floor decrease quickly when ambient gets quieter.
+                        targetNoiseFloor
+                    }
                 }
 
                 if (hasSpeech) {
@@ -471,26 +477,52 @@ class VoiceRecorder(private val context: Context) {
 
                 if (forceFlushRequested) {
                     forceFlushRequested = false
-                    if (segmentBuffer.size() > 0 && segmentDurationMs >= MIN_SEGMENT_MS) {
-                        Log.i(
-                            TAG,
-                            "VOICE_STEP_2 watchdog flush forcing chunk at ${segmentDurationMs}ms"
-                        )
-                        // Watchdog flush is a fallback split and not necessarily real silence,
-                        // so avoid emitting onSpeechStopped here to prevent false paragraph timers.
-                        isSpeaking = false
-                        emitSegment(segmentBuffer, segmentDurationMs)
+                    if (segmentBuffer.size() > 0) {
+                        val minSpeechMs = if (segmentsEmitted == 0) MIN_SPEECH_FIRST_SEGMENT_MS else MIN_SPEECH_ONGOING_MS
+                        if (segmentDurationMs >= MIN_SEGMENT_MS && speechDurationMs >= minSpeechMs) {
+                            Log.i(
+                                TAG,
+                                "VOICE_STEP_2 watchdog flush forcing chunk at ${segmentDurationMs}ms"
+                            )
+                            emitSegment(segmentBuffer, segmentDurationMs)
+                            segmentsEmitted++
+                        } else {
+                            Log.i(
+                                TAG,
+                                "Watchdog flush dropped segment: duration=${segmentDurationMs}ms, " +
+                                    "speech=${speechDurationMs}ms (minimum speech ${minSpeechMs}ms)"
+                            )
+                        }
+                        // Keep recorder/manager state transitions consistent: if we were in speech,
+                        // signal a stop so paragraph/auto-stop timers can recover even when
+                        // silence detection missed the natural boundary.
+                        val wasSpeaking = isSpeaking
                         segmentBuffer.reset()
                         segmentDurationMs = 0L
                         speechDurationMs = 0L
                         silenceDurationMs = 0L
                         preSpeechBuffer.clear()
+                        isSpeaking = false
+                        if (wasSpeaking) {
+                            val callbackSnapshot = callback
+                            mainHandler.post { callbackSnapshot?.onSpeechStopped() }
+                        }
                     }
                 }
 
                 // Force-split very long segments
                 if (segmentDurationMs >= MAX_SEGMENT_MS) {
-                    emitSegment(segmentBuffer, segmentDurationMs)
+                    val minSpeechMs = if (segmentsEmitted == 0) MIN_SPEECH_FIRST_SEGMENT_MS else MIN_SPEECH_ONGOING_MS
+                    if (speechDurationMs >= minSpeechMs) {
+                        emitSegment(segmentBuffer, segmentDurationMs)
+                        segmentsEmitted++
+                    } else {
+                        Log.i(
+                            TAG,
+                            "Max-segment split dropped: duration=${segmentDurationMs}ms, " +
+                                "speech=${speechDurationMs}ms (minimum speech ${minSpeechMs}ms)"
+                        )
+                    }
                     segmentBuffer.reset()
                     segmentDurationMs = 0L
                     speechDurationMs = 0L
