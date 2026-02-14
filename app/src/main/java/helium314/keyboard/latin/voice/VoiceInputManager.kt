@@ -68,6 +68,9 @@ class VoiceInputManager(private val context: Context) {
         /** An audio chunk is being sent for transcription/processing. */
         fun onProcessingStarted()
 
+        /** No segment is currently transcribing and queue is drained. */
+        fun onProcessingIdle()
+
         /** Configured silence window elapsed — start a new paragraph. */
         fun onNewParagraphRequested()
 
@@ -284,6 +287,7 @@ class VoiceInputManager(private val context: Context) {
         isTranscribingSegment = false
         inFlightRequestToken = 0L
         transcriptionClient.cancelAll()
+        notifyProcessingIdleIfDrained()
         Log.i(TAG, "Voice session invalidated ($reason), sessionId=$activeSessionId")
     }
 
@@ -373,7 +377,11 @@ class VoiceInputManager(private val context: Context) {
     private fun processNextSegment() {
         if (isTranscribingSegment) return
 
-        val segment = pendingSegments.removeFirstOrNull() ?: return
+        val segment = pendingSegments.removeFirstOrNull()
+        if (segment == null) {
+            notifyProcessingIdleIfDrained()
+            return
+        }
         if (segment.sessionId != activeSessionId) {
             Log.i(TAG, "Skipping queued segment from stale session ${segment.sessionId}")
             processNextSegment()
@@ -457,6 +465,12 @@ class VoiceInputManager(private val context: Context) {
         }
 
         processNextSegment()
+    }
+
+    private fun notifyProcessingIdleIfDrained() {
+        if (!isTranscribingSegment && pendingSegments.isEmpty()) {
+            listener?.onProcessingIdle()
+        }
     }
 
     // ── Timers ─────────────────────────────────────────────────────────

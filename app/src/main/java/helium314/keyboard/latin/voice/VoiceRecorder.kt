@@ -55,7 +55,8 @@ class VoiceRecorder(private val context: Context) {
         private const val SILENCE_MARGIN = 140.0
         private const val ENERGY_SMOOTHING_ALPHA = 0.2
         private const val NOISE_FLOOR_MIN = 40.0
-        private const val NOISE_FLOOR_MAX = 2500.0
+        private const val NOISE_FLOOR_MAX = 1000.0
+        private const val NOISE_FLOOR_MAX_STEP_UP = 50.0
 
         /** Rolling window size for percentile-based noise floor estimation (iterations).
          *  300 iterations at 100ms = 30 seconds of audio history. */
@@ -353,10 +354,9 @@ class VoiceRecorder(private val context: Context) {
                     smoothedEnergy >= speechThreshold
                 }
 
-                // Percentile-based noise floor: track ALL energy readings (not just
-                // silence) so the floor adapts even when sustained background noise
-                // is misclassified as speech by the hysteresis logic.
-                energyHistory.addLast(smoothedEnergy)
+                // Percentile-based noise floor: track raw RMS energy (not EMA-smoothed)
+                // to avoid speech->silence lag contaminating the low-percentile baseline.
+                energyHistory.addLast(energy)
                 if (energyHistory.size > NOISE_FLOOR_WINDOW_SIZE) {
                     energyHistory.removeFirst()
                 }
@@ -366,7 +366,13 @@ class VoiceRecorder(private val context: Context) {
                     val sorted = energyHistory.toList().sorted()
                     val idx = (sorted.size * NOISE_FLOOR_PERCENTILE).toInt()
                         .coerceIn(0, sorted.size - 1)
-                    noiseFloor = sorted[idx].coerceIn(NOISE_FLOOR_MIN, NOISE_FLOOR_MAX)
+                    val targetNoiseFloor = sorted[idx].coerceIn(NOISE_FLOOR_MIN, NOISE_FLOOR_MAX)
+                    noiseFloor = if (targetNoiseFloor > noiseFloor) {
+                        minOf(targetNoiseFloor, noiseFloor + NOISE_FLOOR_MAX_STEP_UP)
+                    } else {
+                        // Let the floor decrease quickly when ambient gets quieter.
+                        targetNoiseFloor
+                    }
                 }
 
                 if (hasSpeech) {

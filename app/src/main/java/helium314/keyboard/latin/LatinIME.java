@@ -1838,6 +1838,20 @@ public class LatinIME extends InputMethodService implements
             }
 
             @Override
+            public void onProcessingIdle() {
+                try {
+                    // Only hide when both stages are idle:
+                    // - manager queue/transcription drained (this callback)
+                    // - no cleanup request in-flight / queued transcription waiting
+                    if (!mCleanupInProgress && mPendingTranscription.length() == 0) {
+                        mKeyboardSwitcher.hideProcessingIndicator();
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Error hiding processing indicator on idle: " + e.getMessage());
+                }
+            }
+
+            @Override
             public void onTranscriptionResult(@NonNull String text) {
                 try {
                     if (text == null || text.trim().isEmpty()) {
@@ -2295,6 +2309,11 @@ public class LatinIME extends InputMethodService implements
             }
         } catch (Exception e) {
             Log.e(TAG, "Error processing pending voice input: " + e.getMessage(), e);
+        } finally {
+            // Safety net: if both transcription and cleanup are idle, clear spinner.
+            if (!mCleanupInProgress && mPendingTranscription.length() == 0) {
+                mKeyboardSwitcher.hideProcessingIndicator();
+            }
         }
     }
 
