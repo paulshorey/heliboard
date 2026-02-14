@@ -4,6 +4,7 @@ package helium314.keyboard.latin.voice
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.utils.Log
@@ -47,6 +48,14 @@ class VoiceInputManager(private val context: Context) {
          */
         private const val AUTO_STOP_SILENCE_MS = 36_000L
 
+        /**
+         * Short recording threshold: if the user stops recording within this many
+         * milliseconds of starting, the transcription is inserted raw — without
+         * post-processing (capitalization adjustment) or Anthropic cleanup.
+         * This lets users quickly dictate lowercase / unpunctuated text.
+         */
+        private const val SHORT_RECORDING_THRESHOLD_MS = 3_000L
+
         /** Maximum segments waiting in the transcription queue.
          *  Prevents backlog when noisy environments produce segments faster
          *  than Deepgram can process them. Oldest segments are dropped. */
@@ -87,6 +96,17 @@ class VoiceInputManager(private val context: Context) {
 
     private var currentState = State.IDLE
     private var activeSessionId = 0L
+
+    /** Elapsed-realtime timestamp when the current recording session started. */
+    private var recordingStartTimeMs = 0L
+
+    /**
+     * True when the most recent recording session was "short" (user stopped
+     * within [SHORT_RECORDING_THRESHOLD_MS] of starting). Remains valid after
+     * recording stops so the listener can query it when transcription arrives.
+     * Reset to false at the start of every new recording session.
+     */
+    private var _wasShortRecording = false
 
     private var chunkSilenceDurationMs = Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS * 1000L
     private var chunkSilenceThreshold = Defaults.PREF_VOICE_SILENCE_THRESHOLD.toDouble()
@@ -138,6 +158,13 @@ class VoiceInputManager(private val context: Context) {
     val isIdle: Boolean get() = currentState == State.IDLE
     val state: State get() = currentState
 
+    /**
+     * Whether the most recent recording session was a "short" recording
+     * (stopped within [SHORT_RECORDING_THRESHOLD_MS] of starting).
+     * Valid after recording stops and until the next recording starts.
+     */
+    val wasShortRecording: Boolean get() = _wasShortRecording
+
     fun setListener(listener: VoiceInputListener?) {
         this.listener = listener
     }
@@ -173,6 +200,8 @@ class VoiceInputManager(private val context: Context) {
 
         reloadRuntimeConfig()
         beginNewSession()
+        _wasShortRecording = false
+        recordingStartTimeMs = SystemClock.elapsedRealtime()
         val sessionId = activeSessionId
 
         // Wire up the recorder callback
@@ -231,7 +260,9 @@ class VoiceInputManager(private val context: Context) {
 
     fun stopRecording() {
         if (currentState == State.IDLE) return
-        Log.i(TAG, "Stopping recording")
+        val durationMs = SystemClock.elapsedRealtime() - recordingStartTimeMs
+        _wasShortRecording = durationMs < SHORT_RECORDING_THRESHOLD_MS
+        Log.i(TAG, "Stopping recording (duration=${durationMs}ms, shortRecording=$_wasShortRecording)")
         stopRecordingInternal(cancelPending = false)
     }
 

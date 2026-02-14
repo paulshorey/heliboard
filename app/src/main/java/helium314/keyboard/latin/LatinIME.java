@@ -1841,6 +1841,14 @@ public class LatinIME extends InputMethodService implements
                     }
                     Log.i(TAG, "VOICE_STEP_4 transcription arrived in IME (" + text.length() + " chars)");
 
+                    // Short recording: user stopped within 3 seconds of starting.
+                    // Insert raw text without capitalization adjustment or Anthropic cleanup.
+                    if (mVoiceInputManager != null && mVoiceInputManager.getWasShortRecording()) {
+                        Log.i(TAG, "VOICE short recording detected — inserting raw transcription (no post-processing, no cleanup)");
+                        insertRawTranscriptionText(text);
+                        return;
+                    }
+
                     // If cleanup is in progress, queue this transcription to preserve ordering.
                     if (mCleanupInProgress) {
                         appendPendingTranscription(text);
@@ -2042,6 +2050,37 @@ public class LatinIME extends InputMethodService implements
             );
         } catch (Exception e) {
             Log.e(TAG, "Error inserting transcription text: " + e.getMessage(), e);
+            mKeyboardSwitcher.hideProcessingIndicator();
+        }
+    }
+
+    /**
+     * Insert transcription text raw — no capitalization adjustment, no cleanup.
+     * Used for "short recordings" (under 3 seconds) where the user wants the
+     * exact transcription output without any post-processing.
+     *
+     * @param text The raw transcription text to insert as-is
+     */
+    private void insertRawTranscriptionText(String text) {
+        if (text == null || text.isEmpty()) {
+            return;
+        }
+        String sanitized = stripInvisibleChars(text);
+        if (sanitized.isEmpty()) {
+            return;
+        }
+        try {
+            String textToInsert = ensureTrailingSpace(sanitized);
+            Log.i(TAG, "VOICE short-recording raw insert: \"" + sanitizeLogText(textToInsert) + "\"");
+
+            mInputLogic.finishInput();
+            mInputLogic.mConnection.beginBatchEdit();
+            mInputLogic.mConnection.commitText(textToInsert, 1);
+            mInputLogic.mConnection.endBatchEdit();
+
+            mKeyboardSwitcher.hideProcessingIndicator();
+        } catch (Exception e) {
+            Log.e(TAG, "Error inserting raw transcription text: " + e.getMessage(), e);
             mKeyboardSwitcher.hideProcessingIndicator();
         }
     }
