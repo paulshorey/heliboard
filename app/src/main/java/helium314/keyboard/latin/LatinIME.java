@@ -199,7 +199,7 @@ public class LatinIME extends InputMethodService implements
     private boolean mPendingNewParagraph = false;
     private final ArrayDeque<String> mPendingTranscriptionQueue = new ArrayDeque<>();
     private static final int MAX_PENDING_TRANSCRIPTIONS = 64;
-    private static final long CLEANUP_WATCHDOG_TIMEOUT_MS = 30_000L;
+    private static final long CLEANUP_WATCHDOG_TIMEOUT_MS = 5_000L;
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
     private final Runnable mCleanupWatchdogRunnable = new Runnable() {
         @Override
@@ -2271,10 +2271,15 @@ public class LatinIME extends InputMethodService implements
 
                         try {
                             Log.e(TAG, "Cleanup error: " + error);
-                            showVoiceErrorToast("Cleanup failed: " + error);
-
-                            // Graceful degradation: insert raw transcription (append, no replace).
-                            insertTranscriptionText(transcriptionText);
+                            if (isCleanupTimeoutError(error)) {
+                                // Timeout/unresponsive cleanup: drop this chunk and continue.
+                                Log.w(TAG, "Cleanup timed out; dropping current transcription chunk");
+                                showVoiceErrorToast("Cleanup timed out. Skipping this chunk.");
+                            } else {
+                                showVoiceErrorToast("Cleanup failed: " + error);
+                                // Non-timeout failures degrade gracefully with raw insertion.
+                                insertTranscriptionText(transcriptionText);
+                            }
                         } catch (Exception e) {
                             Log.e(TAG, "Exception in cleanup error callback: " + e.getMessage(), e);
                         }
@@ -2423,19 +2428,25 @@ public class LatinIME extends InputMethodService implements
             mTextCleanupClient.cancelAll();
         }
 
-        final String fallbackTranscription = mInFlightCleanupTranscription;
+        final String droppedTranscription = mInFlightCleanupTranscription;
         mInFlightCleanupTranscription = null;
 
-        try {
-            if (fallbackTranscription != null && !fallbackTranscription.trim().isEmpty()) {
-                insertTranscriptionText(fallbackTranscription);
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Fallback insertion after cleanup timeout failed: " + e.getMessage(), e);
+        if (droppedTranscription != null && !droppedTranscription.trim().isEmpty()) {
+            Log.w(TAG, "Dropped timed-out cleanup chunk (" + droppedTranscription.length() + " chars)");
         }
 
-        showVoiceErrorToast("Cleanup timed out. Continuing with queued transcription.");
+        showVoiceErrorToast("Cleanup timed out. Skipping this chunk.");
         processPendingVoiceInput();
+    }
+
+    private boolean isCleanupTimeoutError(@Nullable final String error) {
+        if (error == null) {
+            return false;
+        }
+        final String normalized = error.toLowerCase(Locale.ROOT);
+        return normalized.contains("timed out")
+                || normalized.contains("timeout")
+                || normalized.contains("408");
     }
 
     /**

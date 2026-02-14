@@ -30,6 +30,7 @@ class DeepgramTranscriptionClient {
     companion object {
         private const val TAG = "DeepgramTranscription"
         private const val STREAMING_BASE_URL = "wss://api.deepgram.com/v1/listen"
+        private const val FINALIZE_CLOSE_GRACE_MS = 1_500L
     }
 
     interface StreamingCallback {
@@ -74,6 +75,9 @@ class DeepgramTranscriptionClient {
     @Volatile
     private var lastFinalResultFingerprint = ""
 
+    @Volatile
+    private var pendingFinalizeCloseRunnable: Runnable? = null
+
     /**
      * Start a new Deepgram streaming session.
      *
@@ -92,6 +96,7 @@ class DeepgramTranscriptionClient {
         isClosing = false
         isOpen = false
         lastFinalResultFingerprint = ""
+        clearFinalizeCloseTimer()
 
         val url = buildStreamingUrl(language)
         val request = Request.Builder()
@@ -128,6 +133,7 @@ class DeepgramTranscriptionClient {
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (newToken != activeConnectionToken) return
+                clearFinalizeCloseTimer()
                 isOpen = false
                 this@DeepgramTranscriptionClient.webSocket = null
                 Log.i(TAG, "Deepgram stream closed: code=$code, reason=$reason")
@@ -138,6 +144,7 @@ class DeepgramTranscriptionClient {
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (newToken != activeConnectionToken) return
+                clearFinalizeCloseTimer()
                 isOpen = false
                 this@DeepgramTranscriptionClient.webSocket = null
                 if (isClosing) {
@@ -185,7 +192,17 @@ class DeepgramTranscriptionClient {
         } catch (_: Exception) {
             // Best effort.
         }
-        socket.close(1000, "client_stop")
+
+        // Give Deepgram a brief window to emit the final transcript before closing.
+        clearFinalizeCloseTimer()
+        val connectionToken = activeConnectionToken
+        val closeRunnable = Runnable {
+            if (connectionToken != activeConnectionToken) return@Runnable
+            val activeSocket = webSocket ?: return@Runnable
+            activeSocket.close(1000, "client_stop")
+        }
+        pendingFinalizeCloseRunnable = closeRunnable
+        mainHandler.postDelayed(closeRunnable, FINALIZE_CLOSE_GRACE_MS)
     }
 
     /** Cancel the stream immediately and clear callbacks. */
@@ -195,6 +212,7 @@ class DeepgramTranscriptionClient {
     }
 
     private fun stopStreamingInternal(cancel: Boolean, clearCallback: Boolean) {
+        clearFinalizeCloseTimer()
         isClosing = true
         isOpen = false
         val socket = webSocket
@@ -261,10 +279,19 @@ class DeepgramTranscriptionClient {
                     postIfCurrent(connectionToken) {
                         callback?.onTranscriptionResult(transcript)
                     }
+
+                    if (isClosing) {
+                        // Final result arrived after Finalize request; close immediately.
+                        clearFinalizeCloseTimer()
+                        webSocket?.close(1000, "client_stop")
+                    }
                 }
 
                 "Metadata", "SpeechStarted", "UtteranceEnd" -> {
-                    // Optional informational events; no action required.
+                    if (isClosing && json.optString("type") == "UtteranceEnd") {
+                        clearFinalizeCloseTimer()
+                        webSocket?.close(1000, "client_stop")
+                    }
                 }
 
                 else -> {
@@ -297,5 +324,11 @@ class DeepgramTranscriptionClient {
             if (connectionToken != activeConnectionToken) return@post
             action()
         }
+    }
+
+    private fun clearFinalizeCloseTimer() {
+        val runnable = pendingFinalizeCloseRunnable ?: return
+        mainHandler.removeCallbacks(runnable)
+        pendingFinalizeCloseRunnable = null
     }
 }

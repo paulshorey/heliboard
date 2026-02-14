@@ -39,6 +39,9 @@ class VoiceInputManager(private val context: Context) {
 
         /** Maximum finalized transcripts waiting to be forwarded to the listener. */
         private const val MAX_PENDING_TRANSCRIPTS = 64
+
+        private const val MAX_STREAM_RECONNECT_ATTEMPTS = 3
+        private const val STREAM_RECONNECT_BASE_DELAY_MS = 500L
     }
 
     enum class State {
@@ -96,6 +99,10 @@ class VoiceInputManager(private val context: Context) {
     private var isStreamingReady = false
     private var isStreamingConnecting = false
     private var finalizeWhenStreamReady = false
+    private var isSessionStopping = false
+    private var sessionApiKey = ""
+    private var streamReconnectAttempts = 0
+    private var pendingReconnectRunnable: Runnable? = null
 
     // Buffered audio while stream is not yet open
     private val pendingAudioChunks = ArrayDeque<PendingAudioChunk>()
@@ -129,7 +136,10 @@ class VoiceInputManager(private val context: Context) {
 
     val isRecording: Boolean get() = currentState == State.RECORDING
     val isPaused: Boolean get() = currentState == State.PAUSED
-    val isIdle: Boolean get() = currentState == State.IDLE
+    val isIdle: Boolean
+        get() = currentState == State.IDLE &&
+            !voiceRecorder.isCurrentlyRecording &&
+            !isStreamingConnecting
     val state: State get() = currentState
 
     fun setListener(listener: VoiceInputListener?) {
@@ -168,6 +178,7 @@ class VoiceInputManager(private val context: Context) {
         reloadRuntimeConfig()
         beginNewSession()
         val sessionId = activeSessionId
+        sessionApiKey = apiKey
 
         voiceRecorder.setCallback(object : VoiceRecorder.RecordingCallback {
             override fun onRecordingStarted() {
@@ -222,11 +233,16 @@ class VoiceInputManager(private val context: Context) {
             return false
         }
 
+        // Enter RECORDING immediately after AudioRecord starts so lifecycle guards
+        // don't treat this startup window as idle.
+        updateState(State.RECORDING)
+        startAutoStopTimer()
+
         return true
     }
 
     fun stopRecording() {
-        if (currentState == State.IDLE) return
+        if (isIdle) return
         Log.i(TAG, "Stopping recording")
         stopRecordingInternal(cancelPending = false)
     }
@@ -276,6 +292,10 @@ class VoiceInputManager(private val context: Context) {
         isStreamingReady = false
         isStreamingConnecting = false
         finalizeWhenStreamReady = false
+        isSessionStopping = false
+        sessionApiKey = ""
+        streamReconnectAttempts = 0
+        cancelPendingReconnect()
         pendingAudioChunks.clear()
         pendingTranscripts.clear()
         isDispatchingTranscripts = false
@@ -291,6 +311,9 @@ class VoiceInputManager(private val context: Context) {
         val sessionAtStop = activeSessionId
         if (cancelPending) {
             invalidateActiveSession("recording cancelled")
+        } else {
+            isSessionStopping = true
+            cancelPendingReconnect()
         }
 
         voiceRecorder.stopRecording()
@@ -306,13 +329,15 @@ class VoiceInputManager(private val context: Context) {
         updateState(State.IDLE)
     }
 
-    private fun startStreamingSession(sessionId: Long, apiKey: String) {
+    private fun startStreamingSession(sessionId: Long, apiKey: String, isReconnect: Boolean = false) {
         if (sessionId != activeSessionId) return
         val language = getCurrentLanguage()
         streamSessionId = sessionId
         isStreamingConnecting = true
         isStreamingReady = false
-        finalizeWhenStreamReady = false
+        if (!isReconnect) {
+            finalizeWhenStreamReady = false
+        }
 
         transcriptionClient.startStreaming(
             apiKey = apiKey,
@@ -320,6 +345,8 @@ class VoiceInputManager(private val context: Context) {
             callback = object : DeepgramTranscriptionClient.StreamingCallback {
                 override fun onStreamReady() {
                     if (sessionId != activeSessionId) return
+                    cancelPendingReconnect()
+                    streamReconnectAttempts = 0
                     isStreamingConnecting = false
                     isStreamingReady = true
                     flushPendingAudio(sessionId)
@@ -336,27 +363,12 @@ class VoiceInputManager(private val context: Context) {
 
                 override fun onStreamError(error: String) {
                     if (sessionId != activeSessionId) return
-                    isStreamingConnecting = false
-                    isStreamingReady = false
-                    pendingAudioChunks.clear()
-                    Log.e(TAG, "Deepgram streaming error: $error")
-                    listener?.onError(error)
-
-                    // If streaming died mid-session, stop recording to avoid buffering
-                    // unbounded audio that can no longer be transcribed.
-                    if (currentState != State.IDLE) {
-                        stopRecordingInternal(cancelPending = false)
-                    } else {
-                        notifyProcessingIdleIfDrained()
-                    }
+                    handleStreamDisconnected(sessionId, error)
                 }
 
                 override fun onStreamClosed() {
                     if (sessionId != activeSessionId) return
-                    isStreamingConnecting = false
-                    isStreamingReady = false
-                    pendingAudioChunks.clear()
-                    notifyProcessingIdleIfDrained()
+                    handleStreamDisconnected(sessionId, null)
                 }
             }
         )
@@ -378,21 +390,14 @@ class VoiceInputManager(private val context: Context) {
             return
         }
 
-        // If the socket already died/closed, just transition to idle processing state.
+        // If the socket already died/closed, transition to idle processing state.
+        pendingAudioChunks.clear()
         notifyProcessingIdleIfDrained()
     }
 
     private fun onAudioChunkCaptured(pcmData: ByteArray, sessionId: Long) {
         if (sessionId != activeSessionId) return
         if (pcmData.isEmpty()) return
-
-        if (isStreamingReady && streamSessionId == sessionId) {
-            val sent = transcriptionClient.sendAudioChunk(pcmData)
-            if (sent) {
-                return
-            }
-            Log.w(TAG, "Streaming send rejected chunk; buffering temporarily")
-        }
 
         while (pendingAudioChunks.size >= MAX_PENDING_AUDIO_CHUNKS) {
             pendingAudioChunks.removeFirst()
@@ -403,6 +408,12 @@ class VoiceInputManager(private val context: Context) {
             )
         }
         pendingAudioChunks.addLast(PendingAudioChunk(sessionId, pcmData.copyOf()))
+
+        if (isStreamingReady && streamSessionId == sessionId) {
+            flushPendingAudio(sessionId)
+        } else if (!isStreamingConnecting && !isSessionStopping) {
+            scheduleReconnect(sessionId, "audio queued while stream unavailable")
+        }
     }
 
     private fun flushPendingAudio(sessionId: Long) {
@@ -414,8 +425,11 @@ class VoiceInputManager(private val context: Context) {
                 continue
             }
             if (!transcriptionClient.sendAudioChunk(next.pcmData)) {
-                // Keep the remaining queue; we'll retry when the socket recovers or reconnects.
-                Log.w(TAG, "Failed flushing buffered audio chunk; keeping backlog")
+                // Keep remaining queue; reconnect and retry in FIFO order.
+                isStreamingReady = false
+                isStreamingConnecting = false
+                Log.w(TAG, "Failed flushing buffered audio chunk; scheduling stream reconnect")
+                scheduleReconnect(sessionId, "audio send failed")
                 return
             }
             pendingAudioChunks.removeFirst()
@@ -431,12 +445,14 @@ class VoiceInputManager(private val context: Context) {
         if (normalized.isEmpty()) return
 
         while (pendingTranscripts.size >= MAX_PENDING_TRANSCRIPTS) {
-            pendingTranscripts.removeFirst()
-            Log.w(
-                TAG,
-                "Dropped oldest pending transcript " +
-                    "(queue full at $MAX_PENDING_TRANSCRIPTS)"
-            )
+            val oldest = pendingTranscripts.removeFirstOrNull()
+            val secondOldest = pendingTranscripts.removeFirstOrNull()
+            val merged = mergeTranscriptText(oldest?.text, secondOldest?.text)
+            val mergedSessionId = secondOldest?.sessionId ?: oldest?.sessionId ?: sessionId
+            if (merged.isNotEmpty()) {
+                pendingTranscripts.addFirst(PendingTranscript(mergedSessionId, merged))
+            }
+            Log.w(TAG, "Pending transcript queue full; coalesced oldest entries")
         }
         pendingTranscripts.addLast(PendingTranscript(sessionId, normalized))
         processNextTranscript()
@@ -469,6 +485,87 @@ class VoiceInputManager(private val context: Context) {
         ) {
             listener?.onProcessingIdle()
         }
+    }
+
+    private fun mergeTranscriptText(first: String?, second: String?): String {
+        val left = first.orEmpty()
+        val right = second.orEmpty()
+        if (left.isEmpty()) return right
+        if (right.isEmpty()) return left
+        val needsSpace = !left.last().isWhitespace() && !right.first().isWhitespace()
+        return if (needsSpace) "$left $right" else left + right
+    }
+
+    private fun handleStreamDisconnected(sessionId: Long, error: String?) {
+        if (sessionId != activeSessionId) return
+        isStreamingReady = false
+        isStreamingConnecting = false
+
+        if (isSessionStopping) {
+            pendingAudioChunks.clear()
+            notifyProcessingIdleIfDrained()
+            return
+        }
+
+        val sessionLikelyActive =
+            currentState != State.IDLE || voiceRecorder.isCurrentlyRecording
+
+        if (sessionLikelyActive && scheduleReconnect(sessionId, error ?: "stream closed")) {
+            return
+        }
+
+        pendingAudioChunks.clear()
+        val message = error ?: "Deepgram stream closed"
+        Log.e(TAG, "Stream disconnected unrecoverably: $message")
+        listener?.onError(message)
+        stopRecordingInternal(cancelPending = true)
+    }
+
+    private fun scheduleReconnect(sessionId: Long, reason: String): Boolean {
+        if (sessionId != activeSessionId) return false
+        if (streamReconnectAttempts >= MAX_STREAM_RECONNECT_ATTEMPTS) {
+            Log.e(
+                TAG,
+                "Reconnect attempts exhausted ($MAX_STREAM_RECONNECT_ATTEMPTS), reason=$reason"
+            )
+            return false
+        }
+        if (sessionApiKey.isBlank()) {
+            Log.e(TAG, "Cannot reconnect stream: missing Deepgram API key")
+            return false
+        }
+        cancelPendingReconnect()
+        streamReconnectAttempts += 1
+        val delayMs = STREAM_RECONNECT_BASE_DELAY_MS * (1L shl (streamReconnectAttempts - 1))
+        isStreamingConnecting = true
+        Log.w(
+            TAG,
+            "Scheduling Deepgram reconnect in ${delayMs}ms " +
+                "(attempt $streamReconnectAttempts/$MAX_STREAM_RECONNECT_ATTEMPTS, reason=$reason)"
+        )
+        val reconnectRunnable = Runnable {
+            pendingReconnectRunnable = null
+            if (sessionId != activeSessionId || isSessionStopping) {
+                return@Runnable
+            }
+            val sessionStillActive =
+                currentState != State.IDLE || voiceRecorder.isCurrentlyRecording
+            if (!sessionStillActive) {
+                Log.i(TAG, "Skipping reconnect: voice session no longer active")
+                isStreamingConnecting = false
+                return@Runnable
+            }
+            startStreamingSession(sessionId, sessionApiKey, isReconnect = true)
+        }
+        pendingReconnectRunnable = reconnectRunnable
+        mainHandler.postDelayed(reconnectRunnable, delayMs)
+        return true
+    }
+
+    private fun cancelPendingReconnect() {
+        val runnable = pendingReconnectRunnable ?: return
+        mainHandler.removeCallbacks(runnable)
+        pendingReconnectRunnable = null
     }
 
     private fun reloadRuntimeConfig() {
