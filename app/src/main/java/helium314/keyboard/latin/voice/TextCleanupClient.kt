@@ -100,14 +100,20 @@ class TextCleanupClient {
         // Trim trailing whitespace from editable text to avoid double-spaces
         // when the previous insertion added a trailing space.
         val trimmedEditable = editableText.trimEnd()
-        val userMessage = if (trimmedEditable.isNotEmpty()) {
+        val rawText = if (trimmedEditable.isNotEmpty()) {
             "$trimmedEditable $newText"
         } else {
             newText
         }
 
+        // Wrap in XML tags to create an unambiguous boundary between
+        // instructions and content. This prevents Claude from interpreting
+        // the transcribed text as a conversation or instruction, even when
+        // the user is talking about transcription/AI topics.
+        val userMessage = "<text_to_edit>$rawText</text_to_edit>"
+
         // Skip cleanup if no text to process
-        if (userMessage.isBlank()) {
+        if (rawText.isBlank()) {
             mainHandler.post { callback.onCleanupError("Empty text") }
             return
         }
@@ -125,6 +131,7 @@ class TextCleanupClient {
         val requestBody = JSONObject().apply {
             put("model", MODEL)
             put("max_tokens", MAX_TOKENS)
+            put("temperature", 0.0)
             put("system", fullSystemPrompt)
             put("messages", JSONArray().apply {
                 put(JSONObject().apply {
@@ -227,11 +234,16 @@ class TextCleanupClient {
                     val json = JSONObject(responseBody ?: "{}")
                     // Anthropic response format: content[0].text
                     val content = json.optJSONArray("content")
-                    val cleanedText = content
+                    val rawCleanedText = content
                         ?.optJSONObject(0)
                         ?.optString("text", "")
                         ?.trim()
                         ?: ""
+
+                    // Extract text from <edited_text> XML tags.
+                    // Falls back to the raw response if tags are missing,
+                    // so the feature degrades gracefully.
+                    val cleanedText = extractEditedText(rawCleanedText)
 
                     if (cleanedText.isNotEmpty()) {
                         mainHandler.post {
@@ -260,6 +272,28 @@ class TextCleanupClient {
     /** Whether the HTTP status code indicates a transient server error worth retrying. */
     private fun isRetryableStatus(code: Int): Boolean {
         return code == 408 || code in 500..599
+    }
+
+    /**
+     * Extract the cleaned text from `<edited_text>...</edited_text>` XML tags.
+     *
+     * If the model followed the instruction and wrapped its output, we extract
+     * just the inner content. Otherwise we fall back to the full response text
+     * so the feature degrades gracefully (e.g. custom user prompts that don't
+     * include the XML tag instructions).
+     */
+    private fun extractEditedText(response: String): String {
+        val openTag = "<edited_text>"
+        val closeTag = "</edited_text>"
+        val startIdx = response.indexOf(openTag)
+        val endIdx = response.indexOf(closeTag)
+        return if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
+            response.substring(startIdx + openTag.length, endIdx).trim()
+        } else {
+            // Fallback: model didn't wrap response in tags — use as-is
+            Log.d(TAG, "Response missing <edited_text> tags, using raw response")
+            response
+        }
     }
 
     private fun mapNetworkError(e: IOException): String {
