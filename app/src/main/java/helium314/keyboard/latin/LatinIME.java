@@ -15,6 +15,7 @@ import android.content.IntentFilter;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.graphics.Color;
+import android.inputmethodservice.ExtractEditText;
 import android.inputmethodservice.InputMethodService;
 import android.media.AudioManager;
 import android.os.Build;
@@ -200,6 +201,9 @@ public class LatinIME extends InputMethodService implements
     private final ArrayDeque<String> mPendingTranscriptionQueue = new ArrayDeque<>();
     private static final int MAX_PENDING_TRANSCRIPTIONS = 64;
     private static final long CLEANUP_WATCHDOG_TIMEOUT_MS = 5_000L;
+    private static final int FULLSCREEN_SYNC_MAX_CHARS = 100_000;
+    private static final long FULLSCREEN_SYNC_RETRY_DELAY_MS = 50L;
+    private static final int FULLSCREEN_SYNC_RETRY_COUNT = 2;
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
     private final Runnable mCleanupWatchdogRunnable = new Runnable() {
         @Override
@@ -218,6 +222,8 @@ public class LatinIME extends InputMethodService implements
     private boolean mForceFullscreenMode = false;
     @Nullable
     private View mFullscreenExtractView;
+    @Nullable
+    private ExtractEditText mFullscreenExtractEditText;
     @NonNull
     private String mOriginalFieldText = "";
 
@@ -1403,10 +1409,17 @@ public class LatinIME extends InputMethodService implements
             }
         }
         mOriginalFieldText = getOriginalFieldText();
-        mForceFullscreenMode = true;
 
         mFullscreenExtractView = getLayoutInflater().inflate(
                 R.layout.fullscreen_extract_view, null);
+        mFullscreenExtractEditText = mFullscreenExtractView.findViewById(android.R.id.inputExtractEditText);
+        if (mFullscreenExtractEditText == null) {
+            Log.w(TAG, "Fullscreen extract view missing inputExtractEditText; cannot enter fullscreen mode");
+            clearFullscreenExtractState();
+            return;
+        }
+        mForceFullscreenMode = true;
+
         final android.widget.Button minimizeButton =
                 mFullscreenExtractView.findViewById(R.id.fullscreen_minimize_button);
         final android.widget.Button submitButton =
@@ -1425,23 +1438,62 @@ public class LatinIME extends InputMethodService implements
 
     private void onFullscreenMinimize() {
         Log.i(TAG, "Fullscreen minimize requested");
+        final String fullscreenText = getFullscreenEditorTextForSync();
         cancelVoiceRecordingAbruptly();
-        exitFullscreenMode();
+        synchronizeFullscreenTextAndExit(fullscreenText, false);
     }
 
     private void onFullscreenSubmit() {
         Log.i(TAG, "Fullscreen submit requested");
+        final String fullscreenText = getFullscreenEditorTextForSync();
         cancelVoiceRecordingAbruptly();
-        exitFullscreenMode();
-        requestHideSelf(0);
+        synchronizeFullscreenTextAndExit(fullscreenText, true);
     }
 
     private void onFullscreenCancel() {
         Log.i(TAG, "Fullscreen cancel requested");
+        final String originalText = mOriginalFieldText;
         cancelVoiceRecordingAbruptly();
-        restoreOriginalFieldText();
+        synchronizeFullscreenTextAndExit(originalText, true);
+    }
+
+    @NonNull
+    private String getFullscreenEditorTextForSync() {
+        if (mFullscreenExtractEditText != null && mFullscreenExtractEditText.getText() != null) {
+            return mFullscreenExtractEditText.getText().toString();
+        }
+        return getOriginalFieldText();
+    }
+
+    private void synchronizeFullscreenTextAndExit(@NonNull final String replacementText,
+                                                  final boolean hideKeyboardAfterSync) {
+        final boolean syncedBeforeExit = replaceEntireFieldText(replacementText, true);
         exitFullscreenMode();
-        requestHideSelf(0);
+        if (syncedBeforeExit) {
+            if (hideKeyboardAfterSync) {
+                requestHideSelf(0);
+            }
+            return;
+        }
+        schedulePostExitSync(replacementText, hideKeyboardAfterSync, FULLSCREEN_SYNC_RETRY_COUNT);
+    }
+
+    private void schedulePostExitSync(@NonNull final String replacementText,
+                                      final boolean hideKeyboardAfterSync,
+                                      final int retriesRemaining) {
+        mMainHandler.postDelayed(() -> {
+            final boolean synced = replaceEntireFieldText(replacementText, true);
+            if (!synced && retriesRemaining > 0) {
+                schedulePostExitSync(replacementText, hideKeyboardAfterSync, retriesRemaining - 1);
+                return;
+            }
+            if (!synced) {
+                Log.w(TAG, "Unable to verify fullscreen text sync after exit");
+            }
+            if (hideKeyboardAfterSync) {
+                requestHideSelf(0);
+            }
+        }, FULLSCREEN_SYNC_RETRY_DELAY_MS);
     }
 
     @NonNull
@@ -1451,20 +1503,33 @@ public class LatinIME extends InputMethodService implements
             return "";
         }
 
-        final int maxChars = 100_000;
-        final android.view.inputmethod.ExtractedTextRequest request =
-                new android.view.inputmethod.ExtractedTextRequest();
-        request.hintMaxChars = maxChars;
-        request.hintMaxLines = Integer.MAX_VALUE;
-        request.flags = 0;
-        request.token = 0;
-        final android.view.inputmethod.ExtractedText extracted = ic.getExtractedText(request, 0);
-        if (extracted != null && extracted.text != null) {
-            return extracted.text.toString();
+        final String currentText = readCurrentFieldText(ic, FULLSCREEN_SYNC_MAX_CHARS);
+        return currentText != null ? currentText : "";
+    }
+
+    @Nullable
+    private String readCurrentFieldText(@NonNull final android.view.inputmethod.InputConnection ic,
+                                        final int maxChars) {
+        try {
+            final android.view.inputmethod.ExtractedTextRequest request =
+                    new android.view.inputmethod.ExtractedTextRequest();
+            request.hintMaxChars = maxChars;
+            request.hintMaxLines = Integer.MAX_VALUE;
+            request.flags = 0;
+            request.token = 0;
+            final android.view.inputmethod.ExtractedText extracted = ic.getExtractedText(request, 0);
+            if (extracted != null && extracted.text != null) {
+                return extracted.text.toString();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed reading extracted text: " + e.getMessage());
         }
 
         final CharSequence before = ic.getTextBeforeCursor(maxChars, 0);
         final CharSequence after = ic.getTextAfterCursor(maxChars, 0);
+        if (before == null && after == null) {
+            return null;
+        }
         final StringBuilder fallback = new StringBuilder();
         if (before != null) {
             fallback.append(before);
@@ -1475,41 +1540,50 @@ public class LatinIME extends InputMethodService implements
         return fallback.toString();
     }
 
-    private void restoreOriginalFieldText() {
-        replaceEntireFieldText(mOriginalFieldText);
-    }
-
-    private void replaceEntireFieldText(@NonNull final String replacement) {
+    private boolean replaceEntireFieldText(@NonNull final String replacement,
+                                           final boolean verifyReplacement) {
         final android.view.inputmethod.InputConnection ic = getCurrentInputConnection();
         if (ic == null) {
-            Log.w(TAG, "Unable to restore original text: no InputConnection");
-            return;
+            Log.w(TAG, "Unable to sync text: no InputConnection");
+            return false;
         }
 
+        boolean commitSucceeded = false;
         ic.beginBatchEdit();
         try {
-            final android.view.inputmethod.ExtractedTextRequest request =
-                    new android.view.inputmethod.ExtractedTextRequest();
-            request.hintMaxChars = 100_000;
-            request.hintMaxLines = Integer.MAX_VALUE;
-            request.flags = 0;
-            request.token = 0;
-            final android.view.inputmethod.ExtractedText extracted = ic.getExtractedText(request, 0);
-            final int currentLength = (extracted != null && extracted.text != null)
-                    ? extracted.text.length() : 0;
+            final String currentText = readCurrentFieldText(ic, FULLSCREEN_SYNC_MAX_CHARS);
+            final int currentLength = currentText != null ? currentText.length() : -1;
             if (currentLength > 0) {
                 final boolean selected = ic.setSelection(0, currentLength);
                 if (!selected) {
                     ic.setSelection(currentLength, currentLength);
                     ic.deleteSurroundingText(currentLength, 0);
                 }
+            } else if (currentLength < 0) {
+                final CharSequence before = ic.getTextBeforeCursor(FULLSCREEN_SYNC_MAX_CHARS, 0);
+                final CharSequence after = ic.getTextAfterCursor(FULLSCREEN_SYNC_MAX_CHARS, 0);
+                final int beforeLength = before != null ? before.length() : 0;
+                final int afterLength = after != null ? after.length() : 0;
+                if (beforeLength > 0 || afterLength > 0) {
+                    ic.deleteSurroundingText(beforeLength, afterLength);
+                }
             }
-            ic.commitText(replacement, 1);
+            commitSucceeded = ic.commitText(replacement, 1);
         } catch (Exception e) {
             Log.e(TAG, "Failed replacing field text: " + e.getMessage(), e);
+            commitSucceeded = false;
         } finally {
             ic.endBatchEdit();
         }
+
+        if (!commitSucceeded) {
+            return false;
+        }
+        if (!verifyReplacement || replacement.length() > FULLSCREEN_SYNC_MAX_CHARS) {
+            return true;
+        }
+        final String updatedText = readCurrentFieldText(ic, FULLSCREEN_SYNC_MAX_CHARS);
+        return replacement.equals(updatedText);
     }
 
     private void exitFullscreenMode() {
@@ -1537,6 +1611,7 @@ public class LatinIME extends InputMethodService implements
     private void clearFullscreenExtractState() {
         mForceFullscreenMode = false;
         mFullscreenExtractView = null;
+        mFullscreenExtractEditText = null;
         mOriginalFieldText = "";
     }
 
@@ -2054,12 +2129,6 @@ public class LatinIME extends InputMethodService implements
                     }
                     Log.i(TAG, "VOICE_STEP_4 transcription arrived in IME (" + text.length() + " chars)");
 
-                    // In forced fullscreen mode we route directly to insertion and skip cleanup.
-                    if (mForceFullscreenMode) {
-                        insertTranscriptionText(text);
-                        return;
-                    }
-
                     // If cleanup is in progress, queue this transcription to preserve ordering.
                     if (mCleanupInProgress) {
                         appendPendingTranscription(text);
@@ -2075,17 +2144,11 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onNewParagraphRequested() {
                 try {
-                    if (mForceFullscreenMode) {
-                        mInputLogic.finishInput();
-                        mInputLogic.mConnection.commitText("\n\n", 1);
-                        return;
-                    }
                     if (mCleanupInProgress) {
                         mPendingNewParagraph = true;
                     } else {
                         Log.i(TAG, "New paragraph break inserted (recording remains active)");
-                        mInputLogic.finishInput();
-                        mInputLogic.mConnection.commitText("\n\n", 1);
+                        insertParagraphBreak();
                     }
                 } catch (Exception e) {
                     Log.e(TAG, "Error inserting paragraph break: " + e.getMessage(), e);
@@ -2107,6 +2170,81 @@ public class LatinIME extends InputMethodService implements
         });
     }
 
+    @Nullable
+    private CharSequence getTextBeforeCursorForVoiceContext(final int maxChars) {
+        if (mForceFullscreenMode && mFullscreenExtractEditText != null) {
+            final CharSequence fullText = mFullscreenExtractEditText.getText();
+            if (fullText == null || fullText.length() == 0) {
+                return "";
+            }
+            int cursor = mFullscreenExtractEditText.getSelectionStart();
+            if (cursor < 0 || cursor > fullText.length()) {
+                cursor = fullText.length();
+            }
+            final int start = Math.max(0, cursor - maxChars);
+            return fullText.subSequence(start, cursor);
+        }
+        return mInputLogic.mConnection.getTextBeforeCursor(maxChars, 0);
+    }
+
+    private boolean replaceSelectionInFullscreenEditor(@NonNull final String replacementText) {
+        if (!mForceFullscreenMode || mFullscreenExtractEditText == null) {
+            return false;
+        }
+        final android.text.Editable editable = mFullscreenExtractEditText.getText();
+        if (editable == null) {
+            return false;
+        }
+
+        int start = mFullscreenExtractEditText.getSelectionStart();
+        int end = mFullscreenExtractEditText.getSelectionEnd();
+        if (start < 0 || end < 0) {
+            start = editable.length();
+            end = editable.length();
+        } else if (start > end) {
+            final int tmp = start;
+            start = end;
+            end = tmp;
+        }
+
+        editable.replace(start, end, replacementText);
+        final int newCursor = Math.min(start + replacementText.length(), editable.length());
+        mFullscreenExtractEditText.setSelection(newCursor);
+        return true;
+    }
+
+    private boolean replaceTextBeforeCursorInFullscreenEditor(@NonNull final String replacementText,
+                                                              final int charsBeforeCursor) {
+        if (!mForceFullscreenMode || mFullscreenExtractEditText == null) {
+            return false;
+        }
+        final android.text.Editable editable = mFullscreenExtractEditText.getText();
+        if (editable == null) {
+            return false;
+        }
+
+        final int selStart = mFullscreenExtractEditText.getSelectionStart();
+        final int selEnd = mFullscreenExtractEditText.getSelectionEnd();
+        int cursor = Math.max(selStart, selEnd);
+        if (cursor < 0 || cursor > editable.length()) {
+            cursor = editable.length();
+        }
+        final int deleteCount = Math.max(0, charsBeforeCursor);
+        final int replaceStart = Math.max(0, cursor - deleteCount);
+        editable.replace(replaceStart, cursor, replacementText);
+        final int newCursor = Math.min(replaceStart + replacementText.length(), editable.length());
+        mFullscreenExtractEditText.setSelection(newCursor);
+        return true;
+    }
+
+    private void insertParagraphBreak() {
+        if (replaceSelectionInFullscreenEditor("\n\n")) {
+            return;
+        }
+        mInputLogic.finishInput();
+        mInputLogic.mConnection.commitText("\n\n", 1);
+    }
+
     /**
      * Adjust capitalization of transcribed text based on context.
      * If the previous text doesn't end with sentence-ending punctuation,
@@ -2119,7 +2257,7 @@ public class LatinIME extends InputMethodService implements
 
         try {
             // Get text before cursor to check context
-            CharSequence textBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(5, 0);
+            CharSequence textBeforeCursor = getTextBeforeCursorForVoiceContext(5);
 
             // If no text before cursor or at start, keep original capitalization
             if (textBeforeCursor == null || textBeforeCursor.length() == 0) {
@@ -2249,12 +2387,14 @@ public class LatinIME extends InputMethodService implements
                     "VOICE_STEP_6 context before insert: \"" + sanitizeLogText(contextBefore) + "\""
             );
 
-            // Reset InputLogic composing state before direct connection manipulation.
-            // This ensures the WordComposer is properly synchronized with the connection.
-            mInputLogic.finishInput();
-            mInputLogic.mConnection.beginBatchEdit();
-            mInputLogic.mConnection.commitText(textToInsert, 1);
-            mInputLogic.mConnection.endBatchEdit();
+            if (!replaceSelectionInFullscreenEditor(textToInsert)) {
+                // Reset InputLogic composing state before direct connection manipulation.
+                // This ensures the WordComposer is properly synchronized with the connection.
+                mInputLogic.finishInput();
+                mInputLogic.mConnection.beginBatchEdit();
+                mInputLogic.mConnection.commitText(textToInsert, 1);
+                mInputLogic.mConnection.endBatchEdit();
+            }
 
             // Text has been inserted — hide the processing spinner.
             mKeyboardSwitcher.hideProcessingIndicator();
@@ -2300,14 +2440,16 @@ public class LatinIME extends InputMethodService implements
                             " chars) with cleaned text (" + textToInsert.length() + " chars)"
             );
 
-            // Reset InputLogic composing state before direct connection manipulation.
-            mInputLogic.finishInput();
-            mInputLogic.mConnection.beginBatchEdit();
-            if (oldContextLength > 0) {
-                mInputLogic.mConnection.deleteTextBeforeCursor(oldContextLength);
+            if (!replaceTextBeforeCursorInFullscreenEditor(textToInsert, oldContextLength)) {
+                // Reset InputLogic composing state before direct connection manipulation.
+                mInputLogic.finishInput();
+                mInputLogic.mConnection.beginBatchEdit();
+                if (oldContextLength > 0) {
+                    mInputLogic.mConnection.deleteTextBeforeCursor(oldContextLength);
+                }
+                mInputLogic.mConnection.commitText(textToInsert, 1);
+                mInputLogic.mConnection.endBatchEdit();
             }
-            mInputLogic.mConnection.commitText(textToInsert, 1);
-            mInputLogic.mConnection.endBatchEdit();
 
             // Cleaned text has been inserted — hide the processing spinner.
             mKeyboardSwitcher.hideProcessingIndicator();
@@ -2341,10 +2483,6 @@ public class LatinIME extends InputMethodService implements
      * appended with basic capitalization adjustment.
      */
     private void processTranscriptionResult(@NonNull final String transcriptionText) {
-        if (mForceFullscreenMode) {
-            insertTranscriptionText(transcriptionText);
-            return;
-        }
         final String anthropicApiKey = KtxKt.prefs(this).getString(Settings.PREF_ANTHROPIC_API_KEY, "");
         if (anthropicApiKey == null || anthropicApiKey.isEmpty()) {
             Log.i(TAG, "VOICE_STEP_5 cleanup skipped (no Anthropic API key configured)");
@@ -2523,8 +2661,7 @@ public class LatinIME extends InputMethodService implements
             // Then process pending new paragraph
             if (mPendingNewParagraph) {
                 mPendingNewParagraph = false;
-                mInputLogic.finishInput();
-                mInputLogic.mConnection.commitText("\n\n", 1);
+                insertParagraphBreak();
             }
         } catch (Exception e) {
             Log.e(TAG, "Error processing pending voice input: " + e.getMessage(), e);
@@ -2652,7 +2789,7 @@ public class LatinIME extends InputMethodService implements
     @NonNull
     private String getRecentContext() {
         try {
-            CharSequence beforeCursor = mInputLogic.mConnection.getTextBeforeCursor(4000, 0);
+            CharSequence beforeCursor = getTextBeforeCursorForVoiceContext(4000);
             if (beforeCursor == null || beforeCursor.length() == 0) {
                 return "";
             }
