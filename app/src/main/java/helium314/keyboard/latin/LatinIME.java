@@ -214,6 +214,12 @@ public class LatinIME extends InputMethodService implements
     // cancelled. Used to invalidate stale async cleanup callbacks from previous sessions.
     private int mVoiceSessionId = 0;
     private long mLastVoiceErrorToastTimeMs = 0L;
+    // Forced fullscreen extract mode used for microphone-first dictation UX.
+    private boolean mForceFullscreenMode = false;
+    @Nullable
+    private View mFullscreenExtractView;
+    @NonNull
+    private String mOriginalFieldText = "";
 
     public static final class UIHandler extends LeakGuardHandlerWrapper<LatinIME> {
         private static final int MSG_UPDATE_SHIFT_STATE = 0;
@@ -1061,6 +1067,10 @@ public class LatinIME extends InputMethodService implements
     void onFinishInputInternal() {
         super.onFinishInput();
         Log.i(TAG, "onFinishInput");
+        if (mForceFullscreenMode) {
+            restoreDefaultExtractView();
+            clearFullscreenExtractState();
+        }
 
         // Abruptly cancel voice recording when disconnecting from the text field (e.g., user
         // navigated away, app was backgrounded, or the text field was removed).
@@ -1210,6 +1220,10 @@ public class LatinIME extends InputMethodService implements
     @Override
     public void hideWindow() {
         Log.i(TAG, "hideWindow");
+        if (mForceFullscreenMode) {
+            restoreDefaultExtractView();
+            clearFullscreenExtractState();
+        }
         if (hasSuggestionStripView() && mSettings.getCurrent().mToolbarMode == ToolbarMode.EXPANDABLE)
             mSuggestionStripView.setToolbarVisibility(false);
         mKeyboardSwitcher.onHideWindow();
@@ -1340,6 +1354,10 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public boolean onEvaluateFullscreenMode() {
+        // Force fullscreen while custom mic extract mode is active.
+        if (mForceFullscreenMode) {
+            return true;
+        }
         if (isImeSuppressedByHardwareKeyboard()) {
             // If there is a hardware keyboard, disable full screen mode.
             return false;
@@ -1368,6 +1386,158 @@ public class LatinIME extends InputMethodService implements
     public void updateFullscreenMode() {
         super.updateFullscreenMode();
         KtxKt.updateSoftInputWindowLayoutParameters(this, mInputView);
+    }
+
+    private void enterFullscreenMode() {
+        if (mForceFullscreenMode) {
+            return;
+        }
+        Log.i(TAG, "Entering forced fullscreen extract mode");
+        // A previous session may still have stale async callbacks. Invalidate them before
+        // switching to fullscreen dictation so late cleanup results are ignored.
+        if (mCleanupInProgress || hasPendingTranscriptions()) {
+            mVoiceSessionId++;
+            resetVoiceInputState();
+            if (mTextCleanupClient != null) {
+                mTextCleanupClient.cancelAll();
+            }
+        }
+        mOriginalFieldText = getOriginalFieldText();
+        mForceFullscreenMode = true;
+
+        mFullscreenExtractView = getLayoutInflater().inflate(
+                R.layout.fullscreen_extract_view, null);
+        final android.widget.Button minimizeButton =
+                mFullscreenExtractView.findViewById(R.id.fullscreen_minimize_button);
+        final android.widget.Button submitButton =
+                mFullscreenExtractView.findViewById(R.id.fullscreen_submit_button);
+        final android.widget.Button cancelButton =
+                mFullscreenExtractView.findViewById(R.id.fullscreen_cancel_button);
+
+        minimizeButton.setOnClickListener(v -> onFullscreenMinimize());
+        submitButton.setOnClickListener(v -> onFullscreenSubmit());
+        cancelButton.setOnClickListener(v -> onFullscreenCancel());
+
+        // Layout includes @android:id/inputExtractEditText, so framework routes IME input here.
+        setExtractView(mFullscreenExtractView);
+        updateFullscreenMode();
+    }
+
+    private void onFullscreenMinimize() {
+        Log.i(TAG, "Fullscreen minimize requested");
+        cancelVoiceRecordingAbruptly();
+        exitFullscreenMode();
+    }
+
+    private void onFullscreenSubmit() {
+        Log.i(TAG, "Fullscreen submit requested");
+        cancelVoiceRecordingAbruptly();
+        exitFullscreenMode();
+        requestHideSelf(0);
+    }
+
+    private void onFullscreenCancel() {
+        Log.i(TAG, "Fullscreen cancel requested");
+        cancelVoiceRecordingAbruptly();
+        restoreOriginalFieldText();
+        exitFullscreenMode();
+        requestHideSelf(0);
+    }
+
+    @NonNull
+    private String getOriginalFieldText() {
+        final android.view.inputmethod.InputConnection ic = getCurrentInputConnection();
+        if (ic == null) {
+            return "";
+        }
+
+        final int maxChars = 100_000;
+        final android.view.inputmethod.ExtractedTextRequest request =
+                new android.view.inputmethod.ExtractedTextRequest();
+        request.hintMaxChars = maxChars;
+        request.hintMaxLines = Integer.MAX_VALUE;
+        request.flags = 0;
+        request.token = 0;
+        final android.view.inputmethod.ExtractedText extracted = ic.getExtractedText(request, 0);
+        if (extracted != null && extracted.text != null) {
+            return extracted.text.toString();
+        }
+
+        final CharSequence before = ic.getTextBeforeCursor(maxChars, 0);
+        final CharSequence after = ic.getTextAfterCursor(maxChars, 0);
+        final StringBuilder fallback = new StringBuilder();
+        if (before != null) {
+            fallback.append(before);
+        }
+        if (after != null) {
+            fallback.append(after);
+        }
+        return fallback.toString();
+    }
+
+    private void restoreOriginalFieldText() {
+        replaceEntireFieldText(mOriginalFieldText);
+    }
+
+    private void replaceEntireFieldText(@NonNull final String replacement) {
+        final android.view.inputmethod.InputConnection ic = getCurrentInputConnection();
+        if (ic == null) {
+            Log.w(TAG, "Unable to restore original text: no InputConnection");
+            return;
+        }
+
+        ic.beginBatchEdit();
+        try {
+            final android.view.inputmethod.ExtractedTextRequest request =
+                    new android.view.inputmethod.ExtractedTextRequest();
+            request.hintMaxChars = 100_000;
+            request.hintMaxLines = Integer.MAX_VALUE;
+            request.flags = 0;
+            request.token = 0;
+            final android.view.inputmethod.ExtractedText extracted = ic.getExtractedText(request, 0);
+            final int currentLength = (extracted != null && extracted.text != null)
+                    ? extracted.text.length() : 0;
+            if (currentLength > 0) {
+                final boolean selected = ic.setSelection(0, currentLength);
+                if (!selected) {
+                    ic.setSelection(currentLength, currentLength);
+                    ic.deleteSurroundingText(currentLength, 0);
+                }
+            }
+            ic.commitText(replacement, 1);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed replacing field text: " + e.getMessage(), e);
+        } finally {
+            ic.endBatchEdit();
+        }
+    }
+
+    private void exitFullscreenMode() {
+        if (!mForceFullscreenMode) {
+            return;
+        }
+        Log.i(TAG, "Exiting forced fullscreen extract mode");
+        clearFullscreenExtractState();
+        restoreDefaultExtractView();
+        updateFullscreenMode();
+    }
+
+    private void restoreDefaultExtractView() {
+        // Restore default extract view so non-forced fullscreen paths keep standard behavior.
+        try {
+            final View defaultExtractView = super.onCreateExtractTextView();
+            if (defaultExtractView != null) {
+                setExtractView(defaultExtractView);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to restore default extract view: " + e.getMessage());
+        }
+    }
+
+    private void clearFullscreenExtractState() {
+        mForceFullscreenMode = false;
+        mFullscreenExtractView = null;
+        mOriginalFieldText = "";
     }
 
     @Override
@@ -1781,6 +1951,10 @@ public class LatinIME extends InputMethodService implements
     @Override
     public void onVoiceInputClicked() {
         if (mVoiceInputManager != null) {
+            // First mic tap in idle enters fullscreen extract mode.
+            if (mVoiceInputManager.isIdle() && !mForceFullscreenMode) {
+                enterFullscreenMode();
+            }
             mVoiceInputManager.toggleRecording();
         }
     }
@@ -1880,6 +2054,12 @@ public class LatinIME extends InputMethodService implements
                     }
                     Log.i(TAG, "VOICE_STEP_4 transcription arrived in IME (" + text.length() + " chars)");
 
+                    // In forced fullscreen mode we route directly to insertion and skip cleanup.
+                    if (mForceFullscreenMode) {
+                        insertTranscriptionText(text);
+                        return;
+                    }
+
                     // If cleanup is in progress, queue this transcription to preserve ordering.
                     if (mCleanupInProgress) {
                         appendPendingTranscription(text);
@@ -1895,6 +2075,11 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onNewParagraphRequested() {
                 try {
+                    if (mForceFullscreenMode) {
+                        mInputLogic.finishInput();
+                        mInputLogic.mConnection.commitText("\n\n", 1);
+                        return;
+                    }
                     if (mCleanupInProgress) {
                         mPendingNewParagraph = true;
                     } else {
@@ -2156,6 +2341,10 @@ public class LatinIME extends InputMethodService implements
      * appended with basic capitalization adjustment.
      */
     private void processTranscriptionResult(@NonNull final String transcriptionText) {
+        if (mForceFullscreenMode) {
+            insertTranscriptionText(transcriptionText);
+            return;
+        }
         final String anthropicApiKey = KtxKt.prefs(this).getString(Settings.PREF_ANTHROPIC_API_KEY, "");
         if (anthropicApiKey == null || anthropicApiKey.isEmpty()) {
             Log.i(TAG, "VOICE_STEP_5 cleanup skipped (no Anthropic API key configured)");
