@@ -1796,31 +1796,38 @@ public class LatinIME extends InputMethodService implements
             public void onStateChanged(@NonNull VoiceInputManager.State state) {
                 Log.i(TAG, "Voice input state changed: " + state);
 
-                if (mSuggestionStripView != null) {
-                    switch (state) {
-                        case RECORDING:
+                // State side-effects (session reset, wake lock) must run regardless
+                // of whether the suggestion strip view is available; the view is
+                // transient but lifecycle state is not.
+                switch (state) {
+                    case RECORDING:
+                        if (mSuggestionStripView != null) {
                             mSuggestionStripView.setVoiceInputState(VoiceState.RECORDING);
-                            mKeyboardSwitcher.showToast("Listening...", false);
-                            // New recording session — invalidate stale cleanup callbacks
-                            mVoiceSessionId++;
-                            resetVoiceInputState();
-                            // Keep screen on and CPU alive while recording
-                            acquireVoiceWakeLock();
-                            break;
-                        case PAUSED:
+                        }
+                        mKeyboardSwitcher.showToast("Listening...", false);
+                        // New recording session — invalidate stale cleanup callbacks
+                        mVoiceSessionId++;
+                        resetVoiceInputState();
+                        // Keep screen on and CPU alive while recording
+                        acquireVoiceWakeLock();
+                        break;
+                    case PAUSED:
+                        if (mSuggestionStripView != null) {
                             mSuggestionStripView.setVoiceInputState(VoiceState.PAUSED);
-                            // Keep wake lock held during pause (user intends to resume)
-                            break;
-                        case IDLE:
+                        }
+                        // Keep wake lock held during pause (user intends to resume)
+                        break;
+                    case IDLE:
+                        if (mSuggestionStripView != null) {
                             mSuggestionStripView.setVoiceInputState(VoiceState.IDLE);
-                            releaseVoiceWakeLock();
-                            // Note: we do NOT call resetVoiceInputState() here because
-                            // there may still be pending transcription/cleanup from a
-                            // graceful stop. State is reset explicitly by
-                            // cancelVoiceRecordingAbruptly() or cleaned up naturally
-                            // as pending work completes.
-                            break;
-                    }
+                        }
+                        releaseVoiceWakeLock();
+                        // Note: we do NOT call resetVoiceInputState() here because
+                        // there may still be pending transcription/cleanup from a
+                        // graceful stop. State is reset explicitly by
+                        // cancelVoiceRecordingAbruptly() or cleaned up naturally
+                        // as pending work completes.
+                        break;
                 }
             }
 
@@ -2298,18 +2305,15 @@ public class LatinIME extends InputMethodService implements
                 mInputLogic.finishInput();
                 mInputLogic.mConnection.commitText("\n\n", 1);
             }
-
-            // All pending work processed and no cleanup in flight — ensure spinner is hidden.
-            // This is a safety net for edge cases where the spinner was shown (e.g., by
-            // onProcessingStarted) but no code path explicitly hid it (e.g., Deepgram
-            // returned blank text for the last segment).
-            if (!mCleanupInProgress) {
-                mKeyboardSwitcher.hideProcessingIndicator();
-            }
         } catch (Exception e) {
             Log.e(TAG, "Error processing pending voice input: " + e.getMessage(), e);
-            // Fail-safe: always attempt to hide the spinner on error
-            mKeyboardSwitcher.hideProcessingIndicator();
+        } finally {
+            // Safety net: if both transcription and cleanup are idle, clear spinner.
+            // Using finally ensures the spinner is always cleaned up even if an
+            // unexpected exception escapes the try block.
+            if (!mCleanupInProgress && mPendingTranscription.length() == 0) {
+                mKeyboardSwitcher.hideProcessingIndicator();
+            }
         }
     }
 

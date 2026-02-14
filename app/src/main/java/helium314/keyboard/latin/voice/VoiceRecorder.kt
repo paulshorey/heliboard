@@ -486,26 +486,54 @@ class VoiceRecorder(private val context: Context) {
 
                 if (forceFlushRequested) {
                     forceFlushRequested = false
-                    if (segmentBuffer.size() > 0 && segmentDurationMs >= MIN_SEGMENT_MS) {
-                        Log.i(
-                            TAG,
-                            "VOICE_STEP_2 watchdog flush forcing chunk at ${segmentDurationMs}ms"
-                        )
-                        // Watchdog flush is a fallback split and not necessarily real silence,
-                        // so avoid emitting onSpeechStopped here to prevent false paragraph timers.
-                        isSpeaking = false
-                        emitSegment(segmentBuffer, segmentDurationMs)
+                    if (segmentBuffer.size() > 0) {
+                        // Apply the same speech-duration gating as normal silence splits
+                        // to avoid sending noise-only watchdog chunks to Deepgram.
+                        val minSpeechMs = if (segmentsEmitted == 0) MIN_SPEECH_FIRST_SEGMENT_MS else MIN_SPEECH_ONGOING_MS
+                        if (segmentDurationMs >= MIN_SEGMENT_MS && speechDurationMs >= minSpeechMs) {
+                            Log.i(
+                                TAG,
+                                "VOICE_STEP_2 watchdog flush forcing chunk at ${segmentDurationMs}ms"
+                            )
+                            emitSegment(segmentBuffer, segmentDurationMs)
+                            segmentsEmitted++
+                        } else {
+                            Log.i(
+                                TAG,
+                                "Watchdog flush dropped segment: duration=${segmentDurationMs}ms, " +
+                                    "speech=${speechDurationMs}ms (minimum speech ${minSpeechMs}ms)"
+                            )
+                        }
+                        // Emit onSpeechStopped if we were speaking so that paragraph/auto-stop
+                        // timers in VoiceInputManager recover even when silence detection
+                        // missed the natural boundary.
+                        val wasSpeaking = isSpeaking
                         segmentBuffer.reset()
                         segmentDurationMs = 0L
                         speechDurationMs = 0L
                         silenceDurationMs = 0L
                         preSpeechBuffer.clear()
+                        isSpeaking = false
+                        if (wasSpeaking) {
+                            val callbackSnapshot = callback
+                            mainHandler.post { callbackSnapshot?.onSpeechStopped() }
+                        }
                     }
                 }
 
                 // Force-split very long segments
                 if (segmentDurationMs >= MAX_SEGMENT_MS) {
-                    emitSegment(segmentBuffer, segmentDurationMs)
+                    val minSpeechMs = if (segmentsEmitted == 0) MIN_SPEECH_FIRST_SEGMENT_MS else MIN_SPEECH_ONGOING_MS
+                    if (speechDurationMs >= minSpeechMs) {
+                        emitSegment(segmentBuffer, segmentDurationMs)
+                        segmentsEmitted++
+                    } else {
+                        Log.i(
+                            TAG,
+                            "Max-segment split dropped: duration=${segmentDurationMs}ms, " +
+                                "speech=${speechDurationMs}ms (minimum speech ${minSpeechMs}ms)"
+                        )
+                    }
                     segmentBuffer.reset()
                     segmentDurationMs = 0L
                     speechDurationMs = 0L

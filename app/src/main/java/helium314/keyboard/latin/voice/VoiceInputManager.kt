@@ -30,8 +30,8 @@ class VoiceInputManager(private val context: Context) {
          * Fallback watchdog: if we stay in RECORDING too long without a detected
          * chunk boundary, ask [VoiceRecorder] to flush the current segment.
          */
-        private const val MIN_CHUNK_WATCHDOG_MS = 20_000L
-        private const val CHUNK_WATCHDOG_EXTRA_MS = 12_000L
+        private const val MIN_CHUNK_WATCHDOG_MS = 8_000L
+        private const val CHUNK_WATCHDOG_EXTRA_MS = 4_000L
 
         private const val MIN_CHUNK_SILENCE_SECONDS = 1
         private const val MAX_CHUNK_SILENCE_SECONDS = 30
@@ -116,6 +116,9 @@ class VoiceInputManager(private val context: Context) {
                 "Chunk watchdog fired after ${chunkWatchdogMs}ms — forcing segment flush"
             )
             voiceRecorder.requestSegmentFlush()
+            // Re-arm: if this flush doesn't produce a clean boundary (e.g.
+            // noise floor is corrupted), keep firing until recording stops.
+            resetChunkWatchdog()
         }
     }
 
@@ -290,6 +293,9 @@ class VoiceInputManager(private val context: Context) {
         isTranscribingSegment = false
         inFlightRequestToken = 0L
         transcriptionClient.cancelAll()
+        // Signal idle so the UI clears any lingering spinner from the
+        // now-cancelled session.
+        notifyProcessingIdleIfDrained()
         Log.i(TAG, "Voice session invalidated ($reason), sessionId=$activeSessionId")
     }
 
@@ -381,10 +387,7 @@ class VoiceInputManager(private val context: Context) {
 
         val segment = pendingSegments.removeFirstOrNull()
         if (segment == null) {
-            // No more segments to process — notify listener that the transcription
-            // pipeline is idle. The listener can hide the processing indicator if
-            // there is no cleanup work pending either.
-            listener?.onProcessingIdle()
+            notifyProcessingIdleIfDrained()
             return
         }
         if (segment.sessionId != activeSessionId) {
@@ -463,6 +466,20 @@ class VoiceInputManager(private val context: Context) {
         }
 
         processNextSegment()
+    }
+
+    /**
+     * Notify the listener that the transcription pipeline is idle if both:
+     * - no segment is currently being transcribed
+     * - no segments are queued
+     *
+     * Called from [processNextSegment] (queue drained) and
+     * [invalidateActiveSession] (session cancelled / reset).
+     */
+    private fun notifyProcessingIdleIfDrained() {
+        if (!isTranscribingSegment && pendingSegments.isEmpty()) {
+            listener?.onProcessingIdle()
+        }
     }
 
     // ── Timers ─────────────────────────────────────────────────────────
