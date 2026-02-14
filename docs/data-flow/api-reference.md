@@ -71,12 +71,13 @@ Headers:
 ```json
 {
   "model": "claude-haiku-4-5-20251001",
-  "max_tokens": 500,
-  "system": "<cleanup prompt from settings>",
+  "max_tokens": 4096,
+  "temperature": 0.0,
+  "system": "<cleanup prompt from settings + fixed boundary protocol>",
   "messages": [
     {
       "role": "user",
-      "content": "<text to cleanup>"
+      "content": "REFERENCE_CONTEXT (read-only):\n<<HB_REFERENCE_CONTEXT_START>>\n<optional prior paragraph context>\n<<HB_REFERENCE_CONTEXT_END>>\n\nTEXT_TO_CLEAN:\n<<HB_EDITABLE_TEXT_START>>\n<editable context + new transcript>\n<<HB_EDITABLE_TEXT_END>>"
     }
   ]
 }
@@ -88,7 +89,7 @@ Headers:
   "content": [
     {
       "type": "text",
-      "text": "<cleaned text>"
+      "text": "<<HB_CLEANED_TEXT_START>>\n<cleaned text>\n<<HB_CLEANED_TEXT_END>>"
     }
   ]
 }

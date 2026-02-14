@@ -2132,7 +2132,7 @@ public class LatinIME extends InputMethodService implements
      * paragraph breaks, we split the context at the last newline:
      * <ul>
      *   <li><b>referenceContext</b> — text before the last newline (read-only, for Claude's
-     *       understanding). Included in the system prompt but NOT replaced in the editor.</li>
+     *       understanding). Sent as read-only payload and NOT replaced in the editor.</li>
      *   <li><b>editableText</b> — text after the last newline (current paragraph). This is
      *       what Claude cleans up and what gets replaced in the editor.</li>
      * </ul>
