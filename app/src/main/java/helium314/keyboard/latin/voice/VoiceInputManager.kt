@@ -30,8 +30,8 @@ class VoiceInputManager(private val context: Context) {
          * Fallback watchdog: if we stay in RECORDING too long without a detected
          * chunk boundary, ask [VoiceRecorder] to flush the current segment.
          */
-        private const val MIN_CHUNK_WATCHDOG_MS = 12_000L
-        private const val CHUNK_WATCHDOG_EXTRA_MS = 6_000L
+        private const val MIN_CHUNK_WATCHDOG_MS = 8_000L
+        private const val CHUNK_WATCHDOG_EXTRA_MS = 4_000L
 
         private const val MIN_CHUNK_SILENCE_SECONDS = 1
         private const val MAX_CHUNK_SILENCE_SECONDS = 30
@@ -107,6 +107,9 @@ class VoiceInputManager(private val context: Context) {
                 "Chunk watchdog fired after ${chunkWatchdogMs}ms — forcing segment flush"
             )
             voiceRecorder.requestSegmentFlush()
+            // Keep fallback active while recording in case a single flush
+            // does not produce a clean boundary.
+            resetChunkWatchdog()
         }
     }
 
