@@ -1796,31 +1796,35 @@ public class LatinIME extends InputMethodService implements
             public void onStateChanged(@NonNull VoiceInputManager.State state) {
                 Log.i(TAG, "Voice input state changed: " + state);
 
-                if (mSuggestionStripView != null) {
-                    switch (state) {
-                        case RECORDING:
+                switch (state) {
+                    case RECORDING:
+                        if (mSuggestionStripView != null) {
                             mSuggestionStripView.setVoiceInputState(VoiceState.RECORDING);
-                            mKeyboardSwitcher.showToast("Listening...", false);
-                            // New recording session — invalidate stale cleanup callbacks
-                            mVoiceSessionId++;
-                            resetVoiceInputState();
-                            // Keep screen on and CPU alive while recording
-                            acquireVoiceWakeLock();
-                            break;
-                        case PAUSED:
+                        }
+                        mKeyboardSwitcher.showToast("Listening...", false);
+                        // New recording session — invalidate stale cleanup callbacks
+                        mVoiceSessionId++;
+                        resetVoiceInputState();
+                        // Keep screen on and CPU alive while recording
+                        acquireVoiceWakeLock();
+                        break;
+                    case PAUSED:
+                        if (mSuggestionStripView != null) {
                             mSuggestionStripView.setVoiceInputState(VoiceState.PAUSED);
-                            // Keep wake lock held during pause (user intends to resume)
-                            break;
-                        case IDLE:
+                        }
+                        // Keep wake lock held during pause (user intends to resume)
+                        break;
+                    case IDLE:
+                        if (mSuggestionStripView != null) {
                             mSuggestionStripView.setVoiceInputState(VoiceState.IDLE);
-                            releaseVoiceWakeLock();
-                            // Note: we do NOT call resetVoiceInputState() here because
-                            // there may still be pending transcription/cleanup from a
-                            // graceful stop. State is reset explicitly by
-                            // cancelVoiceRecordingAbruptly() or cleaned up naturally
-                            // as pending work completes.
-                            break;
-                    }
+                        }
+                        releaseVoiceWakeLock();
+                        // Note: we do NOT call resetVoiceInputState() here because
+                        // there may still be pending transcription/cleanup from a
+                        // graceful stop. State is reset explicitly by
+                        // cancelVoiceRecordingAbruptly() or cleaned up naturally
+                        // as pending work completes.
+                        break;
                 }
             }
 
@@ -1836,7 +1840,13 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onTranscriptionResult(@NonNull String text) {
                 try {
-                    if (text == null || text.isEmpty()) {
+                    if (text == null || text.trim().isEmpty()) {
+                        Log.i(TAG, "VOICE_STEP_4 empty transcription result — nothing to insert");
+                        // No cleanup/insert callback will follow for empty chunks, so clear
+                        // spinner now unless another cleanup round is currently active.
+                        if (!mCleanupInProgress && mPendingTranscription.length() == 0) {
+                            mKeyboardSwitcher.hideProcessingIndicator();
+                        }
                         return;
                     }
                     Log.i(TAG, "VOICE_STEP_4 transcription arrived in IME (" + text.length() + " chars)");

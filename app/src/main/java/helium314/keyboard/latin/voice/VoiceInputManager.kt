@@ -30,8 +30,8 @@ class VoiceInputManager(private val context: Context) {
          * Fallback watchdog: if we stay in RECORDING too long without a detected
          * chunk boundary, ask [VoiceRecorder] to flush the current segment.
          */
-        private const val MIN_CHUNK_WATCHDOG_MS = 20_000L
-        private const val CHUNK_WATCHDOG_EXTRA_MS = 12_000L
+        private const val MIN_CHUNK_WATCHDOG_MS = 12_000L
+        private const val CHUNK_WATCHDOG_EXTRA_MS = 6_000L
 
         private const val MIN_CHUNK_SILENCE_SECONDS = 1
         private const val MAX_CHUNK_SILENCE_SECONDS = 30
@@ -411,8 +411,15 @@ class VoiceInputManager(private val context: Context) {
                                 TAG,
                                 "VOICE_STEP_4 transcription received (${text.length} chars) — applying post-processing"
                             )
-                            listener?.onTranscriptionResult(text)
+                        } else {
+                            Log.i(
+                                TAG,
+                                "VOICE_STEP_4 transcription returned empty text for segment"
+                            )
                         }
+                        // Forward all results (including empty) so the IME can
+                        // reliably clear processing state for no-speech chunks.
+                        listener?.onTranscriptionResult(text)
                     }
                 }
 
