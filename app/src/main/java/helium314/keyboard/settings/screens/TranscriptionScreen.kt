@@ -90,6 +90,14 @@ fun TranscriptionScreen(
             ).toString()
         )
     }
+    var autoStopSilenceSeconds by remember {
+        mutableStateOf(
+            prefs.getInt(
+                Settings.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS,
+                Defaults.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS
+            ).toString()
+        )
+    }
 
     // Prompt presets
     var selectedIndex by remember {
@@ -199,6 +207,24 @@ fun TranscriptionScreen(
                                 putInt(
                                     Settings.PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS,
                                     parsed.coerceIn(3, 120)
+                                )
+                            }
+                        }
+                    },
+                    minLines = 1,
+                    maxLines = 1
+                )
+
+                InlineTextField(
+                    label = stringResource(R.string.voice_auto_stop_silence_seconds_title),
+                    value = autoStopSilenceSeconds,
+                    onValueChange = { newValue ->
+                        autoStopSilenceSeconds = newValue
+                        newValue.toIntOrNull()?.let { parsed ->
+                            prefs.edit {
+                                putInt(
+                                    Settings.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS,
+                                    parsed.coerceIn(5, 300)
                                 )
                             }
                         }

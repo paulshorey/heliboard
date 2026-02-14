@@ -20,6 +20,8 @@ import android.media.AudioManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Debug;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Message;
 import android.os.PowerManager;
 import android.os.Process;
@@ -92,6 +94,7 @@ import kotlin.Unit;
 
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -194,7 +197,19 @@ public class LatinIME extends InputMethodService implements
     // Voice input state management for cleanup/transcription coordination
     private boolean mCleanupInProgress = false;
     private boolean mPendingNewParagraph = false;
-    private final StringBuilder mPendingTranscription = new StringBuilder();
+    private final ArrayDeque<String> mPendingTranscriptionQueue = new ArrayDeque<>();
+    private static final int MAX_PENDING_TRANSCRIPTIONS = 64;
+    private static final long CLEANUP_WATCHDOG_TIMEOUT_MS = 5_000L;
+    private final Handler mMainHandler = new Handler(Looper.getMainLooper());
+    private final Runnable mCleanupWatchdogRunnable = new Runnable() {
+        @Override
+        public void run() {
+            onCleanupWatchdogTimeout();
+        }
+    };
+    private int mCleanupRequestToken = 0;
+    @Nullable
+    private String mInFlightCleanupTranscription = null;
     // Voice session ID — incremented when a new recording starts and when recording is
     // cancelled. Used to invalidate stale async cleanup callbacks from previous sessions.
     private int mVoiceSessionId = 0;
@@ -1053,7 +1068,7 @@ public class LatinIME extends InputMethodService implements
         cancelVoiceRecordingAbruptly();
         // Also cancel any in-flight work from a prior graceful stop (recording already
         // stopped but transcription/cleanup callbacks may still be pending).
-        if (mCleanupInProgress || mPendingTranscription.length() > 0) {
+        if (mCleanupInProgress || hasPendingTranscriptions()) {
             Log.i(TAG, "Cancelling residual voice work on input disconnect");
             mVoiceSessionId++;
             resetVoiceInputState();
@@ -1843,7 +1858,7 @@ public class LatinIME extends InputMethodService implements
                     // Only hide when both stages are idle:
                     // - manager queue/transcription drained (this callback)
                     // - no cleanup request in-flight / queued transcription waiting
-                    if (!mCleanupInProgress && mPendingTranscription.length() == 0) {
+                    if (!mCleanupInProgress && !hasPendingTranscriptions()) {
                         mKeyboardSwitcher.hideProcessingIndicator();
                     }
                 } catch (Exception e) {
@@ -1858,7 +1873,7 @@ public class LatinIME extends InputMethodService implements
                         Log.i(TAG, "VOICE_STEP_4 empty transcription result — nothing to insert");
                         // No cleanup/insert callback will follow for empty chunks, so clear
                         // spinner now unless another cleanup round is currently active.
-                        if (!mCleanupInProgress && mPendingTranscription.length() == 0) {
+                        if (!mCleanupInProgress && !hasPendingTranscriptions()) {
                             mKeyboardSwitcher.hideProcessingIndicator();
                         }
                         return;
@@ -2177,13 +2192,15 @@ public class LatinIME extends InputMethodService implements
         // boundary and the start of this context chunk) must be preserved in the
         // editor — Claude's response gets .trim()'d which would lose it.
         final String editableText = rawEditableText.replaceAll("^\\s+", "");
-        final int leadingWhitespaceLen = rawEditableText.length() - editableText.length();
         final int replacementLength = editableText.length();
 
         final int sessionId = mVoiceSessionId;
         final String prompt = cleanupPrompt;
+        final int cleanupToken = ++mCleanupRequestToken;
 
         mCleanupInProgress = true;
+        mInFlightCleanupTranscription = transcriptionText;
+        startCleanupWatchdog(cleanupToken);
         Log.i(
                 TAG,
                 "VOICE_STEP_5 sending to Anthropic cleanup " +
@@ -2202,12 +2219,13 @@ public class LatinIME extends InputMethodService implements
                 new TextCleanupClient.CleanupCallback() {
                     @Override
                     public void onCleanupComplete(String cleanedText) {
-                        // Discard if the voice session has changed (abrupt cancel or new session).
-                        // Do NOT touch mCleanupInProgress — it may belong to the new session.
-                        if (sessionId != mVoiceSessionId) {
-                            Log.i(TAG, "Cleanup result discarded — voice session changed");
+                        // Discard stale callbacks from cancelled/timed-out sessions.
+                        if (sessionId != mVoiceSessionId || cleanupToken != mCleanupRequestToken) {
+                            Log.i(TAG, "Cleanup result discarded — stale callback");
                             return;
                         }
+                        finishCleanupWatchdog(cleanupToken);
+                        mInFlightCleanupTranscription = null;
 
                         try {
                             String sanitizedCleanedText = stripInvisibleChars(cleanedText);
@@ -2243,19 +2261,25 @@ public class LatinIME extends InputMethodService implements
 
                     @Override
                     public void onCleanupError(String error) {
-                        // Discard if the voice session has changed.
-                        // Do NOT touch mCleanupInProgress — it may belong to the new session.
-                        if (sessionId != mVoiceSessionId) {
-                            Log.i(TAG, "Cleanup error discarded — voice session changed");
+                        // Discard stale callbacks from cancelled/timed-out sessions.
+                        if (sessionId != mVoiceSessionId || cleanupToken != mCleanupRequestToken) {
+                            Log.i(TAG, "Cleanup error discarded — stale callback");
                             return;
                         }
+                        finishCleanupWatchdog(cleanupToken);
+                        mInFlightCleanupTranscription = null;
 
                         try {
                             Log.e(TAG, "Cleanup error: " + error);
-                            showVoiceErrorToast("Cleanup failed: " + error);
-
-                            // Graceful degradation: insert raw transcription (append, no replace).
-                            insertTranscriptionText(transcriptionText);
+                            if (isCleanupTimeoutError(error)) {
+                                // Timeout/unresponsive cleanup: drop this chunk and continue.
+                                Log.w(TAG, "Cleanup timed out; dropping current transcription chunk");
+                                showVoiceErrorToast("Cleanup timed out. Skipping this chunk.");
+                            } else {
+                                showVoiceErrorToast("Cleanup failed: " + error);
+                                // Non-timeout failures degrade gracefully with raw insertion.
+                                insertTranscriptionText(transcriptionText);
+                            }
                         } catch (Exception e) {
                             Log.e(TAG, "Exception in cleanup error callback: " + e.getMessage(), e);
                         }
@@ -2268,19 +2292,24 @@ public class LatinIME extends InputMethodService implements
     }
 
     private void appendPendingTranscription(@NonNull final String text) {
-        if (text.isEmpty()) {
+        final String trimmed = text.trim();
+        if (trimmed.isEmpty()) {
             return;
         }
-        if (mPendingTranscription.length() > 0) {
-            final char lastPending = mPendingTranscription.charAt(mPendingTranscription.length() - 1);
-            final char firstIncoming = text.charAt(0);
-            if (!Character.isWhitespace(lastPending) && !Character.isWhitespace(firstIncoming)) {
-                mPendingTranscription.append(' ');
+
+        if (mPendingTranscriptionQueue.size() >= MAX_PENDING_TRANSCRIPTIONS) {
+            Log.w(TAG, "Pending transcription queue full, coalescing oldest entries");
+            final String oldest = mPendingTranscriptionQueue.pollFirst();
+            final String secondOldest = mPendingTranscriptionQueue.pollFirst();
+            final String merged = mergeTranscriptionText(oldest, secondOldest);
+            if (!merged.isEmpty()) {
+                mPendingTranscriptionQueue.addFirst(merged);
             }
         }
-        mPendingTranscription.append(text);
-        if (mPendingTranscription.length() > 12000) {
-            Log.w(TAG, "Pending transcription buffer is large: " + mPendingTranscription.length());
+
+        mPendingTranscriptionQueue.addLast(trimmed);
+        if (mPendingTranscriptionQueue.size() > 20) {
+            Log.w(TAG, "Pending transcription queue is large: " + mPendingTranscriptionQueue.size());
         }
     }
 
@@ -2291,10 +2320,11 @@ public class LatinIME extends InputMethodService implements
     private void processPendingVoiceInput() {
         try {
             // Process any pending transcription first
-            if (mPendingTranscription.length() > 0) {
-                String pending = mPendingTranscription.toString();
-                mPendingTranscription.setLength(0);
-                processTranscriptionResult(pending);
+            if (hasPendingTranscriptions()) {
+                final String pending = drainPendingTranscriptionQueue();
+                if (!pending.isEmpty()) {
+                    processTranscriptionResult(pending);
+                }
                 if (mCleanupInProgress) {
                     // Wait for cleanup callback before applying paragraph operations.
                     return;
@@ -2311,7 +2341,7 @@ public class LatinIME extends InputMethodService implements
             Log.e(TAG, "Error processing pending voice input: " + e.getMessage(), e);
         } finally {
             // Safety net: if both transcription and cleanup are idle, clear spinner.
-            if (!mCleanupInProgress && mPendingTranscription.length() == 0) {
+            if (!mCleanupInProgress && !hasPendingTranscriptions()) {
                 mKeyboardSwitcher.hideProcessingIndicator();
             }
         }
@@ -2322,10 +2352,101 @@ public class LatinIME extends InputMethodService implements
      * Called when voice input session ends.
      */
     private void resetVoiceInputState() {
+        mMainHandler.removeCallbacks(mCleanupWatchdogRunnable);
         mCleanupInProgress = false;
         mPendingNewParagraph = false;
-        mPendingTranscription.setLength(0);
+        mPendingTranscriptionQueue.clear();
+        mCleanupRequestToken++;
+        mInFlightCleanupTranscription = null;
         mKeyboardSwitcher.hideProcessingIndicator();
+    }
+
+    private boolean hasPendingTranscriptions() {
+        return !mPendingTranscriptionQueue.isEmpty();
+    }
+
+    @NonNull
+    private String mergeTranscriptionText(@Nullable final String left, @Nullable final String right) {
+        final String safeLeft = left != null ? left : "";
+        final String safeRight = right != null ? right : "";
+        if (safeLeft.isEmpty()) return safeRight;
+        if (safeRight.isEmpty()) return safeLeft;
+        final char lastLeft = safeLeft.charAt(safeLeft.length() - 1);
+        final char firstRight = safeRight.charAt(0);
+        if (!Character.isWhitespace(lastLeft) && !Character.isWhitespace(firstRight)) {
+            return safeLeft + " " + safeRight;
+        }
+        return safeLeft + safeRight;
+    }
+
+    @NonNull
+    private String drainPendingTranscriptionQueue() {
+        final StringBuilder merged = new StringBuilder();
+        while (!mPendingTranscriptionQueue.isEmpty()) {
+            final String next = mPendingTranscriptionQueue.pollFirst();
+            if (next == null || next.isEmpty()) {
+                continue;
+            }
+            if (merged.length() > 0) {
+                final char lastMerged = merged.charAt(merged.length() - 1);
+                final char firstNext = next.charAt(0);
+                if (!Character.isWhitespace(lastMerged) && !Character.isWhitespace(firstNext)) {
+                    merged.append(' ');
+                }
+            }
+            merged.append(next);
+        }
+        return merged.toString();
+    }
+
+    private void startCleanupWatchdog(final int cleanupToken) {
+        mMainHandler.removeCallbacks(mCleanupWatchdogRunnable);
+        if (cleanupToken != mCleanupRequestToken) {
+            return;
+        }
+        mMainHandler.postDelayed(mCleanupWatchdogRunnable, CLEANUP_WATCHDOG_TIMEOUT_MS);
+    }
+
+    private void finishCleanupWatchdog(final int cleanupToken) {
+        if (cleanupToken != mCleanupRequestToken) {
+            return;
+        }
+        mMainHandler.removeCallbacks(mCleanupWatchdogRunnable);
+    }
+
+    private void onCleanupWatchdogTimeout() {
+        if (!mCleanupInProgress) {
+            return;
+        }
+        Log.e(TAG, "Cleanup watchdog timed out after " + CLEANUP_WATCHDOG_TIMEOUT_MS + "ms");
+
+        // Invalidate callbacks from this in-flight request.
+        mCleanupRequestToken++;
+        mCleanupInProgress = false;
+
+        if (mTextCleanupClient != null) {
+            mTextCleanupClient.cancelAll();
+        }
+
+        final String droppedTranscription = mInFlightCleanupTranscription;
+        mInFlightCleanupTranscription = null;
+
+        if (droppedTranscription != null && !droppedTranscription.trim().isEmpty()) {
+            Log.w(TAG, "Dropped timed-out cleanup chunk (" + droppedTranscription.length() + " chars)");
+        }
+
+        showVoiceErrorToast("Cleanup timed out. Skipping this chunk.");
+        processPendingVoiceInput();
+    }
+
+    private boolean isCleanupTimeoutError(@Nullable final String error) {
+        if (error == null) {
+            return false;
+        }
+        final String normalized = error.toLowerCase(Locale.ROOT);
+        return normalized.contains("timed out")
+                || normalized.contains("timeout")
+                || normalized.contains("408");
     }
 
     /**

@@ -11,7 +11,6 @@ import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
 import helium314.keyboard.latin.utils.Log
-import java.io.ByteArrayOutputStream
 import kotlin.concurrent.thread
 import kotlin.math.sqrt
 
@@ -19,9 +18,9 @@ import kotlin.math.sqrt
  * Records audio from the device microphone with client-side silence detection.
  *
  * Starts recording instantly on the device (no network dependency).
- * Accumulates audio into chunks, splitting on detected silence pauses.
- * When a pause is detected (silence exceeding the configured silence duration),
- * the accumulated audio segment is delivered via [RecordingCallback.onSegmentReady].
+ * Streams raw PCM chunks via [RecordingCallback.onAudioChunk] and emits speech
+ * boundary callbacks ([RecordingCallback.onSpeechStarted] / [RecordingCallback.onSpeechStopped])
+ * based on adaptive silence detection.
  *
  * Audio format: PCM 16-bit, 16kHz, mono — compatible with Deepgram and most speech APIs.
  */
@@ -71,48 +70,26 @@ class VoiceRecorder(private val context: Context) {
          *  10 iterations at 100ms = every 1 second. */
         private const val NOISE_FLOOR_RECALC_INTERVAL = 10
 
-        /** Default silence duration (ms) before splitting a segment. */
+        /** Default silence duration (ms) before declaring speech stopped. */
         private const val DEFAULT_SILENCE_DURATION_MS = 1000L
         private const val MIN_SILENCE_DURATION_MS = 1000L
         private const val MAX_SILENCE_DURATION_MS = 30_000L
         private const val MIN_ALLOWED_SILENCE_THRESHOLD = 40.0
         private const val MAX_ALLOWED_SILENCE_THRESHOLD = 5000.0
-
-        /** Minimum segment length (ms) to emit — avoids sending tiny noise blips. */
-        private const val MIN_SEGMENT_MS = 500L
-
-        /** Fraction of detected silence to trim from the end of a segment (0.0-1.0).
-         *  0.5 = cut at the midpoint of the silence period. */
-        private const val SILENCE_TRIM_FRACTION = 0.5
-
-        /** Pre-speech lookback buffer duration (ms) — captures speech onset missed by energy smoothing. */
-        private const val PRE_SPEECH_BUFFER_MS = 300L
-
-        /** Minimum speech required for the FIRST segment after recording starts (ms).
-         *  Lower threshold allows single-word utterances right after pressing the mic. */
-        private const val MIN_SPEECH_FIRST_SEGMENT_MS = 300L
-
-        /** Minimum speech required for subsequent segments (ms).
-         *  Higher threshold filters background noise (dog barks, coughs, etc.)
-         *  that accumulates less than 1 second of detected speech energy. */
-        private const val MIN_SPEECH_ONGOING_MS = 1000L
-
-        /** Maximum segment length (ms) — force-split very long speech. */
-        private const val MAX_SEGMENT_MS = 60_000L
     }
 
     /**
-     * Callback for recording lifecycle and completed audio segments.
+     * Callback for recording lifecycle and live speech detection.
      */
     interface RecordingCallback {
         /** Recording started successfully — microphone is live. */
         fun onRecordingStarted()
 
         /**
-         * A complete audio segment is ready for transcription.
-         * [wavData] is a self-contained WAV file (header + PCM data).
+         * Raw PCM16 microphone chunk from the live stream.
+         * Chunk cadence is roughly every [READ_INTERVAL_MS] while recording.
          */
-        fun onSegmentReady(wavData: ByteArray)
+        fun onAudioChunk(pcmData: ByteArray)
 
         /** Called when speech is detected (silence ended). */
         fun onSpeechStarted()
@@ -136,7 +113,6 @@ class VoiceRecorder(private val context: Context) {
     private var recordingThread: Thread? = null
     @Volatile private var isRecording = false
     @Volatile private var isPaused = false
-    @Volatile private var forceFlushRequested = false
     @Volatile private var silenceConfig = SilenceConfig()
     private var callback: RecordingCallback? = null
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -207,7 +183,6 @@ class VoiceRecorder(private val context: Context) {
             }
 
             isPaused = false
-            forceFlushRequested = false
             audioRecord?.startRecording()
             isRecording = true
 
@@ -238,11 +213,10 @@ class VoiceRecorder(private val context: Context) {
         }
     }
 
-    /** Stop recording and emit any remaining audio as a final segment. */
+    /** Stop recording. */
     fun stopRecording() {
         if (!isRecording) return
         isRecording = false
-        forceFlushRequested = false
         try {
             recordingThread?.join(2000)
         } catch (_: InterruptedException) {}
@@ -273,18 +247,6 @@ class VoiceRecorder(private val context: Context) {
         }
     }
 
-    /**
-     * Ask the recorder loop to flush the currently buffered segment.
-     * This is a best-effort request used as a watchdog fallback if silence
-     * detection misses a boundary in noisy environments.
-     */
-    fun requestSegmentFlush() {
-        if (isRecording && !isPaused) {
-            forceFlushRequested = true
-            Log.i(TAG, "Chunk flush requested by watchdog")
-        }
-    }
-
     private fun releaseRecorder() {
         try { audioRecord?.release() } catch (_: Exception) {}
         audioRecord = null
@@ -295,11 +257,7 @@ class VoiceRecorder(private val context: Context) {
 
     private fun recordingLoop() {
         val readBuffer = ByteArray(BYTES_PER_READ)
-        val segmentBuffer = ByteArrayOutputStream()
         var silenceDurationMs = 0L
-        var segmentDurationMs = 0L
-        var speechDurationMs = 0L   // only counts chunks where hasSpeech was true
-        var segmentsEmitted = 0     // tracks how many segments have been sent this session
         var isSpeaking = false
         var noiseFloor = INITIAL_NOISE_FLOOR
         var smoothedEnergy = INITIAL_NOISE_FLOOR
@@ -309,12 +267,6 @@ class VoiceRecorder(private val context: Context) {
         val minSilenceThreshold = configSnapshot.silenceThreshold
         val minSpeechThreshold = minSilenceThreshold + SPEECH_HYSTERESIS
 
-        // Lookback buffer: captures recent audio between segments so speech
-        // onset (which energy smoothing may classify as silence) is not lost.
-        val preSpeechBuffer = ArrayDeque<ByteArray>()
-        val maxPreSpeechChunks = (PRE_SPEECH_BUFFER_MS / READ_INTERVAL_MS).toInt()
-        val bytesPerMs = (SAMPLE_RATE * BYTES_PER_SAMPLE) / 1000
-
         try {
             while (isRecording) {
                 val bytesRead = audioRecord?.read(readBuffer, 0, BYTES_PER_READ) ?: break
@@ -322,24 +274,18 @@ class VoiceRecorder(private val context: Context) {
 
                 // When paused, discard audio but keep the loop alive
                 if (isPaused) {
-                    // If there was accumulated speech, emit it before we start discarding
-                    if (segmentBuffer.size() > 0) {
-                        val minSpeechMs = if (segmentsEmitted == 0) MIN_SPEECH_FIRST_SEGMENT_MS else MIN_SPEECH_ONGOING_MS
-                        if (speechDurationMs >= minSpeechMs) {
-                            emitSegment(segmentBuffer, segmentDurationMs)
-                            segmentsEmitted++
-                        }
-                        segmentBuffer.reset()
-                        segmentDurationMs = 0L
-                        speechDurationMs = 0L
-                        silenceDurationMs = 0L
-                    }
-                    preSpeechBuffer.clear()
+                    silenceDurationMs = 0L
+                    isSpeaking = false
                     continue
                 }
 
                 val chunk = if (bytesRead == BYTES_PER_READ) readBuffer.copyOf()
                             else readBuffer.copyOf(bytesRead)
+
+                // Always forward the live PCM stream; streaming transcription consumes
+                // this path instead of relying on locally cut WAV segments.
+                val callbackSnapshot = callback
+                mainHandler.post { callbackSnapshot?.onAudioChunk(chunk) }
 
                 val energy = rmsEnergy(chunk)
                 smoothedEnergy = (ENERGY_SMOOTHING_ALPHA * energy) +
@@ -376,187 +322,34 @@ class VoiceRecorder(private val context: Context) {
                 }
 
                 if (hasSpeech) {
-                    // ── Speech detected ──
                     if (!isSpeaking) {
                         isSpeaking = true
-                        // Prepend lookback buffer to capture speech onset that
-                        // energy smoothing may have classified as silence
-                        if (segmentBuffer.size() == 0 && preSpeechBuffer.isNotEmpty()) {
-                            for (buffered in preSpeechBuffer) {
-                                segmentBuffer.write(buffered)
-                                segmentDurationMs += (buffered.size.toLong() * 1000) / (SAMPLE_RATE * BYTES_PER_SAMPLE)
-                            }
-                            Log.i(TAG, "Prepended ${preSpeechBuffer.size} lookback chunks " +
-                                "(${preSpeechBuffer.sumOf { it.size.toLong() } * 1000 / (SAMPLE_RATE * BYTES_PER_SAMPLE)}ms) to new segment")
-                        }
-                        preSpeechBuffer.clear()
                         val callbackSnapshot = callback
                         mainHandler.post { callbackSnapshot?.onSpeechStarted() }
                     }
                     silenceDurationMs = 0L
-                    segmentBuffer.write(chunk)
-                    segmentDurationMs += chunkMs
-                    speechDurationMs += chunkMs
                 } else {
-                    // ── Silence ──
-                    silenceDurationMs += chunkMs
-
-                    if (segmentBuffer.size() > 0) {
-                        // Active segment: include silence as padding
-                        segmentBuffer.write(chunk)
-                        segmentDurationMs += chunkMs
-                    } else {
-                        // Between segments: maintain lookback buffer for next speech onset
-                        preSpeechBuffer.addLast(chunk)
-                        while (preSpeechBuffer.size > maxPreSpeechChunks) {
-                            preSpeechBuffer.removeFirst()
-                        }
-                    }
-
-                    if (segmentBuffer.size() > 0 && silenceDurationMs >= configSnapshot.silenceDurationMs) {
-                        if (isSpeaking) {
+                    if (isSpeaking) {
+                        silenceDurationMs += chunkMs
+                        if (silenceDurationMs >= configSnapshot.silenceDurationMs) {
                             isSpeaking = false
-                            val callbackSnapshot = callback
-                            mainHandler.post { callbackSnapshot?.onSpeechStopped() }
-                        }
-
-                        // Retroactive trim: cut back into the silence period so the
-                        // emitted segment ends cleanly near where speech actually stopped,
-                        // rather than at the current (lagging) detection point.
-                        val trimBackMs = 0L // disabled for testing; was: Math.round(silenceDurationMs * SILENCE_TRIM_FRACTION)
-                        // Don't trim so much that the emitted segment is shorter than MIN_SEGMENT_MS
-                        val maxTrimForMinSegment = maxOf(0L, segmentDurationMs - MIN_SEGMENT_MS)
-                        val effectiveTrimMs = minOf(trimBackMs, maxTrimForMinSegment)
-                        val trimBackBytes = (effectiveTrimMs * bytesPerMs).toInt()
-                        val pcmData = segmentBuffer.toByteArray()
-                        val actualTrimBytes = trimBackBytes.coerceAtMost(pcmData.size)
-                        val emitEndIndex = pcmData.size - actualTrimBytes
-                        val emitDurationMs = segmentDurationMs - effectiveTrimMs
-
-                        Log.i(
-                            TAG,
-                            "VOICE_STEP_2 silence detected (${silenceDurationMs}ms " +
-                                ">= ${configSnapshot.silenceDurationMs}ms), " +
-                                "energy=${smoothedEnergy.toInt()}, threshold=${silenceThreshold.toInt()} — " +
-                                "cutting chunk (trimmed ${effectiveTrimMs}ms trailing silence)"
-                        )
-
-                        // Emit the retroactively trimmed segment (only if it contains real speech)
-                        val minSpeechMs = if (segmentsEmitted == 0) MIN_SPEECH_FIRST_SEGMENT_MS else MIN_SPEECH_ONGOING_MS
-                        if (emitDurationMs >= MIN_SEGMENT_MS && speechDurationMs >= minSpeechMs) {
-                            val emitPcm = if (actualTrimBytes > 0) pcmData.copyOfRange(0, emitEndIndex) else pcmData
-                            emitSegmentPcm(emitPcm, emitDurationMs)
-                            segmentsEmitted++
-                        } else if (speechDurationMs < minSpeechMs) {
-                            Log.i(TAG, "Segment dropped: only ${speechDurationMs}ms of speech " +
-                                "(minimum ${minSpeechMs}ms required, segments emitted=$segmentsEmitted)")
-                        }
-
-                        // Seed lookback buffer with the trimmed tail so that if speech
-                        // resumes quickly, the onset audio is preserved in the next segment.
-                        preSpeechBuffer.clear()
-                        if (actualTrimBytes > 0) {
-                            val trimmedTail = pcmData.copyOfRange(emitEndIndex, pcmData.size)
-                            var offset = 0
-                            while (offset < trimmedTail.size) {
-                                val end = minOf(offset + BYTES_PER_READ, trimmedTail.size)
-                                preSpeechBuffer.addLast(trimmedTail.copyOfRange(offset, end))
-                                offset = end
-                            }
-                            while (preSpeechBuffer.size > maxPreSpeechChunks) {
-                                preSpeechBuffer.removeFirst()
-                            }
-                        }
-
-                        segmentBuffer.reset()
-                        segmentDurationMs = 0L
-                        speechDurationMs = 0L
-                        silenceDurationMs = 0L
-                    }
-                }
-
-                if (forceFlushRequested) {
-                    forceFlushRequested = false
-                    if (segmentBuffer.size() > 0) {
-                        val minSpeechMs = if (segmentsEmitted == 0) MIN_SPEECH_FIRST_SEGMENT_MS else MIN_SPEECH_ONGOING_MS
-                        if (segmentDurationMs >= MIN_SEGMENT_MS && speechDurationMs >= minSpeechMs) {
+                            silenceDurationMs = 0L
                             Log.i(
                                 TAG,
-                                "VOICE_STEP_2 watchdog flush forcing chunk at ${segmentDurationMs}ms"
+                                "VOICE_STEP_2 silence detected (${configSnapshot.silenceDurationMs}ms window), " +
+                                    "energy=${smoothedEnergy.toInt()}, threshold=${silenceThreshold.toInt()} — speech stopped"
                             )
-                            emitSegment(segmentBuffer, segmentDurationMs)
-                            segmentsEmitted++
-                        } else {
-                            Log.i(
-                                TAG,
-                                "Watchdog flush dropped segment: duration=${segmentDurationMs}ms, " +
-                                    "speech=${speechDurationMs}ms (minimum speech ${minSpeechMs}ms)"
-                            )
-                        }
-                        // Keep recorder/manager state transitions consistent: if we were in speech,
-                        // signal a stop so paragraph/auto-stop timers can recover even when
-                        // silence detection missed the natural boundary.
-                        val wasSpeaking = isSpeaking
-                        segmentBuffer.reset()
-                        segmentDurationMs = 0L
-                        speechDurationMs = 0L
-                        silenceDurationMs = 0L
-                        preSpeechBuffer.clear()
-                        isSpeaking = false
-                        if (wasSpeaking) {
                             val callbackSnapshot = callback
                             mainHandler.post { callbackSnapshot?.onSpeechStopped() }
                         }
                     }
                 }
-
-                // Force-split very long segments
-                if (segmentDurationMs >= MAX_SEGMENT_MS) {
-                    val minSpeechMs = if (segmentsEmitted == 0) MIN_SPEECH_FIRST_SEGMENT_MS else MIN_SPEECH_ONGOING_MS
-                    if (speechDurationMs >= minSpeechMs) {
-                        emitSegment(segmentBuffer, segmentDurationMs)
-                        segmentsEmitted++
-                    } else {
-                        Log.i(
-                            TAG,
-                            "Max-segment split dropped: duration=${segmentDurationMs}ms, " +
-                                "speech=${speechDurationMs}ms (minimum speech ${minSpeechMs}ms)"
-                        )
-                    }
-                    segmentBuffer.reset()
-                    segmentDurationMs = 0L
-                    speechDurationMs = 0L
-                    preSpeechBuffer.clear()
-                }
-            }
-
-            // ── Recording ended: emit any remaining audio ──
-            val minSpeechMs = if (segmentsEmitted == 0) MIN_SPEECH_FIRST_SEGMENT_MS else MIN_SPEECH_ONGOING_MS
-            if (segmentBuffer.size() > 0 && segmentDurationMs >= MIN_SEGMENT_MS
-                && speechDurationMs >= minSpeechMs) {
-                emitSegment(segmentBuffer, segmentDurationMs)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error in recording loop: ${e.message}")
             val callbackSnapshot = callback
             mainHandler.post { callbackSnapshot?.onRecordingError("Recording error: ${e.message}") }
         }
-    }
-
-    /** Wrap raw PCM data in a WAV container and deliver to callback. */
-    private fun emitSegment(buffer: ByteArrayOutputStream, durationMs: Long) {
-        val pcmData = buffer.toByteArray()
-        if (pcmData.isEmpty()) return
-        emitSegmentPcm(pcmData, durationMs)
-    }
-
-    /** Wrap raw PCM data in a WAV container and deliver to callback. */
-    private fun emitSegmentPcm(pcmData: ByteArray, durationMs: Long) {
-        if (pcmData.isEmpty()) return
-        val wavData = createWav(pcmData)
-        Log.i(TAG, "Segment ready: ${durationMs}ms, ${wavData.size} bytes")
-        val callbackSnapshot = callback
-        mainHandler.post { callbackSnapshot?.onSegmentReady(wavData) }
     }
 
     // ── Utility functions ──────────────────────────────────────────────
@@ -573,49 +366,5 @@ class VoiceRecorder(private val context: Context) {
             sum += (sample * sample).toDouble()
         }
         return sqrt(sum / samples)
-    }
-
-    /** Wrap raw PCM16 data in a minimal WAV file (44-byte header + data). */
-    private fun createWav(pcmData: ByteArray): ByteArray {
-        val totalDataLen = pcmData.size + 36
-        val byteRate = SAMPLE_RATE * BYTES_PER_SAMPLE
-        val header = ByteArray(44)
-
-        // RIFF header
-        header[0] = 'R'.code.toByte(); header[1] = 'I'.code.toByte()
-        header[2] = 'F'.code.toByte(); header[3] = 'F'.code.toByte()
-        writeInt(header, 4, totalDataLen)
-        header[8] = 'W'.code.toByte(); header[9] = 'A'.code.toByte()
-        header[10] = 'V'.code.toByte(); header[11] = 'E'.code.toByte()
-
-        // fmt sub-chunk
-        header[12] = 'f'.code.toByte(); header[13] = 'm'.code.toByte()
-        header[14] = 't'.code.toByte(); header[15] = ' '.code.toByte()
-        writeInt(header, 16, 16)         // sub-chunk size
-        writeShort(header, 20, 1)        // PCM format
-        writeShort(header, 22, 1)        // mono
-        writeInt(header, 24, SAMPLE_RATE)
-        writeInt(header, 28, byteRate)
-        writeShort(header, 32, BYTES_PER_SAMPLE) // block align
-        writeShort(header, 34, 16)       // bits per sample
-
-        // data sub-chunk
-        header[36] = 'd'.code.toByte(); header[37] = 'a'.code.toByte()
-        header[38] = 't'.code.toByte(); header[39] = 'a'.code.toByte()
-        writeInt(header, 40, pcmData.size)
-
-        return header + pcmData
-    }
-
-    private fun writeInt(buf: ByteArray, offset: Int, value: Int) {
-        buf[offset]     = (value and 0xFF).toByte()
-        buf[offset + 1] = ((value shr 8) and 0xFF).toByte()
-        buf[offset + 2] = ((value shr 16) and 0xFF).toByte()
-        buf[offset + 3] = ((value shr 24) and 0xFF).toByte()
-    }
-
-    private fun writeShort(buf: ByteArray, offset: Int, value: Int) {
-        buf[offset]     = (value and 0xFF).toByte()
-        buf[offset + 1] = ((value shr 8) and 0xFF).toByte()
     }
 }

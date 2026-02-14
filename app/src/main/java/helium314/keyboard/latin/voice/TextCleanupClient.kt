@@ -27,9 +27,6 @@ import java.util.concurrent.TimeUnit
  * receives the corrected text back. The caller is responsible for replacing the
  * old context in the editor with the cleaned result.
  *
- * Automatically retries once on transient failures (5xx, 408, timeout,
- * connection error).
- *
  * Uses Anthropic's Claude API (claude-haiku-4-5).
  */
 class TextCleanupClient {
@@ -48,8 +45,8 @@ class TextCleanupClient {
          */
         private const val MAX_TOKENS = 4096
 
-        /** Delay before a single retry on transient failures. */
-        private const val RETRY_DELAY_MS = 2000L
+        // Keep per-item cleanup latency bounded so queue processing stays responsive.
+        private const val CLEANUP_CALL_TIMEOUT_SECONDS = 5L
     }
 
     interface CleanupCallback {
@@ -63,6 +60,7 @@ class TextCleanupClient {
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .writeTimeout(10, TimeUnit.SECONDS)
+        .callTimeout(CLEANUP_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
 
     private val activeCalls = Collections.synchronizedSet(mutableSetOf<Call>())
@@ -155,7 +153,8 @@ class TextCleanupClient {
                 "(editable=${userMessage.length} chars, reference=${referenceContext.length} chars)"
         )
 
-        enqueueWithRetry(request, callback, retriesRemaining = 1)
+        // No retry: each queue item has a strict end-to-end timeout budget.
+        enqueueWithRetry(request, callback, retriesRemaining = 0)
     }
 
     /** Cancel all in-flight cleanup requests (best effort). */
@@ -176,7 +175,7 @@ class TextCleanupClient {
     // ── Internal ──────────────────────────────────────────────────────────
 
     /**
-     * Enqueue [request] with automatic single retry on transient failures.
+     * Enqueue [request] with optional retry policy.
      */
     private fun enqueueWithRetry(
         request: Request,
@@ -193,10 +192,10 @@ class TextCleanupClient {
                     return
                 }
                 if (retriesRemaining > 0 && isRetryableError(e)) {
-                    Log.w(TAG, "Cleanup failed (${e.message}), retrying in ${RETRY_DELAY_MS}ms...")
-                    mainHandler.postDelayed({
+                    Log.w(TAG, "Cleanup failed (${e.message}), retrying once...")
+                    mainHandler.post {
                         enqueueWithRetry(request, callback, retriesRemaining - 1)
-                    }, RETRY_DELAY_MS)
+                    }
                     return
                 }
                 Log.e(TAG, "Cleanup request failed: ${e.message}")
@@ -211,10 +210,10 @@ class TextCleanupClient {
                     val responseBody = response.body?.string()
                     if (!response.isSuccessful) {
                         if (retriesRemaining > 0 && isRetryableStatus(response.code)) {
-                            Log.w(TAG, "Cleanup API error ${response.code}, retrying in ${RETRY_DELAY_MS}ms...")
-                            mainHandler.postDelayed({
+                            Log.w(TAG, "Cleanup API error ${response.code}, retrying once...")
+                            mainHandler.post {
                                 enqueueWithRetry(request, callback, retriesRemaining - 1)
-                            }, RETRY_DELAY_MS)
+                            }
                             return
                         }
                         Log.e(TAG, "Cleanup API error: ${response.code} - $responseBody")
