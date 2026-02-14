@@ -129,7 +129,7 @@ class TextCleanupClient {
         val requestBody = JSONObject().apply {
             put("model", MODEL)
             put("max_tokens", MAX_TOKENS)
-            put("temperature", 0.0)
+            put("temperature", 0.2)
             put("system", fullSystemPrompt)
             put("messages", JSONArray().apply {
                 put(JSONObject().apply {
