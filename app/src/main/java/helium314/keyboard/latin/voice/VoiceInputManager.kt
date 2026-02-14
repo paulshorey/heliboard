@@ -195,10 +195,6 @@ class VoiceInputManager(private val context: Context) {
                 onAudioChunkCaptured(pcmData, sessionId)
             }
 
-            override fun onSegmentReady(wavData: ByteArray) {
-                // Local WAV segmentation is no longer used for transcription.
-            }
-
             override fun onSpeechStarted() {
                 if (sessionId != activeSessionId) return
                 cancelNewParagraphTimer()
