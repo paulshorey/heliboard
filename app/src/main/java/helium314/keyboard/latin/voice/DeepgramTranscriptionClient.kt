@@ -13,9 +13,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import org.json.JSONObject
 import java.io.IOException
-import java.net.ConnectException
-import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import java.net.SocketTimeoutException
+import java.net.ConnectException
 import java.util.Collections
 import java.util.concurrent.TimeUnit
 
@@ -49,11 +49,12 @@ class DeepgramTranscriptionClient {
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .callTimeout(30, TimeUnit.SECONDS)   // absolute ceiling per call — must be long enough
-                                              // for audio upload + Deepgram processing + response
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
+        .writeTimeout(5, TimeUnit.SECONDS)
+        .callTimeout(5, TimeUnit.SECONDS)    // fail fast — the transcription queue is sequential,
+                                              // so a stuck request blocks every subsequent chunk.
+                                              // Better to drop one chunk and move on.
         .build()
 
     private val activeCalls = Collections.synchronizedSet(mutableSetOf<Call>())
@@ -61,9 +62,11 @@ class DeepgramTranscriptionClient {
     /**
      * Transcribe a WAV audio segment using Deepgram's pre-recorded API.
      *
-     * Automatically retries once on transient failures (5xx, 408, timeout,
-     * connection error) after a short delay. Non-retryable errors (4xx client
-     * errors) are reported immediately.
+     * Retries once on transient **server** failures (5xx, 408) where the server
+     * responded quickly with an error. Network-level failures (timeouts,
+     * connection errors) are NOT retried — the queue is sequential, so a
+     * stuck request blocks every subsequent chunk. Better to drop one chunk
+     * and move on immediately.
      *
      * @param apiKey   Deepgram API key
      * @param wavData  Complete WAV file bytes (header + PCM data)
@@ -135,13 +138,8 @@ class DeepgramTranscriptionClient {
                     Log.i(TAG, "Transcription request cancelled")
                     return
                 }
-                if (retriesRemaining > 0 && isRetryableError(e)) {
-                    Log.w(TAG, "Transcription failed (${e.message}), retrying in ${RETRY_DELAY_MS}ms...")
-                    mainHandler.postDelayed({
-                        enqueueWithRetry(request, callback, retriesRemaining - 1)
-                    }, RETRY_DELAY_MS)
-                    return
-                }
+                // Don't retry network failures (timeout, connection error) — the queue
+                // is sequential, so retrying blocks every subsequent chunk. Fail fast.
                 Log.e(TAG, "Transcription request failed: ${e.message}")
                 mainHandler.post {
                     callback.onTranscriptionError(mapNetworkError(e))
@@ -183,11 +181,6 @@ class DeepgramTranscriptionClient {
                 }
             }
         })
-    }
-
-    /** Whether the IOException is a transient network error worth retrying. */
-    private fun isRetryableError(e: IOException): Boolean {
-        return e is SocketTimeoutException || e is ConnectException
     }
 
     /** Whether the HTTP status code indicates a transient server error worth retrying. */
