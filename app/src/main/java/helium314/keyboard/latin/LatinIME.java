@@ -1834,6 +1834,21 @@ public class LatinIME extends InputMethodService implements
             }
 
             @Override
+            public void onProcessingIdle() {
+                // Transcription pipeline is idle (no segments queued or in-flight).
+                // Hide the spinner if there is also no cleanup work pending.
+                // This prevents the spinner from being stuck forever when the last
+                // segment returns blank/empty text from Deepgram.
+                try {
+                    if (!mCleanupInProgress && mPendingTranscription.length() == 0) {
+                        mKeyboardSwitcher.hideProcessingIndicator();
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Error in onProcessingIdle: " + e.getMessage());
+                }
+            }
+
+            @Override
             public void onTranscriptionResult(@NonNull String text) {
                 try {
                     if (text == null || text.isEmpty()) {
@@ -2283,8 +2298,18 @@ public class LatinIME extends InputMethodService implements
                 mInputLogic.finishInput();
                 mInputLogic.mConnection.commitText("\n\n", 1);
             }
+
+            // All pending work processed and no cleanup in flight — ensure spinner is hidden.
+            // This is a safety net for edge cases where the spinner was shown (e.g., by
+            // onProcessingStarted) but no code path explicitly hid it (e.g., Deepgram
+            // returned blank text for the last segment).
+            if (!mCleanupInProgress) {
+                mKeyboardSwitcher.hideProcessingIndicator();
+            }
         } catch (Exception e) {
             Log.e(TAG, "Error processing pending voice input: " + e.getMessage(), e);
+            // Fail-safe: always attempt to hide the spinner on error
+            mKeyboardSwitcher.hideProcessingIndicator();
         }
     }
 

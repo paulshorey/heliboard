@@ -68,6 +68,15 @@ class VoiceInputManager(private val context: Context) {
         /** An audio chunk is being sent for transcription/processing. */
         fun onProcessingStarted()
 
+        /**
+         * The transcription pipeline is idle — no segments are queued or in-flight.
+         * The listener should hide any processing indicators if cleanup is also done.
+         *
+         * This fires after the last segment completes (even if it returned blank text)
+         * so the UI is always cleaned up, preventing "spinner stuck forever" issues.
+         */
+        fun onProcessingIdle()
+
         /** Configured silence window elapsed — start a new paragraph. */
         fun onNewParagraphRequested()
 
@@ -370,7 +379,14 @@ class VoiceInputManager(private val context: Context) {
     private fun processNextSegment() {
         if (isTranscribingSegment) return
 
-        val segment = pendingSegments.removeFirstOrNull() ?: return
+        val segment = pendingSegments.removeFirstOrNull()
+        if (segment == null) {
+            // No more segments to process — notify listener that the transcription
+            // pipeline is idle. The listener can hide the processing indicator if
+            // there is no cleanup work pending either.
+            listener?.onProcessingIdle()
+            return
+        }
         if (segment.sessionId != activeSessionId) {
             Log.i(TAG, "Skipping queued segment from stale session ${segment.sessionId}")
             processNextSegment()

@@ -52,7 +52,8 @@ class DeepgramTranscriptionClient {
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
-        .callTimeout(5, TimeUnit.SECONDS)    // absolute ceiling per call — fail fast on hangs
+        .callTimeout(30, TimeUnit.SECONDS)   // absolute ceiling per call — must be long enough
+                                              // for audio upload + Deepgram processing + response
         .build()
 
     private val activeCalls = Collections.synchronizedSet(mutableSetOf<Call>())

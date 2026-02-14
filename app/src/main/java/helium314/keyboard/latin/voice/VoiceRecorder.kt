@@ -55,7 +55,13 @@ class VoiceRecorder(private val context: Context) {
         private const val SILENCE_MARGIN = 140.0
         private const val ENERGY_SMOOTHING_ALPHA = 0.2
         private const val NOISE_FLOOR_MIN = 40.0
-        private const val NOISE_FLOOR_MAX = 2500.0
+        private const val NOISE_FLOOR_MAX = 1000.0
+
+        /** Maximum amount the noise floor can increase per recalculation cycle.
+         *  Prevents sudden jumps from speech bursts or transient noise inflating
+         *  the floor. Allows gradual adaptation over ~10 seconds (10 recalcs).
+         *  No limit on decreases — fast adaptation to quieter environments. */
+        private const val NOISE_FLOOR_MAX_RISE_PER_RECALC = 50.0
 
         /** Rolling window size for percentile-based noise floor estimation (iterations).
          *  300 iterations at 100ms = 30 seconds of audio history. */
@@ -353,10 +359,11 @@ class VoiceRecorder(private val context: Context) {
                     smoothedEnergy >= speechThreshold
                 }
 
-                // Percentile-based noise floor: track ALL energy readings (not just
-                // silence) so the floor adapts even when sustained background noise
-                // is misclassified as speech by the hysteresis logic.
-                energyHistory.addLast(smoothedEnergy)
+                // Percentile-based noise floor: track RAW energy readings (not smoothed)
+                // so that speech energy doesn't inflate the floor estimate.
+                // Smoothed energy lags significantly during speech↔silence transitions
+                // and would poison the percentile with artificially high intermediate values.
+                energyHistory.addLast(energy)
                 if (energyHistory.size > NOISE_FLOOR_WINDOW_SIZE) {
                     energyHistory.removeFirst()
                 }
@@ -366,7 +373,15 @@ class VoiceRecorder(private val context: Context) {
                     val sorted = energyHistory.toList().sorted()
                     val idx = (sorted.size * NOISE_FLOOR_PERCENTILE).toInt()
                         .coerceIn(0, sorted.size - 1)
-                    noiseFloor = sorted[idx].coerceIn(NOISE_FLOOR_MIN, NOISE_FLOOR_MAX)
+                    val candidateFloor = sorted[idx].coerceIn(NOISE_FLOOR_MIN, NOISE_FLOOR_MAX)
+                    // Rate-limit increases to prevent sudden jumps from speech bursts
+                    // or sustained background noise inflating the floor.
+                    // Decreases are unlimited so we adapt quickly to quieter environments.
+                    noiseFloor = if (candidateFloor > noiseFloor) {
+                        minOf(candidateFloor, noiseFloor + NOISE_FLOOR_MAX_RISE_PER_RECALC)
+                    } else {
+                        candidateFloor
+                    }
                 }
 
                 if (hasSpeech) {
