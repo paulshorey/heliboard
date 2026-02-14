@@ -170,7 +170,7 @@ object Defaults {
     const val PREF_TRANSCRIPTION_PROMPT_SELECTED = 0 // Default to first preset
     const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 1
     const val PREF_VOICE_SILENCE_THRESHOLD = 220
-    const val PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS = 12
+    const val PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS = 10
     const val PREF_CLEANUP_PROMPT = """Edit this raw transcription to be written correctly: 
     
 Add capitalization and punctuation (.!?:,) to sentences. Fix grammar. Combine or split sentences to make them sound natural. Split one sentence into two if it reads better. Add punctuation where it makes sense. If the text is just a word or code then do not add grammatical punctuation or capitalization. Remove short insignificant artifacts like "Um...". 

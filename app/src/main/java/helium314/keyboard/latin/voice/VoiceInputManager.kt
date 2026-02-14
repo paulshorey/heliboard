@@ -37,7 +37,7 @@ class VoiceInputManager(private val context: Context) {
          * (no speech detected). Prevents the recording from running indefinitely
          * when the user walks away or stops talking.
          */
-        private const val AUTO_STOP_SILENCE_MS = 36_000L
+        private const val AUTO_STOP_SILENCE_MS = 30_000L
 
         /** Maximum buffered raw PCM chunks while waiting for socket readiness. */
         private const val MAX_PENDING_AUDIO_CHUNKS = 300
