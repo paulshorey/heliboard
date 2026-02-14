@@ -49,15 +49,24 @@ class DeepgramTranscriptionClient {
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.SECONDS)
-        .writeTimeout(5, TimeUnit.SECONDS)
-        .callTimeout(5, TimeUnit.SECONDS)    // fail fast — the transcription queue is sequential,
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
+        .callTimeout(10, TimeUnit.SECONDS)   // fail fast — the transcription queue is sequential,
                                               // so a stuck request blocks every subsequent chunk.
                                               // Better to drop one chunk and move on.
         .build()
 
     private val activeCalls = Collections.synchronizedSet(mutableSetOf<Call>())
+
+    /**
+     * True when [cancelAll] was called. Reset on the next [transcribe] call.
+     * Used to distinguish explicit cancellation (user stopped recording) from
+     * OkHttp callTimeout-induced cancellation — the latter must still report
+     * an error so the sequential queue advances.
+     */
+    @Volatile
+    private var explicitlyCancelled = false
 
     /**
      * Transcribe a WAV audio segment using Deepgram's pre-recorded API.
@@ -79,6 +88,7 @@ class DeepgramTranscriptionClient {
         language: String? = null,
         callback: TranscriptionCallback
     ) {
+        explicitlyCancelled = false
         // Build query parameters
         val urlBuilder = StringBuilder(BASE_URL)
         urlBuilder.append("?model=nova-3")
@@ -104,12 +114,23 @@ class DeepgramTranscriptionClient {
         enqueueWithRetry(request, callback, retriesRemaining = 1)
     }
 
-    /** Cancel all in-flight transcription requests (best effort). */
+    /**
+     * Cancel all in-flight transcription requests (best effort).
+     *
+     * Sets [explicitlyCancelled] so that [onFailure] callbacks from these
+     * calls can be distinguished from callTimeout-induced cancellations.
+     * Without this flag, OkHttp's callTimeout sets [Call.isCanceled] = true,
+     * which would silently swallow the callback and permanently block the
+     * sequential transcription queue.
+     */
     fun cancelAll() {
         val calls = synchronized(activeCalls) {
             val snapshot = activeCalls.toList()
             activeCalls.clear()
             snapshot
+        }
+        if (calls.isNotEmpty()) {
+            explicitlyCancelled = true
         }
         for (call in calls) {
             call.cancel()
@@ -134,12 +155,14 @@ class DeepgramTranscriptionClient {
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 activeCalls.remove(call)
-                if (call.isCanceled()) {
-                    Log.i(TAG, "Transcription request cancelled")
+                // Only silently ignore calls we explicitly cancelled (via cancelAll).
+                // Do NOT silently ignore callTimeout-induced cancellations — OkHttp
+                // sets isCanceled()=true for both, but timeout cancellations must
+                // report an error so the sequential transcription queue advances.
+                if (call.isCanceled() && explicitlyCancelled) {
+                    Log.i(TAG, "Transcription request explicitly cancelled")
                     return
                 }
-                // Don't retry network failures (timeout, connection error) — the queue
-                // is sequential, so retrying blocks every subsequent chunk. Fail fast.
                 Log.e(TAG, "Transcription request failed: ${e.message}")
                 mainHandler.post {
                     callback.onTranscriptionError(mapNetworkError(e))

@@ -67,6 +67,10 @@ class TextCleanupClient {
 
     private val activeCalls = Collections.synchronizedSet(mutableSetOf<Call>())
 
+    /** True when [cancelAll] was called. Reset on next [cleanupText] call. */
+    @Volatile
+    private var explicitlyCancelled = false
+
     /**
      * Clean up transcribed text using Claude.
      *
@@ -96,6 +100,7 @@ class TextCleanupClient {
         newText: String,
         callback: CleanupCallback
     ) {
+        explicitlyCancelled = false
         // Build the user message: current paragraph + new transcription.
         // Trim trailing whitespace from editable text to avoid double-spaces
         // when the previous insertion added a trailing space.
@@ -158,6 +163,9 @@ class TextCleanupClient {
             activeCalls.clear()
             snapshot
         }
+        if (calls.isNotEmpty()) {
+            explicitlyCancelled = true
+        }
         for (call in calls) {
             call.cancel()
         }
@@ -181,8 +189,8 @@ class TextCleanupClient {
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 activeCalls.remove(call)
-                if (call.isCanceled()) {
-                    Log.i(TAG, "Cleanup request cancelled")
+                if (call.isCanceled() && explicitlyCancelled) {
+                    Log.i(TAG, "Cleanup request explicitly cancelled")
                     return
                 }
                 if (retriesRemaining > 0 && isRetryableError(e)) {
