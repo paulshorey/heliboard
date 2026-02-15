@@ -185,11 +185,9 @@ class VoiceInputManager(private val context: Context) {
         voiceRecorder.setCallback(object : VoiceRecorder.RecordingCallback {
             override fun onRecordingStarted() {
                 if (sessionId != activeSessionId) return
-                updateState(State.RECORDING)
-                // Start the auto-stop timer immediately so recording eventually
-                // stops even when the user never speaks.
-                startAutoStopTimer()
                 Log.i(TAG, "VOICE_STEP_1 recording callback received")
+                // State and auto-stop timer are set synchronously after
+                // voiceRecorder.startRecording() returns.
             }
 
             override fun onAudioChunk(pcmData: ByteArray) {
@@ -409,7 +407,8 @@ class VoiceInputManager(private val context: Context) {
                     "(buffer full at $MAX_PENDING_AUDIO_CHUNKS)"
             )
         }
-        pendingAudioChunks.addLast(PendingAudioChunk(sessionId, pcmData.copyOf()))
+        // VoiceRecorder already delivers a fresh chunk copy for each callback.
+        pendingAudioChunks.addLast(PendingAudioChunk(sessionId, pcmData))
 
         if (isStreamingReady && streamSessionId == sessionId) {
             flushPendingAudio(sessionId)
@@ -514,6 +513,17 @@ class VoiceInputManager(private val context: Context) {
             return
         }
 
+        // Rejected/auth/client errors should fail fast instead of retrying the
+        // same invalid session repeatedly.
+        if (isUnrecoverableError(error)) {
+            pendingAudioChunks.clear()
+            val message = error ?: "Deepgram stream rejected"
+            Log.e(TAG, "Unrecoverable stream error — stopping recording: $message")
+            listener?.onError(message)
+            stopRecordingInternal(cancelPending = true)
+            return
+        }
+
         val sessionLikelyActive =
             currentState != State.IDLE || voiceRecorder.isCurrentlyRecording
 
@@ -526,6 +536,13 @@ class VoiceInputManager(private val context: Context) {
         Log.e(TAG, "Stream disconnected unrecoverably: $message")
         listener?.onError(message)
         stopRecordingInternal(cancelPending = true)
+    }
+
+    private fun isUnrecoverableError(error: String?): Boolean {
+        if (error == null) return false
+        val lower = error.lowercase()
+        return (lower.contains("invalid") && lower.contains("api key")) ||
+            lower.contains("connection rejected")
     }
 
     private fun scheduleReconnectOrStop(sessionId: Long, reason: String) {

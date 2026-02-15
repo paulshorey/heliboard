@@ -45,8 +45,10 @@ class TextCleanupClient {
          */
         private const val MAX_TOKENS = 4096
 
-        // Keep per-item cleanup latency bounded so queue processing stays responsive.
-        private const val CLEANUP_CALL_TIMEOUT_SECONDS = 5L
+        // Hard ceiling on total call duration (DNS + connect + request + response).
+        // Keep this below LatinIME's cleanup watchdog so normal OkHttp timeout
+        // handling runs first in the common failure path.
+        private const val CLEANUP_CALL_TIMEOUT_SECONDS = 10L
     }
 
     interface CleanupCallback {
@@ -58,7 +60,7 @@ class TextCleanupClient {
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
         .writeTimeout(10, TimeUnit.SECONDS)
         .callTimeout(CLEANUP_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
