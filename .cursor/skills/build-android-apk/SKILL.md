@@ -1,35 +1,28 @@
-# Cursor Agent Skill: Build installable Android APK into `dist/`
+---
+name: build-android-apk
+description: Build an installable HeliBoard debug APK in /workspace/dist when the user asks for an Android build artifact from this repository.
+---
 
-## Skill intent
+# Build Android APK into `dist/`
 
-Use this skill when the goal is to produce an installable APK artifact for this repository in:
+## When to use
 
-- `/workspace/dist/`
+- The user asks for a cloud build of this Android project.
+- The user asks for an installable APK artifact.
+- The user asks to refresh/update APK artifacts after code changes.
 
-This skill is for automated execution by a Cursor cloud agent only.
+## Repository requirements
 
-## Repository-specific build requirements
+- Module: `:app`
+- Android SDK Platform: `android-35`
+- Build Tools: `35.0.0`
+- NDK: `28.0.13004108`
+- Java: `17`
+- Build task: `:app:assembleDebug`
 
-Read from this repo:
+## Execution steps
 
-- App module: `:app`
-- Required SDK Platform: `android-35`
-- Required Build Tools: `35.0.0`
-- Required NDK: `28.0.13004108`
-- Java target: `17`
-- Primary build task: `:app:assembleDebug`
-
-## Execution policy
-
-1. Run commands from `/workspace` unless explicitly noted.
-2. Ensure Android SDK + NDK are present before building.
-3. Ensure Gradle can resolve SDK via `local.properties`.
-4. Produce APK artifacts in `/workspace/dist/`.
-5. Fail fast on command errors.
-
-## Step-by-step command sequence
-
-### 1) Install system dependencies
+Run commands exactly in this order.
 
 ```bash
 cd /workspace
@@ -37,8 +30,6 @@ export DEBIAN_FRONTEND=noninteractive
 sudo apt-get update
 sudo apt-get install -y openjdk-17-jdk unzip wget zip ca-certificates
 ```
-
-### 2) Install Android command-line tools and required SDK components
 
 ```bash
 export ANDROID_SDK_ROOT="$HOME/Android/Sdk"
@@ -56,8 +47,6 @@ yes | sdkmanager --licenses
 sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;28.0.13004108"
 ```
 
-### 3) Configure SDK path for Gradle in this repo
-
 ```bash
 cd /workspace
 cat > local.properties <<EOF
@@ -65,15 +54,11 @@ sdk.dir=$HOME/Android/Sdk
 EOF
 ```
 
-### 4) Build debug APK
-
 ```bash
 cd /workspace
 chmod +x ./gradlew
 ./gradlew :app:assembleDebug
 ```
-
-### 5) Collect artifacts into `dist/`
 
 ```bash
 cd /workspace
@@ -82,13 +67,15 @@ cp app/build/outputs/apk/debug/*.apk dist/
 ls -lh dist/*.apk
 ```
 
-## Expected result
+## Success criteria
 
-At least one APK file exists matching:
+At least one file exists matching:
 
 - `/workspace/dist/HeliBoard_*-debug.apk`
 
-## Recovery sequence (if build fails)
+## Recovery sequence
+
+If build fails, run:
 
 ```bash
 cd /workspace
