@@ -1,37 +1,44 @@
-# Build this project in Cursor AI Cloud and download an installable APK
+# Cursor Agent Skill: Build installable Android APK into `dist/`
 
-This guide is specific to the current HeliBoard codebase in this repository.
+## Skill intent
 
-## 0) Current project requirements (from Gradle files)
+Use this skill when the goal is to produce an installable APK artifact for this repository in:
 
-- Java: **17**
-- Android SDK Platform: **35**
-- Android Build Tools: **35.0.0**
-- Android NDK: **28.0.13004108**
-- Gradle wrapper: **8.14** (already included in this repo)
-- Main module: `:app`
-- Installable test build: `debug` (applicationId suffix: `.debug`)
+- `/workspace/dist/`
 
----
+This skill is for automated execution by a Cursor cloud agent only.
 
-## 1) Install required Linux packages in Cursor Cloud
+## Repository-specific build requirements
 
-Run in the repo root (`/workspace`):
+Read from this repo:
+
+- App module: `:app`
+- Required SDK Platform: `android-35`
+- Required Build Tools: `35.0.0`
+- Required NDK: `28.0.13004108`
+- Java target: `17`
+- Primary build task: `:app:assembleDebug`
+
+## Execution policy
+
+1. Run commands from `/workspace` unless explicitly noted.
+2. Ensure Android SDK + NDK are present before building.
+3. Ensure Gradle can resolve SDK via `local.properties`.
+4. Produce APK artifacts in `/workspace/dist/`.
+5. Fail fast on command errors.
+
+## Step-by-step command sequence
+
+### 1) Install system dependencies
 
 ```bash
+cd /workspace
+export DEBIAN_FRONTEND=noninteractive
 sudo apt-get update
 sudo apt-get install -y openjdk-17-jdk unzip wget zip ca-certificates
 ```
 
-Verify Java:
-
-```bash
-java -version
-```
-
----
-
-## 2) Install Android command-line tools + SDK/NDK
+### 2) Install Android command-line tools and required SDK components
 
 ```bash
 export ANDROID_SDK_ROOT="$HOME/Android/Sdk"
@@ -41,8 +48,6 @@ mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
 cd /tmp
 wget -O commandlinetools-linux.zip "https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip"
 unzip -q -o commandlinetools-linux.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
-
-# Replace old "latest" folder if it exists.
 rm -rf "$ANDROID_SDK_ROOT/cmdline-tools/latest"
 mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
 
@@ -51,33 +56,16 @@ yes | sdkmanager --licenses
 sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;28.0.13004108"
 ```
 
-Optional: persist Android env vars for future shell sessions:
-
-```bash
-cat <<'EOF' >> ~/.bashrc
-export ANDROID_SDK_ROOT="$HOME/Android/Sdk"
-export ANDROID_HOME="$ANDROID_SDK_ROOT"
-export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
-EOF
-
-# Load the vars in the current shell now.
-source ~/.bashrc
-```
-
-Create `local.properties` in this repo so Gradle can always resolve the SDK path:
+### 3) Configure SDK path for Gradle in this repo
 
 ```bash
 cd /workspace
-cat > local.properties <<'EOF'
-sdk.dir=/home/ubuntu/Android/Sdk
+cat > local.properties <<EOF
+sdk.dir=$HOME/Android/Sdk
 EOF
 ```
 
----
-
-## 3) Build an installable APK (recommended: debug)
-
-From repo root:
+### 4) Build debug APK
 
 ```bash
 cd /workspace
@@ -85,15 +73,7 @@ chmod +x ./gradlew
 ./gradlew :app:assembleDebug
 ```
 
-For faster iteration builds (no minify), you can also use:
-
-```bash
-./gradlew :app:assembleDebugNoMinify
-```
-
----
-
-## 4) Collect APK into a simple downloadable folder
+### 5) Collect artifacts into `dist/`
 
 ```bash
 cd /workspace
@@ -102,57 +82,24 @@ cp app/build/outputs/apk/debug/*.apk dist/
 ls -lh dist/*.apk
 ```
 
-Expected file pattern:
+## Expected result
 
-- `dist/HeliBoard_*-debug.apk`
+At least one APK file exists matching:
 
----
+- `/workspace/dist/HeliBoard_*-debug.apk`
 
-## 5) Download and install on your Android phone
-
-1. In Cursor, download the APK from `dist/`.
-2. Transfer it to your phone (Drive, email, USB, etc.).
-3. On the phone, allow install from unknown sources for your file manager/browser.
-4. Open the APK and install.
-
-For future Cursor AI Cloud changes, rebuild with the same steps and install the newer debug APK over the old one.
-
----
-
-## 6) Repeatable command set for future development cycles
+## Recovery sequence (if build fails)
 
 ```bash
 cd /workspace
+export ANDROID_SDK_ROOT="$HOME/Android/Sdk"
+export ANDROID_HOME="$ANDROID_SDK_ROOT"
+export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
+yes | sdkmanager --licenses
+./gradlew --stop
+rm -rf .gradle build app/build
 ./gradlew :app:assembleDebug
 mkdir -p dist
 cp app/build/outputs/apk/debug/*.apk dist/
 ls -lh dist/*.apk
 ```
-
----
-
-## 7) Troubleshooting
-
-- **`sdkmanager: command not found`**
-  - Re-export PATH:
-    ```bash
-    export ANDROID_SDK_ROOT="$HOME/Android/Sdk"
-    export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
-    ```
-
-- **License errors during build**
-  - Run:
-    ```bash
-    yes | sdkmanager --licenses
-    ```
-
-- **Gradle cache/build corruption**
-  - Run:
-    ```bash
-    ./gradlew --stop
-    rm -rf .gradle build app/build
-    ./gradlew :app:assembleDebug
-    ```
-
-- **Need a production release APK**
-  - `./gradlew :app:assembleRelease` builds the release variant, but production distribution requires proper signing configuration/keystore management.
