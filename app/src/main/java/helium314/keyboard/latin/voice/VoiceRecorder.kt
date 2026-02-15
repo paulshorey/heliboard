@@ -76,6 +76,9 @@ class VoiceRecorder(private val context: Context) {
         private const val MAX_SILENCE_DURATION_MS = 30_000L
         private const val MIN_ALLOWED_SILENCE_THRESHOLD = 40.0
         private const val MAX_ALLOWED_SILENCE_THRESHOLD = 5000.0
+
+        /** Guard against "recording" sessions that never produce readable audio. */
+        private const val MAX_CONSECUTIVE_EMPTY_READS = 50
     }
 
     /**
@@ -218,13 +221,14 @@ class VoiceRecorder(private val context: Context) {
         if (!isRecording) return
         isRecording = false
         try {
-            recordingThread?.join(2000)
-        } catch (_: InterruptedException) {}
-        try {
+            // Stop first to unblock any in-flight AudioRecord.read().
             audioRecord?.stop()
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping AudioRecord: ${e.message}")
         }
+        try {
+            recordingThread?.join(2000)
+        } catch (_: InterruptedException) {}
         releaseRecorder()
         Log.i(TAG, "Recording stopped")
         val callbackSnapshot = callback
@@ -263,6 +267,7 @@ class VoiceRecorder(private val context: Context) {
         var smoothedEnergy = INITIAL_NOISE_FLOOR
         val energyHistory = ArrayDeque<Double>()
         var noiseFloorRecalcCounter = 0
+        var consecutiveEmptyReads = 0
         val configSnapshot = silenceConfig
         val minSilenceThreshold = configSnapshot.silenceThreshold
         val minSpeechThreshold = minSilenceThreshold + SPEECH_HYSTERESIS
@@ -270,7 +275,33 @@ class VoiceRecorder(private val context: Context) {
         try {
             while (isRecording) {
                 val bytesRead = audioRecord?.read(readBuffer, 0, BYTES_PER_READ) ?: break
-                if (bytesRead <= 0) continue
+                when {
+                    bytesRead > 0 -> {
+                        consecutiveEmptyReads = 0
+                    }
+                    bytesRead == 0 -> {
+                        if (!isPaused) {
+                            consecutiveEmptyReads += 1
+                            if (consecutiveEmptyReads >= MAX_CONSECUTIVE_EMPTY_READS) {
+                                val emptyReadWindowMs = MAX_CONSECUTIVE_EMPTY_READS * READ_INTERVAL_MS
+                                val error =
+                                    "Microphone produced no audio data for ${emptyReadWindowMs}ms"
+                                Log.e(TAG, error)
+                                val callbackSnapshot = callback
+                                mainHandler.post { callbackSnapshot?.onRecordingError(error) }
+                                break
+                            }
+                        }
+                        continue
+                    }
+                    else -> {
+                        val error = mapAudioReadError(bytesRead)
+                        Log.e(TAG, "AudioRecord read failed: $error")
+                        val callbackSnapshot = callback
+                        mainHandler.post { callbackSnapshot?.onRecordingError(error) }
+                        break
+                    }
+                }
 
                 // When paused, discard audio but keep the loop alive
                 if (isPaused) {
@@ -366,5 +397,15 @@ class VoiceRecorder(private val context: Context) {
             sum += (sample * sample).toDouble()
         }
         return sqrt(sum / samples)
+    }
+
+    private fun mapAudioReadError(errorCode: Int): String {
+        return when (errorCode) {
+            AudioRecord.ERROR_DEAD_OBJECT -> "Microphone became unavailable (dead audio object)"
+            AudioRecord.ERROR_BAD_VALUE -> "Microphone returned invalid audio buffer"
+            AudioRecord.ERROR_INVALID_OPERATION -> "Microphone was not ready for audio capture"
+            AudioRecord.ERROR -> "Unknown microphone read failure"
+            else -> "Microphone read failure (code=$errorCode)"
+        }
     }
 }

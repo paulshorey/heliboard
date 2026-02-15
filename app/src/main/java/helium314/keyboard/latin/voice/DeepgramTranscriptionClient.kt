@@ -154,9 +154,10 @@ class DeepgramTranscriptionClient {
                     }
                     return
                 }
-                Log.e(TAG, "Deepgram stream failure: ${t.message}")
+                val errorMessage = mapConnectionError(t, response)
+                Log.e(TAG, "Deepgram stream failure: $errorMessage (raw: ${t.message})")
                 postIfCurrent(newToken) {
-                    this@DeepgramTranscriptionClient.callback?.onStreamError(mapNetworkError(t))
+                    this@DeepgramTranscriptionClient.callback?.onStreamError(errorMessage)
                 }
             }
         })
@@ -238,7 +239,6 @@ class DeepgramTranscriptionClient {
             append("&encoding=linear16")
             append("&sample_rate=").append(VoiceRecorder.SAMPLE_RATE)
             append("&channels=1")
-            append("&interim_results=true")
             append("&vad_events=true")
             if (!language.isNullOrBlank()) {
                 append("&language=").append(language)
@@ -309,7 +309,16 @@ class DeepgramTranscriptionClient {
         }
     }
 
-    private fun mapNetworkError(error: Throwable): String {
+    private fun mapConnectionError(error: Throwable, response: Response?): String {
+        val code = response?.code
+        if (code != null) {
+            return when (code) {
+                401, 403 -> "Invalid Deepgram API key. Please check Settings."
+                429 -> "Deepgram rate limited — too many requests"
+                in 500..599 -> "Deepgram service error ($code)"
+                else -> "Deepgram connection rejected ($code)"
+            }
+        }
         return when (error) {
             is UnknownHostException -> "No internet connection"
             is SocketTimeoutException -> "Deepgram streaming timed out"

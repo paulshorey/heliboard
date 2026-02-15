@@ -199,7 +199,7 @@ public class LatinIME extends InputMethodService implements
     private boolean mPendingNewParagraph = false;
     private final ArrayDeque<String> mPendingTranscriptionQueue = new ArrayDeque<>();
     private static final int MAX_PENDING_TRANSCRIPTIONS = 64;
-    private static final long CLEANUP_WATCHDOG_TIMEOUT_MS = 5_000L;
+    private static final long CLEANUP_WATCHDOG_TIMEOUT_MS = 12_000L;
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
     private final Runnable mCleanupWatchdogRunnable = new Runnable() {
         @Override
