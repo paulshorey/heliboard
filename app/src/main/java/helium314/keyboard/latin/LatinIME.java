@@ -200,7 +200,7 @@ public class LatinIME extends InputMethodService implements
     private boolean mPendingNewParagraph = false;
     private final ArrayDeque<String> mPendingTranscriptionQueue = new ArrayDeque<>();
     private static final int MAX_PENDING_TRANSCRIPTIONS = 64;
-    private static final long CLEANUP_WATCHDOG_TIMEOUT_MS = 5_000L;
+    private static final long CLEANUP_WATCHDOG_TIMEOUT_MS = 12_000L;
     private static final int FULLSCREEN_SYNC_MAX_CHARS = 100_000;
     private static final long FULLSCREEN_SYNC_RETRY_DELAY_MS = 50L;
     private static final int FULLSCREEN_SYNC_RETRY_COUNT = 2;
