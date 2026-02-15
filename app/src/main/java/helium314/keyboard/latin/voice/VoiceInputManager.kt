@@ -183,11 +183,9 @@ class VoiceInputManager(private val context: Context) {
         voiceRecorder.setCallback(object : VoiceRecorder.RecordingCallback {
             override fun onRecordingStarted() {
                 if (sessionId != activeSessionId) return
-                updateState(State.RECORDING)
-                // Start the auto-stop timer immediately so recording eventually
-                // stops even when the user never speaks.
-                startAutoStopTimer()
                 Log.i(TAG, "VOICE_STEP_1 recording callback received")
+                // State and auto-stop timer are set after startRecording() returns
+                // (see below), so we only log here to avoid double-initialization.
             }
 
             override fun onAudioChunk(pcmData: ByteArray) {
@@ -403,7 +401,8 @@ class VoiceInputManager(private val context: Context) {
                     "(buffer full at $MAX_PENDING_AUDIO_CHUNKS)"
             )
         }
-        pendingAudioChunks.addLast(PendingAudioChunk(sessionId, pcmData.copyOf()))
+        // No copyOf() needed — VoiceRecorder already provides a fresh copy per chunk.
+        pendingAudioChunks.addLast(PendingAudioChunk(sessionId, pcmData))
 
         if (isStreamingReady && streamSessionId == sessionId) {
             flushPendingAudio(sessionId)
@@ -503,6 +502,16 @@ class VoiceInputManager(private val context: Context) {
             return
         }
 
+        // Auth / client errors are unrecoverable — reconnecting with the same
+        // invalid key would just fail again. Stop immediately.
+        if (isUnrecoverableError(error)) {
+            pendingAudioChunks.clear()
+            Log.e(TAG, "Stream auth/client error — stopping recording: $error")
+            listener?.onError(error ?: "Deepgram authentication failed")
+            stopRecordingInternal(cancelPending = true)
+            return
+        }
+
         val sessionLikelyActive =
             currentState != State.IDLE || voiceRecorder.isCurrentlyRecording
 
@@ -515,6 +524,17 @@ class VoiceInputManager(private val context: Context) {
         Log.e(TAG, "Stream disconnected unrecoverably: $message")
         listener?.onError(message)
         stopRecordingInternal(cancelPending = true)
+    }
+
+    /**
+     * Whether the stream error indicates a client-side issue that won't resolve on retry
+     * (e.g. invalid API key, rejected credentials).
+     */
+    private fun isUnrecoverableError(error: String?): Boolean {
+        if (error == null) return false
+        val lower = error.lowercase()
+        return lower.contains("invalid") && lower.contains("api key") ||
+            lower.contains("connection rejected")
     }
 
     private fun scheduleReconnect(sessionId: Long, reason: String): Boolean {

@@ -154,9 +154,10 @@ class DeepgramTranscriptionClient {
                     }
                     return
                 }
-                Log.e(TAG, "Deepgram stream failure: ${t.message}")
+                val errorMsg = mapConnectionError(t, response)
+                Log.e(TAG, "Deepgram stream failure: $errorMsg (raw: ${t.message})")
                 postIfCurrent(newToken) {
-                    this@DeepgramTranscriptionClient.callback?.onStreamError(mapNetworkError(t))
+                    this@DeepgramTranscriptionClient.callback?.onStreamError(errorMsg)
                 }
             }
         })
@@ -238,7 +239,6 @@ class DeepgramTranscriptionClient {
             append("&encoding=linear16")
             append("&sample_rate=").append(VoiceRecorder.SAMPLE_RATE)
             append("&channels=1")
-            append("&interim_results=true")
             append("&vad_events=true")
             if (!language.isNullOrBlank()) {
                 append("&language=").append(language)
@@ -309,7 +309,24 @@ class DeepgramTranscriptionClient {
         }
     }
 
-    private fun mapNetworkError(error: Throwable): String {
+    /**
+     * Map a WebSocket connection failure to a user-facing error message.
+     *
+     * When the WebSocket upgrade is rejected by the server (e.g. invalid API key),
+     * OkHttp provides the HTTP [response] alongside the [error]. We inspect the
+     * status code first so auth failures get a clear, actionable message instead
+     * of a generic "Streaming error".
+     */
+    private fun mapConnectionError(error: Throwable, response: Response?): String {
+        val code = response?.code
+        if (code != null) {
+            return when (code) {
+                401, 403 -> "Invalid Deepgram API key. Please check Settings."
+                429 -> "Deepgram rate limited — too many requests"
+                in 500..599 -> "Deepgram service error ($code)"
+                else -> "Deepgram connection rejected ($code)"
+            }
+        }
         return when (error) {
             is UnknownHostException -> "No internet connection"
             is SocketTimeoutException -> "Deepgram streaming timed out"
