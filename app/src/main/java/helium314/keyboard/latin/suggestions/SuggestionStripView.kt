@@ -77,6 +77,7 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         fun onVoiceInputClicked()
         fun onVoiceCancelClicked()
         fun onVoicePauseClicked()
+        fun onFullscreenExpandClicked()
     }
 
     private val moreSuggestionsContainer: View
@@ -118,11 +119,13 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
     private val pinnedKeys: ViewGroup = findViewById(R.id.pinned_keys)
     private val suggestionsStrip: ViewGroup = findViewById(R.id.suggestions_strip)
     private val toolbarExpandKey = findViewById<ImageButton>(R.id.suggestions_strip_toolbar_key)
+    private val fullscreenExpandKey = findViewById<ImageButton>(R.id.fullscreen_expand_key)
     private val voiceInputKey = findViewById<ImageButton>(R.id.voice_input_key)
     private val voiceCancelKey = findViewById<ImageButton>(R.id.voice_cancel_key)
     private val voicePauseKey = findViewById<ImageButton>(R.id.voice_pause_key)
     private val incognitoIcon = KeyboardIconsSet.instance.getNewDrawable(ToolbarKey.INCOGNITO.name, context)
     private val toolbarArrowIcon = KeyboardIconsSet.instance.getNewDrawable(KeyboardIconsSet.NAME_TOOLBAR_KEY, context)
+    private val fullscreenCollapseIcon = androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_arrow_left)?.mutate()
     private val voiceIcon = KeyboardIconsSet.instance.getNewDrawable(ToolbarKey.VOICE.name, context)
     private val defaultToolbarBackground: Drawable = toolbarExpandKey.background
     private val enabledToolKeyBackground = GradientDrawable()
@@ -152,6 +155,19 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         enabledToolKeyBackground.colors = intArrayOf(color, Color.TRANSPARENT)
         enabledToolKeyBackground.gradientType = GradientDrawable.RADIAL_GRADIENT
         enabledToolKeyBackground.gradientRadius = resources.getDimensionPixelSize(R.dimen.config_suggestions_strip_height) / 2.1f
+
+        // Fullscreen expand key setup
+        fullscreenExpandKey.layoutParams.height = toolbarHeight
+        fullscreenExpandKey.layoutParams.width = toolbarHeight
+        fullscreenExpandKey.setImageDrawable(toolbarArrowIcon)
+        colors.setColor(fullscreenExpandKey, ColorType.TOOL_BAR_KEY)
+        colors.setBackground(fullscreenExpandKey, ColorType.STRIP_BACKGROUND)
+        fullscreenExpandKey.setOnClickListener {
+            AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, this, HapticEvent.KEY_PRESS)
+            if (::listener.isInitialized) {
+                listener.onFullscreenExpandClicked()
+            }
+        }
 
         // Voice input key setup
         voiceInputKey.layoutParams.height = toolbarHeight
@@ -545,6 +561,20 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         val show = Settings.getValues().mShowsVoiceInputKey
         toolbar.findViewWithTag<View>(ToolbarKey.VOICE)?.isVisible = show
         pinnedKeys.findViewWithTag<View>(ToolbarKey.VOICE)?.isVisible = show
+        fullscreenExpandKey.isVisible = show
+    }
+
+    /**
+     * Update fullscreen expand button icon based on fullscreen state.
+     * When in fullscreen: show collapse icon (minimize). When not: show expand icon.
+     */
+    fun setFullscreenMode(fullscreen: Boolean) {
+        fullscreenExpandKey.setImageDrawable(
+            if (fullscreen) fullscreenCollapseIcon else toolbarArrowIcon
+        )
+        fullscreenExpandKey.contentDescription = context.getString(
+            if (fullscreen) R.string.fullscreen_collapse_description else R.string.fullscreen_expand_description
+        )
     }
 
     private fun updateKeys() {

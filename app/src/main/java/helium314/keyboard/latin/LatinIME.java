@@ -1399,16 +1399,12 @@ public class LatinIME extends InputMethodService implements
             return;
         }
         Log.i(TAG, "Entering forced fullscreen extract mode");
-        // A previous session may still have stale async callbacks. Invalidate them before
-        // switching to fullscreen dictation so late cleanup results are ignored.
-        if (mCleanupInProgress || hasPendingTranscriptions()) {
-            mVoiceSessionId++;
-            resetVoiceInputState();
-            if (mTextCleanupClient != null) {
-                mTextCleanupClient.cancelAll();
-            }
-        }
+        // Do NOT invalidate voice session when switching — recording and transcription
+        // should continue uninterrupted. Pending transcriptions will insert into the
+        // fullscreen editor once it is ready.
+
         mOriginalFieldText = getOriginalFieldText();
+        final int cursorPosition = getOriginalFieldCursorPosition();
 
         mFullscreenExtractView = getLayoutInflater().inflate(
                 R.layout.fullscreen_extract_view, null);
@@ -1418,6 +1414,13 @@ public class LatinIME extends InputMethodService implements
             clearFullscreenExtractState();
             return;
         }
+
+        // Copy app field text and cursor position to fullscreen editor.
+        mFullscreenExtractEditText.setText(mOriginalFieldText);
+        final int safeCursor = Math.max(0, Math.min(cursorPosition, mOriginalFieldText.length()));
+        mFullscreenExtractEditText.setSelection(safeCursor);
+        mFullscreenExtractEditText.requestFocus();
+
         mForceFullscreenMode = true;
 
         final android.widget.Button minimizeButton =
@@ -1434,19 +1437,26 @@ public class LatinIME extends InputMethodService implements
         // Layout includes @android:id/inputExtractEditText, so framework routes IME input here.
         setExtractView(mFullscreenExtractView);
         updateFullscreenMode();
+
+        if (hasSuggestionStripView()) {
+            mSuggestionStripView.setFullscreenMode(true);
+        }
     }
 
     private void onFullscreenMinimize() {
         Log.i(TAG, "Fullscreen minimize requested");
         final String fullscreenText = getFullscreenEditorTextForSync();
-        cancelVoiceRecordingAbruptly();
+        // Do NOT cancel voice — let recording/transcription continue. Pending transcriptions
+        // will insert into the app field after we exit fullscreen.
+        stopVoiceRecordingGracefully();
         synchronizeFullscreenTextAndExit(fullscreenText, false);
     }
 
     private void onFullscreenSubmit() {
         Log.i(TAG, "Fullscreen submit requested");
         final String fullscreenText = getFullscreenEditorTextForSync();
-        cancelVoiceRecordingAbruptly();
+        // Stop gracefully so pending transcriptions complete before we hide.
+        stopVoiceRecordingGracefully();
         synchronizeFullscreenTextAndExit(fullscreenText, true);
     }
 
@@ -1505,6 +1515,38 @@ public class LatinIME extends InputMethodService implements
 
         final String currentText = readCurrentFieldText(ic, FULLSCREEN_SYNC_MAX_CHARS);
         return currentText != null ? currentText : "";
+    }
+
+    /**
+     * Get the cursor position (selection start) in the app's text field.
+     * Returns 0 if unknown or on error.
+     */
+    private int getOriginalFieldCursorPosition() {
+        final android.view.inputmethod.InputConnection ic = getCurrentInputConnection();
+        if (ic == null) {
+            return 0;
+        }
+        try {
+            final android.view.inputmethod.ExtractedTextRequest request =
+                    new android.view.inputmethod.ExtractedTextRequest();
+            request.hintMaxChars = FULLSCREEN_SYNC_MAX_CHARS;
+            request.hintMaxLines = Integer.MAX_VALUE;
+            request.flags = 0;
+            request.token = 0;
+            final android.view.inputmethod.ExtractedText extracted = ic.getExtractedText(request, 0);
+            if (extracted != null) {
+                int pos = extracted.selectionStart;
+                if (pos >= 0 && extracted.text != null && pos <= extracted.text.length()) {
+                    return pos;
+                }
+            }
+            // Fallback: cursor position = length of text before cursor
+            final CharSequence before = ic.getTextBeforeCursor(FULLSCREEN_SYNC_MAX_CHARS, 0);
+            return before != null ? before.length() : 0;
+        } catch (Exception e) {
+            Log.w(TAG, "Failed reading cursor position: " + e.getMessage());
+            return 0;
+        }
     }
 
     @Nullable
@@ -1594,6 +1636,10 @@ public class LatinIME extends InputMethodService implements
         clearFullscreenExtractState();
         restoreDefaultExtractView();
         updateFullscreenMode();
+
+        if (hasSuggestionStripView()) {
+            mSuggestionStripView.setFullscreenMode(false);
+        }
     }
 
     private void restoreDefaultExtractView() {
@@ -2026,11 +2072,16 @@ public class LatinIME extends InputMethodService implements
     @Override
     public void onVoiceInputClicked() {
         if (mVoiceInputManager != null) {
-            // First mic tap in idle enters fullscreen extract mode.
-            if (mVoiceInputManager.isIdle() && !mForceFullscreenMode) {
-                enterFullscreenMode();
-            }
             mVoiceInputManager.toggleRecording();
+        }
+    }
+
+    @Override
+    public void onFullscreenExpandClicked() {
+        if (mForceFullscreenMode) {
+            onFullscreenMinimize();
+        } else {
+            enterFullscreenMode();
         }
     }
 
@@ -2172,77 +2223,16 @@ public class LatinIME extends InputMethodService implements
 
     @Nullable
     private CharSequence getTextBeforeCursorForVoiceContext(final int maxChars) {
-        if (mForceFullscreenMode && mFullscreenExtractEditText != null) {
-            final CharSequence fullText = mFullscreenExtractEditText.getText();
-            if (fullText == null || fullText.length() == 0) {
-                return "";
-            }
-            int cursor = mFullscreenExtractEditText.getSelectionStart();
-            if (cursor < 0 || cursor > fullText.length()) {
-                cursor = fullText.length();
-            }
-            final int start = Math.max(0, cursor - maxChars);
-            return fullText.subSequence(start, cursor);
-        }
+        // Always read from InputConnection (app field). In fullscreen, the extract view
+        // mirrors the app; the app is the source of truth.
         return mInputLogic.mConnection.getTextBeforeCursor(maxChars, 0);
     }
 
-    private boolean replaceSelectionInFullscreenEditor(@NonNull final String replacementText) {
-        if (!mForceFullscreenMode || mFullscreenExtractEditText == null) {
-            return false;
-        }
-        final android.text.Editable editable = mFullscreenExtractEditText.getText();
-        if (editable == null) {
-            return false;
-        }
-
-        int start = mFullscreenExtractEditText.getSelectionStart();
-        int end = mFullscreenExtractEditText.getSelectionEnd();
-        if (start < 0 || end < 0) {
-            start = editable.length();
-            end = editable.length();
-        } else if (start > end) {
-            final int tmp = start;
-            start = end;
-            end = tmp;
-        }
-
-        editable.replace(start, end, replacementText);
-        final int newCursor = Math.min(start + replacementText.length(), editable.length());
-        mFullscreenExtractEditText.setSelection(newCursor);
-        return true;
-    }
-
-    private boolean replaceTextBeforeCursorInFullscreenEditor(@NonNull final String replacementText,
-                                                              final int charsBeforeCursor) {
-        if (!mForceFullscreenMode || mFullscreenExtractEditText == null) {
-            return false;
-        }
-        final android.text.Editable editable = mFullscreenExtractEditText.getText();
-        if (editable == null) {
-            return false;
-        }
-
-        final int selStart = mFullscreenExtractEditText.getSelectionStart();
-        final int selEnd = mFullscreenExtractEditText.getSelectionEnd();
-        int cursor = Math.max(selStart, selEnd);
-        if (cursor < 0 || cursor > editable.length()) {
-            cursor = editable.length();
-        }
-        final int deleteCount = Math.max(0, charsBeforeCursor);
-        final int replaceStart = Math.max(0, cursor - deleteCount);
-        editable.replace(replaceStart, cursor, replacementText);
-        final int newCursor = Math.min(replaceStart + replacementText.length(), editable.length());
-        mFullscreenExtractEditText.setSelection(newCursor);
-        return true;
-    }
-
     private void insertParagraphBreak() {
-        if (replaceSelectionInFullscreenEditor("\n\n")) {
-            return;
-        }
         mInputLogic.finishInput();
+        mInputLogic.mConnection.beginBatchEdit();
         mInputLogic.mConnection.commitText("\n\n", 1);
+        mInputLogic.mConnection.endBatchEdit();
     }
 
     /**
@@ -2387,14 +2377,12 @@ public class LatinIME extends InputMethodService implements
                     "VOICE_STEP_6 context before insert: \"" + sanitizeLogText(contextBefore) + "\""
             );
 
-            if (!replaceSelectionInFullscreenEditor(textToInsert)) {
-                // Reset InputLogic composing state before direct connection manipulation.
-                // This ensures the WordComposer is properly synchronized with the connection.
-                mInputLogic.finishInput();
-                mInputLogic.mConnection.beginBatchEdit();
-                mInputLogic.mConnection.commitText(textToInsert, 1);
-                mInputLogic.mConnection.endBatchEdit();
-            }
+            // Reset InputLogic composing state before direct connection manipulation.
+            // This ensures the WordComposer is properly synchronized with the connection.
+            mInputLogic.finishInput();
+            mInputLogic.mConnection.beginBatchEdit();
+            mInputLogic.mConnection.commitText(textToInsert, 1);
+            mInputLogic.mConnection.endBatchEdit();
 
             // Text has been inserted — hide the processing spinner.
             mKeyboardSwitcher.hideProcessingIndicator();
@@ -2440,16 +2428,14 @@ public class LatinIME extends InputMethodService implements
                             " chars) with cleaned text (" + textToInsert.length() + " chars)"
             );
 
-            if (!replaceTextBeforeCursorInFullscreenEditor(textToInsert, oldContextLength)) {
-                // Reset InputLogic composing state before direct connection manipulation.
-                mInputLogic.finishInput();
-                mInputLogic.mConnection.beginBatchEdit();
-                if (oldContextLength > 0) {
-                    mInputLogic.mConnection.deleteTextBeforeCursor(oldContextLength);
-                }
-                mInputLogic.mConnection.commitText(textToInsert, 1);
-                mInputLogic.mConnection.endBatchEdit();
+            // Reset InputLogic composing state before direct connection manipulation.
+            mInputLogic.finishInput();
+            mInputLogic.mConnection.beginBatchEdit();
+            if (oldContextLength > 0) {
+                mInputLogic.mConnection.deleteTextBeforeCursor(oldContextLength);
             }
+            mInputLogic.mConnection.commitText(textToInsert, 1);
+            mInputLogic.mConnection.endBatchEdit();
 
             // Cleaned text has been inserted — hide the processing spinner.
             mKeyboardSwitcher.hideProcessingIndicator();
