@@ -6,86 +6,86 @@ This document describes how the fullscreen keyboard feature works and what we le
 
 When the user taps the fullscreen expand button (next to the microphone):
 
-1. The keyboard enters fullscreen mode with a large temporary text area visible above the keyboard.
-2. User can type or use voice transcription. Both appear in this text area.
-3. On **Minimize**: return to normal keyboard; text syncs back to the original app field.
-4. On **Submit**: close keyboard and sync text to the app field.
-5. On **Cancel**: discard changes and restore original text.
+1. The keyboard **hides** and `FullscreenEditorActivity` is launched as a standalone app.
+2. The user sees a fullscreen text editor (Compose UI, similar to Settings). They can type or use voice transcription.
+3. On **Minimize**: save text to memory, finish the Activity. User returns to the original app; when they focus the text area again, the IME inserts the pending text.
+4. On **Submit**: same as Minimize, plus the keyboard hides after inserting the text.
+5. On **Cancel**: restore original text, finish the Activity.
 
-## Android Extract View Architecture
+## Why Activity-Based Fullscreen (Not Extract View)
 
-The fullscreen text area uses Android’s extract view (`setExtractView()`). **Critical insight:**
+### Extract view fails on web pages
 
-### The extract view is a MIRROR, not an independent editor
+When using Android's extract view (`setExtractView()` with `ExtractEditText`):
 
-- **Source of truth**: The app’s text field (via `InputConnection` / `getCurrentInputConnection()`).
-- **Display**: The extract view (`ExtractEditText` with `@android:id/inputExtractEditText`) shows a copy of that content.
-- **Sync direction**: App → Framework → Extract view via `setExtractedText()`.
-- **Input flow**: All text input (typing, voice) goes through `InputConnection` to the app. The framework then syncs to the extract view for display.
+- The extract view is a **mirror** of the app's text field — sync flows through `InputConnection`.
+- When the fullscreen extract view gains focus, the **original webpage textarea loses focus**.
+- When the original textarea loses focus, the **keyboard closes**. This is expected Android behavior.
+- Result: fullscreen mode works in native apps but **fails in WebViews / browser textareas**.
 
-So we must always **write to the app’s `InputConnection`**. The framework handles showing it in the fullscreen area.
+### Settings page insight
 
----
+The user can open Settings → Transcription and focus into textareas there (API keys, prompts) while the keyboard stays open. Why? Because **the Settings page is the keyboard app itself**, running as a full standalone foreground app — not as an IME attached to another app.
 
-## What Did NOT Work
+So we reuse that model: **treat fullscreen as "opening the keyboard app"**, separate from the original app.
+
+## Current Implementation (Activity-Based)
+
+### Flow
+
+1. **User taps fullscreen expand** → `onFullscreenExpandClicked()` → `launchFullscreenEditorActivity()`.
+2. **Launch**: Commit typed text, stop voice gracefully, read current text and `packageName` from `InputConnection`/`EditorInfo`, call `requestHideSelf()`, start `FullscreenEditorActivity` with extras.
+3. **In Activity**: User edits in Compose `OutlinedTextField` (keyboard + voice work; keyboard app is foreground).
+4. **On Minimize/Submit/Cancel**: Store result in `FullscreenEditorResult` (pending text, target package, hide-keyboard flag), `finish()`.
+5. **When user returns**: They go back to the original app (e.g. browser). When they focus the text area, `onStartInputViewInternal()` runs. If `FullscreenEditorResult.pendingText` is set and `editorInfo.packageName` matches the target, we call `replaceEntireFieldText()` to insert the text, then optionally hide the keyboard.
+
+### Key files
+
+- `LatinIME.java`: `launchFullscreenEditorActivity()`, pending-text handling in `onStartInputViewInternal()`.
+- `FullscreenEditorActivity.kt`: Compose UI, toolbar (Minimize/Submit/Cancel), `FullscreenEditorResult`.
+- `SuggestionStripView.kt`: Fullscreen expand button, `onFullscreenExpandClicked()`.
+
+### Trailing newlines when opening
+
+When entering fullscreen, the initial text can intermittently have 2 extra trailing newlines.
+This points to `getExtractedText()` rather than the voice paragraph timer.
+
+**Root cause**: Some editors (including WebView/Chrome for HTML textareas) add trailing newlines
+to the text returned by `getExtractedText()` — likely for fullscreen/extract-view display.
+
+**Fix**: We use `getOriginalFieldTextForFullscreen()`, which bypasses `getExtractedText()` and
+reads only via `getTextBeforeCursor()` + `getTextAfterCursor()`. That path returns the actual
+field content without the editor’s extra newlines.
+
+### What to keep
+
+- `replaceEntireFieldText()` — used for inserting pending text when the IME reconnects.
+- `getOriginalFieldText()`, `getOriginalFieldCursorPosition()`, `readCurrentFieldText()` — used to seed the Activity and for `replaceEntireFieldText()`.
+- `FullscreenEditorResult` — bridge between Activity and IME.
+
+## What Did NOT Work (Extract View)
+
+### ❌ Extract view on web pages
+
+When the extract view gains focus, the web textarea loses focus and the keyboard closes. No workaround within the extract view model.
 
 ### ❌ Writing directly to the extract EditText
 
-**Attempt**: Modify `mFullscreenExtractEditText.getText()` or use `BaseInputConnection` to write to the extract view.
+The framework periodically syncs from the app to the extract view. Our direct edits were overwritten.
 
-**Why it failed**: The framework periodically calls `setExtractedText()` to sync from the app to the extract view. Our changes were overwritten by the next sync. Text appeared briefly, then vanished.
+### ❌ Blocking `setExtractedText()`
 
-### ❌ Blocking `setExtractedText()` (FullscreenEditText)
-
-**Attempt**: Subclass `ExtractEditText` and override `setExtractedText()` to no-op when `setIgnoreFrameworkSync(true)`.
-
-**Why it failed**: Blocking `setExtractedText()` stopped the framework from updating the extract view at all. Result:
-- Voice transcription: no visible updates (same overwrite problem, but we also blocked the sync path).
-- **Manual typing stopped working** — typed text never appeared. Typing goes: InputConnection → app → framework extracts → `setExtractedText()` → extract view. By blocking the last step, we broke the display of typed input.
-
-### ❌ Reading context from the extract view for voice
-
-**Attempt**: When in fullscreen, read `getTextBeforeCursorForVoiceContext()` from `mFullscreenExtractEditText` instead of `InputConnection`.
-
-**Why it failed**: Inconsistent. The extract view can lag or be overwritten; the app’s `InputConnection` is the source of truth.
-
----
-
-## What DID Work
-
-### ✅ Always use the app’s InputConnection
-
-- **Voice transcription**: Write via `mInputLogic.mConnection.commitText()` and `deleteTextBeforeCursor()`. Same path as regular (non-fullscreen) mode.
-- **Context for voice**: Read via `mInputLogic.mConnection.getTextBeforeCursor()`. Don’t read from the extract view.
-- **Paragraph breaks**: Use `mInputLogic.mConnection.commitText("\n\n", 1)`.
-
-### ✅ Let the framework handle the extract view
-
-- Use the standard `ExtractEditText` with `@android:id/inputExtractEditText`.
-- Do **not** subclass it or override `setExtractedText()`.
-- The framework syncs app content → extract view. We only need to write to the app.
-
-### ✅ Copy text on enter, sync on exit
-
-- **Enter fullscreen**: Copy `getOriginalFieldText()` and cursor position into the extract view (one-time init). The framework will also sync; we seed it so it’s correct from the start.
-- **Exit (Minimize/Submit)**: Call `replaceEntireFieldText()` to sync our fullscreen draft back to the app via `InputConnection`, then exit. Use retries if needed for flaky connections.
-
-### ✅ Decouple fullscreen from microphone
-
-- Fullscreen expand button is separate from the microphone.
-- Microphone starts/stops recording; fullscreen toggles layout only.
-- Use `stopVoiceRecordingGracefully()` on Minimize/Submit so pending transcription can finish before sync.
+Stopped all display updates; typing and voice transcription stopped showing.
 
 ---
 
 ## Summary: Rules of Thumb
 
-| Do | Don’t |
+| Do | Don't |
 |----|-------|
-| Write to `mInputLogic.mConnection` (app) for voice and all text | Write to the extract view directly |
-| Read from `mInputLogic.mConnection` for voice context | Read from the extract view for voice context |
-| Use standard `ExtractEditText` | Subclass or block `setExtractedText()` |
-| Let the framework sync app → extract view | Try to make the extract view independent |
-| Sync fullscreen text back to app on exit | Assume the extract view is the source of truth |
+| Launch `FullscreenEditorActivity` for fullscreen editing | Use extract view for web page textareas |
+| Store result in `FullscreenEditorResult`, insert on IME reconnect | Try to keep IME attached while switching to fullscreen UI |
+| Treat fullscreen as "keyboard app as standalone app" | Assume extract view works everywhere |
+| Use `replaceEntireFieldText()` when inserting pending text | Assume `InputConnection` is always ready immediately |
 
-**Bottom line**: The extract view is a read-only display of the app’s field. All edits go through `InputConnection` to the app; the framework updates the extract view.
+**Bottom line**: For web pages and apps where the extract view causes focus loss, use an Activity so the keyboard app runs as a standalone app. Sync text back when the user returns and focuses the original field again.

@@ -78,6 +78,7 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         fun onVoiceCancelClicked()
         fun onVoicePauseClicked()
         fun onFullscreenExpandClicked()
+        fun onFullscreenMinimizeClicked()
     }
 
     private val moreSuggestionsContainer: View
@@ -125,12 +126,14 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
     private val voicePauseKey = findViewById<ImageButton>(R.id.voice_pause_key)
     private val incognitoIcon = KeyboardIconsSet.instance.getNewDrawable(ToolbarKey.INCOGNITO.name, context)
     private val toolbarArrowIcon = KeyboardIconsSet.instance.getNewDrawable(KeyboardIconsSet.NAME_TOOLBAR_KEY, context)
-    private val fullscreenCollapseIcon = androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_arrow_left)?.mutate()
+    private val fullscreenExpandIcon = androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_arrow_down)?.mutate()
+    private val fullscreenCollapseIcon = androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_arrow_up)?.mutate()
     private val voiceIcon = KeyboardIconsSet.instance.getNewDrawable(ToolbarKey.VOICE.name, context)
     private val defaultToolbarBackground: Drawable = toolbarExpandKey.background
     private val enabledToolKeyBackground = GradientDrawable()
     private var direction = 1 // 1 if LTR, -1 if RTL
     private var isVoiceRecording = false
+    private var inFullscreenEditor = false
 
     private val toolbarKeyLayoutParams = LinearLayout.LayoutParams(
         resources.getDimensionPixelSize(R.dimen.config_suggestions_strip_edge_key_width),
@@ -156,16 +159,20 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         enabledToolKeyBackground.gradientType = GradientDrawable.RADIAL_GRADIENT
         enabledToolKeyBackground.gradientRadius = resources.getDimensionPixelSize(R.dimen.config_suggestions_strip_height) / 2.1f
 
-        // Fullscreen expand key setup
+        // Fullscreen expand key setup (icon updated in setFullscreenButtonMode)
         fullscreenExpandKey.layoutParams.height = toolbarHeight
         fullscreenExpandKey.layoutParams.width = toolbarHeight
-        fullscreenExpandKey.setImageDrawable(toolbarArrowIcon)
+        fullscreenExpandKey.setImageDrawable(fullscreenExpandIcon)
         colors.setColor(fullscreenExpandKey, ColorType.TOOL_BAR_KEY)
         colors.setBackground(fullscreenExpandKey, ColorType.STRIP_BACKGROUND)
         fullscreenExpandKey.setOnClickListener {
             AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, this, HapticEvent.KEY_PRESS)
             if (::listener.isInitialized) {
-                listener.onFullscreenExpandClicked()
+                if (inFullscreenEditor) {
+                    listener.onFullscreenMinimizeClicked()
+                } else {
+                    listener.onFullscreenExpandClicked()
+                }
             }
         }
 
@@ -565,15 +572,16 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
     }
 
     /**
-     * Update fullscreen expand button icon based on fullscreen state.
-     * When in fullscreen: show collapse icon (minimize). When not: show expand icon.
+     * Update fullscreen button icon and action. When in FullscreenEditorActivity, show angle-down
+     * (minimize); otherwise show angle-up (expand).
      */
-    fun setFullscreenMode(fullscreen: Boolean) {
+    fun setFullscreenButtonMode(inFullscreenEditor: Boolean) {
+        this.inFullscreenEditor = inFullscreenEditor
         fullscreenExpandKey.setImageDrawable(
-            if (fullscreen) fullscreenCollapseIcon else toolbarArrowIcon
+            if (inFullscreenEditor) fullscreenCollapseIcon else fullscreenExpandIcon
         )
         fullscreenExpandKey.contentDescription = context.getString(
-            if (fullscreen) R.string.fullscreen_collapse_description else R.string.fullscreen_expand_description
+            if (inFullscreenEditor) R.string.fullscreen_collapse_description else R.string.fullscreen_expand_description
         )
     }
 

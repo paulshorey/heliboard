@@ -1,0 +1,4 @@
+<!-- Angle up / expand - rotate left-pointing chevron -90 degrees -->
+<rotate xmlns:android="http://schemas.android.com/apk/res/android"
+    android:fromDegrees="-90"
+    android:drawable="@drawable/ic_arrow_left" />
