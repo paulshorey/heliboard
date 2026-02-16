@@ -910,16 +910,12 @@ public class LatinIME extends InputMethodService implements
         if (pending != null && targetPkg != null && targetPkg.equals(editorInfo.packageName)) {
             FullscreenEditorResult.pendingText = null;
             FullscreenEditorResult.targetPackageName = null;
-            final boolean hideAfter = FullscreenEditorResult.hideKeyboardOnInsert;
-            FullscreenEditorResult.hideKeyboardOnInsert = false;
             mMainHandler.post(() -> {
                 final boolean synced = replaceEntireFieldText(pending, true);
                 if (!synced) {
                     Log.w(TAG, "Failed to insert pending fullscreen text");
                 }
-                if (hideAfter) {
-                    requestHideSelf(0);
-                }
+                requestHideSelf(0);
             });
         }
 
@@ -1979,7 +1975,7 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public void onFullscreenMinimizeClicked() {
-        final Runnable runnable = FullscreenEditorActivity.onMinimizeFromKeyboard;
+        final Runnable runnable = FullscreenEditorActivity.onExitFromKeyboard;
         if (runnable != null) {
             runnable.run();
         }
@@ -2900,7 +2896,6 @@ public class LatinIME extends InputMethodService implements
                 | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         intent.putExtra(FullscreenEditorActivity.EXTRA_INITIAL_TEXT, initialText);
         intent.putExtra(FullscreenEditorActivity.EXTRA_PACKAGE_NAME, targetPackage);
-        intent.putExtra(FullscreenEditorActivity.EXTRA_ORIGINAL_TEXT, initialText);
         startActivity(intent);
     }
 

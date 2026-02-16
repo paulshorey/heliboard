@@ -7,10 +7,8 @@ This document describes how the fullscreen keyboard feature works and what we le
 When the user taps the fullscreen expand button (next to the microphone):
 
 1. The keyboard **hides** and `FullscreenEditorActivity` is launched as a standalone app.
-2. The user sees a fullscreen text editor (Compose UI, similar to Settings). They can type or use voice transcription.
-3. On **Minimize**: save text to memory, finish the Activity. User returns to the original app; when they focus the text area again, the IME inserts the pending text.
-4. On **Submit**: same as Minimize, plus the keyboard hides after inserting the text.
-5. On **Cancel**: restore original text, finish the Activity.
+2. The user sees a fullscreen text editor (Compose UI). They can type or use voice transcription.
+3. Any exit (back press, keyboard toggle button) saves the current text and syncs it to the original app's textarea. The keyboard hides after insert.
 
 ## Why Activity-Based Fullscreen (Not Extract View)
 
@@ -35,14 +33,14 @@ So we reuse that model: **treat fullscreen as "opening the keyboard app"**, sepa
 
 1. **User taps fullscreen expand** → `onFullscreenExpandClicked()` → `launchFullscreenEditorActivity()`.
 2. **Launch**: Commit typed text, stop voice gracefully, read current text and `packageName` from `InputConnection`/`EditorInfo`, call `requestHideSelf()`, start `FullscreenEditorActivity` with extras.
-3. **In Activity**: User edits in Compose `OutlinedTextField` (keyboard + voice work; keyboard app is foreground).
-4. **On Minimize/Submit/Cancel**: Store result in `FullscreenEditorResult` (pending text, target package, hide-keyboard flag), `finish()`.
-5. **When user returns**: They go back to the original app (e.g. browser). When they focus the text area, `onStartInputViewInternal()` runs. If `FullscreenEditorResult.pendingText` is set and `editorInfo.packageName` matches the target, we call `replaceEntireFieldText()` to insert the text, then optionally hide the keyboard.
+3. **In Activity**: User edits in Compose `OutlinedTextField` (keyboard + voice work; keyboard app is foreground). No top toolbar — the keyboard's fullscreen toggle (angle down) or back press exits.
+4. **On exit**: Store result in `FullscreenEditorResult` (pending text, target package), `finish()`.
+5. **When user returns**: They go back to the original app. When they focus the text area, `onStartInputViewInternal()` runs. If `FullscreenEditorResult.pendingText` is set and `editorInfo.packageName` matches the target, we call `replaceEntireFieldText()` to insert the text, then hide the keyboard.
 
 ### Key files
 
 - `LatinIME.java`: `launchFullscreenEditorActivity()`, pending-text handling in `onStartInputViewInternal()`.
-- `FullscreenEditorActivity.kt`: Compose UI, toolbar (Minimize/Submit/Cancel), `FullscreenEditorResult`.
+- `FullscreenEditorActivity.kt`: Compose UI (text field only), `FullscreenEditorResult`.
 - `SuggestionStripView.kt`: Fullscreen expand button, `onFullscreenExpandClicked()`.
 
 ### Trailing newlines when opening
