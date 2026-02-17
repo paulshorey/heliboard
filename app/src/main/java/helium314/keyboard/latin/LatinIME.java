@@ -1624,8 +1624,11 @@ public class LatinIME extends InputMethodService implements
             return false;
         }
         final String sourceText = session.getSourceText();
-        if (sourceText != null && sourceText.equals(currentFieldText)) {
-            return true;
+        if (sourceText != null) {
+            return sourceText.equals(currentFieldText);
+        }
+        if (!exactMatch) {
+            return false;
         }
         return currentFieldText.isEmpty() && !session.getText().isEmpty();
     }
