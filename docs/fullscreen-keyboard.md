@@ -32,7 +32,7 @@ So we reuse that model: **treat fullscreen as "opening the keyboard app"**, sepa
 ### Flow
 
 1. **User taps fullscreen expand** → `onFullscreenExpandClicked()` → `launchFullscreenEditorActivity()`.
-2. **Launch**: Commit typed text, stop voice gracefully, read current text and editor identity from `InputConnection`/`EditorInfo`, resolve text from the shared session store, call `requestHideSelf()`, start `FullscreenEditorActivity` with extras.
+2. **Launch**: Commit typed text, stop voice gracefully, cancel pending regular-mode snapshot callbacks, read current text and editor identity from `InputConnection`/`EditorInfo`, resolve text from the shared session store, call `requestHideSelf()`, start `FullscreenEditorActivity` with extras.
 3. **In Activity**: User edits in Compose `OutlinedTextField` (keyboard + voice work; keyboard app is foreground). No top toolbar — the keyboard's fullscreen toggle (angle down) or back press exits.
 4. **While editing**: Fullscreen text is continuously persisted as `fullscreen_in_progress` in the shared session store (debounced + lifecycle flush).
 5. **On exit**: Mark session `pending_sync`, then `finish()`.
