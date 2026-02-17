@@ -265,7 +265,11 @@ object FullscreenTextSessionStore {
                 mutableMapOf()
             }
         }
-        prune(loaded)
+        val pruned = prune(loaded)
+        if (pruned) {
+            val serialized = json.encodeToString(loaded.values.sortedByDescending { it.updatedAt })
+            context.prefs().edit().putString(PREF_KEY_SESSIONS, serialized).apply()
+        }
         cache = loaded
         return loaded
     }
@@ -277,17 +281,19 @@ object FullscreenTextSessionStore {
         cache = sessions
     }
 
-    private fun prune(sessions: MutableMap<String, TextSessionRecord>) {
+    private fun prune(sessions: MutableMap<String, TextSessionRecord>): Boolean {
+        var changed = false
         val now = System.currentTimeMillis()
-        sessions.entries.removeAll { (_, value) ->
+        changed = sessions.entries.removeAll { (_, value) ->
             now - value.updatedAt > SESSION_TTL_MS
-        }
-        if (sessions.size <= MAX_SESSION_COUNT) return
+        } || changed
+        if (sessions.size <= MAX_SESSION_COUNT) return changed
         val toRemove = sessions.values
             .sortedByDescending { it.updatedAt }
             .drop(MAX_SESSION_COUNT)
             .map { it.sessionKey }
             .toSet()
-        sessions.entries.removeAll { it.key in toRemove }
+        changed = sessions.entries.removeAll { it.key in toRemove } || changed
+        return changed
     }
 }
