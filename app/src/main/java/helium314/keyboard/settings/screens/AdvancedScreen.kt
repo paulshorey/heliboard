@@ -85,6 +85,8 @@ fun AdvancedSettingsScreen(
         SettingsWithoutKey.BACKUP_RESTORE,
         if (BuildConfig.DEBUG || prefs.getBoolean(DebugSettings.PREF_SHOW_DEBUG_SETTINGS, Defaults.PREF_SHOW_DEBUG_SETTINGS))
             SettingsWithoutKey.DEBUG_SETTINGS else null,
+        if (Settings.readFullscreenModeAllowed(LocalContext.current.resources))
+            SettingsWithoutKey.FULLSCREEN_DRAFTS else null,
         R.string.settings_category_experimental,
         Settings.PREF_EMOJI_MAX_SDK,
         Settings.PREF_URL_DETECTION,
@@ -214,6 +216,13 @@ fun createAdvancedSettings(context: Context) = listOf(
         Preference(
             name = it.title,
             onClick = { SettingsDestination.navigateTo(SettingsDestination.Debug) }
+        ) { NextScreenIcon() }
+    },
+    Setting(context, SettingsWithoutKey.FULLSCREEN_DRAFTS, R.string.fullscreen_drafts_title,
+        R.string.fullscreen_drafts_empty) {
+        Preference(
+            name = it.title,
+            onClick = { SettingsDestination.navigateTo(SettingsDestination.FullscreenDrafts) }
         ) { NextScreenIcon() }
     },
     Setting(context, Settings.PREF_EMOJI_MAX_SDK, R.string.prefs_key_emoji_max_sdk) { setting ->

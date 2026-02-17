@@ -91,6 +91,7 @@ import helium314.keyboard.latin.voice.TextCleanupClient;
 import helium314.keyboard.latin.suggestions.SuggestionStripView.VoiceState;
 import helium314.keyboard.settings.FullscreenEditorActivity;
 import helium314.keyboard.settings.FullscreenEditorResult;
+import helium314.keyboard.settings.FullscreenEditorStorage;
 import helium314.keyboard.settings.SettingsActivity2;
 import kotlin.Unit;
 
@@ -904,14 +905,29 @@ public class LatinIME extends InputMethodService implements
             EditorInfoCompatUtils.INSTANCE.debugLog(editorInfo, TAG);
         }
 
-        // Insert pending text from fullscreen editor Activity (user returned from FullscreenEditorActivity).
-        final String pending = FullscreenEditorResult.pendingText;
-        final String targetPkg = FullscreenEditorResult.targetPackageName;
-        if (pending != null && targetPkg != null && targetPkg.equals(editorInfo.packageName)) {
+        // Insert pending text from fullscreen editor (user returned from FullscreenEditorActivity).
+        // Check in-memory result first, then persistent storage (survives app switches).
+        final String currentPkg = editorInfo.packageName;
+        String textToInsert = null;
+        if (FullscreenEditorResult.pendingText != null
+                && FullscreenEditorResult.targetPackageName != null
+                && FullscreenEditorResult.targetPackageName.equals(currentPkg)) {
+            textToInsert = FullscreenEditorResult.pendingText;
             FullscreenEditorResult.pendingText = null;
             FullscreenEditorResult.targetPackageName = null;
+        }
+        if (textToInsert == null) {
+            final String stored = FullscreenEditorStorage.INSTANCE.get(LatinIME.this, currentPkg);
+            if (stored != null) {
+                textToInsert = stored;
+                FullscreenEditorStorage.INSTANCE.remove(LatinIME.this, currentPkg);
+            }
+        }
+        if (textToInsert != null) {
+            final String finalText = textToInsert;
+            FullscreenEditorStorage.INSTANCE.remove(LatinIME.this, currentPkg);
             mMainHandler.post(() -> {
-                final boolean synced = replaceEntireFieldText(pending, true);
+                final boolean synced = replaceEntireFieldText(finalText, true);
                 if (!synced) {
                     Log.w(TAG, "Failed to insert pending fullscreen text");
                 }

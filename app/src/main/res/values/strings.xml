@@ -362,6 +362,10 @@
     <string name="close_history" tools:keep="@string/close_history">Close clipboard history</string>
     <string name="emoji" tools:keep="@string/emoji">Emoji</string>
     <string name="fullscreen_editor_hint">Dictate or type…</string>
+    <string name="fullscreen_drafts_title">Fullscreen drafts</string>
+    <string name="fullscreen_drafts_empty">No in-progress drafts. When you use fullscreen mode and switch to another app, your text is saved here per app.</string>
+    <string name="fullscreen_drafts_delete_title">Delete draft?</string>
+    <string name="fullscreen_drafts_delete_message">This will remove the saved draft. It will not be synced back to the app.</string>
     <!-- Title of the setting to set clipboard toolbar keys -->
     <string name="clipboard_toolbar_keys">Select clipboard toolbar keys</string>
     <!-- Title of the setting to set pinned toolbar keys -->

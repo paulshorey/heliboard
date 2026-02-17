@@ -105,6 +105,11 @@ class FullscreenEditorActivity : ComponentActivity() {
 
     override fun onPause() {
         isActive = false
+        // Persist current text when user switches away (e.g. to another app).
+        // Survives process death so we can sync when they return.
+        if (targetPackage.isNotBlank()) {
+            FullscreenEditorStorage.put(this, targetPackage, textState.value)
+        }
         super.onPause()
     }
 
@@ -114,9 +119,15 @@ class FullscreenEditorActivity : ComponentActivity() {
     }
 
     private fun saveAndExit() {
-        FullscreenEditorResult.pendingText = textState.value
+        val text = textState.value
+        FullscreenEditorResult.pendingText = text
         FullscreenEditorResult.targetPackageName = targetPackage
-        setResult(RESULT_OK, Intent().putExtra("text", textState.value))
+        // Also persist so we don't lose if FullscreenEditorResult gets overwritten
+        // when user opens fullscreen from another app before returning here
+        if (targetPackage.isNotBlank()) {
+            FullscreenEditorStorage.put(this, targetPackage, text)
+        }
+        setResult(RESULT_OK, Intent().putExtra("text", text))
         finish()
     }
 }

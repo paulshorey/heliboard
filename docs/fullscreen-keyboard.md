@@ -34,13 +34,15 @@ So we reuse that model: **treat fullscreen as "opening the keyboard app"**, sepa
 1. **User taps fullscreen expand** → `onFullscreenExpandClicked()` → `launchFullscreenEditorActivity()`.
 2. **Launch**: Commit typed text, stop voice gracefully, read current text and `packageName` from `InputConnection`/`EditorInfo`, call `requestHideSelf()`, start `FullscreenEditorActivity` with extras.
 3. **In Activity**: User edits in Compose `OutlinedTextField` (keyboard + voice work; keyboard app is foreground). No top toolbar — the keyboard's fullscreen toggle (angle down) or back press exits.
-4. **On exit**: Store result in `FullscreenEditorResult` (pending text, target package), `finish()`.
-5. **When user returns**: They go back to the original app. When they focus the text area, `onStartInputViewInternal()` runs. If `FullscreenEditorResult.pendingText` is set and `editorInfo.packageName` matches the target, we call `replaceEntireFieldText()` to insert the text, then hide the keyboard.
+4. **On exit**: Store result in `FullscreenEditorResult` (pending text, target package), persist to `FullscreenEditorStorage` (per package), `finish()`.
+5. **On pause** (e.g. user switches apps): Persist current text to `FullscreenEditorStorage` so it survives process death.
+6. **When user returns**: They go back to the original app. When they focus the text area, `onStartInputViewInternal()` runs. If `FullscreenEditorResult.pendingText` matches the package, we insert it. Otherwise we check `FullscreenEditorStorage` for persisted text for that package — this handles the case where the user opened fullscreen from App A, switched to App B, and later returns to App A.
 
 ### Key files
 
 - `LatinIME.java`: `launchFullscreenEditorActivity()`, pending-text handling in `onStartInputViewInternal()`.
-- `FullscreenEditorActivity.kt`: Compose UI (text field only), `FullscreenEditorResult`.
+- `FullscreenEditorActivity.kt`: Compose UI (text field only), `FullscreenEditorResult`, persists to `FullscreenEditorStorage` on save and pause.
+- `FullscreenEditorStorage.kt`: Persistent per-package drafts (SharedPreferences). Survives app switches and process death.
 - `SuggestionStripView.kt`: Fullscreen expand button, `onFullscreenExpandClicked()`.
 
 ### Trailing newlines when opening
@@ -82,8 +84,9 @@ Stopped all display updates; typing and voice transcription stopped showing.
 | Do | Don't |
 |----|-------|
 | Launch `FullscreenEditorActivity` for fullscreen editing | Use extract view for web page textareas |
-| Store result in `FullscreenEditorResult`, insert on IME reconnect | Try to keep IME attached while switching to fullscreen UI |
+| Store result in `FullscreenEditorResult` and `FullscreenEditorStorage` (per package), insert on IME reconnect | Try to keep IME attached while switching to fullscreen UI |
 | Treat fullscreen as "keyboard app as standalone app" | Assume extract view works everywhere |
 | Use `replaceEntireFieldText()` when inserting pending text | Assume `InputConnection` is always ready immediately |
+| Persist drafts on pause (app switch) so they survive process death | Rely only on in-memory state when user may switch apps |
 
 **Bottom line**: For web pages and apps where the extract view causes focus loss, use an Activity so the keyboard app runs as a standalone app. Sync text back when the user returns and focuses the original field again.
