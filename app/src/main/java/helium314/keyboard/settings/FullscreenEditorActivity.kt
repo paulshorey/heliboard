@@ -76,6 +76,7 @@ class FullscreenEditorActivity : ComponentActivity() {
     private var hasExited = false
     private var hasPendingPersist = false
     private var lastPersistedAt = 0L
+    private var lastPersistedText = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -156,11 +157,13 @@ class FullscreenEditorActivity : ComponentActivity() {
         textFieldState.value = TextFieldValue(launchText, selection = TextRange(launchText.length))
         hasExited = false
         hasPendingPersist = false
-        lastPersistedAt = FullscreenTextSessionStore.getSessionForKey(
+        val snapshot = FullscreenTextSessionStore.getSessionForKey(
             context = this,
             sessionKey = sessionKey,
             packageName = targetPackage,
-        )?.updatedAt ?: 0L
+        )
+        lastPersistedAt = snapshot?.updatedAt ?: 0L
+        lastPersistedText = snapshot?.text ?: launchText
         persistInProgress()
     }
 
@@ -176,9 +179,11 @@ class FullscreenEditorActivity : ComponentActivity() {
         if (snapshot.text == textFieldState.value.text) return
         textFieldState.value = TextFieldValue(snapshot.text, selection = TextRange(snapshot.text.length))
         lastPersistedAt = snapshot.updatedAt
+        lastPersistedText = snapshot.text
     }
 
     private fun onEditorTextChanged(newText: String) {
+        if (newText == lastPersistedText) return
         hasPendingPersist = true
         persistHandler.removeCallbacks(persistRunnable)
         persistHandler.postDelayed(persistRunnable, 220L)
@@ -186,6 +191,9 @@ class FullscreenEditorActivity : ComponentActivity() {
 
     private fun persistInProgress() {
         if (sessionKey.isEmpty() || targetPackage.isEmpty()) return
+        if (!hasPendingPersist && textFieldState.value.text == lastPersistedText) {
+            return
+        }
         val snapshot = FullscreenTextSessionStore.upsertSession(
             context = this,
             sessionKey = sessionKey,
@@ -197,6 +205,7 @@ class FullscreenEditorActivity : ComponentActivity() {
         )
         hasPendingPersist = false
         lastPersistedAt = snapshot.updatedAt
+        lastPersistedText = snapshot.text
     }
 
     private fun saveAndExit() {
@@ -215,6 +224,7 @@ class FullscreenEditorActivity : ComponentActivity() {
             sourceText = sourceText,
         )
         lastPersistedAt = snapshot.updatedAt
+        lastPersistedText = snapshot.text
         setResult(RESULT_OK, Intent().putExtra("text", finalText))
         finish()
     }
