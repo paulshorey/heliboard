@@ -1615,10 +1615,10 @@ public class LatinIME extends InputMethodService implements
                 return true;
             }
             final String sourceText = session.getSourceText();
-            if (sourceText != null && sourceText.equals(currentFieldText)) {
-                return true;
-            }
-            return currentFieldText.isEmpty() && !session.getText().isEmpty();
+            // For non-exact key fallback (e.g. package-level pending session), only apply when
+            // the current field still matches the source snapshot captured when fullscreen started.
+            // This avoids replaying pending text into an unrelated empty field in the same app.
+            return sourceText != null && sourceText.equals(currentFieldText);
         }
         if (!FullscreenTextSessionStore.WRITER_FULLSCREEN.equals(session.getLastWriter())) {
             return false;
