@@ -183,7 +183,11 @@ class FullscreenEditorActivity : ComponentActivity() {
     }
 
     private fun onEditorTextChanged(newText: String) {
-        if (newText == lastPersistedText) return
+        if (newText == lastPersistedText) {
+            hasPendingPersist = false
+            persistHandler.removeCallbacks(persistRunnable)
+            return
+        }
         hasPendingPersist = true
         persistHandler.removeCallbacks(persistRunnable)
         persistHandler.postDelayed(persistRunnable, 220L)
