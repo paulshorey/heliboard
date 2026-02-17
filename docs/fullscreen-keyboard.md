@@ -49,6 +49,7 @@ So we reuse that model: **treat fullscreen as "opening the keyboard app"**, sepa
 - If the current editor has only a weak key (package-only), session lookup recovers the **newest** same-package session (including stronger field-key sessions) as a pragmatic fallback for environments where field identity is unavailable.
 - For package-level (non-exact) sessions, apply now requires an explicit source-text snapshot match (both pending and in-progress fullscreen states) to reduce accidental overwrite of unrelated fields.
 - If exact-key lookup misses (identity drift), IME may consult newest same-package session as a recovery path, but still applies only when the same source-match safety rules pass.
+- Fullscreen-origin sessions are not downgraded to regular-active on passive focus/open alone; regular mode must actually edit content before superseding fullscreen state.
 - If a pending session cannot be safely mapped to the currently focused field, IME keeps it pending instead of immediately replacing it with a regular snapshot; regular edits then establish the new latest state.
 - Pending sessions are only considered consumed after successful `InputConnection` replacement verification.
 - Session store pruning (TTL/max-count) is persisted immediately when stale entries are detected on load, keeping durable storage compact over time.
