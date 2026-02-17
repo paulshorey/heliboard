@@ -3,6 +3,8 @@ package helium314.keyboard.settings
 
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.inputmethod.EditorInfo
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -21,10 +23,8 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
@@ -54,6 +54,8 @@ class FullscreenEditorActivity : ComponentActivity() {
     companion object {
         const val EXTRA_INITIAL_TEXT = "initial_text"
         const val EXTRA_PACKAGE_NAME = "package_name"
+        const val EXTRA_SESSION_KEY = "session_key"
+        const val EXTRA_SOURCE_TEXT = "source_text"
 
         /** True while this Activity is in the foreground. Lets the IME know we're in fullscreen editor. */
         @JvmField
@@ -64,8 +66,14 @@ class FullscreenEditorActivity : ComponentActivity() {
         var onExitFromKeyboard: Runnable? = null
     }
 
-    private val textState = androidx.compose.runtime.mutableStateOf("")
+    private val textFieldState = mutableStateOf(TextFieldValue(""))
+    private val persistHandler = Handler(Looper.getMainLooper())
+    private val persistRunnable = Runnable { persistInProgress() }
+
     private var targetPackage = ""
+    private var sessionKey = ""
+    private var sourceText = ""
+    private var hasExited = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -75,11 +83,8 @@ class FullscreenEditorActivity : ComponentActivity() {
         }
         ExecutorUtils.getBackgroundExecutor(ExecutorUtils.KEYBOARD).execute { cleanUnusedMainDicts(this) }
 
-        val initialText = intent?.getStringExtra(EXTRA_INITIAL_TEXT) ?: ""
-        targetPackage = intent?.getStringExtra(EXTRA_PACKAGE_NAME) ?: ""
-        textState.value = initialText
-
-        onExitFromKeyboard = Runnable { saveAndExit() }
+        initializeFromIntent(intent)
+        onExitFromKeyboard = Runnable { runOnUiThread { saveAndExit() } }
 
         val cv = ComposeView(context = this)
         setContentView(cv)
@@ -87,9 +92,9 @@ class FullscreenEditorActivity : ComponentActivity() {
             helium314.keyboard.settings.Theme {
                 Surface {
                     FullscreenEditorScreen(
-                        textState = textState,
-                        initialText = initialText,
-                        onExit = ::saveAndExit
+                        textFieldState = textFieldState,
+                        onTextChanged = ::onEditorTextChanged,
+                        onExit = ::saveAndExit,
                     )
                 }
             }
@@ -98,47 +103,114 @@ class FullscreenEditorActivity : ComponentActivity() {
         enableEdgeToEdge()
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        initializeFromIntent(intent)
+    }
+
     override fun onResume() {
         super.onResume()
         isActive = true
+        refreshFromGlobalSession()
     }
 
     override fun onPause() {
+        if (!hasExited) {
+            persistInProgress()
+        }
         isActive = false
         super.onPause()
     }
 
+    override fun onStop() {
+        if (!hasExited) {
+            persistInProgress()
+        }
+        super.onStop()
+    }
+
     override fun onDestroy() {
+        persistHandler.removeCallbacksAndMessages(null)
         onExitFromKeyboard = null
         super.onDestroy()
     }
 
+    private fun initializeFromIntent(intent: Intent?) {
+        val initialText = intent?.getStringExtra(EXTRA_INITIAL_TEXT) ?: ""
+        targetPackage = intent?.getStringExtra(EXTRA_PACKAGE_NAME) ?: ""
+        sourceText = intent?.getStringExtra(EXTRA_SOURCE_TEXT) ?: initialText
+        sessionKey = intent?.getStringExtra(EXTRA_SESSION_KEY)
+            ?: FullscreenTextSessionStore.buildSessionKey(null, targetPackage)
+        if (sessionKey.isEmpty()) {
+            sessionKey = targetPackage
+        }
+        val launchText = FullscreenTextSessionStore.resolveLaunchText(
+            context = this,
+            sessionKey = sessionKey,
+            packageName = targetPackage,
+            fallbackLiveText = initialText,
+        )
+        textFieldState.value = TextFieldValue(launchText, selection = TextRange(launchText.length))
+        hasExited = false
+        persistInProgress()
+    }
+
+    private fun refreshFromGlobalSession() {
+        if (sessionKey.isEmpty() || targetPackage.isEmpty()) return
+        val snapshot = FullscreenTextSessionStore.getSessionForKey(
+            context = this,
+            sessionKey = sessionKey,
+            packageName = targetPackage,
+        ) ?: return
+        if (snapshot.text == textFieldState.value.text) return
+        textFieldState.value = TextFieldValue(snapshot.text, selection = TextRange(snapshot.text.length))
+    }
+
+    private fun onEditorTextChanged(newText: String) {
+        if (newText.isEmpty() && textFieldState.value.text.isEmpty()) return
+        persistHandler.removeCallbacks(persistRunnable)
+        persistHandler.postDelayed(persistRunnable, 220L)
+    }
+
+    private fun persistInProgress() {
+        if (sessionKey.isEmpty() || targetPackage.isEmpty()) return
+        FullscreenTextSessionStore.upsertSession(
+            context = this,
+            sessionKey = sessionKey,
+            packageName = targetPackage,
+            text = textFieldState.value.text,
+            state = FullscreenTextSessionStore.STATE_FULLSCREEN_IN_PROGRESS,
+            lastWriter = FullscreenTextSessionStore.WRITER_FULLSCREEN,
+            sourceText = sourceText,
+        )
+    }
+
     private fun saveAndExit() {
-        FullscreenEditorResult.pendingText = textState.value
-        FullscreenEditorResult.targetPackageName = targetPackage
-        setResult(RESULT_OK, Intent().putExtra("text", textState.value))
+        if (hasExited) return
+        hasExited = true
+        persistHandler.removeCallbacks(persistRunnable)
+        val finalText = textFieldState.value.text
+        FullscreenTextSessionStore.upsertSession(
+            context = this,
+            sessionKey = sessionKey,
+            packageName = targetPackage,
+            text = finalText,
+            state = FullscreenTextSessionStore.STATE_PENDING_SYNC,
+            lastWriter = FullscreenTextSessionStore.WRITER_FULLSCREEN,
+            sourceText = sourceText,
+        )
+        setResult(RESULT_OK, Intent().putExtra("text", finalText))
         finish()
     }
 }
 
-/**
- * Holder for fullscreen editor result. LatinIME reads this when reconnecting to a client.
- */
-object FullscreenEditorResult {
-    @JvmField var pendingText: String? = null
-    @JvmField var targetPackageName: String? = null
-}
-
 @androidx.compose.runtime.Composable
 private fun FullscreenEditorScreen(
-    textState: androidx.compose.runtime.MutableState<String>,
-    initialText: String,
-    onExit: () -> Unit
+    textFieldState: androidx.compose.runtime.MutableState<TextFieldValue>,
+    onTextChanged: (String) -> Unit,
+    onExit: () -> Unit,
 ) {
-    var textFieldValue by remember {
-        val len = initialText.length
-        mutableStateOf(TextFieldValue(initialText, selection = TextRange(len)))
-    }
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     BackHandler(onBack = onExit)
@@ -154,10 +226,10 @@ private fun FullscreenEditorScreen(
             .windowInsetsPadding(WindowInsets.safeDrawing)
     ) {
         OutlinedTextField(
-            value = textFieldValue,
+            value = textFieldState.value,
             onValueChange = {
-                textFieldValue = it
-                textState.value = it.text
+                textFieldState.value = it
+                onTextChanged(it.text)
             },
             modifier = Modifier
                 .fillMaxWidth()

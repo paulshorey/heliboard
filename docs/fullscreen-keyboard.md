@@ -32,15 +32,17 @@ So we reuse that model: **treat fullscreen as "opening the keyboard app"**, sepa
 ### Flow
 
 1. **User taps fullscreen expand** → `onFullscreenExpandClicked()` → `launchFullscreenEditorActivity()`.
-2. **Launch**: Commit typed text, stop voice gracefully, read current text and `packageName` from `InputConnection`/`EditorInfo`, call `requestHideSelf()`, start `FullscreenEditorActivity` with extras.
+2. **Launch**: Commit typed text, stop voice gracefully, read current text and editor identity from `InputConnection`/`EditorInfo`, resolve text from the shared session store, call `requestHideSelf()`, start `FullscreenEditorActivity` with extras.
 3. **In Activity**: User edits in Compose `OutlinedTextField` (keyboard + voice work; keyboard app is foreground). No top toolbar — the keyboard's fullscreen toggle (angle down) or back press exits.
-4. **On exit**: Store result in `FullscreenEditorResult` (pending text, target package), `finish()`.
-5. **When user returns**: They go back to the original app. When they focus the text area, `onStartInputViewInternal()` runs. If `FullscreenEditorResult.pendingText` is set and `editorInfo.packageName` matches the target, we call `replaceEntireFieldText()` to insert the text, then hide the keyboard.
+4. **While editing**: Fullscreen text is continuously persisted as `fullscreen_in_progress` in the shared session store (debounced + lifecycle flush).
+5. **On exit**: Mark session `pending_sync`, then `finish()`.
+6. **When user returns**: On `onStartInputViewInternal()`, IME reconciles app field text vs the session store. If fullscreen text should win (pending sync or matching source snapshot), `replaceEntireFieldText()` inserts it and session is normalized to regular-active.
 
 ### Key files
 
-- `LatinIME.java`: `launchFullscreenEditorActivity()`, pending-text handling in `onStartInputViewInternal()`.
-- `FullscreenEditorActivity.kt`: Compose UI (text field only), `FullscreenEditorResult`.
+- `LatinIME.java`: launch, reconciliation on start input view, regular-mode snapshot persistence.
+- `FullscreenEditorActivity.kt`: Compose UI (text field only), lifecycle persistence and pending-sync exit.
+- `FullscreenTextSessionStore.kt`: durable shared per-session text state (regular + fullscreen).
 - `SuggestionStripView.kt`: Fullscreen expand button, `onFullscreenExpandClicked()`.
 
 ### Trailing newlines when opening
@@ -57,9 +59,9 @@ field content without the editor’s extra newlines.
 
 ### What to keep
 
-- `replaceEntireFieldText()` — used for inserting pending text when the IME reconnects.
+- `replaceEntireFieldText()` — used for syncing global latest text into the app field.
 - `getOriginalFieldText()`, `getOriginalFieldCursorPosition()`, `readCurrentFieldText()` — used to seed the Activity and for `replaceEntireFieldText()`.
-- `FullscreenEditorResult` — bridge between Activity and IME.
+- `FullscreenTextSessionStore` — shared bridge between Activity and IME.
 
 ## What Did NOT Work (Extract View)
 
@@ -82,7 +84,7 @@ Stopped all display updates; typing and voice transcription stopped showing.
 | Do | Don't |
 |----|-------|
 | Launch `FullscreenEditorActivity` for fullscreen editing | Use extract view for web page textareas |
-| Store result in `FullscreenEditorResult`, insert on IME reconnect | Try to keep IME attached while switching to fullscreen UI |
+| Persist text sessions globally (regular + fullscreen), reconcile on focus | Rely on one in-memory pending variable |
 | Treat fullscreen as "keyboard app as standalone app" | Assume extract view works everywhere |
 | Use `replaceEntireFieldText()` when inserting pending text | Assume `InputConnection` is always ready immediately |
 

@@ -90,7 +90,8 @@ import helium314.keyboard.latin.voice.VoiceInputManager;
 import helium314.keyboard.latin.voice.TextCleanupClient;
 import helium314.keyboard.latin.suggestions.SuggestionStripView.VoiceState;
 import helium314.keyboard.settings.FullscreenEditorActivity;
-import helium314.keyboard.settings.FullscreenEditorResult;
+import helium314.keyboard.settings.FullscreenTextSessionStore;
+import helium314.keyboard.settings.TextSessionSnapshot;
 import helium314.keyboard.settings.SettingsActivity2;
 import kotlin.Unit;
 
@@ -203,6 +204,7 @@ public class LatinIME extends InputMethodService implements
     private static final int MAX_PENDING_TRANSCRIPTIONS = 64;
     private static final long CLEANUP_WATCHDOG_TIMEOUT_MS = 12_000L;
     private static final int FULLSCREEN_SYNC_MAX_CHARS = 100_000;
+    private static final long SESSION_SNAPSHOT_DEBOUNCE_MS = 220L;
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
     private final Runnable mCleanupWatchdogRunnable = new Runnable() {
         @Override
@@ -217,6 +219,8 @@ public class LatinIME extends InputMethodService implements
     // cancelled. Used to invalidate stale async cleanup callbacks from previous sessions.
     private int mVoiceSessionId = 0;
     private long mLastVoiceErrorToastTimeMs = 0L;
+    private final Runnable mRegularSessionSnapshotRunnable =
+            this::persistRegularSessionSnapshotFromCurrentEditor;
 
     public static final class UIHandler extends LeakGuardHandlerWrapper<LatinIME> {
         private static final int MSG_UPDATE_SHIFT_STATE = 0;
@@ -735,6 +739,7 @@ public class LatinIME extends InputMethodService implements
         unregisterReceiver(mDictionaryDumpBroadcastReceiver);
         unregisterReceiver(mRestartAfterDeviceUnlockReceiver);
         mStatsUtilsManager.onDestroy(this /* context */);
+        mMainHandler.removeCallbacks(mRegularSessionSnapshotRunnable);
         super.onDestroy();
         mHandler.removeCallbacksAndMessages(null);
         deallocateMemory();
@@ -904,19 +909,10 @@ public class LatinIME extends InputMethodService implements
             EditorInfoCompatUtils.INSTANCE.debugLog(editorInfo, TAG);
         }
 
-        // Insert pending text from fullscreen editor Activity (user returned from FullscreenEditorActivity).
-        final String pending = FullscreenEditorResult.pendingText;
-        final String targetPkg = FullscreenEditorResult.targetPackageName;
-        if (pending != null && targetPkg != null && targetPkg.equals(editorInfo.packageName)) {
-            FullscreenEditorResult.pendingText = null;
-            FullscreenEditorResult.targetPackageName = null;
-            mMainHandler.post(() -> {
-                final boolean synced = replaceEntireFieldText(pending, true);
-                if (!synced) {
-                    Log.w(TAG, "Failed to insert pending fullscreen text");
-                }
-                requestHideSelf(0);
-            });
+        final boolean inFullscreenEditor = FullscreenEditorActivity.isActive
+                && getPackageName().equals(editorInfo.packageName);
+        if (!inFullscreenEditor) {
+            reconcileGlobalSessionForCurrentEditor(editorInfo, 2);
         }
 
         // In landscape mode, this method gets called without the input view being created.
@@ -957,8 +953,6 @@ public class LatinIME extends InputMethodService implements
 
         // Show angle-down (minimize) when keyboard is in FullscreenEditorActivity; angle-up (expand) otherwise
         if (hasSuggestionStripView()) {
-            final boolean inFullscreenEditor = FullscreenEditorActivity.isActive
-                    && getPackageName().equals(editorInfo.packageName);
             mSuggestionStripView.setFullscreenButtonMode(inFullscreenEditor);
         }
         // ALERT: settings have not been reloaded and there is a chance they may be stale.
@@ -1056,6 +1050,7 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public void onWindowHidden() {
+        flushRegularSessionSnapshot();
         super.onWindowHidden();
         Log.i(TAG, "onWindowHidden");
         // The keyboard window can be hidden for two very different reasons:
@@ -1084,6 +1079,7 @@ public class LatinIME extends InputMethodService implements
     }
 
     void onFinishInputInternal() {
+        flushRegularSessionSnapshot();
         super.onFinishInput();
         Log.i(TAG, "onFinishInput");
 
@@ -1110,6 +1106,7 @@ public class LatinIME extends InputMethodService implements
     }
 
     void onFinishInputViewInternal(final boolean finishingInput) {
+        flushRegularSessionSnapshot();
         super.onFinishInputView(finishingInput);
         Log.i(TAG, "onFinishInputView");
         cleanupInternalStateForFinishInput();
@@ -1544,6 +1541,166 @@ public class LatinIME extends InputMethodService implements
         }
         final String updatedText = readCurrentFieldText(ic, FULLSCREEN_SYNC_MAX_CHARS);
         return replacement.equals(updatedText);
+    }
+
+    private String sessionKeyForEditor(@Nullable final EditorInfo editorInfo) {
+        final String fallbackPackage = editorInfo != null ? editorInfo.packageName : "";
+        return FullscreenTextSessionStore.buildSessionKey(editorInfo, fallbackPackage);
+    }
+
+    private boolean shouldSkipGlobalSessionForEditor(@Nullable final EditorInfo editorInfo) {
+        if (editorInfo == null || editorInfo.packageName == null || editorInfo.packageName.isEmpty()) {
+            return true;
+        }
+        return getPackageName().equals(editorInfo.packageName);
+    }
+
+    private void scheduleRegularSessionSnapshot() {
+        mMainHandler.removeCallbacks(mRegularSessionSnapshotRunnable);
+        mMainHandler.postDelayed(mRegularSessionSnapshotRunnable, SESSION_SNAPSHOT_DEBOUNCE_MS);
+    }
+
+    private void flushRegularSessionSnapshot() {
+        mMainHandler.removeCallbacks(mRegularSessionSnapshotRunnable);
+        persistRegularSessionSnapshotFromCurrentEditor();
+    }
+
+    private void persistRegularSessionSnapshotFromCurrentEditor() {
+        final EditorInfo editorInfo = getCurrentInputEditorInfo();
+        if (shouldSkipGlobalSessionForEditor(editorInfo)) {
+            return;
+        }
+        if (getCurrentInputConnection() == null) {
+            return;
+        }
+        final String fieldText = getOriginalFieldTextForFullscreen();
+        persistRegularSessionSnapshot(editorInfo, fieldText);
+    }
+
+    private void persistRegularSessionSnapshot(@NonNull final EditorInfo editorInfo,
+                                               @NonNull final String fieldText) {
+        if (shouldSkipGlobalSessionForEditor(editorInfo)) {
+            return;
+        }
+        final String sessionKey = sessionKeyForEditor(editorInfo);
+        final String packageName = editorInfo.packageName != null ? editorInfo.packageName : "";
+        if (sessionKey.isEmpty() || packageName.isEmpty()) {
+            return;
+        }
+        FullscreenTextSessionStore.upsertSession(
+                this,
+                sessionKey,
+                packageName,
+                fieldText,
+                FullscreenTextSessionStore.STATE_REGULAR_ACTIVE,
+                FullscreenTextSessionStore.WRITER_REGULAR,
+                null
+        );
+    }
+
+    private boolean shouldApplySessionToField(@NonNull final TextSessionSnapshot session,
+                                              @NonNull final String currentFieldText) {
+        if (FullscreenTextSessionStore.STATE_PENDING_SYNC.equals(session.getState())) {
+            return true;
+        }
+        if (!FullscreenTextSessionStore.WRITER_FULLSCREEN.equals(session.getLastWriter())) {
+            return false;
+        }
+        final String sourceText = session.getSourceText();
+        if (sourceText != null && sourceText.equals(currentFieldText)) {
+            return true;
+        }
+        return currentFieldText.isEmpty() && !session.getText().isEmpty();
+    }
+
+    private void reconcileGlobalSessionForCurrentEditor(@NonNull final EditorInfo editorInfo,
+                                                        final int remainingRetries) {
+        if (shouldSkipGlobalSessionForEditor(editorInfo)) {
+            return;
+        }
+        final String expectedSessionKey = sessionKeyForEditor(editorInfo);
+        if (getCurrentInputConnection() == null) {
+            if (remainingRetries > 0) {
+                mMainHandler.postDelayed(() -> {
+                    final EditorInfo liveEditor = getCurrentInputEditorInfo();
+                    if (liveEditor == null || shouldSkipGlobalSessionForEditor(liveEditor)) {
+                        return;
+                    }
+                    final String liveKey = sessionKeyForEditor(liveEditor);
+                    if (expectedSessionKey.equals(liveKey)) {
+                        reconcileGlobalSessionForCurrentEditor(liveEditor, remainingRetries - 1);
+                    }
+                }, 70L);
+            }
+            return;
+        }
+        final String packageName = editorInfo.packageName != null ? editorInfo.packageName : "";
+        if (packageName.isEmpty() || expectedSessionKey.isEmpty()) {
+            return;
+        }
+
+        final String currentFieldText = getOriginalFieldTextForFullscreen();
+        final TextSessionSnapshot session = FullscreenTextSessionStore.getSessionForEditor(
+                this, editorInfo, packageName
+        );
+        if (session == null) {
+            persistRegularSessionSnapshot(editorInfo, currentFieldText);
+            return;
+        }
+
+        if (currentFieldText.equals(session.getText())) {
+            if (!FullscreenTextSessionStore.STATE_REGULAR_ACTIVE.equals(session.getState())
+                    || !FullscreenTextSessionStore.WRITER_REGULAR.equals(session.getLastWriter())) {
+                FullscreenTextSessionStore.upsertSession(
+                        this,
+                        session.getSessionKey(),
+                        packageName,
+                        currentFieldText,
+                        FullscreenTextSessionStore.STATE_REGULAR_ACTIVE,
+                        FullscreenTextSessionStore.WRITER_REGULAR,
+                        null
+                );
+            }
+            return;
+        }
+
+        if (!shouldApplySessionToField(session, currentFieldText)) {
+            persistRegularSessionSnapshot(editorInfo, currentFieldText);
+            return;
+        }
+
+        final String textToApply = session.getText();
+        final String previousState = session.getState();
+        mMainHandler.post(() -> {
+            final EditorInfo liveEditor = getCurrentInputEditorInfo();
+            if (shouldSkipGlobalSessionForEditor(liveEditor)) {
+                return;
+            }
+            final String liveKey = sessionKeyForEditor(liveEditor);
+            if (!expectedSessionKey.equals(liveKey)) {
+                Log.i(TAG, "Skip session sync: editor target changed before apply");
+                return;
+            }
+            final boolean synced = replaceEntireFieldText(textToApply, true);
+            if (!synced) {
+                Log.w(TAG, "Failed to sync global session text into current field");
+                return;
+            }
+            final String livePackage = liveEditor != null && liveEditor.packageName != null
+                    ? liveEditor.packageName : packageName;
+            FullscreenTextSessionStore.upsertSession(
+                    this,
+                    expectedSessionKey,
+                    livePackage,
+                    textToApply,
+                    FullscreenTextSessionStore.STATE_REGULAR_ACTIVE,
+                    FullscreenTextSessionStore.WRITER_REGULAR,
+                    null
+            );
+            if (FullscreenTextSessionStore.STATE_PENDING_SYNC.equals(previousState)) {
+                requestHideSelf(0);
+            }
+        });
     }
 
     @Override
@@ -2279,6 +2436,7 @@ public class LatinIME extends InputMethodService implements
             mInputLogic.mConnection.beginBatchEdit();
             mInputLogic.mConnection.commitText(textToInsert, 1);
             mInputLogic.mConnection.endBatchEdit();
+            scheduleRegularSessionSnapshot();
 
             // Text has been inserted — hide the processing spinner.
             mKeyboardSwitcher.hideProcessingIndicator();
@@ -2332,6 +2490,7 @@ public class LatinIME extends InputMethodService implements
             }
             mInputLogic.mConnection.commitText(textToInsert, 1);
             mInputLogic.mConnection.endBatchEdit();
+            scheduleRegularSessionSnapshot();
 
             // Cleaned text has been inserted — hide the processing spinner.
             mKeyboardSwitcher.hideProcessingIndicator();
@@ -2766,6 +2925,7 @@ public class LatinIME extends InputMethodService implements
         }
         if (inputTransaction.didAffectContents()) {
             mSubtypeState.setCurrentSubtypeHasBeenUsed();
+            scheduleRegularSessionSnapshot();
         }
     }
 
@@ -2882,6 +3042,21 @@ public class LatinIME extends InputMethodService implements
         initialText = initialText.replaceFirst("[\\r\\n]+$", "");
         final EditorInfo editorInfo = getCurrentInputEditorInfo();
         final String targetPackage = editorInfo != null ? editorInfo.packageName : "";
+        final String sessionKey = FullscreenTextSessionStore.buildSessionKey(editorInfo, targetPackage);
+        final String launchText = FullscreenTextSessionStore.resolveLaunchText(
+                this, sessionKey, targetPackage, initialText
+        );
+        if (!sessionKey.isEmpty() && !targetPackage.isEmpty()) {
+            FullscreenTextSessionStore.upsertSession(
+                    this,
+                    sessionKey,
+                    targetPackage,
+                    launchText,
+                    FullscreenTextSessionStore.STATE_FULLSCREEN_IN_PROGRESS,
+                    FullscreenTextSessionStore.WRITER_FULLSCREEN,
+                    initialText
+            );
+        }
 
         requestHideSelf(0);
         final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
@@ -2894,8 +3069,10 @@ public class LatinIME extends InputMethodService implements
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK
                 | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
                 | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        intent.putExtra(FullscreenEditorActivity.EXTRA_INITIAL_TEXT, initialText);
+        intent.putExtra(FullscreenEditorActivity.EXTRA_INITIAL_TEXT, launchText);
         intent.putExtra(FullscreenEditorActivity.EXTRA_PACKAGE_NAME, targetPackage);
+        intent.putExtra(FullscreenEditorActivity.EXTRA_SESSION_KEY, sessionKey);
+        intent.putExtra(FullscreenEditorActivity.EXTRA_SOURCE_TEXT, initialText);
         startActivity(intent);
     }
 
