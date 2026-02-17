@@ -1688,6 +1688,12 @@ public class LatinIME extends InputMethodService implements
         }
 
         if (!shouldApplySessionToField(session, currentFieldText, expectedSessionKey)) {
+            if (FullscreenTextSessionStore.STATE_PENDING_SYNC.equals(session.getState())
+                    && !expectedSessionKey.equals(session.getSessionKey())) {
+                // Keep package-level pending session intact when we cannot safely map it to this
+                // field yet. A regular snapshot should only supersede this once the user edits.
+                return;
+            }
             persistRegularSessionSnapshot(editorInfo, currentFieldText);
             return;
         }
