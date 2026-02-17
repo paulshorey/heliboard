@@ -221,6 +221,7 @@ public class LatinIME extends InputMethodService implements
     private long mLastVoiceErrorToastTimeMs = 0L;
     private final Runnable mRegularSessionSnapshotRunnable =
             this::persistRegularSessionSnapshotFromCurrentEditor;
+    private boolean mRegularFieldEditedSinceStartInput = false;
 
     public static final class UIHandler extends LeakGuardHandlerWrapper<LatinIME> {
         private static final int MSG_UPDATE_SHIFT_STATE = 0;
@@ -908,6 +909,8 @@ public class LatinIME extends InputMethodService implements
         if (DebugFlags.DEBUG_ENABLED) {
             EditorInfoCompatUtils.INSTANCE.debugLog(editorInfo, TAG);
         }
+        mMainHandler.removeCallbacks(mRegularSessionSnapshotRunnable);
+        mRegularFieldEditedSinceStartInput = false;
 
         final boolean inFullscreenEditor = FullscreenEditorActivity.isActive
                 && getPackageName().equals(editorInfo.packageName);
@@ -1556,6 +1559,7 @@ public class LatinIME extends InputMethodService implements
     }
 
     private void scheduleRegularSessionSnapshot() {
+        mRegularFieldEditedSinceStartInput = true;
         mMainHandler.removeCallbacks(mRegularSessionSnapshotRunnable);
         mMainHandler.postDelayed(mRegularSessionSnapshotRunnable, SESSION_SNAPSHOT_DEBOUNCE_MS);
     }
@@ -1566,6 +1570,9 @@ public class LatinIME extends InputMethodService implements
     }
 
     private void persistRegularSessionSnapshotFromCurrentEditor() {
+        if (!mRegularFieldEditedSinceStartInput) {
+            return;
+        }
         final EditorInfo editorInfo = getCurrentInputEditorInfo();
         if (shouldSkipGlobalSessionForEditor(editorInfo)) {
             return;
@@ -1596,6 +1603,7 @@ public class LatinIME extends InputMethodService implements
                 FullscreenTextSessionStore.WRITER_REGULAR,
                 null
         );
+        mRegularFieldEditedSinceStartInput = false;
     }
 
     private boolean shouldApplySessionToField(@NonNull final TextSessionSnapshot session,
