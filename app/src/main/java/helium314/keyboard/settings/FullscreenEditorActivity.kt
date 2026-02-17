@@ -77,6 +77,7 @@ class FullscreenEditorActivity : ComponentActivity() {
     private var hasPendingPersist = false
     private var lastPersistedAt = 0L
     private var lastPersistedText = ""
+    private var lastPersistedState = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -164,6 +165,7 @@ class FullscreenEditorActivity : ComponentActivity() {
         )
         lastPersistedAt = snapshot?.updatedAt ?: 0L
         lastPersistedText = snapshot?.text ?: launchText
+        lastPersistedState = snapshot?.state ?: ""
         persistInProgress()
     }
 
@@ -180,6 +182,7 @@ class FullscreenEditorActivity : ComponentActivity() {
         textFieldState.value = TextFieldValue(snapshot.text, selection = TextRange(snapshot.text.length))
         lastPersistedAt = snapshot.updatedAt
         lastPersistedText = snapshot.text
+        lastPersistedState = snapshot.state
     }
 
     private fun onEditorTextChanged(newText: String) {
@@ -195,7 +198,11 @@ class FullscreenEditorActivity : ComponentActivity() {
 
     private fun persistInProgress() {
         if (sessionKey.isEmpty() || targetPackage.isEmpty()) return
-        if (!hasPendingPersist && textFieldState.value.text == lastPersistedText) {
+        if (
+            !hasPendingPersist &&
+            textFieldState.value.text == lastPersistedText &&
+            lastPersistedState == FullscreenTextSessionStore.STATE_FULLSCREEN_IN_PROGRESS
+        ) {
             return
         }
         val snapshot = FullscreenTextSessionStore.upsertSession(
@@ -210,6 +217,7 @@ class FullscreenEditorActivity : ComponentActivity() {
         hasPendingPersist = false
         lastPersistedAt = snapshot.updatedAt
         lastPersistedText = snapshot.text
+        lastPersistedState = snapshot.state
     }
 
     private fun saveAndExit() {
@@ -229,6 +237,7 @@ class FullscreenEditorActivity : ComponentActivity() {
         )
         lastPersistedAt = snapshot.updatedAt
         lastPersistedText = snapshot.text
+        lastPersistedState = snapshot.state
         setResult(RESULT_OK, Intent().putExtra("text", finalText))
         finish()
     }

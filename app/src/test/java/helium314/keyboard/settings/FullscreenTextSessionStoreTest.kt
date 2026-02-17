@@ -361,4 +361,30 @@ class FullscreenTextSessionStoreTest {
 
         assertEquals(first.updatedAt, second.updatedAt)
     }
+
+    @Test
+    fun upsertSessionRewritesWhenStateChanges() {
+        val first = FullscreenTextSessionStore.upsertSession(
+            context = context,
+            sessionKey = "com.memo.app",
+            packageName = "com.memo.app",
+            text = "same text",
+            state = FullscreenTextSessionStore.STATE_PENDING_SYNC,
+            lastWriter = FullscreenTextSessionStore.WRITER_FULLSCREEN,
+            sourceText = "source",
+        )
+        Thread.sleep(2)
+        val second = FullscreenTextSessionStore.upsertSession(
+            context = context,
+            sessionKey = "com.memo.app",
+            packageName = "com.memo.app",
+            text = "same text",
+            state = FullscreenTextSessionStore.STATE_FULLSCREEN_IN_PROGRESS,
+            lastWriter = FullscreenTextSessionStore.WRITER_FULLSCREEN,
+            sourceText = "source",
+        )
+
+        assertEquals(true, second.updatedAt >= first.updatedAt)
+        assertEquals(FullscreenTextSessionStore.STATE_FULLSCREEN_IN_PROGRESS, second.state)
+    }
 }
