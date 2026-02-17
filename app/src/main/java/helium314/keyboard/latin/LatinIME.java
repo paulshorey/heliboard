@@ -1715,6 +1715,13 @@ public class LatinIME extends InputMethodService implements
                 // field yet. A regular snapshot should only supersede this once the user edits.
                 return;
             }
+            if (FullscreenTextSessionStore.WRITER_FULLSCREEN.equals(session.getLastWriter())
+                    && !mRegularFieldEditedSinceStartInput) {
+                // Do not overwrite fullscreen-origin session state with a passive focus/open
+                // event. If the user actually edits in regular mode, snapshot logic will then
+                // move the session to regular state.
+                return;
+            }
             persistRegularSessionSnapshot(editorInfo, currentFieldText);
             return;
         }
