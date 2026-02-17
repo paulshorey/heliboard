@@ -38,6 +38,13 @@ So we reuse that model: **treat fullscreen as "opening the keyboard app"**, sepa
 5. **On exit**: Mark session `pending_sync`, then `finish()`.
 6. **When user returns**: On `onStartInputViewInternal()`, IME reconciles app field text vs the session store. If fullscreen text should win (pending sync or matching source snapshot), `replaceEntireFieldText()` inserts it and session is normalized to regular-active.
 
+### Session identity and conflict safety
+
+- Sessions are keyed by **package + best-effort field fingerprint** (falls back to package-only where field identifiers are weak, e.g. some WebViews).
+- Reconciliation now **avoids arbitrary same-package field fallback**: a field-specific session is only reused for its matching field key.
+- For package-level pending sessions, apply is guarded by source-text/empty-field checks to reduce accidental overwrite of unrelated fields.
+- Pending sessions are only considered consumed after successful `InputConnection` replacement verification.
+
 ### Key files
 
 - `LatinIME.java`: launch, reconciliation on start input view, regular-mode snapshot persistence.
