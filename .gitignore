@@ -7,6 +7,7 @@ local.properties
 Gemfile
 build
 app/build
+android-sdk
 app/release
 app/.cxx
 app/.attach_*

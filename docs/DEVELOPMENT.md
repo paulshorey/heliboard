@@ -155,6 +155,26 @@ adb devices
    sdkmanager "ndk;28.0.13004108"
    ```
 
+### Option 3: Cursor Cloud Agent / CI (Headless)
+
+The Cursor Cloud Agent and similar headless environments typically don't have the Android SDK pre-installed. Use the automated setup script:
+
+```bash
+# One-time setup (downloads ~1–2 GB, takes 5–10 minutes)
+./scripts/setup-android-sdk.sh
+
+# Then build as usual
+./gradlew assembleDebug
+```
+
+The script will:
+
+1. Download Android command-line tools to `./android-sdk/` (or `$ANDROID_SDK_ROOT` if set)
+2. Install platform android-35, build-tools 35.0.0, and NDK 28.0.13004108
+3. Create `local.properties` with `sdk.dir` pointing to the SDK
+
+**Note:** The first run downloads several hundred MB. Subsequent builds reuse the cached SDK. The `android-sdk/` directory is in `.gitignore`.
+
 ## Building the App
 
 ### Build Variants
