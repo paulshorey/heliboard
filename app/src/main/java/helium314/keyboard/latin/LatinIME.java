@@ -3058,6 +3058,9 @@ public class LatinIME extends InputMethodService implements
     private void launchFullscreenEditorActivity() {
         mInputLogic.commitTyped(mSettings.getCurrent(), LastComposedWord.NOT_A_SEPARATOR);
         stopVoiceRecordingGracefully();
+        // Avoid stale regular-mode snapshot runnable overwriting fullscreen session state
+        // after we switch into standalone fullscreen editing.
+        mMainHandler.removeCallbacks(mRegularSessionSnapshotRunnable);
 
         // Prevent voice paragraph timer race: clear pending paragraph so processPendingVoiceInput
         // (from async cleanup callback) won't insert "\n\n" into the field before we read.
