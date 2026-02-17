@@ -299,4 +299,41 @@ class FullscreenTextSessionStoreTest {
         assertNotNull(weakSnapshot)
         assertEquals("new strong value", weakSnapshot.text)
     }
+
+    @Test
+    fun getSessionForKeyPackageOnlyPrefersNewestSession() {
+        FullscreenTextSessionStore.upsertSession(
+            context = context,
+            sessionKey = "com.calendar.app",
+            packageName = "com.calendar.app",
+            text = "old package-only text",
+            state = FullscreenTextSessionStore.STATE_REGULAR_ACTIVE,
+            lastWriter = FullscreenTextSessionStore.WRITER_REGULAR,
+            sourceText = null,
+        )
+        val strongEditor = EditorInfo().apply {
+            packageName = "com.calendar.app"
+            fieldId = 901
+            inputType = 1
+            imeOptions = 1
+        }
+        val strongKey = FullscreenTextSessionStore.buildSessionKey(strongEditor, strongEditor.packageName)
+        FullscreenTextSessionStore.upsertSession(
+            context = context,
+            sessionKey = strongKey,
+            packageName = "com.calendar.app",
+            text = "new field session text",
+            state = FullscreenTextSessionStore.STATE_PENDING_SYNC,
+            lastWriter = FullscreenTextSessionStore.WRITER_FULLSCREEN,
+            sourceText = "source",
+        )
+
+        val byPackageKey = FullscreenTextSessionStore.getSessionForKey(
+            context = context,
+            sessionKey = "com.calendar.app",
+            packageName = "com.calendar.app",
+        )
+        assertNotNull(byPackageKey)
+        assertEquals("new field session text", byPackageKey.text)
+    }
 }
