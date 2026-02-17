@@ -79,12 +79,7 @@ object FullscreenTextSessionStore {
 
             val packageOnly = sessions[pkg]
             if (packageOnly != null) return packageOnly.toSnapshot()
-
-            return sessions.values
-                .asSequence()
-                .filter { it.packageName == pkg }
-                .maxByOrNull { it.updatedAt }
-                ?.toSnapshot()
+            return null
         }
     }
 
@@ -99,11 +94,7 @@ object FullscreenTextSessionStore {
             val sessions = load(context)
             sessions[sessionKey]?.let { return it.toSnapshot() }
             sessions[packageName]?.let { return it.toSnapshot() }
-            return sessions.values
-                .asSequence()
-                .filter { it.packageName == packageName }
-                .maxByOrNull { it.updatedAt }
-                ?.toSnapshot()
+            return null
         }
     }
 

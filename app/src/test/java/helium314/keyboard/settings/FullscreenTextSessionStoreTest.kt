@@ -150,4 +150,37 @@ class FullscreenTextSessionStoreTest {
         assertNotNull(snapshot)
         assertEquals("package draft", snapshot.text)
     }
+
+    @Test
+    fun doesNotFallbackToDifferentFieldSpecificSession() {
+        val editor1 = EditorInfo().apply {
+            packageName = "com.forms.app"
+            fieldId = 11
+            inputType = 1
+            imeOptions = 1
+        }
+        val editor2 = EditorInfo().apply {
+            packageName = "com.forms.app"
+            fieldId = 22
+            inputType = 1
+            imeOptions = 1
+        }
+        val key1 = FullscreenTextSessionStore.buildSessionKey(editor1, editor1.packageName)
+        FullscreenTextSessionStore.upsertSession(
+            context = context,
+            sessionKey = key1,
+            packageName = "com.forms.app",
+            text = "field-11 draft",
+            state = FullscreenTextSessionStore.STATE_PENDING_SYNC,
+            lastWriter = FullscreenTextSessionStore.WRITER_FULLSCREEN,
+            sourceText = "src",
+        )
+
+        val snapshotForField2 = FullscreenTextSessionStore.getSessionForEditor(
+            context,
+            editor2,
+            "com.forms.app",
+        )
+        assertEquals(null, snapshotForField2)
+    }
 }

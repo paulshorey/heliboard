@@ -1599,9 +1599,18 @@ public class LatinIME extends InputMethodService implements
     }
 
     private boolean shouldApplySessionToField(@NonNull final TextSessionSnapshot session,
-                                              @NonNull final String currentFieldText) {
+                                              @NonNull final String currentFieldText,
+                                              @NonNull final String expectedSessionKey) {
+        final boolean exactMatch = expectedSessionKey.equals(session.getSessionKey());
         if (FullscreenTextSessionStore.STATE_PENDING_SYNC.equals(session.getState())) {
-            return true;
+            if (exactMatch) {
+                return true;
+            }
+            final String sourceText = session.getSourceText();
+            if (sourceText != null && sourceText.equals(currentFieldText)) {
+                return true;
+            }
+            return currentFieldText.isEmpty() && !session.getText().isEmpty();
         }
         if (!FullscreenTextSessionStore.WRITER_FULLSCREEN.equals(session.getLastWriter())) {
             return false;
@@ -1664,7 +1673,7 @@ public class LatinIME extends InputMethodService implements
             return;
         }
 
-        if (!shouldApplySessionToField(session, currentFieldText)) {
+        if (!shouldApplySessionToField(session, currentFieldText, expectedSessionKey)) {
             persistRegularSessionSnapshot(editorInfo, currentFieldText);
             return;
         }
