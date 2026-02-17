@@ -168,7 +168,6 @@ class FullscreenEditorActivity : ComponentActivity() {
     }
 
     private fun onEditorTextChanged(newText: String) {
-        if (newText.isEmpty() && textFieldState.value.text.isEmpty()) return
         persistHandler.removeCallbacks(persistRunnable)
         persistHandler.postDelayed(persistRunnable, 220L)
     }

@@ -1671,6 +1671,7 @@ public class LatinIME extends InputMethodService implements
 
         final String textToApply = session.getText();
         final String previousState = session.getState();
+        final String matchedSessionKey = session.getSessionKey();
         mMainHandler.post(() -> {
             final EditorInfo liveEditor = getCurrentInputEditorInfo();
             if (shouldSkipGlobalSessionForEditor(liveEditor)) {
@@ -1697,6 +1698,9 @@ public class LatinIME extends InputMethodService implements
                     FullscreenTextSessionStore.WRITER_REGULAR,
                     null
             );
+            if (!expectedSessionKey.equals(matchedSessionKey)) {
+                FullscreenTextSessionStore.clearSession(this, matchedSessionKey);
+            }
             if (FullscreenTextSessionStore.STATE_PENDING_SYNC.equals(previousState)) {
                 requestHideSelf(0);
             }
