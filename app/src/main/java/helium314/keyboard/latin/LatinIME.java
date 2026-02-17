@@ -1670,8 +1670,19 @@ public class LatinIME extends InputMethodService implements
             final TextSessionSnapshot packageFallback = FullscreenTextSessionStore.getSessionForKey(
                     this, packageName, packageName
             );
-            if (packageFallback == null
-                    || !shouldApplySessionToField(packageFallback, currentFieldText, expectedSessionKey)) {
+            if (packageFallback == null) {
+                persistRegularSessionSnapshot(editorInfo, currentFieldText);
+                return;
+            }
+            if (!shouldApplySessionToField(packageFallback, currentFieldText, expectedSessionKey)) {
+                if (FullscreenTextSessionStore.STATE_PENDING_SYNC.equals(packageFallback.getState())
+                        && !expectedSessionKey.equals(packageFallback.getSessionKey())) {
+                    return;
+                }
+                if (FullscreenTextSessionStore.WRITER_FULLSCREEN.equals(packageFallback.getLastWriter())
+                        && !mRegularFieldEditedSinceStartInput) {
+                    return;
+                }
                 persistRegularSessionSnapshot(editorInfo, currentFieldText);
                 return;
             }
