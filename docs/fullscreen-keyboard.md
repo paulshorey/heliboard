@@ -34,7 +34,7 @@ So we reuse that model: **treat fullscreen as "opening the keyboard app"**, sepa
 1. **User taps fullscreen expand** → `onFullscreenExpandClicked()` → `launchFullscreenEditorActivity()`.
 2. **Launch**: Commit typed text, stop voice gracefully, cancel pending regular-mode snapshot callbacks, read current text and editor identity from `InputConnection`/`EditorInfo`, resolve text from the shared session store, call `requestHideSelf()`, start `FullscreenEditorActivity` with extras.
 3. **In Activity**: User edits in Compose `OutlinedTextField` (keyboard + voice work; keyboard app is foreground). No top toolbar — the keyboard's fullscreen toggle (angle down) or back press exits.
-4. **While editing**: Fullscreen text is continuously persisted as `fullscreen_in_progress` in the shared session store (debounced + lifecycle flush), with redundant selection-only updates skipped.
+4. **While editing**: Fullscreen text is continuously persisted as `fullscreen_in_progress` in the shared session store (debounced + lifecycle flush), with redundant selection-only/no-op updates skipped to keep timestamps meaningful.
 5. **On exit**: Mark session `pending_sync`, then `finish()`.
 6. **When user returns**: On `onStartInputViewInternal()`, IME reconciles app field text vs the session store. If fullscreen text should win (pending sync or matching source snapshot), `replaceEntireFieldText()` inserts it and session is normalized to regular-active.
 7. **Fullscreen resume safety**: `FullscreenEditorActivity` tracks persisted timestamps and pending local edits; on resume it only pulls global text when it is strictly newer and there is no pending local flush, preventing stale global overwrite of recent local typing.
