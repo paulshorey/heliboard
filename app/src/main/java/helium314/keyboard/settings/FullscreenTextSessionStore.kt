@@ -194,6 +194,14 @@ object FullscreenTextSessionStore {
         if (privateOptionsHash != null) {
             components.add("pio:$privateOptionsHash")
         }
+        val fieldName = editorInfo.fieldName.orEmpty()
+        if (fieldName.isNotEmpty()) {
+            components.add("fn:${fieldName.hashCode()}")
+        }
+        val hintText = editorInfo.hintText?.toString().orEmpty()
+        if (hintText.isNotEmpty()) {
+            components.add("ht:${hintText.hashCode()}")
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val autofill = editorInfo.autofillId?.toString().orEmpty()
@@ -204,7 +212,9 @@ object FullscreenTextSessionStore {
 
         val hasStrongSignal = editorInfo.fieldId != 0 ||
             (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && editorInfo.autofillId != null) ||
-            !editorInfo.privateImeOptions.isNullOrEmpty()
+            !editorInfo.privateImeOptions.isNullOrEmpty() ||
+            fieldName.isNotEmpty() ||
+            hintText.isNotEmpty()
         if (!hasStrongSignal) return null
 
         return components.joinToString("|").lowercase(Locale.ROOT)

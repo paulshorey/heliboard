@@ -183,4 +183,43 @@ class FullscreenTextSessionStoreTest {
         )
         assertEquals(null, snapshotForField2)
     }
+
+    @Test
+    fun usesFieldNameToDifferentiateWhenNoFieldId() {
+        val editorSubject = EditorInfo().apply {
+            packageName = "com.mail.client"
+            fieldId = 0
+            inputType = 1
+            imeOptions = 1
+            fieldName = "subject"
+        }
+        val editorBody = EditorInfo().apply {
+            packageName = "com.mail.client"
+            fieldId = 0
+            inputType = 1
+            imeOptions = 1
+            fieldName = "body"
+        }
+
+        val subjectKey = FullscreenTextSessionStore.buildSessionKey(editorSubject, editorSubject.packageName)
+        val bodyKey = FullscreenTextSessionStore.buildSessionKey(editorBody, editorBody.packageName)
+
+        FullscreenTextSessionStore.upsertSession(
+            context = context,
+            sessionKey = subjectKey,
+            packageName = "com.mail.client",
+            text = "subject draft",
+            state = FullscreenTextSessionStore.STATE_PENDING_SYNC,
+            lastWriter = FullscreenTextSessionStore.WRITER_FULLSCREEN,
+            sourceText = "subject old",
+        )
+
+        val bodySnapshot = FullscreenTextSessionStore.getSessionForEditor(
+            context = context,
+            editorInfo = editorBody,
+            fallbackPackageName = "com.mail.client",
+        )
+        assertEquals(subjectKey == bodyKey, false)
+        assertEquals(null, bodySnapshot)
+    }
 }
