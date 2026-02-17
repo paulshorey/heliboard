@@ -222,4 +222,38 @@ class FullscreenTextSessionStoreTest {
         assertEquals(subjectKey == bodyKey, false)
         assertEquals(null, bodySnapshot)
     }
+
+    @Test
+    fun weakEditorCanRecoverLatestPackageSession() {
+        val strongEditor = EditorInfo().apply {
+            packageName = "com.browser.app"
+            fieldId = 44
+            inputType = 1
+            imeOptions = 1
+        }
+        val strongKey = FullscreenTextSessionStore.buildSessionKey(strongEditor, strongEditor.packageName)
+        FullscreenTextSessionStore.upsertSession(
+            context = context,
+            sessionKey = strongKey,
+            packageName = "com.browser.app",
+            text = "latest package draft",
+            state = FullscreenTextSessionStore.STATE_PENDING_SYNC,
+            lastWriter = FullscreenTextSessionStore.WRITER_FULLSCREEN,
+            sourceText = "source",
+        )
+
+        val weakEditor = EditorInfo().apply {
+            packageName = "com.browser.app"
+            fieldId = 0
+            inputType = 1
+            imeOptions = 1
+        }
+        val weakSnapshot = FullscreenTextSessionStore.getSessionForEditor(
+            context = context,
+            editorInfo = weakEditor,
+            fallbackPackageName = "com.browser.app",
+        )
+        assertNotNull(weakSnapshot)
+        assertEquals("latest package draft", weakSnapshot.text)
+    }
 }
