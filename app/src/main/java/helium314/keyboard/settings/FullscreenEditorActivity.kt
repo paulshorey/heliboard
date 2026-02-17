@@ -74,6 +74,8 @@ class FullscreenEditorActivity : ComponentActivity() {
     private var sessionKey = ""
     private var sourceText = ""
     private var hasExited = false
+    private var hasPendingPersist = false
+    private var lastPersistedAt = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -153,6 +155,12 @@ class FullscreenEditorActivity : ComponentActivity() {
         )
         textFieldState.value = TextFieldValue(launchText, selection = TextRange(launchText.length))
         hasExited = false
+        hasPendingPersist = false
+        lastPersistedAt = FullscreenTextSessionStore.getSessionForKey(
+            context = this,
+            sessionKey = sessionKey,
+            packageName = targetPackage,
+        )?.updatedAt ?: 0L
         persistInProgress()
     }
 
@@ -163,18 +171,22 @@ class FullscreenEditorActivity : ComponentActivity() {
             sessionKey = sessionKey,
             packageName = targetPackage,
         ) ?: return
+        if (hasPendingPersist) return
+        if (snapshot.updatedAt <= lastPersistedAt) return
         if (snapshot.text == textFieldState.value.text) return
         textFieldState.value = TextFieldValue(snapshot.text, selection = TextRange(snapshot.text.length))
+        lastPersistedAt = snapshot.updatedAt
     }
 
     private fun onEditorTextChanged(newText: String) {
+        hasPendingPersist = true
         persistHandler.removeCallbacks(persistRunnable)
         persistHandler.postDelayed(persistRunnable, 220L)
     }
 
     private fun persistInProgress() {
         if (sessionKey.isEmpty() || targetPackage.isEmpty()) return
-        FullscreenTextSessionStore.upsertSession(
+        val snapshot = FullscreenTextSessionStore.upsertSession(
             context = this,
             sessionKey = sessionKey,
             packageName = targetPackage,
@@ -183,14 +195,17 @@ class FullscreenEditorActivity : ComponentActivity() {
             lastWriter = FullscreenTextSessionStore.WRITER_FULLSCREEN,
             sourceText = sourceText,
         )
+        hasPendingPersist = false
+        lastPersistedAt = snapshot.updatedAt
     }
 
     private fun saveAndExit() {
         if (hasExited) return
         hasExited = true
+        hasPendingPersist = false
         persistHandler.removeCallbacks(persistRunnable)
         val finalText = textFieldState.value.text
-        FullscreenTextSessionStore.upsertSession(
+        val snapshot = FullscreenTextSessionStore.upsertSession(
             context = this,
             sessionKey = sessionKey,
             packageName = targetPackage,
@@ -199,6 +214,7 @@ class FullscreenEditorActivity : ComponentActivity() {
             lastWriter = FullscreenTextSessionStore.WRITER_FULLSCREEN,
             sourceText = sourceText,
         )
+        lastPersistedAt = snapshot.updatedAt
         setResult(RESULT_OK, Intent().putExtra("text", finalText))
         finish()
     }
