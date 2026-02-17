@@ -256,4 +256,47 @@ class FullscreenTextSessionStoreTest {
         assertNotNull(weakSnapshot)
         assertEquals("latest package draft", weakSnapshot.text)
     }
+
+    @Test
+    fun weakEditorPrefersNewestSessionOverStalePackageEntry() {
+        FullscreenTextSessionStore.upsertSession(
+            context = context,
+            sessionKey = "com.notes.app",
+            packageName = "com.notes.app",
+            text = "old package value",
+            state = FullscreenTextSessionStore.STATE_REGULAR_ACTIVE,
+            lastWriter = FullscreenTextSessionStore.WRITER_REGULAR,
+            sourceText = null,
+        )
+        val strongEditor = EditorInfo().apply {
+            packageName = "com.notes.app"
+            fieldId = 77
+            inputType = 1
+            imeOptions = 1
+        }
+        val strongKey = FullscreenTextSessionStore.buildSessionKey(strongEditor, strongEditor.packageName)
+        FullscreenTextSessionStore.upsertSession(
+            context = context,
+            sessionKey = strongKey,
+            packageName = "com.notes.app",
+            text = "new strong value",
+            state = FullscreenTextSessionStore.STATE_PENDING_SYNC,
+            lastWriter = FullscreenTextSessionStore.WRITER_FULLSCREEN,
+            sourceText = "src",
+        )
+
+        val weakEditor = EditorInfo().apply {
+            packageName = "com.notes.app"
+            fieldId = 0
+            inputType = 1
+            imeOptions = 1
+        }
+        val weakSnapshot = FullscreenTextSessionStore.getSessionForEditor(
+            context = context,
+            editorInfo = weakEditor,
+            fallbackPackageName = "com.notes.app",
+        )
+        assertNotNull(weakSnapshot)
+        assertEquals("new strong value", weakSnapshot.text)
+    }
 }

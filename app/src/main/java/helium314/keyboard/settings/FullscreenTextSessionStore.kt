@@ -78,14 +78,18 @@ object FullscreenTextSessionStore {
             if (exact != null) return exact.toSnapshot()
 
             val packageOnly = sessions[pkg]
-            if (packageOnly != null) return packageOnly.toSnapshot()
             if (exactKey == pkg) {
-                return sessions.values
+                val latestSamePackage = sessions.values
                     .asSequence()
                     .filter { it.packageName == pkg }
                     .maxByOrNull { it.updatedAt }
-                    ?.toSnapshot()
+                if (latestSamePackage != null && (packageOnly == null || latestSamePackage.updatedAt >= packageOnly.updatedAt)) {
+                    return latestSamePackage.toSnapshot()
+                }
+                if (packageOnly != null) return packageOnly.toSnapshot()
+                return null
             }
+            if (packageOnly != null) return packageOnly.toSnapshot()
             return null
         }
     }
@@ -100,14 +104,18 @@ object FullscreenTextSessionStore {
         synchronized(this) {
             val sessions = load(context)
             sessions[sessionKey]?.let { return it.toSnapshot() }
-            sessions[packageName]?.let { return it.toSnapshot() }
             if (sessionKey == packageName) {
-                return sessions.values
+                val packageOnly = sessions[packageName]
+                val latestSamePackage = sessions.values
                     .asSequence()
                     .filter { it.packageName == packageName }
                     .maxByOrNull { it.updatedAt }
-                    ?.toSnapshot()
+                if (latestSamePackage != null && (packageOnly == null || latestSamePackage.updatedAt >= packageOnly.updatedAt)) {
+                    return latestSamePackage.toSnapshot()
+                }
+                return packageOnly?.toSnapshot()
             }
+            sessions[packageName]?.let { return it.toSnapshot() }
             return null
         }
     }
