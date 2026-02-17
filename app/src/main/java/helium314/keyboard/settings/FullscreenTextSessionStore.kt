@@ -156,6 +156,16 @@ object FullscreenTextSessionStore {
         val now = System.currentTimeMillis()
         synchronized(this) {
             val sessions = load(context)
+            val previous = sessions[key]
+            if (previous != null
+                && previous.packageName == packageName
+                && previous.text == text
+                && previous.state == state
+                && previous.lastWriter == lastWriter
+                && previous.sourceText == sourceText
+            ) {
+                return previous.toSnapshot()
+            }
             val next = TextSessionRecord(
                 sessionKey = key,
                 packageName = packageName,

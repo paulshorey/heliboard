@@ -336,4 +336,29 @@ class FullscreenTextSessionStoreTest {
         assertNotNull(byPackageKey)
         assertEquals("new field session text", byPackageKey.text)
     }
+
+    @Test
+    fun upsertSessionDoesNotRewriteWhenContentIsUnchanged() {
+        val first = FullscreenTextSessionStore.upsertSession(
+            context = context,
+            sessionKey = "com.memo.app",
+            packageName = "com.memo.app",
+            text = "unchanged",
+            state = FullscreenTextSessionStore.STATE_FULLSCREEN_IN_PROGRESS,
+            lastWriter = FullscreenTextSessionStore.WRITER_FULLSCREEN,
+            sourceText = "source",
+        )
+        Thread.sleep(2)
+        val second = FullscreenTextSessionStore.upsertSession(
+            context = context,
+            sessionKey = "com.memo.app",
+            packageName = "com.memo.app",
+            text = "unchanged",
+            state = FullscreenTextSessionStore.STATE_FULLSCREEN_IN_PROGRESS,
+            lastWriter = FullscreenTextSessionStore.WRITER_FULLSCREEN,
+            sourceText = "source",
+        )
+
+        assertEquals(first.updatedAt, second.updatedAt)
+    }
 }
