@@ -1658,6 +1658,20 @@ public class LatinIME extends InputMethodService implements
         }
 
         if (currentFieldText.equals(session.getText())) {
+            final String matchedSessionKey = session.getSessionKey();
+            if (!expectedSessionKey.equals(matchedSessionKey)) {
+                FullscreenTextSessionStore.upsertSession(
+                        this,
+                        expectedSessionKey,
+                        packageName,
+                        currentFieldText,
+                        FullscreenTextSessionStore.STATE_REGULAR_ACTIVE,
+                        FullscreenTextSessionStore.WRITER_REGULAR,
+                        null
+                );
+                FullscreenTextSessionStore.clearSession(this, matchedSessionKey);
+                return;
+            }
             if (!FullscreenTextSessionStore.STATE_REGULAR_ACTIVE.equals(session.getState())
                     || !FullscreenTextSessionStore.WRITER_REGULAR.equals(session.getLastWriter())) {
                 FullscreenTextSessionStore.upsertSession(
