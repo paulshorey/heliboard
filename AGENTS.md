@@ -2,6 +2,16 @@
 
 HeliBoard is an Android app, open-source project based on AOSP / OpenBoard keyboard.
 
+## Building / Compilation
+
+Before building (e.g. `./gradlew assembleDebug`), ensure the Android SDK is available. If you get an error like "Android SDK path is missing (ANDROID_HOME / local.properties sdk.dir not set)", run:
+
+```bash
+./scripts/setup-android-sdk.sh
+```
+
+This downloads and installs the SDK, creates `local.properties`, and takes about 5–10 minutes on first run. Then build as usual.
+
 ## This project rewrites HeliBoard with custom experimental features
 
 1. Voice to text (using Deepgram Nova-3 transcription + Anthropic Claude cleanup)
