@@ -1660,12 +1660,22 @@ public class LatinIME extends InputMethodService implements
         }
 
         final String currentFieldText = getOriginalFieldTextForFullscreen();
-        final TextSessionSnapshot session = FullscreenTextSessionStore.getSessionForEditor(
+        TextSessionSnapshot session = FullscreenTextSessionStore.getSessionForEditor(
                 this, editorInfo, packageName
         );
         if (session == null) {
-            persistRegularSessionSnapshot(editorInfo, currentFieldText);
-            return;
+            // Recovery path for unstable editor identity: check newest package session, but only
+            // apply if source/safety rules allow it. This keeps cross-field safety while handling
+            // cases where field identifiers changed between fullscreen launch and reconnect.
+            final TextSessionSnapshot packageFallback = FullscreenTextSessionStore.getSessionForKey(
+                    this, packageName, packageName
+            );
+            if (packageFallback == null
+                    || !shouldApplySessionToField(packageFallback, currentFieldText, expectedSessionKey)) {
+                persistRegularSessionSnapshot(editorInfo, currentFieldText);
+                return;
+            }
+            session = packageFallback;
         }
 
         if (currentFieldText.equals(session.getText())) {
