@@ -278,6 +278,16 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         }
 
         toolbarExpandKey.scaleX = (if (toolbarVisible && !locked) -1f else 1f) * direction
+
+        // Update FULLSCREEN key icon: up-angle when toolbar hidden, down-angle when shown
+        val fullscreenIconRes = if (toolbarVisible && !locked) R.drawable.ic_dpad_down else R.drawable.ic_dpad_up
+        val colors = Settings.getValues()?.mColors
+        listOf(toolbar, pinnedKeys).forEach { parent ->
+            parent.findViewWithTag<ImageButton>(ToolbarKey.FULLSCREEN)?.let { key ->
+                key.setImageResource(fullscreenIconRes)
+                colors?.setColor(key, ColorType.TOOL_BAR_KEY)
+            }
+        }
     }
 
     fun setSuggestions(suggestions: SuggestedWords, isRtlLanguage: Boolean) {
@@ -376,6 +386,10 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
                 Log.d(TAG, "click toolbar key $tag")
                 listener.onCodeInput(code, Constants.SUGGESTION_STRIP_COORDINATE, Constants.SUGGESTION_STRIP_COORDINATE, false)
                 if (tag === ToolbarKey.INCOGNITO) updateKeys() // update expand key icon
+                return
+            }
+            if (tag === ToolbarKey.FULLSCREEN) {
+                setToolbarVisibility(toolbarContainer.visibility != VISIBLE)
                 return
             }
         }
