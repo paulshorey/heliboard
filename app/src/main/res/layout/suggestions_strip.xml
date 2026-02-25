@@ -13,6 +13,7 @@
         android:orientation="horizontal"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:layout_marginEnd="@dimen/config_suggestions_strip_edge_key_width"
         android:hapticFeedbackEnabled="false"
         android:soundEffectsEnabled="false">
         <!-- Provide audio and haptic feedback by ourselves based on the keyboard settings.
@@ -63,6 +64,17 @@
             android:minWidth="0dp"
             style="?attr/suggestionWordStyle">
         </LinearLayout>
+    </LinearLayout>
+    <!-- Voice buttons overlay - always floats on top of pinned toolbar buttons at the right edge.
+         Uses RelativeLayout positioning (SuggestionStripView extends RelativeLayout) so it
+         overlays the suggestions_strip_wrapper regardless of how many pinned keys are shown. -->
+    <LinearLayout
+        android:id="@+id/voice_buttons_container"
+        android:orientation="horizontal"
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:layout_alignParentEnd="true"
+        android:gravity="center_vertical">
         <!-- Voice cancel button - shown only during recording -->
         <ImageButton
             android:id="@+id/voice_cancel_key"
@@ -70,7 +82,6 @@
             android:layout_height="@dimen/config_suggestions_strip_edge_key_width"
             android:layout_gravity="center_vertical"
             android:layout_weight="0"
-            android:layout_marginEnd="8dp"
             android:src="@drawable/ic_close_rounded"
             android:background="?android:attr/selectableItemBackgroundBorderless"
             android:visibility="gone"
@@ -83,7 +94,6 @@
             android:layout_height="@dimen/config_suggestions_strip_edge_key_width"
             android:layout_gravity="center_vertical"
             android:layout_weight="0"
-            android:layout_marginEnd="8dp"
             android:src="@drawable/ic_pause"
             android:background="?android:attr/selectableItemBackgroundBorderless"
             android:visibility="gone"

@@ -118,6 +118,7 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
     private val pinnedKeys: ViewGroup = findViewById(R.id.pinned_keys)
     private val suggestionsStrip: ViewGroup = findViewById(R.id.suggestions_strip)
     private val toolbarExpandKey = findViewById<ImageButton>(R.id.suggestions_strip_toolbar_key)
+    private val voiceButtonsContainer: ViewGroup = findViewById(R.id.voice_buttons_container)
     private val voiceInputKey = findViewById<ImageButton>(R.id.voice_input_key)
     private val voiceCancelKey = findViewById<ImageButton>(R.id.voice_cancel_key)
     private val voicePauseKey = findViewById<ImageButton>(R.id.voice_pause_key)
@@ -152,6 +153,9 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         enabledToolKeyBackground.colors = intArrayOf(color, Color.TRANSPARENT)
         enabledToolKeyBackground.gradientType = GradientDrawable.RADIAL_GRADIENT
         enabledToolKeyBackground.gradientRadius = resources.getDimensionPixelSize(R.dimen.config_suggestions_strip_height) / 2.1f
+
+        // Voice buttons overlay container - apply strip background so it covers pinned keys beneath
+        colors.setBackground(voiceButtonsContainer, ColorType.STRIP_BACKGROUND)
 
         // Voice input key setup
         voiceInputKey.layoutParams.height = toolbarHeight
