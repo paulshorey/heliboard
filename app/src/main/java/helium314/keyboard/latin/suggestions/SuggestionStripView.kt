@@ -120,6 +120,7 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
     private val pinnedKeys: ViewGroup = findViewById(R.id.pinned_keys)
     private val suggestionsStrip: ViewGroup = findViewById(R.id.suggestions_strip)
     private val toolbarExpandKey = findViewById<ImageButton>(R.id.suggestions_strip_toolbar_key)
+    private val customButtonsOverlay: ViewGroup = findViewById(R.id.custom_buttons_overlay)
     private val fullappExpandKey = findViewById<ImageButton>(R.id.fullapp_expand_key)
     private val voiceInputKey = findViewById<ImageButton>(R.id.voice_input_key)
     private val voiceCancelKey = findViewById<ImageButton>(R.id.voice_cancel_key)
@@ -142,6 +143,7 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
 
     init {
         val colors = Settings.getValues().mColors
+        colors.setBackground(customButtonsOverlay, ColorType.STRIP_BACKGROUND)
 
         // expand key
         // weird way of setting size (default is config_suggestions_strip_edge_key_width)
