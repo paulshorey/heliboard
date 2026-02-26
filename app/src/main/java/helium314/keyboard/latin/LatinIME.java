@@ -876,6 +876,13 @@ public class LatinIME extends InputMethodService implements
 
     void onStartInputViewInternal(final EditorInfo editorInfo, final boolean restarting) {
         super.onStartInputView(editorInfo, restarting);
+        // Reset forced fullscreen when switching to a new text field.
+        if (!restarting && mForceFullscreenMode) {
+            mForceFullscreenMode = false;
+            if (mSuggestionStripView != null) {
+                mSuggestionStripView.setFullscreenButtonState(false);
+            }
+        }
 
         mDictionaryFacilitator.onStartInput();
         // Switch to the null consumer to handle cases leading to early exit below, for which we
@@ -1338,12 +1345,17 @@ public class LatinIME extends InputMethodService implements
         return super.onEvaluateInputViewShown();
     }
 
+    /** Whether the user has manually requested fullscreen (extract-text) editing mode. */
+    private boolean mForceFullscreenMode = false;
+
     @Override
     public boolean onEvaluateFullscreenMode() {
         if (isImeSuppressedByHardwareKeyboard()) {
             // If there is a hardware keyboard, disable full screen mode.
             return false;
         }
+        // User-requested fullscreen (via the fullscreen overlay button).
+        if (mForceFullscreenMode) return true;
         // Reread resource value here, because this method is called by the framework as needed.
         final boolean isFullscreenModeAllowed = Settings.readFullscreenModeAllowed(getResources());
         if (super.onEvaluateFullscreenMode() && isFullscreenModeAllowed) {
@@ -1800,6 +1812,15 @@ public class LatinIME extends InputMethodService implements
                 mSuggestionStripView.setVoiceInputState(isPaused ? VoiceState.PAUSED : VoiceState.RECORDING);
                 mKeyboardSwitcher.showToast(isPaused ? "Paused" : "Resumed", false);
             }
+        }
+    }
+
+    @Override
+    public void onVoiceFullscreenClicked() {
+        mForceFullscreenMode = !mForceFullscreenMode;
+        updateFullscreenMode();
+        if (mSuggestionStripView != null) {
+            mSuggestionStripView.setFullscreenButtonState(mForceFullscreenMode);
         }
     }
 

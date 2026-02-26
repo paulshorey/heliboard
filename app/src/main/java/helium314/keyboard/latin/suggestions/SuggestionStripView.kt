@@ -77,6 +77,7 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         fun onVoiceInputClicked()
         fun onVoiceCancelClicked()
         fun onVoicePauseClicked()
+        fun onVoiceFullscreenClicked()
     }
 
     private val moreSuggestionsContainer: View
@@ -168,7 +169,9 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         colors.setBackground(voiceFullscreenKey, ColorType.STRIP_BACKGROUND)
         voiceFullscreenKey.setOnClickListener {
             AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, this, HapticEvent.KEY_PRESS)
-            setToolbarVisibility(toolbarContainer.visibility != VISIBLE)
+            if (::listener.isInitialized) {
+                listener.onVoiceFullscreenClicked()
+            }
         }
 
         // Voice input key setup
@@ -292,19 +295,15 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         }
 
         toolbarExpandKey.scaleX = (if (toolbarVisible && !locked) -1f else 1f) * direction
+    }
 
-        // Update FULLSCREEN key icons: up-angle when toolbar hidden, down-angle when shown
-        val fullscreenIconRes = if (toolbarVisible && !locked) R.drawable.ic_dpad_down else R.drawable.ic_dpad_up
-        val colors = Settings.getValues()?.mColors
-        // Update the always-visible overlay fullscreen button
-        voiceFullscreenKey.setImageResource(fullscreenIconRes)
-        colors?.setColor(voiceFullscreenKey, ColorType.TOOL_BAR_KEY)
-        // Update any FULLSCREEN toolbar key instances (in toolbar or pinned keys)
-        listOf(toolbar, pinnedKeys).forEach { parent ->
-            parent.findViewWithTag<ImageButton>(ToolbarKey.FULLSCREEN)?.let { key ->
-                key.setImageResource(fullscreenIconRes)
-                colors?.setColor(key, ColorType.TOOL_BAR_KEY)
-            }
+    /** Update the fullscreen overlay button icon to reflect the active IME fullscreen state. */
+    fun setFullscreenButtonState(isFullscreen: Boolean) {
+        post {
+            val iconRes = if (isFullscreen) R.drawable.ic_dpad_down else R.drawable.ic_dpad_up
+            val colors = Settings.getValues()?.mColors
+            voiceFullscreenKey.setImageResource(iconRes)
+            colors?.setColor(voiceFullscreenKey, ColorType.TOOL_BAR_KEY)
         }
     }
 
