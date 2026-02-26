@@ -89,6 +89,8 @@ import helium314.keyboard.latin.utils.ToolbarMode;
 import helium314.keyboard.latin.voice.VoiceInputManager;
 import helium314.keyboard.latin.voice.TextCleanupClient;
 import helium314.keyboard.latin.suggestions.SuggestionStripView.VoiceState;
+import helium314.keyboard.settings.FullappEditorActivity;
+import helium314.keyboard.settings.FullappEditorResult;
 import helium314.keyboard.settings.SettingsActivity2;
 import kotlin.Unit;
 
@@ -200,6 +202,7 @@ public class LatinIME extends InputMethodService implements
     private final ArrayDeque<String> mPendingTranscriptionQueue = new ArrayDeque<>();
     private static final int MAX_PENDING_TRANSCRIPTIONS = 64;
     private static final long CLEANUP_WATCHDOG_TIMEOUT_MS = 12_000L;
+    private static final int FULLAPP_SYNC_MAX_CHARS = 100_000;
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
     private final Runnable mCleanupWatchdogRunnable = new Runnable() {
         @Override
@@ -901,6 +904,21 @@ public class LatinIME extends InputMethodService implements
             EditorInfoCompatUtils.INSTANCE.debugLog(editorInfo, TAG);
         }
 
+        // Insert pending text from fullapp editor Activity (user returned from FullappEditorActivity).
+        final String pending = FullappEditorResult.pendingText;
+        final String targetPkg = FullappEditorResult.targetPackageName;
+        if (pending != null && targetPkg != null && targetPkg.equals(editorInfo.packageName)) {
+            FullappEditorResult.pendingText = null;
+            FullappEditorResult.targetPackageName = null;
+            mMainHandler.post(() -> {
+                final boolean synced = replaceEntireFieldText(pending, true);
+                if (!synced) {
+                    Log.w(TAG, "Failed to insert pending fullapp text");
+                }
+                requestHideSelf(0);
+            });
+        }
+
         // In landscape mode, this method gets called without the input view being created.
         if (mainKeyboardView == null) {
             return;
@@ -935,6 +953,13 @@ public class LatinIME extends InputMethodService implements
             currentSettingsValues = mSettings.getCurrent();
             if (hasSuggestionStripView())
                 mSuggestionStripView.updateVoiceKey();
+        }
+
+        // Show angle-down (minimize) when keyboard is in FullappEditorActivity; angle-up (expand) otherwise
+        if (hasSuggestionStripView()) {
+            final boolean inFullappEditor = FullappEditorActivity.isActive
+                    && getPackageName().equals(editorInfo.packageName);
+            mSuggestionStripView.setFullappButtonMode(inFullappEditor);
         }
         // ALERT: settings have not been reloaded and there is a chance they may be stale.
         // In the practice, if it is, we should have gotten onConfigurationChanged so it should
@@ -1370,6 +1395,157 @@ public class LatinIME extends InputMethodService implements
         KtxKt.updateSoftInputWindowLayoutParameters(this, mInputView);
     }
 
+    @NonNull
+    private String getOriginalFieldText() {
+        final android.view.inputmethod.InputConnection ic = getCurrentInputConnection();
+        if (ic == null) {
+            return "";
+        }
+
+        final String currentText = readCurrentFieldText(ic, FULLAPP_SYNC_MAX_CHARS);
+        return currentText != null ? currentText : "";
+    }
+
+    /**
+     * Read field text using only getTextBeforeCursor + getTextAfterCursor, bypassing
+     * getExtractedText(). Some editors (including WebView/Chrome for textareas) add trailing
+     * newlines to ExtractedText for fullscreen/extract-view display; this path avoids that.
+     */
+    @NonNull
+    private String getOriginalFieldTextForFullapp() {
+        final android.view.inputmethod.InputConnection ic = getCurrentInputConnection();
+        if (ic == null) {
+            return "";
+        }
+
+        final CharSequence before = ic.getTextBeforeCursor(FULLAPP_SYNC_MAX_CHARS, 0);
+        final CharSequence after = ic.getTextAfterCursor(FULLAPP_SYNC_MAX_CHARS, 0);
+        if (before == null && after == null) {
+            return "";
+        }
+        final StringBuilder sb = new StringBuilder();
+        if (before != null) {
+            sb.append(before);
+        }
+        if (after != null) {
+            sb.append(after);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Get the cursor position (selection start) in the app's text field.
+     * Returns 0 if unknown or on error.
+     */
+    private int getOriginalFieldCursorPosition() {
+        final android.view.inputmethod.InputConnection ic = getCurrentInputConnection();
+        if (ic == null) {
+            return 0;
+        }
+        try {
+            final android.view.inputmethod.ExtractedTextRequest request =
+                    new android.view.inputmethod.ExtractedTextRequest();
+            request.hintMaxChars = FULLAPP_SYNC_MAX_CHARS;
+            request.hintMaxLines = Integer.MAX_VALUE;
+            request.flags = 0;
+            request.token = 0;
+            final android.view.inputmethod.ExtractedText extracted = ic.getExtractedText(request, 0);
+            if (extracted != null) {
+                int pos = extracted.selectionStart;
+                if (pos >= 0 && extracted.text != null && pos <= extracted.text.length()) {
+                    return pos;
+                }
+            }
+            // Fallback: cursor position = length of text before cursor
+            final CharSequence before = ic.getTextBeforeCursor(FULLAPP_SYNC_MAX_CHARS, 0);
+            return before != null ? before.length() : 0;
+        } catch (Exception e) {
+            Log.w(TAG, "Failed reading cursor position: " + e.getMessage());
+            return 0;
+        }
+    }
+
+    @Nullable
+    private String readCurrentFieldText(@NonNull final android.view.inputmethod.InputConnection ic,
+                                        final int maxChars) {
+        try {
+            final android.view.inputmethod.ExtractedTextRequest request =
+                    new android.view.inputmethod.ExtractedTextRequest();
+            request.hintMaxChars = maxChars;
+            request.hintMaxLines = Integer.MAX_VALUE;
+            request.flags = 0;
+            request.token = 0;
+            final android.view.inputmethod.ExtractedText extracted = ic.getExtractedText(request, 0);
+            if (extracted != null && extracted.text != null) {
+                return extracted.text.toString();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed reading extracted text: " + e.getMessage());
+        }
+
+        final CharSequence before = ic.getTextBeforeCursor(maxChars, 0);
+        final CharSequence after = ic.getTextAfterCursor(maxChars, 0);
+        if (before == null && after == null) {
+            return null;
+        }
+        final StringBuilder fallback = new StringBuilder();
+        if (before != null) {
+            fallback.append(before);
+        }
+        if (after != null) {
+            fallback.append(after);
+        }
+        return fallback.toString();
+    }
+
+    /**
+     * Replace the entire field content with the given text.
+     * Uses getTextBeforeCursor + getTextAfterCursor to compute the actual selection range,
+     * because getExtractedText can return truncated content and leave trailing text as a duplicate.
+     */
+    private boolean replaceEntireFieldText(@NonNull final String replacement,
+                                           final boolean verifyReplacement) {
+        final android.view.inputmethod.InputConnection ic = getCurrentInputConnection();
+        if (ic == null) {
+            Log.w(TAG, "Unable to sync text: no InputConnection");
+            return false;
+        }
+
+        boolean commitSucceeded = false;
+        ic.beginBatchEdit();
+        try {
+            ic.finishComposingText();
+            final CharSequence before = ic.getTextBeforeCursor(FULLAPP_SYNC_MAX_CHARS, 0);
+            final CharSequence after = ic.getTextAfterCursor(FULLAPP_SYNC_MAX_CHARS, 0);
+            final int beforeLength = before != null ? before.length() : 0;
+            final int afterLength = after != null ? after.length() : 0;
+            final int totalLength = beforeLength + afterLength;
+
+            if (totalLength > 0) {
+                final boolean selected = ic.setSelection(0, totalLength);
+                if (!selected) {
+                    ic.setSelection(totalLength, totalLength);
+                    ic.deleteSurroundingText(totalLength, 0);
+                }
+            }
+            commitSucceeded = ic.commitText(replacement, 1);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed replacing field text: " + e.getMessage(), e);
+            commitSucceeded = false;
+        } finally {
+            ic.endBatchEdit();
+        }
+
+        if (!commitSucceeded) {
+            return false;
+        }
+        if (!verifyReplacement || replacement.length() > FULLAPP_SYNC_MAX_CHARS) {
+            return true;
+        }
+        final String updatedText = readCurrentFieldText(ic, FULLAPP_SYNC_MAX_CHARS);
+        return replacement.equals(updatedText);
+    }
+
     @Override
     @RequiresApi(api = Build.VERSION_CODES.R)
     public InlineSuggestionsRequest onCreateInlineSuggestionsRequest(@NonNull Bundle uiExtras) {
@@ -1614,6 +1790,13 @@ public class LatinIME extends InputMethodService implements
         }
     }
 
+    @Override
+    public void setFullappButtonMode(final boolean inFullappEditor) {
+        if (hasSuggestionStripView()) {
+            mSuggestionStripView.setFullappButtonMode(inFullappEditor);
+        }
+    }
+
     // Called from {@link SuggestionStripView} through the {@link SuggestionStripView#Listener}
     // interface
     @Override
@@ -1786,6 +1969,19 @@ public class LatinIME extends InputMethodService implements
     }
 
     @Override
+    public void onFullappExpandClicked() {
+        launchFullappEditorActivity();
+    }
+
+    @Override
+    public void onFullappMinimizeClicked() {
+        final Runnable runnable = FullappEditorActivity.onExitFromKeyboard;
+        if (runnable != null) {
+            runnable.run();
+        }
+    }
+
+    @Override
     public void onVoiceCancelClicked() {
         cancelVoiceRecordingAbruptly();
     }
@@ -1899,8 +2095,7 @@ public class LatinIME extends InputMethodService implements
                         mPendingNewParagraph = true;
                     } else {
                         Log.i(TAG, "New paragraph break inserted (recording remains active)");
-                        mInputLogic.finishInput();
-                        mInputLogic.mConnection.commitText("\n\n", 1);
+                        insertParagraphBreak();
                     }
                 } catch (Exception e) {
                     Log.e(TAG, "Error inserting paragraph break: " + e.getMessage(), e);
@@ -1922,6 +2117,20 @@ public class LatinIME extends InputMethodService implements
         });
     }
 
+    @Nullable
+    private CharSequence getTextBeforeCursorForVoiceContext(final int maxChars) {
+        // Always read from InputConnection (app field). In fullscreen, the extract view
+        // mirrors the app; the app is the source of truth.
+        return mInputLogic.mConnection.getTextBeforeCursor(maxChars, 0);
+    }
+
+    private void insertParagraphBreak() {
+        mInputLogic.finishInput();
+        mInputLogic.mConnection.beginBatchEdit();
+        mInputLogic.mConnection.commitText("\n\n", 1);
+        mInputLogic.mConnection.endBatchEdit();
+    }
+
     /**
      * Adjust capitalization of transcribed text based on context.
      * If the previous text doesn't end with sentence-ending punctuation,
@@ -1934,7 +2143,7 @@ public class LatinIME extends InputMethodService implements
 
         try {
             // Get text before cursor to check context
-            CharSequence textBeforeCursor = mInputLogic.mConnection.getTextBeforeCursor(5, 0);
+            CharSequence textBeforeCursor = getTextBeforeCursorForVoiceContext(5);
 
             // If no text before cursor or at start, keep original capitalization
             if (textBeforeCursor == null || textBeforeCursor.length() == 0) {
@@ -2334,8 +2543,7 @@ public class LatinIME extends InputMethodService implements
             // Then process pending new paragraph
             if (mPendingNewParagraph) {
                 mPendingNewParagraph = false;
-                mInputLogic.finishInput();
-                mInputLogic.mConnection.commitText("\n\n", 1);
+                insertParagraphBreak();
             }
         } catch (Exception e) {
             Log.e(TAG, "Error processing pending voice input: " + e.getMessage(), e);
@@ -2463,7 +2671,7 @@ public class LatinIME extends InputMethodService implements
     @NonNull
     private String getRecentContext() {
         try {
-            CharSequence beforeCursor = mInputLogic.mConnection.getTextBeforeCursor(4000, 0);
+            CharSequence beforeCursor = getTextBeforeCursorForVoiceContext(4000);
             if (beforeCursor == null || beforeCursor.length() == 0) {
                 return "";
             }
@@ -2652,6 +2860,42 @@ public class LatinIME extends InputMethodService implements
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK
                 | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
                 | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        startActivity(intent);
+    }
+
+    /**
+     * Launch the fullapp editor Activity. The keyboard app becomes the foreground app;
+     * the user edits text there (with keyboard and voice), then returns to the original
+     * app. Pending text is inserted when the IME reconnects to that app.
+     */
+    private void launchFullappEditorActivity() {
+        mInputLogic.commitTyped(mSettings.getCurrent(), LastComposedWord.NOT_A_SEPARATOR);
+        stopVoiceRecordingGracefully();
+
+        // Prevent voice paragraph timer race: clear pending paragraph so processPendingVoiceInput
+        // (from async cleanup callback) won't insert "\n\n" into the field before we read.
+        mPendingNewParagraph = false;
+
+        // Use fallback path to avoid trailing newlines that getExtractedText adds (e.g. WebView)
+        String initialText = getOriginalFieldTextForFullapp();
+        // Trim trailing newlines as safety net (extract view or race can still add them sometimes)
+        initialText = initialText.replaceFirst("[\\r\\n]+$", "");
+        final EditorInfo editorInfo = getCurrentInputEditorInfo();
+        final String targetPackage = editorInfo != null ? editorInfo.packageName : "";
+
+        requestHideSelf(0);
+        final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
+        if (mainKeyboardView != null) {
+            mainKeyboardView.closing();
+        }
+
+        final Intent intent = new Intent();
+        intent.setClass(LatinIME.this, FullappEditorActivity.class);
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+                | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        intent.putExtra(FullappEditorActivity.EXTRA_INITIAL_TEXT, initialText);
+        intent.putExtra(FullappEditorActivity.EXTRA_PACKAGE_NAME, targetPackage);
         startActivity(intent);
     }
 

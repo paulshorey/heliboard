@@ -15,4 +15,5 @@ public interface SuggestionStripViewAccessor {
     void setNeutralSuggestionStrip();
     void setSuggestions(final SuggestedWords suggestedWords);
     void showSuggestionStrip();
+    void setFullappButtonMode(boolean inFullappEditor);
 }

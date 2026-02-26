@@ -51,6 +51,10 @@
     <string name="spoken_description_space">Space</string>
     <!-- Spoken description for the "Mic" keyboard key. -->
     <string name="spoken_description_mic">Voice input</string>
+    <!-- Spoken description for the fullapp expand keyboard button. -->
+    <string name="fullapp_expand_description">Open fullapp editor</string>
+    <!-- Spoken description for the fullapp collapse (minimize) button. -->
+    <string name="fullapp_collapse_description">Close fullapp editor</string>
     <!-- Spoken description for the voice input cancel button. -->
     <string name="voice_input_cancel">Cancel voice input</string>
     <!-- Spoken description for the voice input pause button. -->
