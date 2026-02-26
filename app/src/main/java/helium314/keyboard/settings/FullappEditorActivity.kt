@@ -39,9 +39,9 @@ import helium314.keyboard.latin.utils.ExecutorUtils
 import helium314.keyboard.latin.utils.cleanUnusedMainDicts
 
 /**
- * Fullscreen text editor Activity.
+ * Fullapp text editor Activity.
  *
- * Launched when the user taps the fullscreen expand button while the keyboard is attached
+ * Launched when the user taps the fullapp expand button while the keyboard is attached
  * to another app (e.g. a web page textarea). The keyboard app becomes the foreground app;
  * the user edits text here with full keyboard and voice support, then returns to the
  * original app with the text synced back.
@@ -49,17 +49,17 @@ import helium314.keyboard.latin.utils.cleanUnusedMainDicts
  * Any exit (back press, keyboard toggle button) saves the current text and syncs it to
  * the original app's textarea.
  */
-class FullscreenEditorActivity : ComponentActivity() {
+class FullappEditorActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_INITIAL_TEXT = "initial_text"
         const val EXTRA_PACKAGE_NAME = "package_name"
 
-        /** True while this Activity is in the foreground. Lets the IME know we're in fullscreen editor. */
+        /** True while this Activity is in the foreground. Lets the IME know we're in fullapp editor. */
         @JvmField
         var isActive = false
 
-        /** Called when the keyboard's fullscreen toggle (angle down) is tapped to exit and save. */
+        /** Called when the keyboard's fullapp toggle (angle down) is tapped to exit and save. */
         @JvmField
         var onExitFromKeyboard: Runnable? = null
     }
@@ -86,7 +86,7 @@ class FullscreenEditorActivity : ComponentActivity() {
         cv.setContent {
             helium314.keyboard.settings.Theme {
                 Surface {
-                    FullscreenEditorScreen(
+                    FullappEditorScreen(
                         textState = textState,
                         initialText = initialText,
                         onExit = ::saveAndExit
@@ -114,23 +114,23 @@ class FullscreenEditorActivity : ComponentActivity() {
     }
 
     private fun saveAndExit() {
-        FullscreenEditorResult.pendingText = textState.value
-        FullscreenEditorResult.targetPackageName = targetPackage
+        FullappEditorResult.pendingText = textState.value
+        FullappEditorResult.targetPackageName = targetPackage
         setResult(RESULT_OK, Intent().putExtra("text", textState.value))
         finish()
     }
 }
 
 /**
- * Holder for fullscreen editor result. LatinIME reads this when reconnecting to a client.
+ * Holder for fullapp editor result. LatinIME reads this when reconnecting to a client.
  */
-object FullscreenEditorResult {
+object FullappEditorResult {
     @JvmField var pendingText: String? = null
     @JvmField var targetPackageName: String? = null
 }
 
 @androidx.compose.runtime.Composable
-private fun FullscreenEditorScreen(
+private fun FullappEditorScreen(
     textState: androidx.compose.runtime.MutableState<String>,
     initialText: String,
     onExit: () -> Unit
@@ -164,7 +164,7 @@ private fun FullscreenEditorScreen(
                 .weight(1f)
                 .padding(horizontal = 14.dp, vertical = 8.dp)
                 .focusRequester(focusRequester),
-            placeholder = { Text(stringResource(R.string.fullscreen_editor_hint)) },
+            placeholder = { Text(stringResource(R.string.fullapp_editor_hint)) },
             minLines = 10,
             maxLines = Int.MAX_VALUE,
             textStyle = androidx.compose.material3.MaterialTheme.typography.bodyLarge

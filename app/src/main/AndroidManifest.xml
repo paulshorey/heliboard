@@ -79,7 +79,7 @@ SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-only
             </intent-filter>
         </activity>
 
-        <activity android:name="helium314.keyboard.settings.FullscreenEditorActivity"
+        <activity android:name="helium314.keyboard.settings.FullappEditorActivity"
                 android:theme="@style/platformActivityTheme"
                 android:windowSoftInputMode="adjustResize"
                 android:exported="false" />

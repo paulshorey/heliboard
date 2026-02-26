@@ -89,8 +89,8 @@ import helium314.keyboard.latin.utils.ToolbarMode;
 import helium314.keyboard.latin.voice.VoiceInputManager;
 import helium314.keyboard.latin.voice.TextCleanupClient;
 import helium314.keyboard.latin.suggestions.SuggestionStripView.VoiceState;
-import helium314.keyboard.settings.FullscreenEditorActivity;
-import helium314.keyboard.settings.FullscreenEditorResult;
+import helium314.keyboard.settings.FullappEditorActivity;
+import helium314.keyboard.settings.FullappEditorResult;
 import helium314.keyboard.settings.SettingsActivity2;
 import kotlin.Unit;
 
@@ -202,7 +202,7 @@ public class LatinIME extends InputMethodService implements
     private final ArrayDeque<String> mPendingTranscriptionQueue = new ArrayDeque<>();
     private static final int MAX_PENDING_TRANSCRIPTIONS = 64;
     private static final long CLEANUP_WATCHDOG_TIMEOUT_MS = 12_000L;
-    private static final int FULLSCREEN_SYNC_MAX_CHARS = 100_000;
+    private static final int FULLAPP_SYNC_MAX_CHARS = 100_000;
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
     private final Runnable mCleanupWatchdogRunnable = new Runnable() {
         @Override
@@ -904,16 +904,16 @@ public class LatinIME extends InputMethodService implements
             EditorInfoCompatUtils.INSTANCE.debugLog(editorInfo, TAG);
         }
 
-        // Insert pending text from fullscreen editor Activity (user returned from FullscreenEditorActivity).
-        final String pending = FullscreenEditorResult.pendingText;
-        final String targetPkg = FullscreenEditorResult.targetPackageName;
+        // Insert pending text from fullapp editor Activity (user returned from FullappEditorActivity).
+        final String pending = FullappEditorResult.pendingText;
+        final String targetPkg = FullappEditorResult.targetPackageName;
         if (pending != null && targetPkg != null && targetPkg.equals(editorInfo.packageName)) {
-            FullscreenEditorResult.pendingText = null;
-            FullscreenEditorResult.targetPackageName = null;
+            FullappEditorResult.pendingText = null;
+            FullappEditorResult.targetPackageName = null;
             mMainHandler.post(() -> {
                 final boolean synced = replaceEntireFieldText(pending, true);
                 if (!synced) {
-                    Log.w(TAG, "Failed to insert pending fullscreen text");
+                    Log.w(TAG, "Failed to insert pending fullapp text");
                 }
                 requestHideSelf(0);
             });
@@ -955,11 +955,11 @@ public class LatinIME extends InputMethodService implements
                 mSuggestionStripView.updateVoiceKey();
         }
 
-        // Show angle-down (minimize) when keyboard is in FullscreenEditorActivity; angle-up (expand) otherwise
+        // Show angle-down (minimize) when keyboard is in FullappEditorActivity; angle-up (expand) otherwise
         if (hasSuggestionStripView()) {
-            final boolean inFullscreenEditor = FullscreenEditorActivity.isActive
+            final boolean inFullappEditor = FullappEditorActivity.isActive
                     && getPackageName().equals(editorInfo.packageName);
-            mSuggestionStripView.setFullscreenButtonMode(inFullscreenEditor);
+            mSuggestionStripView.setFullappButtonMode(inFullappEditor);
         }
         // ALERT: settings have not been reloaded and there is a chance they may be stale.
         // In the practice, if it is, we should have gotten onConfigurationChanged so it should
@@ -1402,7 +1402,7 @@ public class LatinIME extends InputMethodService implements
             return "";
         }
 
-        final String currentText = readCurrentFieldText(ic, FULLSCREEN_SYNC_MAX_CHARS);
+        final String currentText = readCurrentFieldText(ic, FULLAPP_SYNC_MAX_CHARS);
         return currentText != null ? currentText : "";
     }
 
@@ -1412,14 +1412,14 @@ public class LatinIME extends InputMethodService implements
      * newlines to ExtractedText for fullscreen/extract-view display; this path avoids that.
      */
     @NonNull
-    private String getOriginalFieldTextForFullscreen() {
+    private String getOriginalFieldTextForFullapp() {
         final android.view.inputmethod.InputConnection ic = getCurrentInputConnection();
         if (ic == null) {
             return "";
         }
 
-        final CharSequence before = ic.getTextBeforeCursor(FULLSCREEN_SYNC_MAX_CHARS, 0);
-        final CharSequence after = ic.getTextAfterCursor(FULLSCREEN_SYNC_MAX_CHARS, 0);
+        final CharSequence before = ic.getTextBeforeCursor(FULLAPP_SYNC_MAX_CHARS, 0);
+        final CharSequence after = ic.getTextAfterCursor(FULLAPP_SYNC_MAX_CHARS, 0);
         if (before == null && after == null) {
             return "";
         }
@@ -1445,7 +1445,7 @@ public class LatinIME extends InputMethodService implements
         try {
             final android.view.inputmethod.ExtractedTextRequest request =
                     new android.view.inputmethod.ExtractedTextRequest();
-            request.hintMaxChars = FULLSCREEN_SYNC_MAX_CHARS;
+            request.hintMaxChars = FULLAPP_SYNC_MAX_CHARS;
             request.hintMaxLines = Integer.MAX_VALUE;
             request.flags = 0;
             request.token = 0;
@@ -1457,7 +1457,7 @@ public class LatinIME extends InputMethodService implements
                 }
             }
             // Fallback: cursor position = length of text before cursor
-            final CharSequence before = ic.getTextBeforeCursor(FULLSCREEN_SYNC_MAX_CHARS, 0);
+            final CharSequence before = ic.getTextBeforeCursor(FULLAPP_SYNC_MAX_CHARS, 0);
             return before != null ? before.length() : 0;
         } catch (Exception e) {
             Log.w(TAG, "Failed reading cursor position: " + e.getMessage());
@@ -1515,8 +1515,8 @@ public class LatinIME extends InputMethodService implements
         ic.beginBatchEdit();
         try {
             ic.finishComposingText();
-            final CharSequence before = ic.getTextBeforeCursor(FULLSCREEN_SYNC_MAX_CHARS, 0);
-            final CharSequence after = ic.getTextAfterCursor(FULLSCREEN_SYNC_MAX_CHARS, 0);
+            final CharSequence before = ic.getTextBeforeCursor(FULLAPP_SYNC_MAX_CHARS, 0);
+            final CharSequence after = ic.getTextAfterCursor(FULLAPP_SYNC_MAX_CHARS, 0);
             final int beforeLength = before != null ? before.length() : 0;
             final int afterLength = after != null ? after.length() : 0;
             final int totalLength = beforeLength + afterLength;
@@ -1539,10 +1539,10 @@ public class LatinIME extends InputMethodService implements
         if (!commitSucceeded) {
             return false;
         }
-        if (!verifyReplacement || replacement.length() > FULLSCREEN_SYNC_MAX_CHARS) {
+        if (!verifyReplacement || replacement.length() > FULLAPP_SYNC_MAX_CHARS) {
             return true;
         }
-        final String updatedText = readCurrentFieldText(ic, FULLSCREEN_SYNC_MAX_CHARS);
+        final String updatedText = readCurrentFieldText(ic, FULLAPP_SYNC_MAX_CHARS);
         return replacement.equals(updatedText);
     }
 
@@ -1791,9 +1791,9 @@ public class LatinIME extends InputMethodService implements
     }
 
     @Override
-    public void setFullscreenButtonMode(final boolean inFullscreenEditor) {
+    public void setFullappButtonMode(final boolean inFullappEditor) {
         if (hasSuggestionStripView()) {
-            mSuggestionStripView.setFullscreenButtonMode(inFullscreenEditor);
+            mSuggestionStripView.setFullappButtonMode(inFullappEditor);
         }
     }
 
@@ -1969,13 +1969,13 @@ public class LatinIME extends InputMethodService implements
     }
 
     @Override
-    public void onFullscreenExpandClicked() {
-        launchFullscreenEditorActivity();
+    public void onFullappExpandClicked() {
+        launchFullappEditorActivity();
     }
 
     @Override
-    public void onFullscreenMinimizeClicked() {
-        final Runnable runnable = FullscreenEditorActivity.onExitFromKeyboard;
+    public void onFullappMinimizeClicked() {
+        final Runnable runnable = FullappEditorActivity.onExitFromKeyboard;
         if (runnable != null) {
             runnable.run();
         }
@@ -2864,11 +2864,11 @@ public class LatinIME extends InputMethodService implements
     }
 
     /**
-     * Launch the fullscreen editor Activity. The keyboard app becomes the foreground app;
+     * Launch the fullapp editor Activity. The keyboard app becomes the foreground app;
      * the user edits text there (with keyboard and voice), then returns to the original
      * app. Pending text is inserted when the IME reconnects to that app.
      */
-    private void launchFullscreenEditorActivity() {
+    private void launchFullappEditorActivity() {
         mInputLogic.commitTyped(mSettings.getCurrent(), LastComposedWord.NOT_A_SEPARATOR);
         stopVoiceRecordingGracefully();
 
@@ -2877,7 +2877,7 @@ public class LatinIME extends InputMethodService implements
         mPendingNewParagraph = false;
 
         // Use fallback path to avoid trailing newlines that getExtractedText adds (e.g. WebView)
-        String initialText = getOriginalFieldTextForFullscreen();
+        String initialText = getOriginalFieldTextForFullapp();
         // Trim trailing newlines as safety net (extract view or race can still add them sometimes)
         initialText = initialText.replaceFirst("[\\r\\n]+$", "");
         final EditorInfo editorInfo = getCurrentInputEditorInfo();
@@ -2890,12 +2890,12 @@ public class LatinIME extends InputMethodService implements
         }
 
         final Intent intent = new Intent();
-        intent.setClass(LatinIME.this, FullscreenEditorActivity.class);
+        intent.setClass(LatinIME.this, FullappEditorActivity.class);
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK
                 | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
                 | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        intent.putExtra(FullscreenEditorActivity.EXTRA_INITIAL_TEXT, initialText);
-        intent.putExtra(FullscreenEditorActivity.EXTRA_PACKAGE_NAME, targetPackage);
+        intent.putExtra(FullappEditorActivity.EXTRA_INITIAL_TEXT, initialText);
+        intent.putExtra(FullappEditorActivity.EXTRA_PACKAGE_NAME, targetPackage);
         startActivity(intent);
     }
 

@@ -34,8 +34,8 @@ HeliBoard is an Android app, open-source project based on AOSP / OpenBoard keybo
 10 processPendingVoiceInput() → processTranscriptionResult(textB)
 11 getRecentContext() called NOW for ChunkB → captures text after A's
 
-## Fullscreen keyboard
+## Fullapp keyboard
 
-See [docs/fullscreen-keyboard.md](docs/fullscreen-keyboard.md) for architecture and lessons learned.
+See [docs/fullapp-keyboard.md](docs/fullapp-keyboard.md) for architecture and lessons learned.
 
 **Key rule**: The extract view is a mirror of the app's field. All text input (typing, voice) must go through `InputConnection` to the app — never write to the extract view directly. The framework syncs app → extract view via `setExtractedText()`.
