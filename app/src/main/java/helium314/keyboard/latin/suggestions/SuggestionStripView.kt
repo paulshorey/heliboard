@@ -118,7 +118,9 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
     private val pinnedKeys: ViewGroup = findViewById(R.id.pinned_keys)
     private val suggestionsStrip: ViewGroup = findViewById(R.id.suggestions_strip)
     private val toolbarExpandKey = findViewById<ImageButton>(R.id.suggestions_strip_toolbar_key)
+    private val suggestionsStripWrapper: ViewGroup = findViewById(R.id.suggestions_strip_wrapper)
     private val voiceButtonsContainer: ViewGroup = findViewById(R.id.voice_buttons_container)
+    private val voiceFullscreenKey = findViewById<ImageButton>(R.id.voice_fullscreen_key)
     private val voiceInputKey = findViewById<ImageButton>(R.id.voice_input_key)
     private val voiceCancelKey = findViewById<ImageButton>(R.id.voice_cancel_key)
     private val voicePauseKey = findViewById<ImageButton>(R.id.voice_pause_key)
@@ -144,6 +146,8 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         val toolbarHeight = min(toolbarExpandKey.layoutParams.height, resources.getDimension(R.dimen.config_suggestions_strip_height).toInt())
         toolbarExpandKey.layoutParams.height = toolbarHeight
         toolbarExpandKey.layoutParams.width = toolbarHeight // we want it square
+        // Reserve right margin for the 2 always-visible overlay buttons (fullscreen + mic)
+        (suggestionsStripWrapper.layoutParams as? RelativeLayout.LayoutParams)?.marginEnd = toolbarHeight * 2
         colors.setBackground(toolbarExpandKey, ColorType.STRIP_BACKGROUND) // necessary because background is re-used for defaultToolbarBackground
         colors.setColor(toolbarExpandKey, ColorType.TOOL_BAR_EXPAND_KEY)
         colors.setColor(toolbarExpandKey.background, ColorType.TOOL_BAR_EXPAND_KEY_BACKGROUND)
@@ -156,6 +160,16 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
 
         // Voice buttons overlay container - apply strip background so it covers pinned keys beneath
         colors.setBackground(voiceButtonsContainer, ColorType.STRIP_BACKGROUND)
+
+        // Fullscreen / expand toolbar key setup - always visible in overlay
+        voiceFullscreenKey.layoutParams.height = toolbarHeight
+        voiceFullscreenKey.layoutParams.width = toolbarHeight
+        colors.setColor(voiceFullscreenKey, ColorType.TOOL_BAR_KEY)
+        colors.setBackground(voiceFullscreenKey, ColorType.STRIP_BACKGROUND)
+        voiceFullscreenKey.setOnClickListener {
+            AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, this, HapticEvent.KEY_PRESS)
+            setToolbarVisibility(toolbarContainer.visibility != VISIBLE)
+        }
 
         // Voice input key setup
         voiceInputKey.layoutParams.height = toolbarHeight
@@ -279,9 +293,13 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
 
         toolbarExpandKey.scaleX = (if (toolbarVisible && !locked) -1f else 1f) * direction
 
-        // Update FULLSCREEN key icon: up-angle when toolbar hidden, down-angle when shown
+        // Update FULLSCREEN key icons: up-angle when toolbar hidden, down-angle when shown
         val fullscreenIconRes = if (toolbarVisible && !locked) R.drawable.ic_dpad_down else R.drawable.ic_dpad_up
         val colors = Settings.getValues()?.mColors
+        // Update the always-visible overlay fullscreen button
+        voiceFullscreenKey.setImageResource(fullscreenIconRes)
+        colors?.setColor(voiceFullscreenKey, ColorType.TOOL_BAR_KEY)
+        // Update any FULLSCREEN toolbar key instances (in toolbar or pinned keys)
         listOf(toolbar, pinnedKeys).forEach { parent ->
             parent.findViewWithTag<ImageButton>(ToolbarKey.FULLSCREEN)?.let { key ->
                 key.setImageResource(fullscreenIconRes)
