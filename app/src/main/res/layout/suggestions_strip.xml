@@ -48,6 +48,14 @@
         <!-- todo: sth is fishy with that maxwidth
                check what is going on in the layout helper? -->
         <LinearLayout
+            android:id="@+id/pinned_keys"
+            android:orientation="horizontal"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:minWidth="0dp"
+            style="?attr/suggestionWordStyle">
+        </LinearLayout>
+        <LinearLayout
             android:id="@+id/suggestions_strip"
             android:orientation="horizontal"
             android:maxWidth="100dp"
@@ -57,14 +65,6 @@
             android:gravity="start"
             android:hapticFeedbackEnabled="false"
             android:soundEffectsEnabled="false" />
-        <LinearLayout
-            android:id="@+id/pinned_keys"
-            android:orientation="horizontal"
-            android:layout_width="wrap_content"
-            android:layout_height="match_parent"
-            android:minWidth="0dp"
-            style="?attr/suggestionWordStyle">
-        </LinearLayout>
     </LinearLayout>
     <!-- Custom buttons, pinned to right edge -->
     <LinearLayout
