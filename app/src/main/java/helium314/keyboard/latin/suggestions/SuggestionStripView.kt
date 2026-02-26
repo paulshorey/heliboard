@@ -143,7 +143,6 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
 
     init {
         val colors = Settings.getValues().mColors
-        colors.setBackground(customButtonsOverlay, ColorType.STRIP_BACKGROUND)
 
         // expand key
         // weird way of setting size (default is config_suggestions_strip_edge_key_width)
@@ -647,9 +646,10 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         val isActive = state != VoiceState.IDLE
         this.isVoiceRecording = isActive
         post {
-            // Show cancel and pause buttons when active
+            // Show cancel and pause buttons when active, hide fullapp button
             voiceCancelKey.isVisible = isActive
             voicePauseKey.isVisible = isActive
+            fullappExpandKey.isVisible = !isActive && Settings.getValues().mShowsVoiceInputKey
 
             // Update pause button icon based on pause state
             if (state == VoiceState.PAUSED) {

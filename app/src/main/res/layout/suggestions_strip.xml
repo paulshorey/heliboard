@@ -11,8 +11,10 @@
         android:animateLayoutChanges="true"
         android:id="@+id/suggestions_strip_wrapper"
         android:orientation="horizontal"
-        android:layout_width="match_parent"
+        android:layout_width="0dp"
         android:layout_height="match_parent"
+        android:layout_alignParentStart="true"
+        android:layout_toStartOf="@+id/custom_buttons_overlay"
         android:hapticFeedbackEnabled="false"
         android:soundEffectsEnabled="false">
         <!-- Provide audio and haptic feedback by ourselves based on the keyboard settings.
@@ -52,7 +54,7 @@
             android:layout_width="wrap_content"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:gravity="center_horizontal"
+            android:gravity="start"
             android:hapticFeedbackEnabled="false"
             android:soundEffectsEnabled="false" />
         <LinearLayout
@@ -64,21 +66,21 @@
             style="?attr/suggestionWordStyle">
         </LinearLayout>
     </LinearLayout>
-    <!-- Floating overlay for custom buttons, pinned to right edge -->
+    <!-- Custom buttons, pinned to right edge -->
     <LinearLayout
-        android:id="@+id/custom_buttons_overlay"
+        android:id="@id/custom_buttons_overlay"
         android:layout_width="wrap_content"
         android:layout_height="match_parent"
         android:layout_alignParentEnd="true"
         android:orientation="horizontal"
-        android:gravity="center_vertical">
+        android:gravity="center_vertical"
+        android:paddingStart="4dp">
         <!-- Voice cancel button - shown only during recording -->
         <ImageButton
             android:id="@+id/voice_cancel_key"
             android:layout_width="@dimen/config_suggestions_strip_edge_key_width"
             android:layout_height="@dimen/config_suggestions_strip_edge_key_width"
             android:layout_gravity="center_vertical"
-            android:layout_marginEnd="8dp"
             android:src="@drawable/ic_close_rounded"
             android:background="?android:attr/selectableItemBackgroundBorderless"
             android:visibility="gone"
@@ -90,7 +92,6 @@
             android:layout_width="@dimen/config_suggestions_strip_edge_key_width"
             android:layout_height="@dimen/config_suggestions_strip_edge_key_width"
             android:layout_gravity="center_vertical"
-            android:layout_marginEnd="8dp"
             android:src="@drawable/ic_pause"
             android:background="?android:attr/selectableItemBackgroundBorderless"
             android:visibility="gone"
@@ -102,7 +103,6 @@
             android:layout_width="@dimen/config_suggestions_strip_edge_key_width"
             android:layout_height="@dimen/config_suggestions_strip_edge_key_width"
             android:layout_gravity="center_vertical"
-            android:layout_marginEnd="4dp"
             android:src="@drawable/ic_arrow_right"
             android:background="?android:attr/selectableItemBackgroundBorderless"
             style="?attr/suggestionWordStyle"
