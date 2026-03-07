@@ -56,39 +56,55 @@ Body: <raw WAV file bytes>
 
 ---
 
-## Anthropic Claude API (Text Cleanup)
+## Google Gemini API (Text Cleanup)
 
 ### Endpoint
 ```
-POST https://api.anthropic.com/v1/messages
+POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent
 Headers:
-  x-api-key: <ANTHROPIC_API_KEY>
-  anthropic-version: 2023-06-01
+  x-goog-api-key: <GOOGLE_API_KEY>
   Content-Type: application/json
 ```
 
 ### Request Format
 ```json
 {
-  "model": "claude-haiku-4-5-20251001",
-  "max_tokens": 500,
-  "system": "<cleanup prompt from settings>",
-  "messages": [
+  "systemInstruction": {
+    "parts": [
+      {
+        "text": "<cleanup prompt from settings>"
+      }
+    ]
+  },
+  "contents": [
     {
       "role": "user",
-      "content": "<text to cleanup>"
+      "parts": [
+        {
+          "text": "<text to cleanup>"
+        }
+      ]
     }
-  ]
+  ],
+  "generationConfig": {
+    "temperature": 0.2,
+    "maxOutputTokens": 4096
+  }
 }
 ```
 
 ### Response Format
 ```json
 {
-  "content": [
+  "candidates": [
     {
-      "type": "text",
-      "text": "<cleaned text>"
+      "content": {
+        "parts": [
+          {
+            "text": "<cleaned text>"
+          }
+        ]
+      }
     }
   ]
 }
@@ -101,7 +117,7 @@ Headers:
 | Key | Type | Description |
 |-----|------|-------------|
 | `PREF_DEEPGRAM_API_KEY` | String | Deepgram API key for transcription |
-| `PREF_ANTHROPIC_API_KEY` | String | Anthropic API key for cleanup |
-| `PREF_CLEANUP_PROMPT` | String | Custom cleanup instructions for Claude |
+| `PREF_GOOGLE_API_KEY` | String | Google AI API key for Gemini cleanup |
+| `PREF_CLEANUP_PROMPT` | String | Custom cleanup instructions for Gemini |
 | `PREF_TRANSCRIPTION_PROMPT_PREFIX` | String | Transcription style prompt presets |
 | `PREF_TRANSCRIPTION_PROMPT_SELECTED` | Int | Index of selected prompt preset |

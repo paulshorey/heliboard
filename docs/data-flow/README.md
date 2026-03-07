@@ -6,7 +6,7 @@ This directory contains documentation for the data flow in HeliBoard's voice tra
 
 - **[voice-transcription.md](./voice-transcription.md)** - Complete architecture and data flow for voice transcription with intelligent text cleanup
 
-- **[api-reference.md](./api-reference.md)** - Quick reference for Deepgram and Anthropic Claude API integrations
+- **[api-reference.md](./api-reference.md)** - Quick reference for Deepgram and Google Gemini API integrations
 
 ## Quick Start
 
@@ -24,5 +24,5 @@ This directory contains documentation for the data flow in HeliBoard's voice tra
 | `VoiceInputManager.kt` | Recording state, timers, segment pipeline |
 | `VoiceRecorder.kt` | Audio capture, silence detection, WAV segmentation |
 | `DeepgramTranscriptionClient.kt` | Deepgram HTTP client (batch transcription) |
-| `TextCleanupClient.kt` | Anthropic HTTP client (text cleanup) |
+| `TextCleanupClient.kt` | Google Gemini HTTP client (text cleanup) |
 | `TranscriptionScreen.kt` | Settings UI |

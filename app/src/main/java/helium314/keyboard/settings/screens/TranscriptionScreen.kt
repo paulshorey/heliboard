@@ -60,8 +60,8 @@ fun TranscriptionScreen(
     var deepgramApiKey by remember {
         mutableStateOf(prefs.getString(Settings.PREF_DEEPGRAM_API_KEY, Defaults.PREF_DEEPGRAM_API_KEY) ?: "")
     }
-    var anthropicApiKey by remember {
-        mutableStateOf(prefs.getString(Settings.PREF_ANTHROPIC_API_KEY, Defaults.PREF_ANTHROPIC_API_KEY) ?: "")
+    var googleApiKey by remember {
+        mutableStateOf(prefs.getString(Settings.PREF_GOOGLE_API_KEY, Defaults.PREF_GOOGLE_API_KEY) ?: "")
     }
     var cleanupPrompt by remember {
         mutableStateOf(prefs.getString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT) ?: Defaults.PREF_CLEANUP_PROMPT)
@@ -137,13 +137,13 @@ fun TranscriptionScreen(
                     maxLines = 2
                 )
 
-                // Anthropic API Key
+                // Google AI API Key
                 InlineTextField(
-                    label = stringResource(R.string.anthropic_api_key_title),
-                    value = anthropicApiKey,
+                    label = stringResource(R.string.google_api_key_title),
+                    value = googleApiKey,
                     onValueChange = { newValue ->
-                        anthropicApiKey = newValue
-                        prefs.edit { putString(Settings.PREF_ANTHROPIC_API_KEY, newValue) }
+                        googleApiKey = newValue
+                        prefs.edit { putString(Settings.PREF_GOOGLE_API_KEY, newValue) }
                     },
                     minLines = 1,
                     maxLines = 2
