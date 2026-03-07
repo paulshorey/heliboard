@@ -2920,6 +2920,7 @@ public class LatinIME extends InputMethodService implements
         if (draftKey.equals(mFullappSyncInFlightKey)) {
             return;
         }
+        Log.i(TAG, "Attempting fullapp draft sync for " + pendingDraft.getTarget().debugSummary());
         mFullappSyncInFlightKey = draftKey;
         attemptPendingFullappSync(pendingDraft, FULLAPP_SYNC_RETRY_ATTEMPTS);
     }
@@ -2941,6 +2942,7 @@ public class LatinIME extends InputMethodService implements
                 restoreFullappSelection(pendingDraft);
                 FullappEditorResult.clearDraft(LatinIME.this, pendingDraft.getTarget());
                 mFullappSyncInFlightKey = null;
+                Log.i(TAG, "Fullapp draft sync succeeded for " + pendingDraft.getTarget().debugSummary());
                 requestHideSelf(0);
                 return;
             }
@@ -2949,7 +2951,8 @@ public class LatinIME extends InputMethodService implements
                 return;
             }
             mFullappSyncInFlightKey = null;
-            Log.w(TAG, "Failed to insert pending fullapp text after retries");
+            Log.w(TAG, "Failed to insert pending fullapp text after retries for "
+                    + pendingDraft.getTarget().debugSummary());
         }, delayMs);
     }
 

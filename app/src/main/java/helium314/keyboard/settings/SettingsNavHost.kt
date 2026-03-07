@@ -22,6 +22,7 @@ import helium314.keyboard.settings.screens.AppearanceScreen
 import helium314.keyboard.settings.screens.ColorsScreen
 import helium314.keyboard.settings.screens.DebugScreen
 import helium314.keyboard.settings.screens.DictionaryScreen
+import helium314.keyboard.settings.screens.FullappDraftsScreen
 import helium314.keyboard.settings.screens.GestureTypingScreen
 import helium314.keyboard.settings.screens.LanguageScreen
 import helium314.keyboard.settings.screens.MainSettingsScreen
@@ -73,6 +74,7 @@ fun SettingsNavHost(
                 onClickGestureTyping = { navController.navigate(SettingsDestination.GestureTyping) },
                 onClickAdvanced = { navController.navigate(SettingsDestination.Advanced) },
                 onClickTranscription = { navController.navigate(SettingsDestination.Transcription) },
+                onClickFullappDrafts = { navController.navigate(SettingsDestination.FullappDrafts) },
                 onClickAppearance = { navController.navigate(SettingsDestination.Appearance) },
                 onClickLanguage = { navController.navigate(SettingsDestination.Languages) },
                 onClickLayouts = { navController.navigate(SettingsDestination.Layouts) },
@@ -100,6 +102,9 @@ fun SettingsNavHost(
         }
         composable(SettingsDestination.Transcription) {
             TranscriptionScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.FullappDrafts) {
+            FullappDraftsScreen(onClickBack = ::goBack)
         }
         composable(SettingsDestination.Debug) {
             DebugScreen(onClickBack = ::goBack)
@@ -149,6 +154,7 @@ object SettingsDestination {
     const val GestureTyping = "gesture_typing"
     const val Advanced = "advanced"
     const val Transcription = "transcription"
+    const val FullappDrafts = "fullapp_drafts"
     const val Debug = "debug"
     const val Appearance = "appearance"
     const val Colors = "colors/"

@@ -40,6 +40,7 @@ import helium314.keyboard.latin.InputAttributes
 import helium314.keyboard.latin.R
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.utils.ExecutorUtils
+import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.cleanUnusedMainDicts
 import helium314.keyboard.latin.utils.protectedPrefs
 import org.json.JSONObject
@@ -196,6 +197,7 @@ class FullappEditorActivity : ComponentActivity() {
  * Holder for fullapp editor result. LatinIME reads this when reconnecting to a client.
  */
 object FullappEditorResult {
+    private const val TAG = "FullappDrafts"
     private const val PREF_FULLAPP_DRAFT_KEYS = "fullapp_draft_keys"
     private const val PREF_FULLAPP_DRAFT_PREFIX = "fullapp_draft_"
 
@@ -224,6 +226,15 @@ object FullappEditorResult {
 
         val hasStrongIdentity: Boolean
             get() = fieldId != 0 || fieldName.isNotBlank()
+
+        fun debugSummary(): String = buildString {
+            append("pkg=").append(packageName)
+            if (fieldId != 0) append(", fieldId=").append(fieldId)
+            if (fieldName.isNotBlank()) append(", fieldName=").append(fieldName)
+            append(", inputType=0x").append(inputType.toUInt().toString(16))
+            append(", imeOptions=0x").append(imeOptions.toUInt().toString(16))
+            if (privateImeOptions.isNotBlank()) append(", privateImeOptions=present")
+        }
 
         fun matchScore(editorInfo: EditorInfo): Int {
             if (packageName != editorInfo.packageName.orEmpty()) {
@@ -321,6 +332,35 @@ object FullappEditorResult {
     }
 
     @JvmStatic
+    fun getAllDrafts(context: Context): List<DraftRecord> {
+        val prefs = draftPrefs(context) ?: return emptyList()
+        val draftKeys = prefs.getStringSet(PREF_FULLAPP_DRAFT_KEYS, emptySet()).orEmpty()
+        val drafts = mutableListOf<DraftRecord>()
+        val staleKeys = mutableListOf<String>()
+        for (draftKey in draftKeys) {
+            val rawDraft = prefs.getString(prefKey(draftKey), null)
+            if (rawDraft == null) {
+                staleKeys.add(draftKey)
+                continue
+            }
+            val draft = draftFromJson(rawDraft)
+            if (draft == null) {
+                staleKeys.add(draftKey)
+                continue
+            }
+            drafts.add(draft)
+        }
+        if (staleKeys.isNotEmpty()) {
+            val updatedKeys = draftKeys.toMutableSet().apply { removeAll(staleKeys.toSet()) }
+            prefs.edit {
+                putStringSet(PREF_FULLAPP_DRAFT_KEYS, updatedKeys)
+                staleKeys.forEach { remove(prefKey(it)) }
+            }
+        }
+        return drafts.sortedByDescending { it.lastSavedAt }
+    }
+
+    @JvmStatic
     fun saveDraft(context: Context, draft: DraftRecord) {
         val prefs = draftPrefs(context) ?: return
         val draftKeys = prefs.getStringSet(PREF_FULLAPP_DRAFT_KEYS, emptySet())?.toMutableSet() ?: mutableSetOf()
@@ -329,6 +369,7 @@ object FullappEditorResult {
             putStringSet(PREF_FULLAPP_DRAFT_KEYS, draftKeys)
             putString(prefKey(draft.target.storageKey), draft.toJson().toString())
         }
+        Log.i(TAG, "Saved fullapp draft for ${draft.target.debugSummary()}, chars=${draft.draftText.length}")
     }
 
     @JvmStatic
@@ -340,6 +381,7 @@ object FullappEditorResult {
             putStringSet(PREF_FULLAPP_DRAFT_KEYS, draftKeys)
             remove(prefKey(target.storageKey))
         }
+        Log.i(TAG, "Cleared fullapp draft for ${target.debugSummary()}")
     }
 
     @JvmStatic
@@ -383,6 +425,9 @@ object FullappEditorResult {
                 putStringSet(PREF_FULLAPP_DRAFT_KEYS, updatedKeys)
                 staleKeys.forEach { remove(prefKey(it)) }
             }
+        }
+        if (bestDraft != null) {
+            Log.i(TAG, "Matched fullapp draft for ${bestDraft.target.debugSummary()}")
         }
         return bestDraft
     }
