@@ -21,21 +21,21 @@ import java.util.Collections
 import java.util.concurrent.TimeUnit
 
 /**
- * Client for Claude text cleanup.
+ * Client for Gemini text cleanup.
  *
- * Sends recent context (last ~3 sentences + new transcription) to Claude and
+ * Sends recent context (last ~3 sentences + new transcription) to Gemini and
  * receives the corrected text back. The caller is responsible for replacing the
  * old context in the editor with the cleaned result.
  *
- * Uses Anthropic's Claude API (claude-haiku-4-5).
+ * Uses Google's Gemini API (gemini-2.0-flash).
  */
 class TextCleanupClient {
 
     companion object {
         private const val TAG = "TextCleanupClient"
-        private const val API_URL = "https://api.anthropic.com/v1/messages"
-        private const val MODEL = "claude-haiku-4-5-20251001"
-        private const val ANTHROPIC_VERSION = "2023-06-01"
+        private const val MODEL = "gemini-2.0-flash"
+        private const val API_URL =
+            "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent"
 
         /**
          * Maximum output tokens for the cleanup response.
@@ -44,6 +44,13 @@ class TextCleanupClient {
          * 4096 tokens ≈ 3000 words — generous for any reasonable context window.
          */
         private const val MAX_TOKENS = 4096
+
+        private val SAFETY_CATEGORIES = arrayOf(
+            "HARM_CATEGORY_HARASSMENT",
+            "HARM_CATEGORY_HATE_SPEECH",
+            "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+            "HARM_CATEGORY_DANGEROUS_CONTENT"
+        )
 
         // Hard ceiling on total call duration (DNS + connect + request + response).
         // Keep this below LatinIME's cleanup watchdog so normal OkHttp timeout
@@ -68,23 +75,23 @@ class TextCleanupClient {
     private val activeCalls = Collections.synchronizedSet(mutableSetOf<Call>())
 
     /**
-     * Clean up transcribed text using Claude.
+     * Clean up transcribed text using Gemini.
      *
      * The context is split into two parts to protect paragraph breaks:
      * - [referenceContext]: Text from earlier paragraphs (before the last line break).
-     *   Included in the system prompt so Claude can understand the surrounding context,
-     *   but Claude is instructed not to include it in its response.
+     *   Included in the system prompt so Gemini can understand the surrounding context,
+     *   but Gemini is instructed not to include it in its response.
      * - [editableText]: Text in the current paragraph (after the last line break).
-     *   This is the text Claude will clean up and return. Only this portion is replaced
+     *   This is the text Gemini will clean up and return. Only this portion is replaced
      *   in the editor, so paragraph breaks are never touched.
      *
-     * @param apiKey Anthropic API key
+     * @param apiKey Google AI API key
      * @param systemPrompt The system prompt for cleanup instructions
      * @param referenceContext Read-only context from earlier paragraphs. Goes into the
-     *                         system prompt so Claude can understand surrounding text.
+     *                         system prompt so Gemini can understand surrounding text.
      *                         Empty string when the context doesn't cross paragraph breaks.
      * @param editableText Text from the current paragraph (after last line break).
-     *                      This is what Claude cleans up and what gets replaced in the editor.
+     *                      This is what Gemini cleans up and what gets replaced in the editor.
      * @param newText Newly transcribed text to append after the editable text.
      * @param callback Callback for result (called on main thread)
      */
@@ -107,7 +114,7 @@ class TextCleanupClient {
         }
 
         // Wrap in XML tags to create an unambiguous boundary between
-        // instructions and content. This prevents Claude from interpreting
+        // instructions and content. This prevents Gemini from interpreting
         // the transcribed text as a conversation or instruction, even when
         // the user is talking about transcription/AI topics.
         val userMessage = "<text_to_edit>$rawText</text_to_edit>"
@@ -119,7 +126,7 @@ class TextCleanupClient {
         }
 
         // Build system prompt: cleanup instructions + optional reference context.
-        // The reference context gives Claude understanding of the surrounding text
+        // The reference context gives Gemini understanding of the surrounding text
         // without being part of the editable scope.
         val fullSystemPrompt = if (referenceContext.isNotBlank()) {
             "$systemPrompt\n\nPrevious context for reference (do not include in your response):\n$referenceContext"
@@ -127,31 +134,42 @@ class TextCleanupClient {
             systemPrompt
         }
 
-        // Anthropic Claude API format
+        // Google Gemini API format
         val requestBody = JSONObject().apply {
-            put("model", MODEL)
-            put("max_tokens", MAX_TOKENS)
-            put("temperature", 0.2)
-            put("system", fullSystemPrompt)
-            put("messages", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("role", "user")
-                    put("content", userMessage)
+            put("systemInstruction", JSONObject().apply {
+                put("parts", JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("text", fullSystemPrompt)
+                    })
                 })
             })
+            put("contents", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("parts", JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("text", userMessage)
+                        })
+                    })
+                })
+            })
+            put("generationConfig", JSONObject().apply {
+                put("temperature", 0.2)
+                put("maxOutputTokens", MAX_TOKENS)
+            })
+            put("safetySettings", buildSafetySettings())
         }
 
         val request = Request.Builder()
             .url(API_URL)
-            .addHeader("x-api-key", apiKey)
-            .addHeader("anthropic-version", ANTHROPIC_VERSION)
+            .addHeader("x-goog-api-key", apiKey)
             .addHeader("Content-Type", "application/json")
             .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
         Log.i(
             TAG,
-            "VOICE_STEP_5 send to Anthropic cleanup " +
+            "VOICE_STEP_5 send to Google Gemini cleanup " +
                 "(editable=${userMessage.length} chars, reference=${referenceContext.length} chars)"
         )
 
@@ -220,10 +238,10 @@ class TextCleanupClient {
                         }
                         Log.e(TAG, "Cleanup API error: ${response.code} - $responseBody")
                         val message = when (response.code) {
-                            401, 403 -> "Invalid Anthropic API key"
+                            401, 403 -> "Invalid Google AI API key"
                             408 -> "Cleanup request timed out"
-                            429 -> "Anthropic rate limited — too many requests"
-                            in 500..599 -> "Anthropic service error (${response.code})"
+                            429 -> "Google Gemini rate limited — too many requests"
+                            in 500..599 -> "Google Gemini service error (${response.code})"
                             else -> "Cleanup API error: ${response.code}"
                         }
                         mainHandler.post {
@@ -233,13 +251,7 @@ class TextCleanupClient {
                     }
 
                     val json = JSONObject(responseBody ?: "{}")
-                    // Anthropic response format: content[0].text
-                    val content = json.optJSONArray("content")
-                    val rawCleanedText = content
-                        ?.optJSONObject(0)
-                        ?.optString("text", "")
-                        ?.trim()
-                        ?: ""
+                    val rawCleanedText = extractCandidateText(json).trim()
 
                     // Extract text from <edited_text> XML tags.
                     // Falls back to the raw response if tags are missing,
@@ -251,8 +263,17 @@ class TextCleanupClient {
                             callback.onCleanupComplete(cleanedText)
                         }
                     } else {
+                        val blockedReason = json.optJSONObject("promptFeedback")
+                            ?.optString("blockReason", "")
+                            ?.trim()
                         mainHandler.post {
-                            callback.onCleanupError("Empty response from API")
+                            callback.onCleanupError(
+                                if (blockedReason.isNullOrEmpty()) {
+                                    "Empty response from API"
+                                } else {
+                                    "Cleanup blocked by Gemini safety filters ($blockedReason)"
+                                }
+                            )
                         }
                     }
                 } catch (e: Exception) {
@@ -273,6 +294,31 @@ class TextCleanupClient {
     /** Whether the HTTP status code indicates a transient server error worth retrying. */
     private fun isRetryableStatus(code: Int): Boolean {
         return code == 408 || code in 500..599
+    }
+
+    private fun buildSafetySettings(): JSONArray {
+        return JSONArray().apply {
+            for (category in SAFETY_CATEGORIES) {
+                put(JSONObject().apply {
+                    put("category", category)
+                    put("threshold", "BLOCK_NONE")
+                })
+            }
+        }
+    }
+
+    private fun extractCandidateText(responseJson: JSONObject): String {
+        val candidates = responseJson.optJSONArray("candidates") ?: return ""
+        val content = candidates.optJSONObject(0)?.optJSONObject("content") ?: return ""
+        val parts = content.optJSONArray("parts") ?: return ""
+        val text = StringBuilder()
+        for (index in 0 until parts.length()) {
+            val partText = parts.optJSONObject(index)?.optString("text", "").orEmpty()
+            if (partText.isNotEmpty()) {
+                text.append(partText)
+            }
+        }
+        return text.toString()
     }
 
     /**
@@ -301,7 +347,7 @@ class TextCleanupClient {
         return when (e) {
             is UnknownHostException -> "No internet connection"
             is SocketTimeoutException -> "Cleanup request timed out"
-            is ConnectException -> "Could not connect to Anthropic cleanup API"
+            is ConnectException -> "Could not connect to Google Gemini cleanup API"
             else -> e.message ?: "Network error"
         }
     }

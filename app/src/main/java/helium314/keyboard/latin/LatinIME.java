@@ -191,7 +191,7 @@ public class LatinIME extends InputMethodService implements
 
     // Voice input manager (local recording + Deepgram transcription)
     private VoiceInputManager mVoiceInputManager;
-    // Text cleanup client (Anthropic Claude post-processing)
+    // Text cleanup client (Google Gemini post-processing)
     private TextCleanupClient mTextCleanupClient;
     // Wake lock to prevent CPU sleep during voice recording
     private PowerManager.WakeLock mVoiceWakeLock;
@@ -2185,7 +2185,7 @@ public class LatinIME extends InputMethodService implements
     /**
      * Strip invisible and zero-width Unicode characters from text.
      *
-     * The OpenAI Realtime transcription API and the Claude cleanup API can return
+     * The OpenAI Realtime transcription API and the Gemini cleanup API can return
      * invisible Unicode characters such as zero-width spaces (U+200B), word joiners
      * (U+2060), byte order marks (U+FEFF), direction marks (U+200E/U+200F), and
      * others. These characters are inserted into the text field but are invisible
@@ -2295,15 +2295,15 @@ public class LatinIME extends InputMethodService implements
     }
 
     /**
-     * Replace the current paragraph text with cleaned text from Claude.
+     * Replace the current paragraph text with cleaned text from Gemini.
      *
      * Only the editable portion (text after the last line break in the context) is
      * deleted and replaced. Paragraph breaks and earlier text remain untouched.
      *
-     * Claude already handles capitalization and punctuation, so we do NOT apply
+     * Gemini already handles capitalization and punctuation, so we do NOT apply
      * {@link #adjustCapitalization} here — only invisible-char stripping and trailing space.
      *
-     * @param cleanedText      The corrected text returned by Claude (current paragraph only)
+     * @param cleanedText      The corrected text returned by Gemini (current paragraph only)
      * @param oldContextLength The length of the editable text that was in the editor when
      *                         the cleanup request was sent (chars to delete before cursor)
      */
@@ -2350,24 +2350,24 @@ public class LatinIME extends InputMethodService implements
     /**
      * Process transcription through cleanup (if configured) before inserting into the editor.
      *
-     * Pipeline: Deepgram transcript → Anthropic cleanup → replace current paragraph.
+     * Pipeline: Deepgram transcript → Gemini cleanup → replace current paragraph.
      *
      * The recent context (last 3 sentences) may span multiple paragraphs. To protect
      * paragraph breaks, we split the context at the last newline:
      * <ul>
-     *   <li><b>referenceContext</b> — text before the last newline (read-only, for Claude's
+     *   <li><b>referenceContext</b> — text before the last newline (read-only, for Gemini's
      *       understanding). Included in the system prompt but NOT replaced in the editor.</li>
      *   <li><b>editableText</b> — text after the last newline (current paragraph). This is
-     *       what Claude cleans up and what gets replaced in the editor.</li>
+     *       what Gemini cleans up and what gets replaced in the editor.</li>
      * </ul>
      *
-     * When cleanup is disabled (no Anthropic key), the raw transcription is simply
+     * When cleanup is disabled (no Google AI key), the raw transcription is simply
      * appended with basic capitalization adjustment.
      */
     private void processTranscriptionResult(@NonNull final String transcriptionText) {
-        final String anthropicApiKey = KtxKt.prefs(this).getString(Settings.PREF_ANTHROPIC_API_KEY, "");
-        if (anthropicApiKey == null || anthropicApiKey.isEmpty()) {
-            Log.i(TAG, "VOICE_STEP_5 cleanup skipped (no Anthropic API key configured)");
+        final String googleApiKey = KtxKt.prefs(this).getString(Settings.PREF_GOOGLE_API_KEY, "");
+        if (googleApiKey == null || googleApiKey.isEmpty()) {
+            Log.i(TAG, "VOICE_STEP_5 cleanup skipped (no Google AI API key configured)");
             insertTranscriptionText(transcriptionText);
             return;
         }
@@ -2383,7 +2383,7 @@ public class LatinIME extends InputMethodService implements
 
         // Split at the last newline to separate read-only context from editable text.
         // Only the editable portion (current paragraph) will be replaced in the editor.
-        // The reference context (earlier paragraphs) is sent to Claude for understanding
+        // The reference context (earlier paragraphs) is sent to Gemini for understanding
         // but paragraph breaks are never touched.
         final int lastNewline = recentContext.lastIndexOf('\n');
         final String referenceContext;
@@ -2399,7 +2399,7 @@ public class LatinIME extends InputMethodService implements
         // Strip leading whitespace from the editable text so we don't delete it
         // during replacement. The leading whitespace (space between the sentence
         // boundary and the start of this context chunk) must be preserved in the
-        // editor — Claude's response gets .trim()'d which would lose it.
+        // editor — Gemini's response gets .trim()'d which would lose it.
         final String editableText = rawEditableText.replaceAll("^\\s+", "");
         final int replacementLength = editableText.length();
 
@@ -2412,7 +2412,7 @@ public class LatinIME extends InputMethodService implements
         startCleanupWatchdog(cleanupToken);
         Log.i(
                 TAG,
-                "VOICE_STEP_5 sending to Anthropic cleanup " +
+                "VOICE_STEP_5 sending to Google Gemini cleanup " +
                         "(reference=" + referenceContext.length() +
                         " chars, editable=" + replacementLength +
                         " chars, newTranscription=" + transcriptionText.length() +
@@ -2420,7 +2420,7 @@ public class LatinIME extends InputMethodService implements
         );
 
         mTextCleanupClient.cleanupText(
-                anthropicApiKey,
+                googleApiKey,
                 prompt,
                 referenceContext,
                 editableText,
@@ -2658,7 +2658,7 @@ public class LatinIME extends InputMethodService implements
     }
 
     /**
-     * Return recent context for Claude cleanup: the last 3 sentences before the cursor,
+     * Return recent context for Gemini cleanup: the last 3 sentences before the cursor,
      * or up to 300 characters if fewer than 3 sentence boundaries are found.
      *
      * Sentence boundaries are detected by simplified punctuation matching: . ! ? : ; =

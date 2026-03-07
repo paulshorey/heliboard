@@ -219,14 +219,14 @@
     <string name="backup_restored">Backup restored</string>
     <!-- Preferences item for format for timestamp keycode -->
     <string name="timestamp_format_title">Format for timestamp key</string>
-    <!-- Voice Input (Deepgram transcription + Anthropic cleanup) settings -->
+    <!-- Voice Input (Deepgram transcription + Google Gemini cleanup) settings -->
     <string name="settings_screen_transcription">Transcription</string>
     <string name="deepgram_api_key_title">Deepgram API Key</string>
     <string name="deepgram_api_key_summary">API key for voice transcription (Nova-3). Get from console.deepgram.com</string>
-    <string name="anthropic_api_key_title">Anthropic API Key</string>
-    <string name="anthropic_api_key_summary">API key for text cleanup (Claude). Get from console.anthropic.com</string>
+    <string name="google_api_key_title">Google AI API Key</string>
+    <string name="google_api_key_summary">API key for text cleanup (Gemini Flash). Get from ai.google.dev</string>
     <string name="cleanup_prompt_title">Cleanup Prompt</string>
-    <string name="cleanup_prompt_summary">Prompt for Claude post-processing to fix capitalization and punctuation</string>
+    <string name="cleanup_prompt_summary">Prompt for Gemini post-processing to fix capitalization and punctuation</string>
     <string name="voice_chunk_silence_seconds_title">Chunk silence duration (seconds)</string>
     <string name="voice_silence_threshold_title">Silence threshold (RMS loudness)</string>
     <string name="voice_new_paragraph_silence_seconds_title">New paragraph silence duration (seconds)</string>

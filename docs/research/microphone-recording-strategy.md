@@ -184,7 +184,7 @@ This is the most complex but most robust approach.
 
 5. **Simplicity.** The WebSocket + Realtime API is a complex protocol with session management, reconnection handling, and state synchronization. A simple `POST` request with audio data is far easier to reason about, test, and maintain.
 
-6. **Current features are preserved.** Server-side VAD can be replaced with simple client-side energy-based silence detection (threshold on RMS amplitude). The cleanup timer (3s silence → Claude cleanup) and paragraph timer (12s silence → new paragraph) work identically.
+6. **Current features are preserved.** Server-side VAD can be replaced with simple client-side energy-based silence detection (threshold on RMS amplitude). The cleanup timer (3s silence → Gemini cleanup) and paragraph timer (12s silence → new paragraph) work identically.
 
 ### Implementation Plan
 
