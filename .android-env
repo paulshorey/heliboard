@@ -1,0 +1,5 @@
+# Source this to set ANDROID_HOME/ANDROID_SDK_ROOT when SDK is at default location.
+# Use after running tools/setup-android-sdk.sh, or when SDK is pre-installed.
+export ANDROID_HOME="${ANDROID_HOME:-/workspace/.android-sdk}"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"

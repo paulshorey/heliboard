@@ -39,3 +39,11 @@ HeliBoard is an Android app, open-source project based on AOSP / OpenBoard keybo
 See [docs/fullapp-keyboard.md](docs/fullapp-keyboard.md) for architecture and lessons learned.
 
 **Key rule**: The extract view is a mirror of the app's field. All text input (typing, voice) must go through `InputConnection` to the app — never write to the extract view directly. The framework syncs app → extract view via `setExtractedText()`.
+
+## Android workspace setup (cloud agents)
+
+To run Gradle builds (`./gradlew :app:compileDebugKotlin`) in cloud/CI environments:
+
+1. Run `./tools/setup-android-sdk.sh` once. This installs the Android SDK to `/workspace/.android-sdk`, creates `local.properties` with `sdk.dir`, and sets `ANDROID_HOME`/`ANDROID_SDK_ROOT` when sourced.
+2. After setup, `./gradlew :app:compileDebugKotlin` works out of the box (Gradle reads `local.properties`).
+3. To get env vars in the current shell: `source ./tools/setup-android-sdk.sh` (idempotent if SDK already installed).
