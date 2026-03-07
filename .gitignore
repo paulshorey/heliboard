@@ -3,6 +3,7 @@
 .gradle
 .kotlin
 local.properties
+.android-sdk
 .DS_Store
 Gemfile
 build
