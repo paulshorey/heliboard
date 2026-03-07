@@ -203,6 +203,8 @@ public class LatinIME extends InputMethodService implements
     private static final int MAX_PENDING_TRANSCRIPTIONS = 64;
     private static final long CLEANUP_WATCHDOG_TIMEOUT_MS = 12_000L;
     private static final int FULLAPP_SYNC_MAX_CHARS = 100_000;
+    private static final int FULLAPP_SYNC_RETRY_ATTEMPTS = 5;
+    private static final long FULLAPP_SYNC_RETRY_DELAY_MS = 120L;
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
     private final Runnable mCleanupWatchdogRunnable = new Runnable() {
         @Override
@@ -213,6 +215,8 @@ public class LatinIME extends InputMethodService implements
     private int mCleanupRequestToken = 0;
     @Nullable
     private String mInFlightCleanupTranscription = null;
+    @Nullable
+    private String mFullappSyncInFlightKey = null;
     // Voice session ID — incremented when a new recording starts and when recording is
     // cancelled. Used to invalidate stale async cleanup callbacks from previous sessions.
     private int mVoiceSessionId = 0;
@@ -904,20 +908,7 @@ public class LatinIME extends InputMethodService implements
             EditorInfoCompatUtils.INSTANCE.debugLog(editorInfo, TAG);
         }
 
-        // Insert pending text from fullapp editor Activity (user returned from FullappEditorActivity).
-        final String pending = FullappEditorResult.pendingText;
-        final String targetPkg = FullappEditorResult.targetPackageName;
-        if (pending != null && targetPkg != null && targetPkg.equals(editorInfo.packageName)) {
-            FullappEditorResult.pendingText = null;
-            FullappEditorResult.targetPackageName = null;
-            mMainHandler.post(() -> {
-                final boolean synced = replaceEntireFieldText(pending, true);
-                if (!synced) {
-                    Log.w(TAG, "Failed to insert pending fullapp text");
-                }
-                requestHideSelf(0);
-            });
-        }
+        maybeSyncPendingFullappDraft(editorInfo);
 
         // In landscape mode, this method gets called without the input view being created.
         if (mainKeyboardView == null) {
@@ -1086,6 +1077,7 @@ public class LatinIME extends InputMethodService implements
     void onFinishInputInternal() {
         super.onFinishInput();
         Log.i(TAG, "onFinishInput");
+        mFullappSyncInFlightKey = null;
 
         // Abruptly cancel voice recording when disconnecting from the text field (e.g., user
         // navigated away, app was backgrounded, or the text field was removed).
@@ -2881,7 +2873,20 @@ public class LatinIME extends InputMethodService implements
         // Trim trailing newlines as safety net (extract view or race can still add them sometimes)
         initialText = initialText.replaceFirst("[\\r\\n]+$", "");
         final EditorInfo editorInfo = getCurrentInputEditorInfo();
-        final String targetPackage = editorInfo != null ? editorInfo.packageName : "";
+        final FullappEditorResult.TargetSnapshot targetSnapshot =
+                FullappEditorResult.createTargetSnapshot(editorInfo);
+        final FullappEditorResult.DraftRecord existingDraft = targetSnapshot == null
+                ? null
+                : FullappEditorResult.loadDraft(this, targetSnapshot);
+        final int initialSelection;
+        if (existingDraft != null) {
+            initialText = existingDraft.getDraftText();
+            initialSelection = Math.max(0,
+                    Math.min(existingDraft.getSelectionEnd(), initialText.length()));
+        } else {
+            initialSelection = Math.max(0,
+                    Math.min(getOriginalFieldCursorPosition(), initialText.length()));
+        }
 
         requestHideSelf(0);
         final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
@@ -2895,8 +2900,72 @@ public class LatinIME extends InputMethodService implements
                 | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
                 | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         intent.putExtra(FullappEditorActivity.EXTRA_INITIAL_TEXT, initialText);
-        intent.putExtra(FullappEditorActivity.EXTRA_PACKAGE_NAME, targetPackage);
+        intent.putExtra(FullappEditorActivity.EXTRA_INITIAL_SELECTION_START, initialSelection);
+        intent.putExtra(FullappEditorActivity.EXTRA_INITIAL_SELECTION_END, initialSelection);
+        if (targetSnapshot != null) {
+            FullappEditorResult.putTargetExtras(intent, targetSnapshot);
+        }
         startActivity(intent);
+    }
+
+    private void maybeSyncPendingFullappDraft(@NonNull final EditorInfo editorInfo) {
+        final String currentFieldText = getOriginalFieldTextForFullapp();
+        final FullappEditorResult.DraftRecord pendingDraft =
+                FullappEditorResult.findDraftForEditor(this, editorInfo, currentFieldText);
+        if (pendingDraft == null) {
+            mFullappSyncInFlightKey = null;
+            return;
+        }
+        final String draftKey = pendingDraft.getTarget().getStorageKey();
+        if (draftKey.equals(mFullappSyncInFlightKey)) {
+            return;
+        }
+        mFullappSyncInFlightKey = draftKey;
+        attemptPendingFullappSync(pendingDraft, FULLAPP_SYNC_RETRY_ATTEMPTS);
+    }
+
+    private void attemptPendingFullappSync(@NonNull final FullappEditorResult.DraftRecord pendingDraft,
+                                           final int remainingAttempts) {
+        final long delayMs = remainingAttempts == FULLAPP_SYNC_RETRY_ATTEMPTS
+                ? 0L
+                : FULLAPP_SYNC_RETRY_DELAY_MS;
+        mMainHandler.postDelayed(() -> {
+            final String currentFieldText = getOriginalFieldTextForFullapp();
+            if (pendingDraft.getDraftText().equals(currentFieldText)) {
+                FullappEditorResult.clearDraft(LatinIME.this, pendingDraft.getTarget());
+                mFullappSyncInFlightKey = null;
+                return;
+            }
+            final boolean synced = replaceEntireFieldText(pendingDraft.getDraftText(), true);
+            if (synced) {
+                restoreFullappSelection(pendingDraft);
+                FullappEditorResult.clearDraft(LatinIME.this, pendingDraft.getTarget());
+                mFullappSyncInFlightKey = null;
+                requestHideSelf(0);
+                return;
+            }
+            if (remainingAttempts > 1) {
+                attemptPendingFullappSync(pendingDraft, remainingAttempts - 1);
+                return;
+            }
+            mFullappSyncInFlightKey = null;
+            Log.w(TAG, "Failed to insert pending fullapp text after retries");
+        }, delayMs);
+    }
+
+    private void restoreFullappSelection(@NonNull final FullappEditorResult.DraftRecord pendingDraft) {
+        final android.view.inputmethod.InputConnection ic = getCurrentInputConnection();
+        if (ic == null) {
+            return;
+        }
+        final int textLength = pendingDraft.getDraftText().length();
+        final int selectionStart = Math.max(0, Math.min(pendingDraft.getSelectionStart(), textLength));
+        final int selectionEnd = Math.max(0, Math.min(pendingDraft.getSelectionEnd(), textLength));
+        try {
+            ic.setSelection(selectionStart, selectionEnd);
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to restore fullapp selection: " + e.getMessage());
+        }
     }
 
     public void dumpDictionaryForDebug(final String dictName) {
