@@ -1,3 +1,8 @@
+---
+name: full-app-mode
+description: This android keyboard app has a unique feature not available in any other keyboard app. Full-screen mode. We call it "fullapp" or "full app" to differentiate from the system OS fullscreen mode. When entering full-app mode, the keyboard is opened as its own standalone app, in its own full screen window. Text from the source app input field is copied to the full keyboard app. When user is done editing in full mode, they can minimize it or click back button. Then the edited text syncs back to the original app input field. User is then able to continue editing using the regular keyboard mode.
+---
+
 # Fullapp Keyboard — Architecture and Lessons Learned
 
 This document describes how the fullapp keyboard feature works and what we learned from implementing it. Use it to avoid pitfalls and stick to the approach that works.
@@ -82,11 +87,11 @@ Stopped all display updates; typing and voice transcription stopped showing.
 
 ## Summary: Rules of Thumb
 
-| Do | Don't |
-|----|-------|
-| Launch `FullappEditorActivity` for fullapp editing | Use extract view for web page textareas |
+| Do                                                             | Don't                                                  |
+| -------------------------------------------------------------- | ------------------------------------------------------ |
+| Launch `FullappEditorActivity` for fullapp editing             | Use extract view for web page textareas                |
 | Store result in `FullappEditorResult`, insert on IME reconnect | Try to keep IME attached while switching to fullapp UI |
-| Treat fullapp as "keyboard app as standalone app" | Assume extract view works everywhere |
-| Use `replaceEntireFieldText()` when inserting pending text | Assume `InputConnection` is always ready immediately |
+| Treat fullapp as "keyboard app as standalone app"              | Assume extract view works everywhere                   |
+| Use `replaceEntireFieldText()` when inserting pending text     | Assume `InputConnection` is always ready immediately   |
 
 **Bottom line**: For web pages and apps where the extract view causes focus loss, use an Activity so the keyboard app runs as a standalone app. Sync text back when the user returns and focuses the original field again.
