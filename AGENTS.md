@@ -54,11 +54,15 @@ When a task requires a phone-installable build artifact, generate a debug APK an
 
 - `/workspace/dist/HeliBoard.apk`
 
-Use this flow:
+Preferred flow:
 
-1. `source ./tools/setup-android-sdk.sh`
-2. `./gradlew :app:assembleDebug`
-3. Copy `app/build/outputs/apk/debug/HeliBoard_*-debug.apk` to `/workspace/dist/HeliBoard.apk`
-4. Remove any older files in `/workspace/dist` first so the repository contains only one installable APK artifact at a time
+1. Run `./tools/build-dist-apk.sh`
+
+This helper script:
+
+- sources `./tools/setup-android-sdk.sh`
+- builds the debug APK with Gradle
+- removes older files in `/workspace/dist`
+- copies the generated APK to `/workspace/dist/HeliBoard.apk`
 
 Always overwrite `/workspace/dist/HeliBoard.apk` with the latest build when regenerating it.
