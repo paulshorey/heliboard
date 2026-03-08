@@ -60,7 +60,7 @@ Body: <raw WAV file bytes>
 
 ### Endpoint
 ```
-POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent
+POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent
 Headers:
   x-goog-api-key: <GOOGLE_API_KEY>
   Content-Type: application/json

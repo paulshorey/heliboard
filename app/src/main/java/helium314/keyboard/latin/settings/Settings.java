@@ -182,6 +182,7 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
     // Voice Input (Deepgram transcription + Google Gemini cleanup)
     public static final String PREF_DEEPGRAM_API_KEY = "deepgram_api_key";
     public static final String PREF_GOOGLE_API_KEY = "google_api_key";
+    public static final String PREF_GEMINI_MODEL = "gemini_model";
     public static final String PREF_TRANSCRIPTION_PROMPT_PREFIX = "transcription_prompt_";
     public static final String PREF_TRANSCRIPTION_PROMPT_SELECTED = "transcription_prompt_selected";
     public static final int TRANSCRIPTION_PROMPT_COUNT = 7;
