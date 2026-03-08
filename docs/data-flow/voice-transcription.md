@@ -27,7 +27,7 @@ The voice input system uses a **local recording + batch transcription** architec
                                    ▼ (after 3s silence)
                         ┌──────────────────────┐     ┌─────────────────┐
                         │  TextCleanupClient   │────▶│   Google API    │
-                        │  (HTTP POST)         │◀────│ (Gemini Flash)  │
+                        │  (HTTP POST)         │◀────│ (Gemini 3.1 Flash Lite)  │
                         └──────────────────────┘     └─────────────────┘
 ```
 
@@ -63,7 +63,7 @@ Orchestrates the voice input flow and manages timers.
 
 ### TextCleanupClient.kt
 HTTP client for Google's Gemini API.
-- **Model**: `gemini-2.0-flash`
+- **Model**: `gemini-3.1-flash-lite-preview` (configurable)
 - **Purpose**: Intelligent capitalization, punctuation, and grammar cleanup
 - **Input (system prompt)**: Cleanup instructions + optional reference context from earlier paragraphs
 - **Input (user message)**: `<text_to_edit>{current paragraph text} + {new transcription}</text_to_edit>`

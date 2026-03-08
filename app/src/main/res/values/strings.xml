@@ -245,6 +245,8 @@
     <string name="deepgram_api_key_summary">API key for voice transcription (Nova-3). Get from console.deepgram.com</string>
     <string name="google_api_key_title">Google AI API Key</string>
     <string name="google_api_key_summary">API key for text cleanup (Gemini Flash). Get from ai.google.dev</string>
+    <string name="gemini_model_title">Gemini model</string>
+    <string name="gemini_model_summary">Model name for cleanup (default: gemini-3.1-flash-lite-preview).</string>
     <string name="cleanup_prompt_title">Cleanup Prompt</string>
     <string name="cleanup_prompt_summary">Prompt for Gemini post-processing to fix capitalization and punctuation</string>
     <string name="voice_chunk_silence_seconds_title">Chunk silence duration (seconds)</string>

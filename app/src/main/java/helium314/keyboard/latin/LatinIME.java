@@ -1130,6 +1130,7 @@ public class LatinIME extends InputMethodService implements
                     + ", nss=" + newSelStart + ", nse=" + newSelEnd
                     + ", cs=" + composingSpanStart + ", ce=" + composingSpanEnd);
         }
+        discardPendingFullappDraftIfRegularTextChanged();
 
         // Abruptly cancel voice recording when the user moves the cursor away from the end
         // of the text, or when the text field is cleared. We use isBelatedExpectedUpdate to
@@ -2359,7 +2360,6 @@ public class LatinIME extends InputMethodService implements
     private void processTranscriptionResult(@NonNull final String transcriptionText) {
         final String googleApiKey = KtxKt.prefs(this).getString(Settings.PREF_GOOGLE_API_KEY, "");
         if (googleApiKey == null || googleApiKey.isEmpty()) {
-            Log.i(TAG, "VOICE_STEP_5 cleanup skipped (no Google AI API key configured)");
             insertTranscriptionText(transcriptionText);
             return;
         }
@@ -2367,6 +2367,10 @@ public class LatinIME extends InputMethodService implements
         String cleanupPrompt = KtxKt.prefs(this).getString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT);
         if (cleanupPrompt == null || cleanupPrompt.isEmpty()) {
             cleanupPrompt = Defaults.PREF_CLEANUP_PROMPT;
+        }
+        String geminiModel = KtxKt.prefs(this).getString(Settings.PREF_GEMINI_MODEL, Defaults.PREF_GEMINI_MODEL);
+        if (geminiModel == null) {
+            geminiModel = Defaults.PREF_GEMINI_MODEL;
         }
 
         // Capture the recent context (last 3 sentences or up to 300 chars).
@@ -2402,14 +2406,6 @@ public class LatinIME extends InputMethodService implements
         mCleanupInProgress = true;
         mInFlightCleanupTranscription = transcriptionText;
         startCleanupWatchdog(cleanupToken);
-        Log.i(
-                TAG,
-                "VOICE_STEP_5 sending to Google Gemini cleanup " +
-                        "(reference=" + referenceContext.length() +
-                        " chars, editable=" + replacementLength +
-                        " chars, newTranscription=" + transcriptionText.length() +
-                        " chars)"
-        );
 
         mTextCleanupClient.cleanupText(
                 googleApiKey,
@@ -2417,12 +2413,12 @@ public class LatinIME extends InputMethodService implements
                 referenceContext,
                 editableText,
                 transcriptionText,
+                geminiModel,
                 new TextCleanupClient.CleanupCallback() {
                     @Override
                     public void onCleanupComplete(String cleanedText) {
                         // Discard stale callbacks from cancelled/timed-out sessions.
                         if (sessionId != mVoiceSessionId || cleanupToken != mCleanupRequestToken) {
-                            Log.i(TAG, "Cleanup result discarded — stale callback");
                             return;
                         }
                         finishCleanupWatchdog(cleanupToken);
@@ -2430,12 +2426,6 @@ public class LatinIME extends InputMethodService implements
 
                         try {
                             String sanitizedCleanedText = stripInvisibleChars(cleanedText);
-                            Log.i(
-                                    TAG,
-                                    "VOICE_STEP_5C cleanup response received (" +
-                                            sanitizedCleanedText.length() + " chars): \"" +
-                                            sanitizeLogText(sanitizedCleanedText) + "\""
-                            );
 
                             if (sanitizedCleanedText.isEmpty()) {
                                 Log.w(TAG, "Cleanup returned empty text, falling back to raw transcription insert");
@@ -2464,7 +2454,6 @@ public class LatinIME extends InputMethodService implements
                     public void onCleanupError(String error) {
                         // Discard stale callbacks from cancelled/timed-out sessions.
                         if (sessionId != mVoiceSessionId || cleanupToken != mCleanupRequestToken) {
-                            Log.i(TAG, "Cleanup error discarded — stale callback");
                             return;
                         }
                         finishCleanupWatchdog(cleanupToken);
@@ -2875,9 +2864,16 @@ public class LatinIME extends InputMethodService implements
         final EditorInfo editorInfo = getCurrentInputEditorInfo();
         final FullappEditorResult.TargetSnapshot targetSnapshot =
                 FullappEditorResult.createTargetSnapshot(editorInfo);
-        final FullappEditorResult.DraftRecord existingDraft = targetSnapshot == null
+        FullappEditorResult.DraftRecord existingDraft = targetSnapshot == null
                 ? null
                 : FullappEditorResult.loadDraft(this, targetSnapshot);
+        if (existingDraft != null
+                && FullappEditorResult.wasSupersededByRegularEditing(existingDraft, initialText)) {
+            Log.i(TAG, "Discarding fullapp draft before launch because the field changed in regular mode for "
+                    + existingDraft.getTarget().debugSummary());
+            FullappEditorResult.clearDraft(this, existingDraft.getTarget());
+            existingDraft = null;
+        }
         final int initialSelection;
         if (existingDraft != null) {
             initialText = existingDraft.getDraftText();
@@ -2911,9 +2907,27 @@ public class LatinIME extends InputMethodService implements
     private void maybeSyncPendingFullappDraft(@NonNull final EditorInfo editorInfo) {
         final String currentFieldText = getOriginalFieldTextForFullapp();
         final FullappEditorResult.DraftRecord pendingDraft =
-                FullappEditorResult.findDraftForEditor(this, editorInfo, currentFieldText);
+                FullappEditorResult.findDraftForEditor(this, editorInfo);
         if (pendingDraft == null) {
             mFullappSyncInFlightKey = null;
+            return;
+        }
+        if (pendingDraft.getDraftText().equals(currentFieldText)) {
+            FullappEditorResult.clearDraft(this, pendingDraft.getTarget());
+            mFullappSyncInFlightKey = null;
+            return;
+        }
+        if (FullappEditorResult.wasSupersededByRegularEditing(pendingDraft, currentFieldText)) {
+            FullappEditorResult.clearDraft(this, pendingDraft.getTarget());
+            mFullappSyncInFlightKey = null;
+            Log.i(TAG, "Discarded fullapp draft because regular mode changed the field for "
+                    + pendingDraft.getTarget().debugSummary());
+            return;
+        }
+        if (!FullappEditorResult.shouldSyncToCurrentField(pendingDraft, currentFieldText)) {
+            mFullappSyncInFlightKey = null;
+            Log.i(TAG, "Keeping fullapp draft without syncing because it is older than the restore window for "
+                    + pendingDraft.getTarget().debugSummary());
             return;
         }
         final String draftKey = pendingDraft.getTarget().getStorageKey();
@@ -2937,6 +2951,19 @@ public class LatinIME extends InputMethodService implements
                 mFullappSyncInFlightKey = null;
                 return;
             }
+            if (FullappEditorResult.wasSupersededByRegularEditing(pendingDraft, currentFieldText)) {
+                FullappEditorResult.clearDraft(LatinIME.this, pendingDraft.getTarget());
+                mFullappSyncInFlightKey = null;
+                Log.i(TAG, "Discarded fullapp draft during sync because regular mode changed the field for "
+                        + pendingDraft.getTarget().debugSummary());
+                return;
+            }
+            if (!FullappEditorResult.shouldSyncToCurrentField(pendingDraft, currentFieldText)) {
+                mFullappSyncInFlightKey = null;
+                Log.i(TAG, "Skipping fullapp draft sync because the draft is no longer recent for "
+                        + pendingDraft.getTarget().debugSummary());
+                return;
+            }
             final boolean synced = replaceEntireFieldText(pendingDraft.getDraftText(), true);
             if (synced) {
                 restoreFullappSelection(pendingDraft);
@@ -2954,6 +2981,34 @@ public class LatinIME extends InputMethodService implements
             Log.w(TAG, "Failed to insert pending fullapp text after retries for "
                     + pendingDraft.getTarget().debugSummary());
         }, delayMs);
+    }
+
+    private void discardPendingFullappDraftIfRegularTextChanged() {
+        if (FullappEditorActivity.isActive || mFullappSyncInFlightKey != null) {
+            return;
+        }
+        final EditorInfo editorInfo = getCurrentInputEditorInfo();
+        if (editorInfo == null) {
+            return;
+        }
+        final FullappEditorResult.TargetSnapshot targetSnapshot =
+                FullappEditorResult.createTargetSnapshot(editorInfo);
+        FullappEditorResult.DraftRecord pendingDraft = targetSnapshot == null
+                ? null
+                : FullappEditorResult.loadDraft(this, targetSnapshot);
+        if (pendingDraft == null && (targetSnapshot == null || !targetSnapshot.getHasStrongIdentity())) {
+            pendingDraft = FullappEditorResult.findDraftForEditor(this, editorInfo);
+        }
+        if (pendingDraft == null) {
+            return;
+        }
+        final String currentFieldText = getOriginalFieldTextForFullapp();
+        if (!FullappEditorResult.wasSupersededByRegularEditing(pendingDraft, currentFieldText)) {
+            return;
+        }
+        FullappEditorResult.clearDraft(this, pendingDraft.getTarget());
+        Log.i(TAG, "Discarded fullapp draft after regular mode editing for "
+                + pendingDraft.getTarget().debugSummary());
     }
 
     private void restoreFullappSelection(@NonNull final FullappEditorResult.DraftRecord pendingDraft) {

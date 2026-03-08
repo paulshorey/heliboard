@@ -27,15 +27,17 @@ import java.util.concurrent.TimeUnit
  * receives the corrected text back. The caller is responsible for replacing the
  * old context in the editor with the cleaned result.
  *
- * Uses Google's Gemini API (gemini-2.0-flash).
+ * Uses Google's Gemini API. Model is configurable (default gemini-3.1-flash-lite-preview).
  */
 class TextCleanupClient {
 
     companion object {
         private const val TAG = "TextCleanupClient"
-        private const val MODEL = "gemini-2.0-flash"
-        private const val API_URL =
-            "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent"
+        private const val DEFAULT_MODEL = "gemini-3.1-flash-lite-preview"
+        private fun apiUrlForModel(model: String): String {
+            val m = model.trim().ifEmpty { DEFAULT_MODEL }
+            return "https://generativelanguage.googleapis.com/v1beta/models/$m:generateContent"
+        }
 
         /**
          * Maximum output tokens for the cleanup response.
@@ -93,6 +95,7 @@ class TextCleanupClient {
      * @param editableText Text from the current paragraph (after last line break).
      *                      This is what Gemini cleans up and what gets replaced in the editor.
      * @param newText Newly transcribed text to append after the editable text.
+     * @param model Gemini model name (e.g. gemini-3.1-flash-lite-preview). Empty = default.
      * @param callback Callback for result (called on main thread)
      */
     fun cleanupText(
@@ -101,8 +104,11 @@ class TextCleanupClient {
         referenceContext: String,
         editableText: String,
         newText: String,
+        model: String,
         callback: CleanupCallback
     ) {
+        val effectiveModel = model.trim().ifEmpty { DEFAULT_MODEL }
+        val requestUrl = apiUrlForModel(effectiveModel)
         // Build the user message: current paragraph + new transcription.
         // Trim trailing whitespace from editable text to avoid double-spaces
         // when the previous insertion added a trailing space.
@@ -161,17 +167,11 @@ class TextCleanupClient {
         }
 
         val request = Request.Builder()
-            .url(API_URL)
+            .url(requestUrl)
             .addHeader("x-goog-api-key", apiKey)
             .addHeader("Content-Type", "application/json")
             .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
-
-        Log.i(
-            TAG,
-            "VOICE_STEP_5 send to Google Gemini cleanup " +
-                "(editable=${userMessage.length} chars, reference=${referenceContext.length} chars)"
-        )
 
         // No retry: each queue item has a strict end-to-end timeout budget.
         enqueueWithRetry(request, callback, retriesRemaining = 0)
