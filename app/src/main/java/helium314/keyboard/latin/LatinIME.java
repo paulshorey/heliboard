@@ -1067,6 +1067,7 @@ public class LatinIME extends InputMethodService implements
                 // When the user returns, they can stop via the mic button or X.
             }
         }
+        reconcileStoredFullappDraftWithCurrentField();
         final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
         if (mainKeyboardView != null) {
             mainKeyboardView.closing();
@@ -1183,10 +1184,13 @@ public class LatinIME extends InputMethodService implements
             // because this may end the manual shift, which is unwanted in case of shift + arrow keys for changing selection
             // todo: this is not fully implemented yet, and maybe should be behind a setting
             if (mKeyboardSwitcher.getKeyboard() != null && mKeyboardSwitcher.getKeyboard().mId.isAlphabetShiftedManually()
-                && ((oldSelEnd == newSelEnd && oldSelStart != newSelStart) || (oldSelEnd != newSelEnd && oldSelStart == newSelStart)))
+                && ((oldSelEnd == newSelEnd && oldSelStart != newSelStart) || (oldSelEnd != newSelEnd && oldSelStart == newSelStart))) {
+                reconcileStoredFullappDraftWithCurrentField();
                 return;
+            }
             mKeyboardSwitcher.requestUpdatingShiftState(getCurrentAutoCapsState(), getCurrentRecapitalizeState());
         }
+        reconcileStoredFullappDraftWithCurrentField();
     }
 
     /**
@@ -2875,18 +2879,8 @@ public class LatinIME extends InputMethodService implements
         final EditorInfo editorInfo = getCurrentInputEditorInfo();
         final FullappEditorResult.TargetSnapshot targetSnapshot =
                 FullappEditorResult.createTargetSnapshot(editorInfo);
-        final FullappEditorResult.DraftRecord existingDraft = targetSnapshot == null
-                ? null
-                : FullappEditorResult.loadDraft(this, targetSnapshot);
-        final int initialSelection;
-        if (existingDraft != null) {
-            initialText = existingDraft.getDraftText();
-            initialSelection = Math.max(0,
-                    Math.min(existingDraft.getSelectionEnd(), initialText.length()));
-        } else {
-            initialSelection = Math.max(0,
-                    Math.min(getOriginalFieldCursorPosition(), initialText.length()));
-        }
+        final int initialSelection = Math.max(0,
+                Math.min(getOriginalFieldCursorPosition(), initialText.length()));
 
         requestHideSelf(0);
         final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
@@ -2906,6 +2900,34 @@ public class LatinIME extends InputMethodService implements
             FullappEditorResult.putTargetExtras(intent, targetSnapshot);
         }
         startActivity(intent);
+    }
+
+    private void reconcileStoredFullappDraftWithCurrentField() {
+        if (FullappEditorActivity.isActive || mFullappSyncInFlightKey != null) {
+            return;
+        }
+        final EditorInfo editorInfo = getCurrentInputEditorInfo();
+        final android.view.inputmethod.InputConnection ic = getCurrentInputConnection();
+        if (editorInfo == null || ic == null) {
+            return;
+        }
+        final FullappEditorResult.TargetSnapshot targetSnapshot =
+                FullappEditorResult.createTargetSnapshot(editorInfo);
+        if (targetSnapshot == null) {
+            return;
+        }
+        if (FullappEditorResult.loadDraft(this, targetSnapshot) == null) {
+            return;
+        }
+        final String currentFieldText = getOriginalFieldTextForFullapp();
+        final int currentSelection = Math.max(0,
+                Math.min(getOriginalFieldCursorPosition(), currentFieldText.length()));
+        FullappEditorResult.reconcileDraftWithCurrentField(
+                this,
+                targetSnapshot,
+                currentFieldText,
+                currentSelection,
+                currentSelection);
     }
 
     private void maybeSyncPendingFullappDraft(@NonNull final EditorInfo editorInfo) {
@@ -2932,6 +2954,20 @@ public class LatinIME extends InputMethodService implements
                 : FULLAPP_SYNC_RETRY_DELAY_MS;
         mMainHandler.postDelayed(() -> {
             final String currentFieldText = getOriginalFieldTextForFullapp();
+            if (!FullappEditorResult.shouldApplyDraftToCurrentField(pendingDraft, currentFieldText)) {
+                final int currentSelection = Math.max(0,
+                        Math.min(getOriginalFieldCursorPosition(), currentFieldText.length()));
+                FullappEditorResult.reconcileDraftWithCurrentField(
+                        LatinIME.this,
+                        pendingDraft.getTarget(),
+                        currentFieldText,
+                        currentSelection,
+                        currentSelection);
+                mFullappSyncInFlightKey = null;
+                Log.i(TAG, "Skipping fullapp draft sync because current field text is newer for "
+                        + pendingDraft.getTarget().debugSummary());
+                return;
+            }
             if (pendingDraft.getDraftText().equals(currentFieldText)) {
                 FullappEditorResult.clearDraft(LatinIME.this, pendingDraft.getTarget());
                 mFullappSyncInFlightKey = null;

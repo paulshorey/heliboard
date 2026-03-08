@@ -155,7 +155,15 @@ class FullappEditorActivity : ComponentActivity() {
             ?: initialSelectionStart
 
         targetSnapshot = FullappEditorResult.getTargetFromIntent(sourceIntent)
-        val savedDraft = targetSnapshot?.let { FullappEditorResult.loadDraft(this, it) }
+        val savedDraft = targetSnapshot?.let {
+            FullappEditorResult.reconcileDraftWithCurrentField(
+                context = this,
+                target = it,
+                currentFieldText = initialText,
+                selectionStart = initialSelectionStart,
+                selectionEnd = initialSelectionEnd
+            )
+        }
         originalText = savedDraft?.originalText ?: initialText
 
         val restoredText = savedDraft?.draftText ?: initialText
@@ -385,6 +393,55 @@ object FullappEditorResult {
     }
 
     @JvmStatic
+    fun shouldApplyDraftToCurrentField(draft: DraftRecord, currentFieldText: String): Boolean =
+        currentFieldText == draft.originalText || currentFieldText == draft.draftText
+
+    private fun shouldKeepUnsyncedDraft(draft: DraftRecord, currentFieldText: String): Boolean =
+        currentFieldText == draft.originalText && currentFieldText != draft.draftText
+
+    private fun DraftRecord.toLatestFieldSnapshot(
+        currentFieldText: String,
+        selectionStart: Int,
+        selectionEnd: Int,
+        lastSavedAt: Long
+    ): DraftRecord {
+        val textLength = currentFieldText.length
+        return DraftRecord(
+            target = target,
+            originalText = currentFieldText,
+            draftText = currentFieldText,
+            selectionStart = selectionStart.coerceIn(0, textLength),
+            selectionEnd = selectionEnd.coerceIn(0, textLength),
+            lastSavedAt = lastSavedAt
+        )
+    }
+
+    @JvmStatic
+    fun reconcileDraftWithCurrentField(
+        context: Context,
+        target: TargetSnapshot,
+        currentFieldText: String,
+        selectionStart: Int,
+        selectionEnd: Int
+    ): DraftRecord? {
+        val existingDraft = loadDraft(context, target) ?: return null
+        if (shouldKeepUnsyncedDraft(existingDraft, currentFieldText)) {
+            return existingDraft
+        }
+        val updatedDraft = existingDraft.toLatestFieldSnapshot(
+            currentFieldText = currentFieldText,
+            selectionStart = selectionStart,
+            selectionEnd = selectionEnd,
+            lastSavedAt = System.currentTimeMillis()
+        )
+        if (updatedDraft == existingDraft) {
+            return existingDraft
+        }
+        saveDraft(context, updatedDraft)
+        return updatedDraft
+    }
+
+    @JvmStatic
     fun findDraftForEditor(context: Context, editorInfo: EditorInfo, currentFieldText: String): DraftRecord? {
         val prefs = draftPrefs(context) ?: return null
         val draftKeys = prefs.getStringSet(PREF_FULLAPP_DRAFT_KEYS, emptySet()).orEmpty()
@@ -407,9 +464,7 @@ object FullappEditorResult {
             if (score == Int.MIN_VALUE) {
                 continue
             }
-            val safeToApply = draft.target.hasStrongIdentity
-                || currentFieldText == draft.originalText
-                || currentFieldText == draft.draftText
+            val safeToApply = shouldApplyDraftToCurrentField(draft, currentFieldText)
             if (!safeToApply) {
                 continue
             }
