@@ -221,6 +221,26 @@
     <string name="timestamp_format_title">Format for timestamp key</string>
     <!-- Voice Input (Deepgram transcription + Google Gemini cleanup) settings -->
     <string name="settings_screen_transcription">Transcription</string>
+    <!-- Settings screen showing saved standalone fullapp edits -->
+    <string name="settings_screen_fullapp_drafts">In-progress fullapp edits</string>
+    <!-- Empty-state title for fullapp drafts screen -->
+    <string name="fullapp_drafts_empty_title">No saved fullapp drafts</string>
+    <!-- Empty-state description for fullapp drafts screen -->
+    <string name="fullapp_drafts_empty_summary">Drafts saved while using standalone fullapp editing will appear here until they are synced back to the original app field.</string>
+    <!-- Timestamp shown for a saved fullapp draft -->
+    <string name="fullapp_drafts_saved_at">Saved %s</string>
+    <!-- Field name label in the fullapp drafts screen -->
+    <string name="fullapp_drafts_field_name">Field name: %s</string>
+    <!-- Field id label in the fullapp drafts screen -->
+    <string name="fullapp_drafts_field_id">Field ID: %d</string>
+    <!-- Text length label in the fullapp drafts screen -->
+    <string name="fullapp_drafts_text_length">Text length: %d</string>
+    <!-- Input type label in the fullapp drafts screen -->
+    <string name="fullapp_drafts_input_type">Input type: 0x%s</string>
+    <!-- IME options label in the fullapp drafts screen -->
+    <string name="fullapp_drafts_ime_options">IME options: 0x%s</string>
+    <!-- Private IME options label in the fullapp drafts screen -->
+    <string name="fullapp_drafts_private_ime_options">Private IME options: %s</string>
     <string name="deepgram_api_key_title">Deepgram API Key</string>
     <string name="deepgram_api_key_summary">API key for voice transcription (Nova-3). Get from console.deepgram.com</string>
     <string name="google_api_key_title">Google AI API Key</string>

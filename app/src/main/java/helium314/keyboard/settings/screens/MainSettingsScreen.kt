@@ -36,6 +36,7 @@ fun MainSettingsScreen(
     onClickGestureTyping: () -> Unit,
     onClickAdvanced: () -> Unit,
     onClickTranscription: () -> Unit,
+    onClickFullappDrafts: () -> Unit,
     onClickAppearance: () -> Unit,
     onClickLanguage: () -> Unit,
     onClickLayouts: () -> Unit,
@@ -105,6 +106,11 @@ fun MainSettingsScreen(
                     icon = R.drawable.sym_keyboard_voice_rounded
                 ) { NextScreenIcon() }
                 Preference(
+                    name = stringResource(R.string.settings_screen_fullapp_drafts),
+                    onClick = onClickFullappDrafts,
+                    icon = R.drawable.sym_keyboard_clipboard_rounded
+                ) { NextScreenIcon() }
+                Preference(
                     name = stringResource(R.string.settings_screen_about),
                     onClick = onClickAbout,
                     icon = R.drawable.ic_settings_about
@@ -120,7 +126,7 @@ private fun PreviewScreen() {
     initPreview(LocalContext.current)
     Theme(previewDark) {
         Surface {
-            MainSettingsScreen({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
+            MainSettingsScreen({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
         }
     }
 }
