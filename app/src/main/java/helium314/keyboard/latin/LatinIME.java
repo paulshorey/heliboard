@@ -2360,7 +2360,6 @@ public class LatinIME extends InputMethodService implements
     private void processTranscriptionResult(@NonNull final String transcriptionText) {
         final String googleApiKey = KtxKt.prefs(this).getString(Settings.PREF_GOOGLE_API_KEY, "");
         if (googleApiKey == null || googleApiKey.isEmpty()) {
-            Log.i(TAG, "VOICE_STEP_5 cleanup skipped (no Google AI API key configured)");
             insertTranscriptionText(transcriptionText);
             return;
         }
@@ -2368,6 +2367,10 @@ public class LatinIME extends InputMethodService implements
         String cleanupPrompt = KtxKt.prefs(this).getString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT);
         if (cleanupPrompt == null || cleanupPrompt.isEmpty()) {
             cleanupPrompt = Defaults.PREF_CLEANUP_PROMPT;
+        }
+        String geminiModel = KtxKt.prefs(this).getString(Settings.PREF_GEMINI_MODEL, Defaults.PREF_GEMINI_MODEL);
+        if (geminiModel == null) {
+            geminiModel = Defaults.PREF_GEMINI_MODEL;
         }
 
         // Capture the recent context (last 3 sentences or up to 300 chars).
@@ -2403,14 +2406,6 @@ public class LatinIME extends InputMethodService implements
         mCleanupInProgress = true;
         mInFlightCleanupTranscription = transcriptionText;
         startCleanupWatchdog(cleanupToken);
-        Log.i(
-                TAG,
-                "VOICE_STEP_5 sending to Google Gemini cleanup " +
-                        "(reference=" + referenceContext.length() +
-                        " chars, editable=" + replacementLength +
-                        " chars, newTranscription=" + transcriptionText.length() +
-                        " chars)"
-        );
 
         mTextCleanupClient.cleanupText(
                 googleApiKey,
@@ -2418,12 +2413,12 @@ public class LatinIME extends InputMethodService implements
                 referenceContext,
                 editableText,
                 transcriptionText,
+                geminiModel,
                 new TextCleanupClient.CleanupCallback() {
                     @Override
                     public void onCleanupComplete(String cleanedText) {
                         // Discard stale callbacks from cancelled/timed-out sessions.
                         if (sessionId != mVoiceSessionId || cleanupToken != mCleanupRequestToken) {
-                            Log.i(TAG, "Cleanup result discarded — stale callback");
                             return;
                         }
                         finishCleanupWatchdog(cleanupToken);
@@ -2431,12 +2426,6 @@ public class LatinIME extends InputMethodService implements
 
                         try {
                             String sanitizedCleanedText = stripInvisibleChars(cleanedText);
-                            Log.i(
-                                    TAG,
-                                    "VOICE_STEP_5C cleanup response received (" +
-                                            sanitizedCleanedText.length() + " chars): \"" +
-                                            sanitizeLogText(sanitizedCleanedText) + "\""
-                            );
 
                             if (sanitizedCleanedText.isEmpty()) {
                                 Log.w(TAG, "Cleanup returned empty text, falling back to raw transcription insert");
@@ -2465,7 +2454,6 @@ public class LatinIME extends InputMethodService implements
                     public void onCleanupError(String error) {
                         // Discard stale callbacks from cancelled/timed-out sessions.
                         if (sessionId != mVoiceSessionId || cleanupToken != mCleanupRequestToken) {
-                            Log.i(TAG, "Cleanup error discarded — stale callback");
                             return;
                         }
                         finishCleanupWatchdog(cleanupToken);

@@ -167,6 +167,7 @@ object Defaults {
     const val PREF_TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss"
     const val PREF_DEEPGRAM_API_KEY = ""
     const val PREF_GOOGLE_API_KEY = ""
+    const val PREF_GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
     const val PREF_TRANSCRIPTION_PROMPT_SELECTED = 0 // Default to first preset
     const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 1
     const val PREF_VOICE_SILENCE_THRESHOLD = 220
