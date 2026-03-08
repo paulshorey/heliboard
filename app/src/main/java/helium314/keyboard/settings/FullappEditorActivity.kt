@@ -78,7 +78,30 @@ class FullappEditorActivity : ComponentActivity() {
         @JvmField
         var onExitFromKeyboard: Runnable? = null
 
+        @Volatile
+        private var pendingReturnTargetKey: String? = null
+
         private const val AUTOSAVE_DELAY_MS = 750L
+
+        @JvmStatic
+        fun markPendingReturn(target: FullappEditorResult.TargetSnapshot) {
+            pendingReturnTargetKey = target.storageKey
+        }
+
+        @JvmStatic
+        fun consumePendingReturn(target: FullappEditorResult.TargetSnapshot?): Boolean {
+            val storageKey = target?.storageKey ?: return false
+            if (pendingReturnTargetKey != storageKey) {
+                return false
+            }
+            pendingReturnTargetKey = null
+            return true
+        }
+
+        @JvmStatic
+        fun clearPendingReturn() {
+            pendingReturnTargetKey = null
+        }
     }
 
     private val textState = mutableStateOf(TextFieldValue())
@@ -141,7 +164,13 @@ class FullappEditorActivity : ComponentActivity() {
 
     private fun saveAndExit() {
         autosaveHandler.removeCallbacks(autosaveRunnable)
-        persistDraft()
+        val savedDraft = persistDraft()
+        val target = targetSnapshot
+        if (savedDraft && target != null) {
+            markPendingReturn(target)
+        } else {
+            clearPendingReturn()
+        }
         setResult(RESULT_OK, Intent().putExtra("text", textState.value.text))
         finish()
     }
@@ -173,12 +202,12 @@ class FullappEditorActivity : ComponentActivity() {
         autosaveHandler.postDelayed(autosaveRunnable, AUTOSAVE_DELAY_MS)
     }
 
-    private fun persistDraft() {
-        val target = targetSnapshot ?: return
+    private fun persistDraft(): Boolean {
+        val target = targetSnapshot ?: return false
         val currentValue = textState.value
         if (currentValue.text == originalText) {
             FullappEditorResult.clearDraft(this, target)
-            return
+            return false
         }
         val textLength = currentValue.text.length
         val draft = FullappEditorResult.DraftRecord(
@@ -190,6 +219,7 @@ class FullappEditorActivity : ComponentActivity() {
             lastSavedAt = System.currentTimeMillis()
         )
         FullappEditorResult.saveDraft(this, draft)
+        return true
     }
 }
 
@@ -410,11 +440,24 @@ object FullappEditorResult {
 
     @JvmStatic
     fun shouldSyncToCurrentField(draft: DraftRecord, currentFieldText: String): Boolean {
-        return shouldSyncToCurrentField(draft, currentFieldText, System.currentTimeMillis())
+        return shouldSyncToCurrentField(draft, currentFieldText, false, System.currentTimeMillis())
     }
 
     @JvmStatic
-    fun shouldSyncToCurrentField(draft: DraftRecord, currentFieldText: String, nowMs: Long): Boolean {
+    fun shouldSyncToCurrentField(draft: DraftRecord, currentFieldText: String, forceSync: Boolean): Boolean {
+        return shouldSyncToCurrentField(draft, currentFieldText, forceSync, System.currentTimeMillis())
+    }
+
+    @JvmStatic
+    fun shouldSyncToCurrentField(
+        draft: DraftRecord,
+        currentFieldText: String,
+        forceSync: Boolean,
+        nowMs: Long
+    ): Boolean {
+        if (forceSync) {
+            return true
+        }
         return currentFieldText == draft.originalText && isRecentEnoughToSync(draft, nowMs)
     }
 

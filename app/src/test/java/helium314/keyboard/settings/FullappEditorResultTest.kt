@@ -20,8 +20,8 @@ class FullappEditorResultTest {
         val now = 1_000_000L
         val draft = draft(lastSavedAt = now - 119_999L)
 
-        assertTrue(FullappEditorResult.shouldSyncToCurrentField(draft, "original", now))
-        assertFalse(FullappEditorResult.shouldSyncToCurrentField(draft, "draft", now))
+        assertTrue(FullappEditorResult.shouldSyncToCurrentField(draft, "original", false, now))
+        assertFalse(FullappEditorResult.shouldSyncToCurrentField(draft, "draft", false, now))
     }
 
     @Test
@@ -30,7 +30,7 @@ class FullappEditorResultTest {
         val draft = draft(lastSavedAt = now - 120_001L)
 
         assertTrue(FullappEditorResult.matchesCurrentFieldContents(draft, "original"))
-        assertFalse(FullappEditorResult.shouldSyncToCurrentField(draft, "original", now))
+        assertFalse(FullappEditorResult.shouldSyncToCurrentField(draft, "original", false, now))
     }
 
     @Test
@@ -47,7 +47,15 @@ class FullappEditorResultTest {
         val draft = draft(lastSavedAt = 0L)
 
         assertFalse(FullappEditorResult.isRecentEnoughToSync(draft, 1_000_000L))
-        assertFalse(FullappEditorResult.shouldSyncToCurrentField(draft, "original", 1_000_000L))
+        assertFalse(FullappEditorResult.shouldSyncToCurrentField(draft, "original", false, 1_000_000L))
+    }
+
+    @Test
+    fun `returning from fullapp bypasses staleness and field-content gating`() {
+        val now = 1_000_000L
+        val draft = draft(lastSavedAt = now - 999_999L)
+
+        assertTrue(FullappEditorResult.shouldSyncToCurrentField(draft, "something else", true, now))
     }
 
     private fun draft(lastSavedAt: Long) = FullappEditorResult.DraftRecord(

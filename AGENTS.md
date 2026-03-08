@@ -50,5 +50,25 @@ Gradle builds (`./gradlew :app:compileDebugKotlin`) work out of the box in Curso
 - **Env vars**: `ANDROID_HOME`, `ANDROID_SDK_ROOT` (set in environment.json)
 
 **Manual setup (CI or other environments):**
-1. Run `./tools/setup-android-sdk.sh` once. Creates `local.properties` and installs the SDK.
-2. For shell env vars: `source ./.android-env` or `source ./tools/setup-android-sdk.sh`.
+1. Run `./tools/setup-android-sdk.sh` once. This installs the Android SDK to `/workspace/.android-sdk`, creates `local.properties` with `sdk.dir`, and sets `ANDROID_HOME`/`ANDROID_SDK_ROOT` when sourced.
+2. After setup, `./gradlew :app:compileDebugKotlin` works out of the box (Gradle reads `local.properties`).
+3. To get env vars in the current shell: `source ./.android-env` or `source ./tools/setup-android-sdk.sh` (idempotent if SDK already installed).
+
+## Installable APK artifact
+
+When a task requires a phone-installable build artifact, generate a debug APK and save exactly one canonical copy at:
+
+- `/workspace/dist/HeliBoard.apk`
+
+Preferred flow:
+
+1. Run `./tools/build-dist-apk.sh`
+
+This helper script:
+
+- sources `./tools/setup-android-sdk.sh`
+- builds the debug APK with Gradle
+- removes older files in `/workspace/dist`
+- copies the generated APK to `/workspace/dist/HeliBoard.apk`
+
+Always overwrite `/workspace/dist/HeliBoard.apk` with the latest build when regenerating it.
