@@ -42,8 +42,13 @@ See [docs/fullapp-keyboard.md](docs/fullapp-keyboard.md) for architecture and le
 
 ## Android workspace setup (cloud agents)
 
-To run Gradle builds (`./gradlew :app:compileDebugKotlin`) in cloud/CI environments:
+Gradle builds (`./gradlew :app:compileDebugKotlin`) work out of the box in Cursor cloud agents. `.cursor/environment.json` runs `./tools/setup-android-sdk.sh` automatically at startup.
 
-1. Run `./tools/setup-android-sdk.sh` once. This installs the Android SDK to `/workspace/.android-sdk`, creates `local.properties` with `sdk.dir`, and sets `ANDROID_HOME`/`ANDROID_SDK_ROOT` when sourced.
-2. After setup, `./gradlew :app:compileDebugKotlin` works out of the box (Gradle reads `local.properties`).
-3. To get env vars in the current shell: `source ./tools/setup-android-sdk.sh` (idempotent if SDK already installed).
+**What the setup configures:**
+- **SDK path**: `/workspace/.android-sdk` (platform-tools, platforms;android-35, build-tools;35.0.0, NDK 28)
+- **local.properties**: `sdk.dir=/workspace/.android-sdk` (Gradle reads this)
+- **Env vars**: `ANDROID_HOME`, `ANDROID_SDK_ROOT` (set in environment.json)
+
+**Manual setup (CI or other environments):**
+1. Run `./tools/setup-android-sdk.sh` once. Creates `local.properties` and installs the SDK.
+2. For shell env vars: `source ./.android-env` or `source ./tools/setup-android-sdk.sh`.
