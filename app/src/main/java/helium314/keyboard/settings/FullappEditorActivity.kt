@@ -200,6 +200,7 @@ object FullappEditorResult {
     private const val TAG = "FullappDrafts"
     private const val PREF_FULLAPP_DRAFT_KEYS = "fullapp_draft_keys"
     private const val PREF_FULLAPP_DRAFT_PREFIX = "fullapp_draft_"
+    private const val FULLAPP_SYNC_RECENCY_WINDOW_MS = 120_000L
 
     private const val JSON_PACKAGE_NAME = "package_name"
     private const val JSON_FIELD_ID = "field_id"
@@ -385,7 +386,40 @@ object FullappEditorResult {
     }
 
     @JvmStatic
-    fun findDraftForEditor(context: Context, editorInfo: EditorInfo, currentFieldText: String): DraftRecord? {
+    fun matchesCurrentFieldContents(draft: DraftRecord, currentFieldText: String): Boolean {
+        return currentFieldText == draft.originalText || currentFieldText == draft.draftText
+    }
+
+    @JvmStatic
+    fun wasSupersededByRegularEditing(draft: DraftRecord, currentFieldText: String): Boolean {
+        return !matchesCurrentFieldContents(draft, currentFieldText)
+    }
+
+    @JvmStatic
+    fun isRecentEnoughToSync(draft: DraftRecord): Boolean {
+        return isRecentEnoughToSync(draft, System.currentTimeMillis())
+    }
+
+    @JvmStatic
+    fun isRecentEnoughToSync(draft: DraftRecord, nowMs: Long): Boolean {
+        if (draft.lastSavedAt <= 0L) {
+            return false
+        }
+        return nowMs - draft.lastSavedAt <= FULLAPP_SYNC_RECENCY_WINDOW_MS
+    }
+
+    @JvmStatic
+    fun shouldSyncToCurrentField(draft: DraftRecord, currentFieldText: String): Boolean {
+        return shouldSyncToCurrentField(draft, currentFieldText, System.currentTimeMillis())
+    }
+
+    @JvmStatic
+    fun shouldSyncToCurrentField(draft: DraftRecord, currentFieldText: String, nowMs: Long): Boolean {
+        return currentFieldText == draft.originalText && isRecentEnoughToSync(draft, nowMs)
+    }
+
+    @JvmStatic
+    fun findDraftForEditor(context: Context, editorInfo: EditorInfo): DraftRecord? {
         val prefs = draftPrefs(context) ?: return null
         val draftKeys = prefs.getStringSet(PREF_FULLAPP_DRAFT_KEYS, emptySet()).orEmpty()
         val staleKeys = mutableListOf<String>()
@@ -405,12 +439,6 @@ object FullappEditorResult {
             }
             val score = draft.target.matchScore(editorInfo)
             if (score == Int.MIN_VALUE) {
-                continue
-            }
-            val safeToApply = draft.target.hasStrongIdentity
-                || currentFieldText == draft.originalText
-                || currentFieldText == draft.draftText
-            if (!safeToApply) {
                 continue
             }
             if (score > bestScore || (score == bestScore && draft.lastSavedAt > bestSavedAt)) {

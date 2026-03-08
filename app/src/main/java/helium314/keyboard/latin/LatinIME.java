@@ -1130,6 +1130,7 @@ public class LatinIME extends InputMethodService implements
                     + ", nss=" + newSelStart + ", nse=" + newSelEnd
                     + ", cs=" + composingSpanStart + ", ce=" + composingSpanEnd);
         }
+        discardPendingFullappDraftIfRegularTextChanged();
 
         // Abruptly cancel voice recording when the user moves the cursor away from the end
         // of the text, or when the text field is cleared. We use isBelatedExpectedUpdate to
@@ -2875,9 +2876,16 @@ public class LatinIME extends InputMethodService implements
         final EditorInfo editorInfo = getCurrentInputEditorInfo();
         final FullappEditorResult.TargetSnapshot targetSnapshot =
                 FullappEditorResult.createTargetSnapshot(editorInfo);
-        final FullappEditorResult.DraftRecord existingDraft = targetSnapshot == null
+        FullappEditorResult.DraftRecord existingDraft = targetSnapshot == null
                 ? null
                 : FullappEditorResult.loadDraft(this, targetSnapshot);
+        if (existingDraft != null
+                && FullappEditorResult.wasSupersededByRegularEditing(existingDraft, initialText)) {
+            Log.i(TAG, "Discarding fullapp draft before launch because the field changed in regular mode for "
+                    + existingDraft.getTarget().debugSummary());
+            FullappEditorResult.clearDraft(this, existingDraft.getTarget());
+            existingDraft = null;
+        }
         final int initialSelection;
         if (existingDraft != null) {
             initialText = existingDraft.getDraftText();
@@ -2911,9 +2919,27 @@ public class LatinIME extends InputMethodService implements
     private void maybeSyncPendingFullappDraft(@NonNull final EditorInfo editorInfo) {
         final String currentFieldText = getOriginalFieldTextForFullapp();
         final FullappEditorResult.DraftRecord pendingDraft =
-                FullappEditorResult.findDraftForEditor(this, editorInfo, currentFieldText);
+                FullappEditorResult.findDraftForEditor(this, editorInfo);
         if (pendingDraft == null) {
             mFullappSyncInFlightKey = null;
+            return;
+        }
+        if (pendingDraft.getDraftText().equals(currentFieldText)) {
+            FullappEditorResult.clearDraft(this, pendingDraft.getTarget());
+            mFullappSyncInFlightKey = null;
+            return;
+        }
+        if (FullappEditorResult.wasSupersededByRegularEditing(pendingDraft, currentFieldText)) {
+            FullappEditorResult.clearDraft(this, pendingDraft.getTarget());
+            mFullappSyncInFlightKey = null;
+            Log.i(TAG, "Discarded fullapp draft because regular mode changed the field for "
+                    + pendingDraft.getTarget().debugSummary());
+            return;
+        }
+        if (!FullappEditorResult.shouldSyncToCurrentField(pendingDraft, currentFieldText)) {
+            mFullappSyncInFlightKey = null;
+            Log.i(TAG, "Keeping fullapp draft without syncing because it is older than the restore window for "
+                    + pendingDraft.getTarget().debugSummary());
             return;
         }
         final String draftKey = pendingDraft.getTarget().getStorageKey();
@@ -2937,6 +2963,19 @@ public class LatinIME extends InputMethodService implements
                 mFullappSyncInFlightKey = null;
                 return;
             }
+            if (FullappEditorResult.wasSupersededByRegularEditing(pendingDraft, currentFieldText)) {
+                FullappEditorResult.clearDraft(LatinIME.this, pendingDraft.getTarget());
+                mFullappSyncInFlightKey = null;
+                Log.i(TAG, "Discarded fullapp draft during sync because regular mode changed the field for "
+                        + pendingDraft.getTarget().debugSummary());
+                return;
+            }
+            if (!FullappEditorResult.shouldSyncToCurrentField(pendingDraft, currentFieldText)) {
+                mFullappSyncInFlightKey = null;
+                Log.i(TAG, "Skipping fullapp draft sync because the draft is no longer recent for "
+                        + pendingDraft.getTarget().debugSummary());
+                return;
+            }
             final boolean synced = replaceEntireFieldText(pendingDraft.getDraftText(), true);
             if (synced) {
                 restoreFullappSelection(pendingDraft);
@@ -2954,6 +2993,34 @@ public class LatinIME extends InputMethodService implements
             Log.w(TAG, "Failed to insert pending fullapp text after retries for "
                     + pendingDraft.getTarget().debugSummary());
         }, delayMs);
+    }
+
+    private void discardPendingFullappDraftIfRegularTextChanged() {
+        if (FullappEditorActivity.isActive || mFullappSyncInFlightKey != null) {
+            return;
+        }
+        final EditorInfo editorInfo = getCurrentInputEditorInfo();
+        if (editorInfo == null) {
+            return;
+        }
+        final FullappEditorResult.TargetSnapshot targetSnapshot =
+                FullappEditorResult.createTargetSnapshot(editorInfo);
+        FullappEditorResult.DraftRecord pendingDraft = targetSnapshot == null
+                ? null
+                : FullappEditorResult.loadDraft(this, targetSnapshot);
+        if (pendingDraft == null && (targetSnapshot == null || !targetSnapshot.getHasStrongIdentity())) {
+            pendingDraft = FullappEditorResult.findDraftForEditor(this, editorInfo);
+        }
+        if (pendingDraft == null) {
+            return;
+        }
+        final String currentFieldText = getOriginalFieldTextForFullapp();
+        if (!FullappEditorResult.wasSupersededByRegularEditing(pendingDraft, currentFieldText)) {
+            return;
+        }
+        FullappEditorResult.clearDraft(this, pendingDraft.getTarget());
+        Log.i(TAG, "Discarded fullapp draft after regular mode editing for "
+                + pendingDraft.getTarget().debugSummary());
     }
 
     private void restoreFullappSelection(@NonNull final FullappEditorResult.DraftRecord pendingDraft) {
