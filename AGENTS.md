@@ -47,3 +47,18 @@ To run Gradle builds (`./gradlew :app:compileDebugKotlin`) in cloud/CI environme
 1. Run `./tools/setup-android-sdk.sh` once. This installs the Android SDK to `/workspace/.android-sdk`, creates `local.properties` with `sdk.dir`, and sets `ANDROID_HOME`/`ANDROID_SDK_ROOT` when sourced.
 2. After setup, `./gradlew :app:compileDebugKotlin` works out of the box (Gradle reads `local.properties`).
 3. To get env vars in the current shell: `source ./tools/setup-android-sdk.sh` (idempotent if SDK already installed).
+
+## Installable APK artifact
+
+When a task requires a phone-installable build artifact, generate a debug APK and save exactly one canonical copy at:
+
+- `/workspace/dist/HeliBoard.apk`
+
+Use this flow:
+
+1. `source ./tools/setup-android-sdk.sh`
+2. `./gradlew :app:assembleDebug`
+3. Copy `app/build/outputs/apk/debug/HeliBoard_*-debug.apk` to `/workspace/dist/HeliBoard.apk`
+4. Remove any older files in `/workspace/dist` first so the repository contains only one installable APK artifact at a time
+
+Always overwrite `/workspace/dist/HeliBoard.apk` with the latest build when regenerating it.
