@@ -53,7 +53,7 @@ HTTP client for Deepgram's pre-recorded transcription API.
 - **Model**: `nova-3`
 - **Content-Type**: `audio/wav` (raw bytes in request body)
 - **Features**: `smart_format=true`, `punctuate=true`
-- **Retry**: Single automatic retry after 2s on transient failures (5xx, 408, timeout, connection error)
+- **Retry**: Single automatic retry on transient failures (5xx, 408, timeout, connection error)
 
 ### VoiceInputManager.kt
 Orchestrates the voice input flow and manages timers.
@@ -71,7 +71,7 @@ HTTP client for Google's Gemini API.
 - **Output format**: JSON with a single `edited_text` field
 - **maxOutputTokens**: 4096 (accommodates full paragraph responses)
 - **Cancellation**: Tracks active HTTP calls; `cancelAll()` cancels in-flight requests
-- **Retry**: Single automatic retry after 2s on transient failures (5xx, 408, timeout, connection error)
+- **Retry**: Single automatic retry on transient failures (5xx, 408, timeout, connection error)
 
 ### LatinIME.java
 Main orchestrator that coordinates all components and manages text insertion.
@@ -134,8 +134,8 @@ start of a new line, Gemini always has adequate context.
 as `new_transcription`. Only this current-paragraph portion is replaced in the editor,
 so `\n` and `\n\n` paragraph breaks are never touched.
 
-**Retry**: Both transcription and cleanup requests automatically retry once after a
-2-second delay on transient failures (5xx, 408, socket timeout, connection error).
+**Retry**: Both transcription and cleanup requests automatically retry once on
+transient failures (5xx, 408, socket timeout, connection error).
 Non-retryable errors (4xx) are reported immediately.
 
 ### 4. New Paragraph (after configured silence window)

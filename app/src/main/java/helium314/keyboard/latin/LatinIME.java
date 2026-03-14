@@ -2340,6 +2340,26 @@ public class LatinIME extends InputMethodService implements
         }
     }
 
+    private void insertRawTranscriptionFallback(
+            @Nullable final String transcriptionText,
+            @NonNull final String logMessage,
+            @Nullable final String toastMessage
+    ) {
+        if (toastMessage != null && !toastMessage.isEmpty()) {
+            showVoiceErrorToast(toastMessage);
+        }
+        if (transcriptionText == null || transcriptionText.trim().isEmpty()) {
+            Log.w(TAG, logMessage + " but no transcription text was available for fallback");
+            return;
+        }
+        Log.w(TAG, logMessage + " — inserting raw transcription fallback");
+        try {
+            insertTranscriptionText(transcriptionText);
+        } catch (Exception e) {
+            Log.e(TAG, "Raw transcription fallback failed: " + e.getMessage(), e);
+        }
+    }
+
     /**
      * Process transcription through cleanup (if configured) before inserting into the editor.
      *
@@ -2418,8 +2438,11 @@ public class LatinIME extends InputMethodService implements
                             String sanitizedCleanedText = stripInvisibleChars(cleanedText);
 
                             if (sanitizedCleanedText.isEmpty()) {
-                                Log.w(TAG, "Cleanup returned empty text, falling back to raw transcription insert");
-                                insertTranscriptionText(transcriptionText);
+                                insertRawTranscriptionFallback(
+                                        transcriptionText,
+                                        "Cleanup returned empty text",
+                                        "Cleanup returned empty text. Inserted raw transcription."
+                                );
                             } else {
                                 // Replace only the latest editable line.
                                 // Paragraph breaks and earlier text stay untouched.
@@ -2428,12 +2451,11 @@ public class LatinIME extends InputMethodService implements
                             }
                         } catch (Exception e) {
                             Log.e(TAG, "Exception in cleanup callback: " + e.getMessage(), e);
-                            // Attempt graceful fallback: insert raw transcription
-                            try {
-                                insertTranscriptionText(transcriptionText);
-                            } catch (Exception fallbackEx) {
-                                Log.e(TAG, "Fallback insertion also failed: " + fallbackEx.getMessage());
-                            }
+                            insertRawTranscriptionFallback(
+                                    transcriptionText,
+                                    "Exception while applying cleanup result",
+                                    "Cleanup could not be applied. Inserted raw transcription."
+                            );
                         }
 
                         mCleanupInProgress = false;
@@ -2451,15 +2473,14 @@ public class LatinIME extends InputMethodService implements
 
                         try {
                             Log.e(TAG, "Cleanup error: " + error);
-                            if (isCleanupTimeoutError(error)) {
-                                // Timeout/unresponsive cleanup: drop this chunk and continue.
-                                Log.w(TAG, "Cleanup timed out; dropping current transcription chunk");
-                                showVoiceErrorToast("Cleanup timed out. Skipping this chunk.");
-                            } else {
-                                showVoiceErrorToast("Cleanup failed: " + error);
-                                // Non-timeout failures degrade gracefully with raw insertion.
-                                insertTranscriptionText(transcriptionText);
-                            }
+                            final String toastMessage = isCleanupTimeoutError(error)
+                                    ? "Cleanup timed out. Inserted raw transcription."
+                                    : "Cleanup failed. Inserted raw transcription.";
+                            insertRawTranscriptionFallback(
+                                    transcriptionText,
+                                    "Cleanup request failed: " + error,
+                                    toastMessage
+                            );
                         } catch (Exception e) {
                             Log.e(TAG, "Exception in cleanup error callback: " + e.getMessage(), e);
                         }
@@ -2610,11 +2631,11 @@ public class LatinIME extends InputMethodService implements
         final String droppedTranscription = mInFlightCleanupTranscription;
         mInFlightCleanupTranscription = null;
 
-        if (droppedTranscription != null && !droppedTranscription.trim().isEmpty()) {
-            Log.w(TAG, "Dropped timed-out cleanup chunk (" + droppedTranscription.length() + " chars)");
-        }
-
-        showVoiceErrorToast("Cleanup timed out. Skipping this chunk.");
+        insertRawTranscriptionFallback(
+                droppedTranscription,
+                "Cleanup watchdog timed out after " + CLEANUP_WATCHDOG_TIMEOUT_MS + "ms",
+                "Cleanup timed out. Inserted raw transcription."
+        );
         processPendingVoiceInput();
     }
 

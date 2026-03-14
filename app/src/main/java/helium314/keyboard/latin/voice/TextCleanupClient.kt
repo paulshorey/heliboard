@@ -60,6 +60,7 @@ class TextCleanupClient {
         // Keep this below LatinIME's cleanup watchdog so normal OkHttp timeout
         // handling runs first in the common failure path.
         private const val CLEANUP_CALL_TIMEOUT_SECONDS = 10L
+        private const val TRANSIENT_RETRY_ATTEMPTS = 1
     }
 
     interface CleanupCallback {
@@ -166,8 +167,8 @@ class TextCleanupClient {
             .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
-        // No retry: each queue item has a strict end-to-end timeout budget.
-        enqueueWithRetry(request, callback, retriesRemaining = 0)
+        // Allow a single retry for transient transport/server failures.
+        enqueueWithRetry(request, callback, retriesRemaining = TRANSIENT_RETRY_ATTEMPTS)
     }
 
     /** Cancel all in-flight cleanup requests (best effort). */
