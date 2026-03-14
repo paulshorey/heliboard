@@ -86,8 +86,9 @@ import helium314.keyboard.latin.utils.SubtypeLocaleUtils;
 import helium314.keyboard.latin.utils.SubtypeSettings;
 import helium314.keyboard.latin.utils.SubtypeState;
 import helium314.keyboard.latin.utils.ToolbarMode;
-import helium314.keyboard.latin.voice.VoiceInputManager;
 import helium314.keyboard.latin.voice.TextCleanupClient;
+import helium314.keyboard.latin.voice.VoiceContextUtils;
+import helium314.keyboard.latin.voice.VoiceInputManager;
 import helium314.keyboard.latin.suggestions.SuggestionStripView.VoiceState;
 import helium314.keyboard.settings.FullappEditorActivity;
 import helium314.keyboard.settings.FullappEditorResult;
@@ -2287,15 +2288,15 @@ public class LatinIME extends InputMethodService implements
     }
 
     /**
-     * Replace the current paragraph text with cleaned text from Gemini.
+     * Replace the latest editable line with cleaned text from Gemini.
      *
-     * Only the editable portion (text after the last line break in the context) is
-     * deleted and replaced. Paragraph breaks and earlier text remain untouched.
+     * Only the editable portion (text after the last line break in the context window) is
+     * deleted and replaced. Earlier lines, paragraph breaks, and prior paragraphs remain untouched.
      *
      * Gemini already handles capitalization and punctuation, so we do NOT apply
      * {@link #adjustCapitalization} here — only invisible-char stripping and trailing space.
      *
-     * @param cleanedText      The corrected text returned by Gemini (current paragraph only)
+     * @param cleanedText      The corrected text returned by Gemini (latest line only)
      * @param oldContextLength The length of the editable text that was in the editor when
      *                         the cleanup request was sent (chars to delete before cursor)
      */
@@ -2342,14 +2343,15 @@ public class LatinIME extends InputMethodService implements
     /**
      * Process transcription through cleanup (if configured) before inserting into the editor.
      *
-     * Pipeline: Deepgram transcript → Gemini cleanup → replace current paragraph.
+     * Pipeline: Deepgram transcript → Gemini cleanup → replace only the latest line.
      *
-     * The recent context (last 3 sentences) may span multiple paragraphs. To protect
-     * paragraph breaks, we split the context at the last newline:
+     * The recent context (last 3 sentence boundaries) may span multiple paragraphs. Newline runs
+     * count as sentence boundaries so standalone lines still contribute useful context.
+     * To protect paragraph breaks, we split the context at the last newline:
      * <ul>
      *   <li><b>referenceContext</b> — text before the last newline (read-only, for Gemini's
      *       understanding). Sent as read-only structured data and NOT replaced in the editor.</li>
-     *   <li><b>editableText</b> — text after the last newline (current paragraph). This is
+     *   <li><b>editableText</b> — text after the last newline (latest line). This is
      *       what Gemini cleans up and what gets replaced in the editor.</li>
      * </ul>
      *
@@ -2372,24 +2374,13 @@ public class LatinIME extends InputMethodService implements
             geminiModel = Defaults.PREF_GEMINI_MODEL;
         }
 
-        // Capture the recent context (last 3 sentences or up to 300 chars).
-        // This may span multiple paragraphs.
+        // Capture the recent context (last 3 sentence boundaries or up to 300 chars).
+        // This may span multiple paragraphs, but only the latest line remains editable.
         final String recentContext = getRecentContext();
-
-        // Split at the last newline to separate read-only context from editable text.
-        // Only the editable portion (current paragraph) will be replaced in the editor.
-        // The reference context (earlier paragraphs) is sent to Gemini for understanding
-        // but paragraph breaks are never touched.
-        final int lastNewline = recentContext.lastIndexOf('\n');
-        final String referenceContext;
-        final String rawEditableText;
-        if (lastNewline >= 0) {
-            referenceContext = recentContext.substring(0, lastNewline + 1); // includes the \n
-            rawEditableText = recentContext.substring(lastNewline + 1);
-        } else {
-            referenceContext = "";
-            rawEditableText = recentContext;
-        }
+        final VoiceContextUtils.CleanupWindow cleanupWindow =
+                VoiceContextUtils.splitForCleanup(recentContext);
+        final String referenceContext = cleanupWindow.getReferenceContext();
+        final String rawEditableText = cleanupWindow.getEditableText();
 
         // Strip leading whitespace from the editable text so we don't delete it
         // during replacement. The leading whitespace (space between the sentence
@@ -2430,7 +2421,7 @@ public class LatinIME extends InputMethodService implements
                                 Log.w(TAG, "Cleanup returned empty text, falling back to raw transcription insert");
                                 insertTranscriptionText(transcriptionText);
                             } else {
-                                // Replace only the current paragraph (editable portion).
+                                // Replace only the latest editable line.
                                 // Paragraph breaks and earlier text stay untouched.
                                 replaceContextWithCleanedText(
                                         sanitizedCleanedText, replacementLength);
@@ -2638,43 +2629,21 @@ public class LatinIME extends InputMethodService implements
     }
 
     /**
-     * Return recent context for Gemini cleanup: the last 3 sentences before the cursor,
+     * Return recent context for Gemini cleanup: the last 3 sentence boundaries before the cursor,
      * or up to 300 characters if fewer than 3 sentence boundaries are found.
      *
-     * Sentence boundaries are detected by simplified punctuation matching: . ! ? : ; =
-     * This intentionally crosses newline and paragraph boundaries so that context is
-     * always available — even at the very start of a new line.
+     * Sentence boundaries are detected by simplified punctuation matching (. ! ? : ; =)
+     * plus newline runs. This intentionally crosses newline and paragraph boundaries so that
+     * context is always available — even at the very start of a new line.
      *
      * The 300-character fallback ensures a reasonable context window when the user is
-     * dictating a single long sentence without much punctuation.
+     * dictating a single long sentence without much punctuation or line breaks.
      */
     @NonNull
     private String getRecentContext() {
         try {
-            CharSequence beforeCursor = getTextBeforeCursorForVoiceContext(4000);
-            if (beforeCursor == null || beforeCursor.length() == 0) {
-                return "";
-            }
-            String text = beforeCursor.toString();
-
-            // Scan backwards for sentence-ending punctuation
-            int boundaryCount = 0;
-            for (int i = text.length() - 1; i >= 0; i--) {
-                char c = text.charAt(i);
-                if (c == '.' || c == '!' || c == '?' || c == ':' || c == ';' || c == '=') {
-                    boundaryCount++;
-                    if (boundaryCount >= 3) {
-                        // Return everything after this boundary character
-                        return text.substring(i + 1);
-                    }
-                }
-            }
-
-            // Fewer than 3 sentence boundaries: return up to 300 chars
-            if (text.length() <= 300) {
-                return text;
-            }
-            return text.substring(text.length() - 300);
+            final CharSequence beforeCursor = getTextBeforeCursorForVoiceContext(4000);
+            return VoiceContextUtils.extractRecentContext(beforeCursor);
         } catch (Exception e) {
             Log.e(TAG, "Error getting recent context: " + e.getMessage());
             return "";
