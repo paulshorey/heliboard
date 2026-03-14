@@ -95,3 +95,7 @@ Stopped all display updates; typing and voice transcription stopped showing.
 | Use `replaceEntireFieldText()` when inserting pending text     | Assume `InputConnection` is always ready immediately   |
 
 **Bottom line**: For web pages and apps where the extract view causes focus loss, use an Activity so the keyboard app runs as a standalone app. Sync text back when the user returns and focuses the original field again.
+
+## Update documentation
+
+IMPORTANT: When you change something, or discover that the code or functionality is different than described, update and fix the documentation. Always keep this skill file up to date (.claude/skills/full-app-mode/SKILL.md) after any change or after you discover any difference in implementation or functionality.
