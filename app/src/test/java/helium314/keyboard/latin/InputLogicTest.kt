@@ -246,14 +246,26 @@ class InputLogicTest {
         latinIME.prefs().edit { putBoolean(Settings.PREF_AUTOSPACE_AFTER_PUNCTUATION, true) }
         chainInput("mail@example.com")
         assertEquals("mail@example.com", text)
-        assertEquals("mail@example", lastAddedWord) // todo: do we want this? not really nice, but don't want to be too aggressive with URL detection disabled
-        assertEquals("com", composingText) // todo: maybe this should still see the whole address as a single word? or don't be too aggressive?
+        assertEquals("", lastAddedWord)
+        assertEquals("mail@example.com", composingText)
         setText("")
         lastAddedWord = ""
         latinIME.prefs().edit { putBoolean(Settings.PREF_URL_DETECTION, true) }
         chainInput("mail@example.com")
         assertEquals("", lastAddedWord)
         assertEquals("mail@example.com", composingText)
+    }
+
+    @Test fun emailAddedToHistoryAsLowercaseWhenCompleted() {
+        reset()
+        chainInput("Mail@example.com ")
+        assertEquals("mail@example.com", lastAddedWord)
+    }
+
+    @Test fun incompleteEmailNotAddedToHistory() {
+        reset()
+        chainInput("mail@example ")
+        assertEquals("", lastAddedWord)
     }
 
     @Test fun urlDetectionThings() {
@@ -407,7 +419,7 @@ class InputLogicTest {
         reset()
         latinIME.prefs().edit { putBoolean(Settings.PREF_URL_DETECTION, true) }
         chainInput("bla.com/img.jpg")
-        assertEquals("bla", lastAddedWord)
+        assertEquals("", lastAddedWord)
         assertEquals("bla.com/img.jpg", composingText)
     }
 
