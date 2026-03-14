@@ -2,7 +2,9 @@
 package helium314.keyboard.settings.screens
 
 import android.content.Context
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,6 +20,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -175,6 +178,21 @@ fun TranscriptionScreen(
                     minLines = 4,
                     maxLines = 10
                 )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(
+                        onClick = {
+                            cleanupPrompt = Defaults.PREF_CLEANUP_PROMPT
+                            prefs.edit {
+                                putString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT)
+                            }
+                        }
+                    ) {
+                        Text(stringResource(R.string.cleanup_prompt_reset_button))
+                    }
+                }
 
                 InlineTextField(
                     label = stringResource(R.string.voice_chunk_silence_seconds_title),
