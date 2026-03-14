@@ -903,6 +903,8 @@ public final class InputLogic {
         final int codePoint = event.getCodePoint();
         mSpaceState = SpaceState.NONE;
         final SettingsValues sv = inputTransaction.getSettingsValues();
+        final boolean shouldKeepPeriodInCurrentWord =
+                shouldContinueComposingWithPeriod(codePoint, sv);
         // don't treat separators as for handling URLs and similar
         //  otherwise it would work too, but whenever a separator is entered, the word is not selected
         //  until the next character is entered, and the word is added to history
@@ -911,7 +913,7 @@ public final class InputLogic {
                 || (Character.getType(codePoint) == Character.UNASSIGNED && StringUtils.mightBeEmoji(codePoint)) // outdated java doesn't detect some emojis
                 || (sv.isWordSeparator(codePoint)
                     && (Character.isWhitespace(codePoint) // whitespace is always a separator
-                        || !textBeforeCursorMayBeUrlOrSimilar(sv, false) // if text before is not URL or similar, it's a separator
+                        || (!shouldKeepPeriodInCurrentWord && !textBeforeCursorMayBeUrlOrSimilar(sv, false)) // if text before is not URL or similar, it's a separator
                         || (codePoint == '/' && mWordComposer.lastChar() == '/') // break composing at 2 consecutive slashes
                     )
                 )
@@ -1656,8 +1658,16 @@ public final class InputLogic {
         // mInputTypeNoAutoCorrect changed to !isSuggestionsEnabledPerUserSettings because this was cancelling learning way too often
         if (!settingsValues.isSuggestionsEnabledPerUserSettings() || TextUtils.isEmpty(suggestion))
             return;
-        final boolean wasAutoCapitalized = mWordComposer.wasAutoCapitalized() && !mWordComposer.isMostlyCaps();
-        final String word = stripWordSeparatorsFromEnd(suggestion, settingsValues);
+        final String strippedWord = stripWordSeparatorsFromEnd(suggestion, settingsValues);
+        final boolean isEmailAddress = StringUtils.looksLikeEmailAddress(strippedWord);
+        if (StringUtils.looksLikeEmailAddressPrefix(strippedWord) && !isEmailAddress)
+            return;
+        final boolean wasAutoCapitalized = !isEmailAddress
+                && mWordComposer.wasAutoCapitalized()
+                && !mWordComposer.isMostlyCaps();
+        final String word = isEmailAddress
+                ? StringUtils.normalizeEmailAddress(strippedWord)
+                : strippedWord;
         if (settingsValues.mIncognitoModeEnabled) {
             // still adjust confidences, otherwise incognito input fields can be very annoying when wrong language is active
             mDictionaryFacilitator.adjustConfidences(word, wasAutoCapitalized);
@@ -2275,6 +2285,8 @@ public final class InputLogic {
                 (forAutoSpace ? mConnection.nonWordCodePointAndNoSpaceBeforeCursor(settingsValues.mSpacingAndPunctuations) // avoid detecting URL if it could be a word
                 : !mConnection.spaceBeforeCursor()))
             return true;
+        if (StringUtils.looksLikeEmailAddressPrefix(mWordComposer.getTypedWord()))
+            return true;
         // already contains a SometimesWordConnector -> may be URL (not so sure, only do with detection enabled
         if (settingsValues.mUrlDetectionEnabled && settingsValues.mSpacingAndPunctuations.containsSometimesWordConnector(mWordComposer.getTypedWord()))
             return true;
@@ -2283,6 +2295,21 @@ public final class InputLogic {
         if (textBeforeCursor != null && textBeforeCursor.toString().startsWith("://"))
             return true;
         return false;
+    }
+
+    private boolean shouldContinueComposingWithPeriod(final int codePoint,
+            final SettingsValues settingsValues) {
+        if (codePoint != Constants.CODE_PERIOD || !mWordComposer.isComposingWord()) {
+            return false;
+        }
+        final int lastCodePoint = mWordComposer.lastChar();
+        if (!Character.isLetterOrDigit(lastCodePoint)) {
+            return false;
+        }
+        final String typedWord = mWordComposer.getTypedWord();
+        return StringUtils.looksLikeEmailAddressPrefix(typedWord)
+                || InputTypeUtils.isUriOrEmailType(settingsValues.mInputAttributes.mInputType)
+                || settingsValues.mUrlDetectionEnabled;
     }
 
     /**
