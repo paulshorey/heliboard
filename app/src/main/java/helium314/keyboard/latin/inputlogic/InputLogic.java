@@ -914,6 +914,7 @@ public final class InputLogic {
                 || (sv.isWordSeparator(codePoint)
                     && (Character.isWhitespace(codePoint) // whitespace is always a separator
                         || (!shouldKeepPeriodInCurrentWord && !textBeforeCursorMayBeUrlOrSimilar(sv, false)) // if text before is not URL or similar, it's a separator
+                        || (codePoint == Constants.CODE_PERIOD && mWordComposer.lastChar() == Constants.CODE_PERIOD) // break composing at consecutive periods
                         || (codePoint == '/' && mWordComposer.lastChar() == '/') // break composing at 2 consecutive slashes
                     )
                 )
