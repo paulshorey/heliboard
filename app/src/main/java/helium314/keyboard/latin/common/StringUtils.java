@@ -357,6 +357,53 @@ public final class StringUtils {
         // Otherwise, it doesn't look like an URL.
     }
 
+    public static boolean looksLikeEmailAddress(@Nullable final CharSequence text) {
+        if (isEmpty(text)) {
+            return false;
+        }
+        final String s = text.toString();
+        final int at = s.indexOf('@');
+        if (at <= 0 || at != s.lastIndexOf('@') || at >= s.length() - 1) {
+            return false;
+        }
+        final String domain = s.substring(at + 1);
+        final int lastDot = domain.lastIndexOf('.');
+        if (lastDot <= 0 || lastDot >= domain.length() - 1) {
+            return false;
+        }
+        if (domain.charAt(lastDot - 1) == '.' || domain.charAt(lastDot + 1) == '.') {
+            return false;
+        }
+        for (int i = 0; i < s.length(); i++) {
+            if (Character.isWhitespace(s.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public static boolean looksLikeEmailAddressPrefix(@Nullable final CharSequence text) {
+        if (isEmpty(text)) {
+            return false;
+        }
+        final String s = text.toString();
+        final int at = s.indexOf('@');
+        if (at <= 0 || at != s.lastIndexOf('@') || at >= s.length() - 1) {
+            return false;
+        }
+        for (int i = 0; i < s.length(); i++) {
+            if (Character.isWhitespace(s.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    @NonNull
+    public static String normalizeEmailAddress(@NonNull final String text) {
+        return text.toLowerCase(Locale.ROOT);
+    }
+
     /**
      * Examines the string and returns whether we're inside a double quote.
      * <p>

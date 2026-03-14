@@ -60,6 +60,14 @@ class StringUtilsTest {
         assert(StringUtils.isInsideDoubleQuoteOrAfterDigit("hello \"yes\", \"h"))
     }
 
+    @Test fun `email helpers detect valid and invalid emails`() {
+        assert(StringUtils.looksLikeEmailAddressPrefix("user@example"))
+        assert(StringUtils.looksLikeEmailAddress("user@example.com"))
+        assert(!StringUtils.looksLikeEmailAddress("user@example"))
+        assert(!StringUtils.looksLikeEmailAddress("user@example."))
+        assertEquals("user@example.com", StringUtils.normalizeEmailAddress("User@Example.COM"))
+    }
+
     @Test fun `non-word codepoints and no space`() {
         val sp = SpacingAndPunctuations(ApplicationProvider.getApplicationContext<App>().resources, false)
         assert(!nonWordCodePointAndNoSpaceBeforeCursor("this is", sp))
