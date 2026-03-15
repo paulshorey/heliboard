@@ -30,6 +30,7 @@ import helium314.keyboard.settings.screens.PersonalDictionariesScreen
 import helium314.keyboard.settings.screens.PersonalDictionaryScreen
 import helium314.keyboard.settings.screens.PreferencesScreen
 import helium314.keyboard.settings.screens.SecondaryLayoutScreen
+import helium314.keyboard.settings.screens.SetupAppScreen
 import helium314.keyboard.settings.screens.SubtypeScreen
 import helium314.keyboard.settings.screens.TextCorrectionScreen
 import helium314.keyboard.settings.screens.ToolbarScreen
@@ -73,6 +74,7 @@ fun SettingsNavHost(
                 onClickToolbar = { navController.navigate(SettingsDestination.Toolbar) },
                 onClickGestureTyping = { navController.navigate(SettingsDestination.GestureTyping) },
                 onClickAdvanced = { navController.navigate(SettingsDestination.Advanced) },
+                onClickSetupApp = { navController.navigate(SettingsDestination.SetupApp) },
                 onClickTranscription = { navController.navigate(SettingsDestination.Transcription) },
                 onClickFullappDrafts = { navController.navigate(SettingsDestination.FullappDrafts) },
                 onClickAppearance = { navController.navigate(SettingsDestination.Appearance) },
@@ -99,6 +101,9 @@ fun SettingsNavHost(
         }
         composable(SettingsDestination.Advanced) {
             AdvancedSettingsScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.SetupApp) {
+            SetupAppScreen(onClickBack = ::goBack)
         }
         composable(SettingsDestination.Transcription) {
             TranscriptionScreen(onClickBack = ::goBack)
@@ -153,6 +158,7 @@ object SettingsDestination {
     const val Toolbar = "toolbar"
     const val GestureTyping = "gesture_typing"
     const val Advanced = "advanced"
+    const val SetupApp = "setup_app"
     const val Transcription = "transcription"
     const val FullappDrafts = "fullapp_drafts"
     const val Debug = "debug"
