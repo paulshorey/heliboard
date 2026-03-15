@@ -19,6 +19,7 @@ import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.util.Collections
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Client for Gemini text cleanup.
@@ -30,6 +31,19 @@ import java.util.concurrent.TimeUnit
  * Uses Google's Gemini API. Model is configurable (default gemini-3.1-flash-lite-preview).
  */
 class TextCleanupClient {
+
+    data class CleanupAttemptInfo(
+        val requestId: Long,
+        val attemptNumber: Int,
+        val totalAttempts: Int
+    )
+
+    data class CleanupAttemptResult(
+        val requestId: Long,
+        val attemptNumber: Int,
+        val totalAttempts: Int,
+        val durationMs: Long
+    )
 
     companion object {
         private const val TAG = "TextCleanupClient"
@@ -60,14 +74,17 @@ class TextCleanupClient {
         // Keep this below LatinIME's cleanup watchdog so normal OkHttp timeout
         // handling runs first in the common failure path.
         private const val CLEANUP_CALL_TIMEOUT_SECONDS = 10L
+        private const val TRANSIENT_RETRY_ATTEMPTS = 1
     }
 
     interface CleanupCallback {
-        fun onCleanupComplete(cleanedText: String)
-        fun onCleanupError(error: String)
+        fun onCleanupAttemptStarted(info: CleanupAttemptInfo) {}
+        fun onCleanupComplete(cleanedText: String, result: CleanupAttemptResult)
+        fun onCleanupError(error: String, result: CleanupAttemptResult)
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val nextRequestId = AtomicLong(1L)
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -123,7 +140,17 @@ class TextCleanupClient {
 
         // Skip cleanup if no text to process
         if (rawText.isBlank()) {
-            mainHandler.post { callback.onCleanupError("Empty text") }
+            mainHandler.post {
+                callback.onCleanupError(
+                    "Empty text",
+                    CleanupAttemptResult(
+                        requestId = -1L,
+                        attemptNumber = 0,
+                        totalAttempts = 0,
+                        durationMs = 0L
+                    )
+                )
+            }
             return
         }
 
@@ -166,8 +193,25 @@ class TextCleanupClient {
             .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
-        // No retry: each queue item has a strict end-to-end timeout budget.
-        enqueueWithRetry(request, callback, retriesRemaining = 0)
+        val requestId = nextRequestId.getAndIncrement()
+        val totalAttempts = TRANSIENT_RETRY_ATTEMPTS + 1
+        Log.i(
+            TAG,
+            "Cleanup request $requestId prepared " +
+                "(model=$effectiveModel, referenceChars=${referenceContext.length}, " +
+                "editableChars=${trimmedEditable.length}, newChars=${normalizedNewText.length}, " +
+                "maxAttempts=$totalAttempts)"
+        )
+
+        // Allow a single retry for transient transport/server failures.
+        enqueueWithRetry(
+            request = request,
+            callback = callback,
+            requestId = requestId,
+            attemptNumber = 1,
+            totalAttempts = totalAttempts,
+            retriesRemaining = TRANSIENT_RETRY_ATTEMPTS
+        )
     }
 
     /** Cancel all in-flight cleanup requests (best effort). */
@@ -193,43 +237,96 @@ class TextCleanupClient {
     private fun enqueueWithRetry(
         request: Request,
         callback: CleanupCallback,
+        requestId: Long,
+        attemptNumber: Int,
+        totalAttempts: Int,
         retriesRemaining: Int
     ) {
+        dispatchOnMain {
+            callback.onCleanupAttemptStarted(
+                CleanupAttemptInfo(
+                    requestId = requestId,
+                    attemptNumber = attemptNumber,
+                    totalAttempts = totalAttempts
+                )
+            )
+        }
+        val attemptStartNs = System.nanoTime()
         val call = client.newCall(request)
         activeCalls.add(call)
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 activeCalls.remove(call)
                 if (call.isCanceled()) {
-                    Log.i(TAG, "Cleanup request cancelled")
+                    Log.i(TAG, "Cleanup request $requestId attempt $attemptNumber cancelled")
                     return
                 }
+                val durationMs = nanosToMillis(System.nanoTime() - attemptStartNs)
                 if (retriesRemaining > 0 && isRetryableError(e)) {
-                    Log.w(TAG, "Cleanup failed (${e.message}), retrying once...")
-                    mainHandler.post {
-                        enqueueWithRetry(request, callback, retriesRemaining - 1)
+                    Log.w(
+                        TAG,
+                        "Cleanup request $requestId attempt $attemptNumber/$totalAttempts " +
+                            "failed after ${durationMs}ms (${e.message}), retrying..."
+                    )
+                    dispatchOnMain {
+                        enqueueWithRetry(
+                            request = request,
+                            callback = callback,
+                            requestId = requestId,
+                            attemptNumber = attemptNumber + 1,
+                            totalAttempts = totalAttempts,
+                            retriesRemaining = retriesRemaining - 1
+                        )
                     }
                     return
                 }
-                Log.e(TAG, "Cleanup request failed: ${e.message}")
-                mainHandler.post {
-                    callback.onCleanupError(mapNetworkError(e))
+                Log.e(
+                    TAG,
+                    "Cleanup request $requestId attempt $attemptNumber/$totalAttempts " +
+                        "failed after ${durationMs}ms: ${e.message}"
+                )
+                dispatchOnMain {
+                    callback.onCleanupError(
+                        mapNetworkError(e),
+                        CleanupAttemptResult(
+                            requestId = requestId,
+                            attemptNumber = attemptNumber,
+                            totalAttempts = totalAttempts,
+                            durationMs = durationMs
+                        )
+                    )
                 }
             }
 
             override fun onResponse(call: Call, response: Response) {
                 activeCalls.remove(call)
+                val durationMs = nanosToMillis(System.nanoTime() - attemptStartNs)
                 try {
                     val responseBody = response.body?.string()
                     if (!response.isSuccessful) {
                         if (retriesRemaining > 0 && isRetryableStatus(response.code)) {
-                            Log.w(TAG, "Cleanup API error ${response.code}, retrying once...")
-                            mainHandler.post {
-                                enqueueWithRetry(request, callback, retriesRemaining - 1)
+                            Log.w(
+                                TAG,
+                                "Cleanup request $requestId attempt $attemptNumber/$totalAttempts " +
+                                    "received HTTP ${response.code} after ${durationMs}ms, retrying..."
+                            )
+                            dispatchOnMain {
+                                enqueueWithRetry(
+                                    request = request,
+                                    callback = callback,
+                                    requestId = requestId,
+                                    attemptNumber = attemptNumber + 1,
+                                    totalAttempts = totalAttempts,
+                                    retriesRemaining = retriesRemaining - 1
+                                )
                             }
                             return
                         }
-                        Log.e(TAG, "Cleanup API error: ${response.code} - $responseBody")
+                        Log.e(
+                            TAG,
+                            "Cleanup request $requestId attempt $attemptNumber/$totalAttempts " +
+                                "failed with HTTP ${response.code} after ${durationMs}ms: $responseBody"
+                        )
                         val message = when (response.code) {
                             401, 403 -> "Invalid Google AI API key"
                             408 -> "Cleanup request timed out"
@@ -237,8 +334,16 @@ class TextCleanupClient {
                             in 500..599 -> "Google Gemini service error (${response.code})"
                             else -> "Cleanup API error: ${response.code}"
                         }
-                        mainHandler.post {
-                            callback.onCleanupError(message)
+                        dispatchOnMain {
+                            callback.onCleanupError(
+                                message,
+                                CleanupAttemptResult(
+                                    requestId = requestId,
+                                    attemptNumber = attemptNumber,
+                                    totalAttempts = totalAttempts,
+                                    durationMs = durationMs
+                                )
+                            )
                         }
                         return
                     }
@@ -251,31 +356,74 @@ class TextCleanupClient {
                     val cleanedText = extractEditedText(rawCleanedText)
 
                     if (cleanedText.isNotEmpty()) {
-                        mainHandler.post {
-                            callback.onCleanupComplete(cleanedText)
+                        Log.i(
+                            TAG,
+                            "Cleanup request $requestId attempt $attemptNumber/$totalAttempts " +
+                                "succeeded after ${durationMs}ms"
+                        )
+                        dispatchOnMain {
+                            callback.onCleanupComplete(
+                                cleanedText,
+                                CleanupAttemptResult(
+                                    requestId = requestId,
+                                    attemptNumber = attemptNumber,
+                                    totalAttempts = totalAttempts,
+                                    durationMs = durationMs
+                                )
+                            )
                         }
                     } else {
                         val blockedReason = json.optJSONObject("promptFeedback")
                             ?.optString("blockReason", "")
                             ?.trim()
-                        mainHandler.post {
+                        dispatchOnMain {
                             callback.onCleanupError(
                                 if (blockedReason.isNullOrEmpty()) {
                                     "Empty response from API"
                                 } else {
                                     "Cleanup blocked by Gemini safety filters ($blockedReason)"
-                                }
+                                },
+                                CleanupAttemptResult(
+                                    requestId = requestId,
+                                    attemptNumber = attemptNumber,
+                                    totalAttempts = totalAttempts,
+                                    durationMs = durationMs
+                                )
                             )
                         }
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error parsing cleanup response: ${e.message}")
-                    mainHandler.post {
-                        callback.onCleanupError("Parse error: ${e.message}")
+                    Log.e(
+                        TAG,
+                        "Cleanup request $requestId attempt $attemptNumber/$totalAttempts " +
+                            "parse error after ${durationMs}ms: ${e.message}"
+                    )
+                    dispatchOnMain {
+                        callback.onCleanupError(
+                            "Parse error: ${e.message}",
+                            CleanupAttemptResult(
+                                requestId = requestId,
+                                attemptNumber = attemptNumber,
+                                totalAttempts = totalAttempts,
+                                durationMs = durationMs
+                            )
+                        )
                     }
                 }
             }
         })
+    }
+
+    private fun dispatchOnMain(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            block()
+        } else {
+            mainHandler.post(block)
+        }
+    }
+
+    private fun nanosToMillis(durationNs: Long): Long {
+        return TimeUnit.NANOSECONDS.toMillis(durationNs)
     }
 
     /** Whether the IOException is a transient network error worth retrying. */
