@@ -87,7 +87,7 @@ Headers:
     }
   ],
   "generationConfig": {
-    "temperature": 0.2,
+    "temperature": 0.0,
     "maxOutputTokens": 4096
   }
 }

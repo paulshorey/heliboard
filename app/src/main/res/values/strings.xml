@@ -220,6 +220,7 @@
     <!-- Preferences item for format for timestamp keycode -->
     <string name="timestamp_format_title">Format for timestamp key</string>
     <!-- Voice Input (Deepgram transcription + Google Gemini cleanup) settings -->
+    <string name="settings_screen_setup_app">Setup this app</string>
     <string name="settings_screen_transcription">Transcription</string>
     <!-- Settings screen showing saved standalone fullapp edits -->
     <string name="settings_screen_fullapp_drafts">In-progress fullapp edits</string>
@@ -254,6 +255,20 @@
     <string name="voice_silence_threshold_title">Silence threshold (RMS loudness)</string>
     <string name="voice_new_paragraph_silence_seconds_title">New paragraph silence duration (seconds)</string>
     <string name="voice_auto_stop_silence_seconds_title">Auto-stop silence duration (seconds)</string>
+    <string name="setup_app_breadcrumb">Settings -&gt; Setup this app</string>
+    <string name="setup_app_checklist_title">Checklist</string>
+    <string name="setup_app_intro">Complete these steps so HeliBoard is fully set up for typing and voice input.</string>
+    <string name="setup_app_enable_keyboard_summary">Enable %s in your system keyboard settings.</string>
+    <string name="setup_app_select_keyboard_summary">Select %s as your active keyboard when typing.</string>
+    <string name="setup_app_microphone_title">Microphone permission</string>
+    <string name="setup_app_microphone_summary">Allow microphone access so voice transcription can start recording.</string>
+    <string name="setup_app_open_system_settings">Open system settings</string>
+    <string name="setup_app_choose_keyboard">Choose keyboard</string>
+    <string name="setup_app_grant_permission">Grant permission</string>
+    <string name="setup_app_configured">Configured</string>
+    <string name="setup_app_missing">Missing</string>
+    <string name="setup_app_return_later">Come back to finish later in "Settings -&gt; Setup this app".</string>
+    <string name="setup_app_dismiss">Dismiss</string>
     <!-- Preferences item for choosing secondary language -->
     <string name="secondary_locale">Multilingual typing</string>
     <!-- Clarification which locales are available for multilingual typing -->

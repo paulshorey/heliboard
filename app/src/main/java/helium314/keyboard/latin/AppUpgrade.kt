@@ -49,7 +49,18 @@ import kotlin.collections.component2
 import kotlin.collections.set
 
 object AppUpgrade {
-    private const val CLEANUP_PROMPT_RESET_VERSION = 1
+    private const val CLEANUP_PROMPT_RESET_VERSION = 2
+    private const val LEGACY_CLEANUP_PROMPT_V1 = """Edit the transcript text only.
+
+Preserve the speaker's intended meaning, but you may:
+- fix capitalization, punctuation, grammar, and sentence structure
+- remove short filler artifacts such as "um" and "uh"
+- capitalize names, products, and acronyms such as "Claude Code" and "API"
+- convert spoken punctuation or special-character names into the actual characters when clearly intended
+
+Do not add commentary or explain your edits.
+If the text seems unfinished, do not force ending punctuation.
+If the transcript appears to continue an existing sentence, keep the opening letter lowercase when appropriate."""
 
     fun checkVersionUpgrade(context: Context) {
         val prefs = context.prefs()
@@ -611,8 +622,13 @@ object AppUpgrade {
         if (appliedResetVersion >= CLEANUP_PROMPT_RESET_VERSION) {
             return
         }
+        val currentPrompt = prefs.getString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT)
+        val shouldResetPrompt = currentPrompt.isNullOrBlank() || currentPrompt == LEGACY_CLEANUP_PROMPT_V1
         prefs.edit {
-            putString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT)
+            // Upgrade untouched users to the new safer default without overwriting custom prompts.
+            if (shouldResetPrompt) {
+                putString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT)
+            }
             putInt(Settings.PREF_CLEANUP_PROMPT_RESET_VERSION, CLEANUP_PROMPT_RESET_VERSION)
         }
     }
