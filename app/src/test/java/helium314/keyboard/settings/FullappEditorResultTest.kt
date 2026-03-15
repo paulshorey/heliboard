@@ -6,6 +6,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class FullappEditorResultTest {
+    private val sessionToken = "session-1"
     private val target = FullappEditorResult.TargetSnapshot(
         packageName = "com.example.app",
         fieldId = 42,
@@ -58,12 +59,22 @@ class FullappEditorResultTest {
         assertTrue(FullappEditorResult.shouldSyncToCurrentField(draft, "something else", true, now))
     }
 
+    @Test
+    fun `draft only restores for matching launch session`() {
+        val draft = draft(lastSavedAt = 1_000_000L)
+
+        assertTrue(FullappEditorResult.belongsToLaunchSession(draft, sessionToken))
+        assertFalse(FullappEditorResult.belongsToLaunchSession(draft, "session-2"))
+        assertFalse(FullappEditorResult.belongsToLaunchSession(draft, ""))
+    }
+
     private fun draft(lastSavedAt: Long) = FullappEditorResult.DraftRecord(
         target = target,
         originalText = "original",
         draftText = "draft",
         selectionStart = 0,
         selectionEnd = 5,
+        launchSessionToken = sessionToken,
         lastSavedAt = lastSavedAt
     )
 }
