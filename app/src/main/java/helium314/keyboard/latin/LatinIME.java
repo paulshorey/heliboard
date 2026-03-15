@@ -90,6 +90,7 @@ import helium314.keyboard.latin.utils.ToolbarMode;
 import helium314.keyboard.latin.voice.TextCleanupClient;
 import helium314.keyboard.latin.voice.VoiceContextUtils;
 import helium314.keyboard.latin.voice.VoiceInputManager;
+import helium314.keyboard.latin.voice.VoiceTextSanitizer;
 import helium314.keyboard.latin.suggestions.SuggestionStripView.VoiceState;
 import helium314.keyboard.settings.FullappEditorActivity;
 import helium314.keyboard.settings.FullappEditorResult;
@@ -2221,45 +2222,25 @@ public class LatinIME extends InputMethodService implements
     /**
      * Strip invisible and zero-width Unicode characters from text.
      *
-     * The OpenAI Realtime transcription API and the Gemini cleanup API can return
-     * invisible Unicode characters such as zero-width spaces (U+200B), word joiners
-     * (U+2060), byte order marks (U+FEFF), direction marks (U+200E/U+200F), and
-     * others. These characters are inserted into the text field but are invisible
-     * and have no width, making it appear that backspace "doesn't work" because
-     * the user must delete each invisible character individually before reaching
-     * the visible text behind them.
+     * The transcription and cleanup APIs can return invisible Unicode characters such
+     * as zero-width spaces, byte order marks, directional marks, and bidi isolate /
+     * embedding controls. These characters are inserted into the text field but are
+     * invisible and have no width, making it appear that backspace "doesn't work"
+     * because the user must delete each invisible character individually before
+     * reaching the visible text behind them.
      *
      * @param text The text to sanitize
      * @return The text with invisible characters removed
      */
     private String stripInvisibleChars(String text) {
-        if (text == null) {
-            return "";
+        final String sanitized = VoiceTextSanitizer.stripInvisibleChars(text);
+        if (text != null && !sanitized.equals(text)) {
+            final int removedCodePoints = text.codePointCount(0, text.length())
+                    - sanitized.codePointCount(0, sanitized.length());
+            Log.i(TAG, "Removed " + removedCodePoints
+                    + " hidden Unicode formatting character(s) from voice text");
         }
-        if (text.isEmpty()) {
-            return text;
-        }
-        // Remove characters that are invisible / zero-width in typical text rendering:
-        // U+200B  Zero-width space
-        // U+200C  Zero-width non-joiner
-        // U+200D  Zero-width joiner
-        // U+200E  Left-to-right mark
-        // U+200F  Right-to-left mark
-        // U+2060  Word joiner
-        // U+2061  Function application (invisible math operator)
-        // U+2062  Invisible times
-        // U+2063  Invisible separator
-        // U+2064  Invisible plus
-        // U+FEFF  Zero-width no-break space (byte order mark)
-        // U+00AD  Soft hyphen
-        // U+034F  Combining grapheme joiner
-        // U+061C  Arabic letter mark
-        // U+115F  Hangul choseong filler
-        // U+1160  Hangul jungseong filler
-        // U+17B4  Khmer vowel inherent AQ
-        // U+17B5  Khmer vowel inherent AA
-        // U+180E  Mongolian vowel separator
-        return text.replaceAll("[\\u200B\\u200C\\u200D\\u200E\\u200F\\u2060-\\u2064\\uFEFF\\u00AD\\u034F\\u061C\\u115F\\u1160\\u17B4\\u17B5\\u180E]", "");
+        return sanitized;
     }
 
     /**
