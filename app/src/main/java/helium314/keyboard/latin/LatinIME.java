@@ -103,6 +103,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import androidx.annotation.NonNull;
@@ -3068,18 +3069,9 @@ public class LatinIME extends InputMethodService implements
         final EditorInfo editorInfo = getCurrentInputEditorInfo();
         final FullappEditorResult.TargetSnapshot targetSnapshot =
                 FullappEditorResult.createTargetSnapshot(editorInfo);
-        final FullappEditorResult.DraftRecord existingDraft = targetSnapshot == null
-                ? null
-                : FullappEditorResult.loadDraft(this, targetSnapshot);
-        final int initialSelection;
-        if (existingDraft != null) {
-            initialText = existingDraft.getDraftText();
-            initialSelection = Math.max(0,
-                    Math.min(existingDraft.getSelectionEnd(), initialText.length()));
-        } else {
-            initialSelection = Math.max(0,
-                    Math.min(getOriginalFieldCursorPosition(), initialText.length()));
-        }
+        final String launchSessionToken = UUID.randomUUID().toString();
+        final int initialSelection = Math.max(0,
+                Math.min(getOriginalFieldCursorPosition(), initialText.length()));
 
         FullappEditorActivity.clearPendingReturn();
         requestHideSelf(0);
@@ -3094,6 +3086,7 @@ public class LatinIME extends InputMethodService implements
                 | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
                 | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         intent.putExtra(FullappEditorActivity.EXTRA_INITIAL_TEXT, initialText);
+        intent.putExtra(FullappEditorActivity.EXTRA_SESSION_TOKEN, launchSessionToken);
         intent.putExtra(FullappEditorActivity.EXTRA_INITIAL_SELECTION_START, initialSelection);
         intent.putExtra(FullappEditorActivity.EXTRA_INITIAL_SELECTION_END, initialSelection);
         if (targetSnapshot != null) {

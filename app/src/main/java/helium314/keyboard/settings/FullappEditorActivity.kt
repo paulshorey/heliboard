@@ -61,6 +61,7 @@ class FullappEditorActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_INITIAL_TEXT = "initial_text"
+        const val EXTRA_SESSION_TOKEN = "session_token"
         const val EXTRA_PACKAGE_NAME = "package_name"
         const val EXTRA_INITIAL_SELECTION_START = "initial_selection_start"
         const val EXTRA_INITIAL_SELECTION_END = "initial_selection_end"
@@ -108,6 +109,7 @@ class FullappEditorActivity : ComponentActivity() {
     private val autosaveHandler = Handler(Looper.getMainLooper())
     private val autosaveRunnable = Runnable { persistDraft() }
     private var targetSnapshot: FullappEditorResult.TargetSnapshot? = null
+    private var launchSessionToken = ""
     private var originalText = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -182,14 +184,21 @@ class FullappEditorActivity : ComponentActivity() {
             ?: defaultSelection
         val initialSelectionEnd = sourceIntent?.getIntExtra(EXTRA_INITIAL_SELECTION_END, initialSelectionStart)
             ?: initialSelectionStart
+        launchSessionToken = sourceIntent?.getStringExtra(EXTRA_SESSION_TOKEN).orEmpty()
 
         targetSnapshot = FullappEditorResult.getTargetFromIntent(sourceIntent)
         val savedDraft = targetSnapshot?.let { FullappEditorResult.loadDraft(this, it) }
-        originalText = savedDraft?.originalText ?: initialText
+        val matchingDraft = savedDraft?.takeIf {
+            FullappEditorResult.belongsToLaunchSession(it, launchSessionToken)
+        }
+        if (savedDraft != null && matchingDraft == null && launchSessionToken.isNotBlank()) {
+            targetSnapshot?.let { FullappEditorResult.clearDraft(this, it) }
+        }
+        originalText = matchingDraft?.originalText ?: initialText
 
-        val restoredText = savedDraft?.draftText ?: initialText
-        val selectionStart = (savedDraft?.selectionStart ?: initialSelectionStart).coerceIn(0, restoredText.length)
-        val selectionEnd = (savedDraft?.selectionEnd ?: initialSelectionEnd).coerceIn(0, restoredText.length)
+        val restoredText = matchingDraft?.draftText ?: initialText
+        val selectionStart = (matchingDraft?.selectionStart ?: initialSelectionStart).coerceIn(0, restoredText.length)
+        val selectionEnd = (matchingDraft?.selectionEnd ?: initialSelectionEnd).coerceIn(0, restoredText.length)
         textState.value = TextFieldValue(
             text = restoredText,
             selection = TextRange(selectionStart, selectionEnd)
@@ -216,6 +225,7 @@ class FullappEditorActivity : ComponentActivity() {
             draftText = currentValue.text,
             selectionStart = currentValue.selection.start.coerceIn(0, textLength),
             selectionEnd = currentValue.selection.end.coerceIn(0, textLength),
+            launchSessionToken = launchSessionToken,
             lastSavedAt = System.currentTimeMillis()
         )
         FullappEditorResult.saveDraft(this, draft)
@@ -242,6 +252,7 @@ object FullappEditorResult {
     private const val JSON_DRAFT_TEXT = "draft_text"
     private const val JSON_SELECTION_START = "selection_start"
     private const val JSON_SELECTION_END = "selection_end"
+    private const val JSON_SESSION_TOKEN = "session_token"
     private const val JSON_LAST_SAVED_AT = "last_saved_at"
 
     data class TargetSnapshot(
@@ -315,6 +326,7 @@ object FullappEditorResult {
         val draftText: String,
         val selectionStart: Int,
         val selectionEnd: Int,
+        val launchSessionToken: String,
         val lastSavedAt: Long
     )
 
@@ -416,6 +428,11 @@ object FullappEditorResult {
     }
 
     @JvmStatic
+    fun belongsToLaunchSession(draft: DraftRecord, launchSessionToken: String): Boolean {
+        return launchSessionToken.isNotBlank() && draft.launchSessionToken == launchSessionToken
+    }
+
+    @JvmStatic
     fun matchesCurrentFieldContents(draft: DraftRecord, currentFieldText: String): Boolean {
         return currentFieldText == draft.originalText || currentFieldText == draft.draftText
     }
@@ -514,6 +531,7 @@ object FullappEditorResult {
         put(JSON_DRAFT_TEXT, draftText)
         put(JSON_SELECTION_START, selectionStart)
         put(JSON_SELECTION_END, selectionEnd)
+        put(JSON_SESSION_TOKEN, launchSessionToken)
         put(JSON_LAST_SAVED_AT, lastSavedAt)
     }
 
@@ -532,6 +550,7 @@ object FullappEditorResult {
             draftText = json.optString(JSON_DRAFT_TEXT, ""),
             selectionStart = json.optInt(JSON_SELECTION_START, 0),
             selectionEnd = json.optInt(JSON_SELECTION_END, 0),
+            launchSessionToken = json.optString(JSON_SESSION_TOKEN, ""),
             lastSavedAt = json.optLong(JSON_LAST_SAVED_AT, 0L)
         )
     }.getOrNull()
