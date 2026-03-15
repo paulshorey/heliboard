@@ -49,8 +49,11 @@ import kotlin.collections.component2
 import kotlin.collections.set
 
 object AppUpgrade {
+    private const val CLEANUP_PROMPT_RESET_VERSION = 1
+
     fun checkVersionUpgrade(context: Context) {
         val prefs = context.prefs()
+        maybeResetCleanupPrompt(prefs)
         val oldVersion = prefs.getInt(Settings.PREF_VERSION_CODE, 0)
         if (oldVersion == BuildConfig.VERSION_CODE)
             return
@@ -601,6 +604,17 @@ object AppUpgrade {
         upgradeToolbarPrefs(prefs)
         LayoutUtilsCustom.onLayoutFileChanged() // just to be sure
         prefs.edit { putInt(Settings.PREF_VERSION_CODE, BuildConfig.VERSION_CODE) }
+    }
+
+    private fun maybeResetCleanupPrompt(prefs: android.content.SharedPreferences) {
+        val appliedResetVersion = prefs.getInt(Settings.PREF_CLEANUP_PROMPT_RESET_VERSION, 0)
+        if (appliedResetVersion >= CLEANUP_PROMPT_RESET_VERSION) {
+            return
+        }
+        prefs.edit {
+            putString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT)
+            putInt(Settings.PREF_CLEANUP_PROMPT_RESET_VERSION, CLEANUP_PROMPT_RESET_VERSION)
+        }
     }
 
     // not only on upgrade, because this might also be called when db is locked

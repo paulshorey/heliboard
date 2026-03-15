@@ -173,15 +173,17 @@ object Defaults {
     const val PREF_VOICE_SILENCE_THRESHOLD = 220
     const val PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS = 10
     const val PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = 30
-    const val PREF_CLEANUP_PROMPT = """Clean up and improve this transcription. 
-    
-Add or remove punctuation (.!?:,) to optimize sentence structure. Fix grammar. Remove short insignificant artifacts like "Um...". 
+    const val PREF_CLEANUP_PROMPT = """Edit the transcript text only.
 
-Capitalize names and products such as "Claude Code". Acronyms should be uppercase (api -> API). 
+Preserve the speaker's intended meaning, but you may:
+- fix capitalization, punctuation, grammar, and sentence structure
+- remove short filler artifacts such as "um" and "uh"
+- capitalize names, products, and acronyms such as "Claude Code" and "API"
+- convert spoken punctuation or special-character names into the actual characters when clearly intended
 
-Convert spelled-out special character names into the characters they represent. If a special character is spelled out like 'open curly bracket', 'open parentheses', 'slash' then convert it into the actual character '{', '(', '/'. Example: 'Open curly bracket quote model unquote colon quote opus dash four dash six quote Close curly bracket' -> '{"model":"claude-opus-4-6"}'
-
-If the text seems unfinished, do not add punctuation. If the text has too many periods, combine into a single sentence."""
+Do not add commentary or explain your edits.
+If the text seems unfinished, do not force ending punctuation.
+If the transcript appears to continue an existing sentence, keep the opening letter lowercase when appropriate."""
 
     val PREF_TRANSCRIBE_PROMPTS = listOf(
         // Standard

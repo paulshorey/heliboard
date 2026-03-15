@@ -53,7 +53,7 @@ HTTP client for Deepgram's pre-recorded transcription API.
 - **Model**: `nova-3`
 - **Content-Type**: `audio/wav` (raw bytes in request body)
 - **Features**: `smart_format=true`, `punctuate=true`
-- **Retry**: Single automatic retry after 2s on transient failures (5xx, 408, timeout, connection error)
+- **Retry**: Single automatic retry on transient failures (5xx, 408, timeout, connection error)
 
 ### VoiceInputManager.kt
 Orchestrates the voice input flow and manages timers.
@@ -65,12 +65,13 @@ Orchestrates the voice input flow and manages timers.
 HTTP client for Google's Gemini API.
 - **Model**: `gemini-3.1-flash-lite-preview` (configurable)
 - **Purpose**: Intelligent capitalization, punctuation, and grammar cleanup
-- **Input (system prompt)**: Cleanup instructions + optional reference context from earlier paragraphs
-- **Input (user message)**: `<text_to_edit>{current paragraph text} + {new transcription}</text_to_edit>`
+- **Input (system prompt)**: Non-chat cleanup instructions only (no transcript data)
+- **Input (user message)**: Structured JSON payload containing `reference_context`, `editable_text`, and `new_transcription`
 - **Output**: Corrected current paragraph (only this portion is replaced in editor)
+- **Output format**: JSON with a single `edited_text` field
 - **maxOutputTokens**: 4096 (accommodates full paragraph responses)
 - **Cancellation**: Tracks active HTTP calls; `cancelAll()` cancels in-flight requests
-- **Retry**: Single automatic retry after 2s on transient failures (5xx, 408, timeout, connection error)
+- **Retry**: Single automatic retry on transient failures (5xx, 408, timeout, connection error)
 
 ### LatinIME.java
 Main orchestrator that coordinates all components and manages text insertion.
@@ -108,9 +109,14 @@ VoiceInputManager.enqueueSegment(wavData)
         referenceContext = text before last \n  (read-only, for Gemini's understanding)
         editableText    = text after last \n   (current paragraph, will be replaced)
     → Send to Gemini:
-        system prompt += referenceContext (do not include in response)
-        user message   = <text_to_edit>editableText + new transcription</text_to_edit>
-    → Gemini returns corrected current paragraph
+        system prompt = cleanup instructions only
+        user message  = structured transcript payload
+          {
+            "reference_context": "...",
+            "editable_text": "...",
+            "new_transcription": "..."
+          }
+    → Gemini returns {"edited_text":"..."}
     → LatinIME.replaceContextWithCleanedText():
         1. Delete editableText.length() chars before cursor
         2. Insert corrected text + trailing space
@@ -123,13 +129,13 @@ up to 300 characters are used. This crosses newline/paragraph boundaries — eve
 start of a new line, Gemini always has adequate context.
 
 **Paragraph break protection**: The context is split at the last `\n`. Text before it
-(earlier paragraphs) is passed to Gemini in the system prompt for understanding only —
-Gemini is told not to include it in its response. Text after it (the current paragraph)
-is sent as the user message and is what Gemini cleans up. Only this current-paragraph
-portion is replaced in the editor, so `\n` and `\n\n` paragraph breaks are never touched.
+(earlier paragraphs) is passed to Gemini as read-only `reference_context`. Text after it
+(the current paragraph) is sent as `editable_text`, and the new transcript chunk is sent
+as `new_transcription`. Only this current-paragraph portion is replaced in the editor,
+so `\n` and `\n\n` paragraph breaks are never touched.
 
-**Retry**: Both transcription and cleanup requests automatically retry once after a
-2-second delay on transient failures (5xx, 408, socket timeout, connection error).
+**Retry**: Both transcription and cleanup requests automatically retry once on
+transient failures (5xx, 408, socket timeout, connection error).
 Non-retryable errors (4xx) are reported immediately.
 
 ### 4. New Paragraph (after configured silence window)
