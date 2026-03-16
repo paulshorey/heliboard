@@ -90,6 +90,7 @@ import helium314.keyboard.latin.utils.ToolbarMode;
 import helium314.keyboard.latin.voice.TextCleanupClient;
 import helium314.keyboard.latin.voice.VoiceContextUtils;
 import helium314.keyboard.latin.voice.VoiceInputManager;
+import helium314.keyboard.latin.voice.VoiceTranscriptionPreprocessor;
 import helium314.keyboard.latin.voice.VoiceTextSanitizer;
 import helium314.keyboard.latin.suggestions.SuggestionStripView.VoiceState;
 import helium314.keyboard.settings.FullappEditorActivity;
@@ -2101,7 +2102,18 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onTranscriptionResult(@NonNull String text) {
                 try {
-                    if (text == null || text.trim().isEmpty()) {
+                    final String rawText = text != null ? text : "";
+                    final String preprocessedText =
+                            VoiceTranscriptionPreprocessor.preprocessChunk(rawText);
+                    if (!preprocessedText.equals(rawText)) {
+                        Log.i(
+                                TAG,
+                                "VOICE_STEP_4 applied manual transcript edits (" +
+                                        rawText.length() + " -> " + preprocessedText.length() +
+                                        " chars)"
+                        );
+                    }
+                    if (preprocessedText.trim().isEmpty()) {
                         Log.i(TAG, "VOICE_STEP_4 empty transcription result — nothing to insert");
                         // No cleanup/insert callback will follow for empty chunks, so clear
                         // spinner now unless another cleanup round is currently active.
@@ -2110,9 +2122,17 @@ public class LatinIME extends InputMethodService implements
                         }
                         return;
                     }
-                    Log.i(TAG, "VOICE_STEP_4 transcription arrived in IME (" + text.length() + " chars)");
+                    Log.i(
+                            TAG,
+                            "VOICE_STEP_4 transcription arrived in IME (" +
+                                    preprocessedText.length() + " chars)"
+                    );
                     final PendingVoiceTranscription pendingTranscription =
-                            createPendingVoiceTranscription(text, SystemClock.elapsedRealtime(), 1);
+                            createPendingVoiceTranscription(
+                                    preprocessedText,
+                                    SystemClock.elapsedRealtime(),
+                                    1
+                            );
 
                     // If cleanup is in progress, queue this transcription to preserve ordering.
                     if (mCleanupInProgress) {
