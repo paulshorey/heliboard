@@ -1457,7 +1457,7 @@ public class LatinIME extends InputMethodService implements
         final CharSequence before = ic.getTextBeforeCursor(FULLAPP_SYNC_MAX_CHARS, 0);
         final CharSequence selectedText = ic.getSelectedText(0);
         final CharSequence after = ic.getTextAfterCursor(FULLAPP_SYNC_MAX_CHARS, 0);
-        return buildFieldTextSnapshot(before, selectedText, after);
+        return FullappTextSnapshotUtils.buildFieldTextSnapshot(before, selectedText, after);
     }
 
     /**
@@ -1516,43 +1516,7 @@ public class LatinIME extends InputMethodService implements
         if (before == null && selectedText == null && after == null) {
             return null;
         }
-        return buildFieldTextSnapshot(before, selectedText, after);
-    }
-
-    @NonNull
-    static String buildFieldTextSnapshot(@Nullable final CharSequence before,
-                                         @Nullable final CharSequence selected,
-                                         @Nullable final CharSequence after) {
-        if (before == null && selected == null && after == null) {
-            return "";
-        }
-        final StringBuilder snapshot = new StringBuilder();
-        if (before != null) {
-            snapshot.append(before);
-        }
-        if (selected != null) {
-            snapshot.append(selected);
-        }
-        if (after != null) {
-            snapshot.append(after);
-        }
-        return snapshot.toString();
-    }
-
-    static int getFieldTextSnapshotLength(@Nullable final CharSequence before,
-                                          @Nullable final CharSequence selected,
-                                          @Nullable final CharSequence after) {
-        int totalLength = 0;
-        if (before != null) {
-            totalLength += before.length();
-        }
-        if (selected != null) {
-            totalLength += selected.length();
-        }
-        if (after != null) {
-            totalLength += after.length();
-        }
-        return totalLength;
+        return FullappTextSnapshotUtils.buildFieldTextSnapshot(before, selectedText, after);
     }
 
     /**
@@ -1575,7 +1539,8 @@ public class LatinIME extends InputMethodService implements
             final CharSequence before = ic.getTextBeforeCursor(FULLAPP_SYNC_MAX_CHARS, 0);
             final CharSequence selectedText = ic.getSelectedText(0);
             final CharSequence after = ic.getTextAfterCursor(FULLAPP_SYNC_MAX_CHARS, 0);
-            final int totalLength = getFieldTextSnapshotLength(before, selectedText, after);
+            final int totalLength = FullappTextSnapshotUtils.getFieldTextSnapshotLength(
+                    before, selectedText, after);
 
             if (totalLength > 0) {
                 final boolean selectionSet = ic.setSelection(0, totalLength);
