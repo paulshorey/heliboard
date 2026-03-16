@@ -72,3 +72,15 @@ This helper script:
 - copies the generated APK to `/workspace/dist/HeliBoard.apk`
 
 Always overwrite `/workspace/dist/HeliBoard.apk` with the latest build when regenerating it.
+
+## Shared debug keystore
+
+Debug builds use `keystore/debug.keystore` so local Gradle builds and cloud-agent builds produce APKs with the **same signature**. You can install a cloud-built APK over a locally-built install (or vice versa) without uninstalling, preserving user preferences and data.
+
+**One-time migration** (if you had HeliBoard installed from a different machine's Gradle debug build):
+1. Backup app data: `adb backup -f heliboard.ab -noapk helium314.keyboard.debug`
+2. Uninstall the existing app
+3. Install the new APK (from cloud or local; both now use the shared key)
+4. Restore data: `adb restore heliboard.ab`
+
+After migration, you can switch between local and cloud builds without losing data.
