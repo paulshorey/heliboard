@@ -2591,7 +2591,7 @@ public class LatinIME extends InputMethodService implements
                             if (isCleanupTargetStillCurrent(cleanupTrace.mEditableTextSnapshot)) {
                                 final String toastMessage = isCleanupTimeoutError(error)
                                         ? "Cleanup timed out. Inserted raw transcription."
-                                        : "Cleanup failed. Inserted raw transcription.";
+                                        : buildCleanupFailureToast(error);
                                 insertRawTranscriptionFallback(
                                         transcriptionText,
                                         "Cleanup request failed: " + error,
@@ -2928,6 +2928,20 @@ public class LatinIME extends InputMethodService implements
         return normalized.contains("timed out")
                 || normalized.contains("timeout")
                 || normalized.contains("408");
+    }
+
+    @NonNull
+    private String buildCleanupFailureToast(@Nullable final String error) {
+        final String normalized = error != null ? error.trim() : "";
+        if (normalized.isEmpty()) {
+            return "Cleanup failed. Inserted raw transcription.";
+        }
+        final String compact = normalized.replaceAll("\\s+", " ");
+        final int maxLen = 80;
+        final String detail = compact.length() <= maxLen
+                ? compact
+                : compact.substring(0, maxLen - 3) + "...";
+        return "Cleanup failed: " + detail + ". Inserted raw transcription.";
     }
 
     /**
