@@ -270,6 +270,8 @@ public class LatinIME extends InputMethodService implements
     // cancelled. Used to invalidate stale async cleanup callbacks from previous sessions.
     private int mVoiceSessionId = 0;
     private long mLastVoiceErrorToastTimeMs = 0L;
+    @NonNull
+    private VoiceInputManager.State mLastVoiceInputManagerState = VoiceInputManager.State.IDLE;
 
     public static final class UIHandler extends LeakGuardHandlerWrapper<LatinIME> {
         private static final int MSG_UPDATE_SHIFT_STATE = 0;
@@ -2025,18 +2027,24 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onStateChanged(@NonNull VoiceInputManager.State state) {
                 Log.i(TAG, "Voice input state changed: " + state);
+                final VoiceInputManager.State previousState = mLastVoiceInputManagerState;
+                mLastVoiceInputManagerState = state;
 
                 switch (state) {
                     case RECORDING:
                         if (mSuggestionStripView != null) {
                             mSuggestionStripView.setVoiceInputState(VoiceState.RECORDING);
                         }
-                        mKeyboardSwitcher.showToast("Listening...", false);
-                        // New recording session — invalidate stale cleanup callbacks
-                        mVoiceSessionId++;
-                        resetVoiceInputState();
-                        if (mTextCleanupClient != null) {
-                            mTextCleanupClient.cancelAll();
+                        if (previousState == VoiceInputManager.State.PAUSED) {
+                            mKeyboardSwitcher.showToast("Resumed", false);
+                        } else {
+                            mKeyboardSwitcher.showToast("Listening...", false);
+                            // New recording session — invalidate stale cleanup callbacks
+                            mVoiceSessionId++;
+                            resetVoiceInputState();
+                            if (mTextCleanupClient != null) {
+                                mTextCleanupClient.cancelAll();
+                            }
                         }
                         // Keep screen on and CPU alive while recording
                         acquireVoiceWakeLock();

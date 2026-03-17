@@ -610,10 +610,10 @@ class TextCleanupClient {
             is JSONArray -> buildString {
                 for (index in 0 until content.length()) {
                     val part = content.optJSONObject(index) ?: continue
-                    val partText = part.optString("text", "").trim()
-                    if (partText.isNotEmpty()) {
-                        append(partText)
+                    if (!part.has("text") || part.isNull("text")) {
+                        continue
                     }
+                    append(part.optString("text", ""))
                 }
             }
             else -> return null
