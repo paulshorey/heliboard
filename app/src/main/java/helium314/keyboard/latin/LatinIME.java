@@ -2034,6 +2034,7 @@ public class LatinIME extends InputMethodService implements
                         if (mSuggestionStripView != null) {
                             mSuggestionStripView.setVoiceInputState(VoiceState.RECORDING);
                         }
+                        mKeyboardSwitcher.hideMicrophonePermissionPrompt();
                         mKeyboardSwitcher.showToast("Listening...", false);
                         // New recording session — invalidate stale cleanup callbacks
                         mVoiceSessionId++;
@@ -2045,6 +2046,7 @@ public class LatinIME extends InputMethodService implements
                         if (mSuggestionStripView != null) {
                             mSuggestionStripView.setVoiceInputState(VoiceState.PAUSED);
                         }
+                        mKeyboardSwitcher.hideMicrophonePermissionPrompt();
                         // Keep wake lock held during pause (user intends to resume)
                         break;
                     case IDLE:
@@ -2155,7 +2157,7 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onPermissionRequired() {
                 Log.w(TAG, "Microphone permission required");
-                mKeyboardSwitcher.showToast("Microphone permission required. Please grant permission in Settings.", true);
+                mKeyboardSwitcher.showMicrophonePermissionPrompt();
             }
         });
     }
@@ -2412,8 +2414,9 @@ public class LatinIME extends InputMethodService implements
         final String transcriptionText = pendingTranscription.mText;
         final long cleanupStartElapsedMs = SystemClock.elapsedRealtime();
         final long queueWaitMs = Math.max(0L, cleanupStartElapsedMs - pendingTranscription.mReceivedAtElapsedMs);
-        final String googleApiKey = KtxKt.prefs(this).getString(Settings.PREF_GOOGLE_API_KEY, "");
-        if (googleApiKey == null || googleApiKey.isEmpty()) {
+        final String googleApiKeyRaw = KtxKt.prefs(this).getString(Settings.PREF_GOOGLE_API_KEY, "");
+        final String googleApiKey = googleApiKeyRaw == null ? "" : googleApiKeyRaw.trim();
+        if (googleApiKey.isEmpty()) {
             Log.i(
                     TAG,
                     "VOICE_CLEANUP bypassed (no Google API key, chars=" + transcriptionText.length() +

@@ -4,6 +4,7 @@ package helium314.keyboard.settings.screens
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings as AndroidSettings
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -72,6 +73,7 @@ fun SetupAppScreen(
     var isImeEnabled by remember { mutableStateOf(false) }
     var isImeCurrent by remember { mutableStateOf(false) }
     var microphoneGranted by remember { mutableStateOf(false) }
+    var hasRequestedMicrophonePermission by remember { mutableStateOf(false) }
     var deepgramApiKey by remember { mutableStateOf("") }
     var googleApiKey by remember { mutableStateOf("") }
 
@@ -79,8 +81,8 @@ fun SetupAppScreen(
         isImeEnabled = UncachedInputMethodManagerUtils.isThisImeEnabled(context, imm)
         isImeCurrent = UncachedInputMethodManagerUtils.isThisImeCurrent(context, imm)
         microphoneGranted = PermissionsUtil.checkAllPermissionsGranted(context, Manifest.permission.RECORD_AUDIO)
-        deepgramApiKey = prefs.getString(Settings.PREF_DEEPGRAM_API_KEY, Defaults.PREF_DEEPGRAM_API_KEY) ?: ""
-        googleApiKey = prefs.getString(Settings.PREF_GOOGLE_API_KEY, Defaults.PREF_GOOGLE_API_KEY) ?: ""
+        deepgramApiKey = (prefs.getString(Settings.PREF_DEEPGRAM_API_KEY, Defaults.PREF_DEEPGRAM_API_KEY) ?: "").trim()
+        googleApiKey = (prefs.getString(Settings.PREF_GOOGLE_API_KEY, Defaults.PREF_GOOGLE_API_KEY) ?: "").trim()
     }
 
     LaunchedEffect(prefChanged?.value) {
@@ -92,6 +94,27 @@ fun SetupAppScreen(
     }
     val microphonePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         microphoneGranted = it
+        activity?.intent?.removeExtra(SettingsActivity.EXTRA_REQUEST_MICROPHONE_PERMISSION)
+        refreshStatus()
+    }
+    val shouldOpenMicrophoneSettings = activity != null &&
+        hasRequestedMicrophonePermission &&
+        !microphoneGranted &&
+        !activity.shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)
+
+    LaunchedEffect(microphoneGranted) {
+        if (microphoneGranted) {
+            activity?.intent?.removeExtra(SettingsActivity.EXTRA_REQUEST_MICROPHONE_PERMISSION)
+        }
+    }
+
+    LaunchedEffect(activity, microphoneGranted) {
+        val shouldRequestOnOpen =
+            activity?.intent?.getBooleanExtra(SettingsActivity.EXTRA_REQUEST_MICROPHONE_PERMISSION, false) == true
+        if (shouldRequestOnOpen && !microphoneGranted) {
+            hasRequestedMicrophonePermission = true
+            microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
     }
 
     SearchSettingsScreen(
@@ -158,8 +181,9 @@ fun SetupAppScreen(
                     SetupKeyField(
                         value = deepgramApiKey,
                         onValueChange = { newValue ->
-                            deepgramApiKey = newValue
-                            prefs.edit { putString(Settings.PREF_DEEPGRAM_API_KEY, newValue) }
+                            val trimmedValue = newValue.trim()
+                            deepgramApiKey = trimmedValue
+                            prefs.edit { putString(Settings.PREF_DEEPGRAM_API_KEY, trimmedValue) }
                         }
                     )
                 }
@@ -171,8 +195,9 @@ fun SetupAppScreen(
                     SetupKeyField(
                         value = googleApiKey,
                         onValueChange = { newValue ->
-                            googleApiKey = newValue
-                            prefs.edit { putString(Settings.PREF_GOOGLE_API_KEY, newValue) }
+                            val trimmedValue = newValue.trim()
+                            googleApiKey = trimmedValue
+                            prefs.edit { putString(Settings.PREF_GOOGLE_API_KEY, trimmedValue) }
                         }
                     )
                 }
@@ -180,9 +205,24 @@ fun SetupAppScreen(
                     title = stringResource(R.string.setup_app_microphone_title),
                     summary = stringResource(R.string.setup_app_microphone_summary),
                     isComplete = microphoneGranted,
-                    actionLabel = stringResource(R.string.setup_app_grant_permission),
+                    actionLabel = stringResource(
+                        if (shouldOpenMicrophoneSettings) {
+                            R.string.setup_app_open_app_settings
+                        } else {
+                            R.string.setup_app_grant_permission
+                        }
+                    ),
                     onAction = {
-                        microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        if (shouldOpenMicrophoneSettings) {
+                            val intent = Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = Uri.fromParts("package", context.packageName, null)
+                                addCategory(Intent.CATEGORY_DEFAULT)
+                            }
+                            systemSettingsLauncher.launch(intent)
+                        } else {
+                            hasRequestedMicrophonePermission = true
+                            microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }
                     }
                 )
 

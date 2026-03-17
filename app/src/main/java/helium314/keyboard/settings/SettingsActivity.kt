@@ -77,6 +77,7 @@ open class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPre
         settingsContainer = SettingsContainer(this)
 
         val spellchecker = intent?.getBooleanExtra("spellchecker", false) ?: false
+        val startDestination = intent?.getStringExtra(EXTRA_START_DESTINATION)
 
         val cv = ComposeView(context = this)
         setContentView(cv)
@@ -106,7 +107,10 @@ open class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPre
                             }
                         }
                     else {
-                        SettingsNavHost(onClickBack = { this.finish() })
+                        SettingsNavHost(
+                            onClickBack = { this.finish() },
+                            startDestination = startDestination
+                        )
                         if (showWelcomeWizard) {
                             WelcomeWizard(close = { showWelcomeWizard = false }, finish = this::finish)
                         } else if (crashReports.isNotEmpty()) {
@@ -214,6 +218,19 @@ open class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPre
     }
 
     companion object {
+        const val EXTRA_START_DESTINATION = "helium314.keyboard.settings.extra.START_DESTINATION"
+        const val EXTRA_REQUEST_MICROPHONE_PERMISSION =
+            "helium314.keyboard.settings.extra.REQUEST_MICROPHONE_PERMISSION"
+
+        @JvmStatic
+        fun createMicrophonePermissionIntent(context: Context): Intent {
+            return Intent(context, SettingsActivity::class.java).apply {
+                putExtra(EXTRA_START_DESTINATION, SettingsDestination.SetupApp)
+                putExtra(EXTRA_REQUEST_MICROPHONE_PERMISSION, true)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        }
+
         // public write so compose previews can show the screens
         // having it in a companion object is not ideal as it will stay in memory even after settings are closed
         // but it's small enough to not care

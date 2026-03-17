@@ -61,10 +61,14 @@ fun TranscriptionScreen(
 
     // API keys
     var deepgramApiKey by remember {
-        mutableStateOf(prefs.getString(Settings.PREF_DEEPGRAM_API_KEY, Defaults.PREF_DEEPGRAM_API_KEY) ?: "")
+        mutableStateOf(
+            (prefs.getString(Settings.PREF_DEEPGRAM_API_KEY, Defaults.PREF_DEEPGRAM_API_KEY) ?: "").trim()
+        )
     }
     var googleApiKey by remember {
-        mutableStateOf(prefs.getString(Settings.PREF_GOOGLE_API_KEY, Defaults.PREF_GOOGLE_API_KEY) ?: "")
+        mutableStateOf(
+            (prefs.getString(Settings.PREF_GOOGLE_API_KEY, Defaults.PREF_GOOGLE_API_KEY) ?: "").trim()
+        )
     }
     var geminiModel by remember {
         mutableStateOf(prefs.getString(Settings.PREF_GEMINI_MODEL, Defaults.PREF_GEMINI_MODEL) ?: Defaults.PREF_GEMINI_MODEL)
@@ -136,8 +140,9 @@ fun TranscriptionScreen(
                     label = stringResource(R.string.deepgram_api_key_title),
                     value = deepgramApiKey,
                     onValueChange = { newValue ->
-                        deepgramApiKey = newValue
-                        prefs.edit { putString(Settings.PREF_DEEPGRAM_API_KEY, newValue) }
+                        val trimmedValue = newValue.trim()
+                        deepgramApiKey = trimmedValue
+                        prefs.edit { putString(Settings.PREF_DEEPGRAM_API_KEY, trimmedValue) }
                     },
                     minLines = 1,
                     maxLines = 2
@@ -148,8 +153,9 @@ fun TranscriptionScreen(
                     label = stringResource(R.string.google_api_key_title),
                     value = googleApiKey,
                     onValueChange = { newValue ->
-                        googleApiKey = newValue
-                        prefs.edit { putString(Settings.PREF_GOOGLE_API_KEY, newValue) }
+                        val trimmedValue = newValue.trim()
+                        googleApiKey = trimmedValue
+                        prefs.edit { putString(Settings.PREF_GOOGLE_API_KEY, trimmedValue) }
                     },
                     minLines = 1,
                     maxLines = 2

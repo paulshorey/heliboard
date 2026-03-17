@@ -711,7 +711,7 @@ class VoiceInputManager(private val context: Context) {
 
     private fun getApiKey(): String {
         return try {
-            context.prefs().getString(Settings.PREF_DEEPGRAM_API_KEY, "") ?: ""
+            (context.prefs().getString(Settings.PREF_DEEPGRAM_API_KEY, "") ?: "").trim()
         } catch (e: Exception) {
             Log.e(TAG, "Error getting API key: ${e.message}")
             ""

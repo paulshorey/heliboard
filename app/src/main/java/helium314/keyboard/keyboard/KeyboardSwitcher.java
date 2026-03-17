@@ -54,6 +54,7 @@ import helium314.keyboard.latin.utils.ResourceUtils;
 import helium314.keyboard.latin.utils.ScriptUtils;
 import helium314.keyboard.latin.utils.SubtypeUtilsAdditional;
 import helium314.keyboard.latin.utils.ToolbarMode;
+import helium314.keyboard.settings.SettingsActivity;
 
 public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
     private static final String TAG = KeyboardSwitcher.class.getSimpleName();
@@ -70,6 +71,9 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
     private FrameLayout mStripContainer;
     private ClipboardHistoryView mClipboardHistoryView;
     private TextView mFakeToastView;
+    private View mVoicePermissionPromptView;
+    private TextView mVoicePermissionPromptActionView;
+    private TextView mVoicePermissionPromptDismissView;
     private ProgressBar mProcessingIndicator;
     private Runnable mHideProcessingIndicatorRunnable;
     private LatinIME mLatinIME;
@@ -564,6 +568,17 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         }
     }
 
+    public void showMicrophonePermissionPrompt() {
+        if (mVoicePermissionPromptView == null) return;
+        mVoicePermissionPromptView.setVisibility(View.VISIBLE);
+        mVoicePermissionPromptView.bringToFront();
+    }
+
+    public void hideMicrophonePermissionPrompt() {
+        if (mVoicePermissionPromptView == null) return;
+        mVoicePermissionPromptView.setVisibility(View.GONE);
+    }
+
     private static int getSecondaryStripVisibility() {
         return Settings.getValues().mSecondaryStripVisible? View.VISIBLE : View.GONE;
     }
@@ -737,7 +752,19 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         mEmojiPalettesView = mCurrentInputView.findViewById(R.id.emoji_palettes_view);
         mClipboardHistoryView = mCurrentInputView.findViewById(R.id.clipboard_history_view);
         mFakeToastView = mCurrentInputView.findViewById(R.id.fakeToast);
+        mVoicePermissionPromptView = mCurrentInputView.findViewById(R.id.voice_permission_prompt);
+        mVoicePermissionPromptActionView = mCurrentInputView.findViewById(R.id.voice_permission_prompt_action);
+        mVoicePermissionPromptDismissView = mCurrentInputView.findViewById(R.id.voice_permission_prompt_dismiss);
         mProcessingIndicator = mCurrentInputView.findViewById(R.id.voice_processing_indicator);
+        if (mVoicePermissionPromptActionView != null) {
+            mVoicePermissionPromptActionView.setOnClickListener(v -> {
+                hideMicrophonePermissionPrompt();
+                mLatinIME.startActivity(SettingsActivity.createMicrophonePermissionIntent(mLatinIME));
+            });
+        }
+        if (mVoicePermissionPromptDismissView != null) {
+            mVoicePermissionPromptDismissView.setOnClickListener(v -> hideMicrophonePermissionPrompt());
+        }
 
         mKeyboardViewWrapper = mCurrentInputView.findViewById(R.id.keyboard_view_wrapper);
         mKeyboardViewWrapper.setKeyboardActionListener(mLatinIME.mKeyboardActionListener);
