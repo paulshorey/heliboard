@@ -9,7 +9,7 @@ import androidx.annotation.Nullable;
  *
  * <p>The editable portion must stay limited to the latest line so the IME can safely
  * replace only text immediately before the cursor. Earlier lines and paragraphs are
- * read-only context for Gemini.</p>
+ * read-only context for the cleanup model.</p>
  */
 public final class VoiceContextUtils {
     private static final int DEFAULT_BOUNDARY_COUNT = 3;

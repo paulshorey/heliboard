@@ -240,13 +240,30 @@ class VoiceRecorder(private val context: Context) {
     fun pauseRecording() {
         if (isRecording && !isPaused) {
             isPaused = true
+            try {
+                // Stop the recorder to avoid keeping the microphone actively capturing
+                // while the UI reports a paused state.
+                audioRecord?.stop()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error pausing AudioRecord: ${e.message}")
+            }
             Log.i(TAG, "Recording paused")
         }
     }
 
     fun resumeRecording() {
         if (isRecording && isPaused) {
-            isPaused = false
+            try {
+                audioRecord?.startRecording()
+                isPaused = false
+            } catch (e: Exception) {
+                Log.e(TAG, "Error resuming AudioRecord: ${e.message}")
+                val callbackSnapshot = callback
+                mainHandler.post {
+                    callbackSnapshot?.onRecordingError("Failed to resume recording: ${e.message}")
+                }
+                return
+            }
             Log.i(TAG, "Recording resumed")
         }
     }
@@ -274,13 +291,32 @@ class VoiceRecorder(private val context: Context) {
 
         try {
             while (isRecording) {
+                if (isPaused) {
+                    silenceDurationMs = 0L
+                    isSpeaking = false
+                    try {
+                        Thread.sleep(READ_INTERVAL_MS)
+                    } catch (_: InterruptedException) {
+                        break
+                    }
+                    continue
+                }
+
                 val bytesRead = audioRecord?.read(readBuffer, 0, BYTES_PER_READ) ?: break
+                if (!isRecording) {
+                    break
+                }
+                if (isPaused) {
+                    silenceDurationMs = 0L
+                    isSpeaking = false
+                    continue
+                }
                 when {
                     bytesRead > 0 -> {
                         consecutiveEmptyReads = 0
                     }
                     bytesRead == 0 -> {
-                        if (!isPaused) {
+                        if (!isPaused && isRecording) {
                             consecutiveEmptyReads += 1
                             if (consecutiveEmptyReads >= MAX_CONSECUTIVE_EMPTY_READS) {
                                 val emptyReadWindowMs = MAX_CONSECUTIVE_EMPTY_READS * READ_INTERVAL_MS
@@ -295,19 +331,16 @@ class VoiceRecorder(private val context: Context) {
                         continue
                     }
                     else -> {
+                        if (!isRecording || isPaused) {
+                            Log.i(TAG, "Ignoring recorder read result after intentional pause/stop: $bytesRead")
+                            break
+                        }
                         val error = mapAudioReadError(bytesRead)
                         Log.e(TAG, "AudioRecord read failed: $error")
                         val callbackSnapshot = callback
                         mainHandler.post { callbackSnapshot?.onRecordingError(error) }
                         break
                     }
-                }
-
-                // When paused, discard audio but keep the loop alive
-                if (isPaused) {
-                    silenceDurationMs = 0L
-                    isSpeaking = false
-                    continue
                 }
 
                 val chunk = if (bytesRead == BYTES_PER_READ) readBuffer.copyOf()
@@ -377,6 +410,10 @@ class VoiceRecorder(private val context: Context) {
                 }
             }
         } catch (e: Exception) {
+            if (!isRecording || isPaused) {
+                Log.i(TAG, "Ignoring recorder loop exception after intentional pause/stop: ${e.message}")
+                return
+            }
             Log.e(TAG, "Error in recording loop: ${e.message}")
             val callbackSnapshot = callback
             mainHandler.post { callbackSnapshot?.onRecordingError("Recording error: ${e.message}") }

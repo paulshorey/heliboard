@@ -63,11 +63,11 @@ fun TranscriptionScreen(
     var deepgramApiKey by remember {
         mutableStateOf(prefs.getString(Settings.PREF_DEEPGRAM_API_KEY, Defaults.PREF_DEEPGRAM_API_KEY) ?: "")
     }
-    var googleApiKey by remember {
-        mutableStateOf(prefs.getString(Settings.PREF_GOOGLE_API_KEY, Defaults.PREF_GOOGLE_API_KEY) ?: "")
+    var openAiApiKey by remember {
+        mutableStateOf(prefs.getString(Settings.PREF_OPENAI_API_KEY, Defaults.PREF_OPENAI_API_KEY) ?: "")
     }
-    var geminiModel by remember {
-        mutableStateOf(prefs.getString(Settings.PREF_GEMINI_MODEL, Defaults.PREF_GEMINI_MODEL) ?: Defaults.PREF_GEMINI_MODEL)
+    var openAiModel by remember {
+        mutableStateOf(prefs.getString(Settings.PREF_OPENAI_MODEL, Defaults.PREF_OPENAI_MODEL) ?: Defaults.PREF_OPENAI_MODEL)
     }
     var cleanupPrompt by remember {
         mutableStateOf(prefs.getString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT) ?: Defaults.PREF_CLEANUP_PROMPT)
@@ -143,25 +143,25 @@ fun TranscriptionScreen(
                     maxLines = 2
                 )
 
-                // Google AI API Key
+                // OpenAI API Key
                 InlineTextField(
                     label = stringResource(R.string.google_api_key_title),
-                    value = googleApiKey,
+                    value = openAiApiKey,
                     onValueChange = { newValue ->
-                        googleApiKey = newValue
-                        prefs.edit { putString(Settings.PREF_GOOGLE_API_KEY, newValue) }
+                        openAiApiKey = newValue
+                        prefs.edit { putString(Settings.PREF_OPENAI_API_KEY, newValue) }
                     },
                     minLines = 1,
                     maxLines = 2
                 )
 
-                // Gemini model
+                // OpenAI model
                 InlineTextField(
                     label = stringResource(R.string.gemini_model_title),
-                    value = geminiModel,
+                    value = openAiModel,
                     onValueChange = { newValue ->
-                        geminiModel = newValue
-                        prefs.edit { putString(Settings.PREF_GEMINI_MODEL, newValue.trim()) }
+                        openAiModel = newValue
+                        prefs.edit { putString(Settings.PREF_OPENAI_MODEL, newValue.trim()) }
                     },
                     minLines = 1,
                     maxLines = 1

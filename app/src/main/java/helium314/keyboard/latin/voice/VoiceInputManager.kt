@@ -144,6 +144,13 @@ class VoiceInputManager(private val context: Context) {
             !isStreamingConnecting
     val state: State get() = currentState
 
+    fun hasPendingProcessing(): Boolean {
+        return pendingTranscripts.isNotEmpty() ||
+            pendingAudioChunks.isNotEmpty() ||
+            isStreamingConnecting ||
+            finalizeWhenStreamReady
+    }
+
     fun setListener(listener: VoiceInputListener?) {
         this.listener = listener
     }
@@ -253,11 +260,17 @@ class VoiceInputManager(private val context: Context) {
         cancelNewParagraphTimer()
         cancelAutoStopTimer()
         voiceRecorder.pauseRecording()
+        cancelPendingReconnect()
+        streamReconnectAttempts = 0
+        finalizeWhenStreamReady = false
         updateState(State.PAUSED)
     }
 
     fun resumeRecording() {
         if (currentState != State.PAUSED) return
+        if (!isStreamingReady && !isStreamingConnecting && sessionApiKey.isNotBlank()) {
+            startStreamingSession(activeSessionId, sessionApiKey, isReconnect = true)
+        }
         voiceRecorder.resumeRecording()
         updateState(State.RECORDING)
         startAutoStopTimer()
@@ -390,6 +403,12 @@ class VoiceInputManager(private val context: Context) {
             return
         }
 
+        if (shouldReconnectWhileStopping() &&
+            scheduleReconnect(sessionId, "finalize requested with closed stream", allowWhileStopping = true)
+        ) {
+            return
+        }
+
         // If the socket already died/closed, transition to idle processing state.
         pendingAudioChunks.clear()
         notifyProcessingIdleIfDrained()
@@ -482,7 +501,9 @@ class VoiceInputManager(private val context: Context) {
         if (
             !isDispatchingTranscripts &&
             pendingTranscripts.isEmpty() &&
-            pendingAudioChunks.isEmpty()
+            pendingAudioChunks.isEmpty() &&
+            !isStreamingConnecting &&
+            !finalizeWhenStreamReady
         ) {
             listener?.onProcessingIdle()
         }
@@ -507,7 +528,23 @@ class VoiceInputManager(private val context: Context) {
         isStreamingReady = false
         isStreamingConnecting = false
 
+        if (currentState == State.PAUSED) {
+            Log.i(TAG, "Deepgram stream disconnected while paused — waiting for resume")
+            notifyProcessingIdleIfDrained()
+            return
+        }
+
         if (isSessionStopping) {
+            if (shouldReconnectWhileStopping() &&
+                scheduleReconnect(sessionId, error ?: "stream closed while stopping", allowWhileStopping = true)
+            ) {
+                return
+            }
+            if (pendingAudioChunks.isNotEmpty()) {
+                val message = "Final voice segment could not be transcribed completely"
+                Log.e(TAG, "$message: ${error ?: "stream closed"}")
+                listener?.onError(message)
+            }
             pendingAudioChunks.clear()
             notifyProcessingIdleIfDrained()
             return
@@ -547,18 +584,28 @@ class VoiceInputManager(private val context: Context) {
 
     private fun scheduleReconnectOrStop(sessionId: Long, reason: String) {
         if (sessionId != activeSessionId) return
-        if (isSessionStopping) return
-        if (scheduleReconnect(sessionId, reason)) return
+        val allowWhileStopping = shouldReconnectWhileStopping()
+        if (isSessionStopping && !allowWhileStopping) return
+        if (scheduleReconnect(sessionId, reason, allowWhileStopping = allowWhileStopping)) return
 
         pendingAudioChunks.clear()
-        val message = "Deepgram stream unavailable: $reason"
+        val message = if (allowWhileStopping) {
+            "Final voice segment could not be transcribed completely"
+        } else {
+            "Deepgram stream unavailable: $reason"
+        }
         Log.e(TAG, message)
         listener?.onError(message)
         stopRecordingInternal(cancelPending = true)
     }
 
-    private fun scheduleReconnect(sessionId: Long, reason: String): Boolean {
+    private fun scheduleReconnect(
+        sessionId: Long,
+        reason: String,
+        allowWhileStopping: Boolean = false
+    ): Boolean {
         if (sessionId != activeSessionId) return false
+        if (isSessionStopping && !allowWhileStopping) return false
         if (streamReconnectAttempts >= MAX_STREAM_RECONNECT_ATTEMPTS) {
             Log.e(
                 TAG,
@@ -581,11 +628,16 @@ class VoiceInputManager(private val context: Context) {
         )
         val reconnectRunnable = Runnable {
             pendingReconnectRunnable = null
-            if (sessionId != activeSessionId || isSessionStopping) {
+            if (sessionId != activeSessionId) {
+                return@Runnable
+            }
+            if (isSessionStopping && !allowWhileStopping) {
                 return@Runnable
             }
             val sessionStillActive =
-                currentState != State.IDLE || voiceRecorder.isCurrentlyRecording
+                currentState != State.IDLE ||
+                    voiceRecorder.isCurrentlyRecording ||
+                    (allowWhileStopping && shouldReconnectWhileStopping())
             if (!sessionStillActive) {
                 Log.i(TAG, "Skipping reconnect: voice session no longer active")
                 isStreamingConnecting = false
@@ -596,6 +648,10 @@ class VoiceInputManager(private val context: Context) {
         pendingReconnectRunnable = reconnectRunnable
         mainHandler.postDelayed(reconnectRunnable, delayMs)
         return true
+    }
+
+    private fun shouldReconnectWhileStopping(): Boolean {
+        return isSessionStopping && (pendingAudioChunks.isNotEmpty() || finalizeWhenStreamReady)
     }
 
     private fun cancelPendingReconnect() {
