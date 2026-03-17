@@ -10,6 +10,17 @@ plugins {
 android {
     compileSdk = 35
 
+    // Shared debug keystore so local and cloud builds produce APKs with the same signature,
+    // enabling updates without uninstall and preserving user data.
+    signingConfigs {
+        create("sharedDebug") {
+            storeFile = rootProject.file("keystore/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     defaultConfig {
         applicationId = "helium314.keyboard"
         minSdk = 21
@@ -42,6 +53,7 @@ android {
             isMinifyEnabled = true
             isJniDebuggable = false
             applicationIdSuffix = ".debug"
+            signingConfig = signingConfigs.getByName("sharedDebug")
         }
         create("runTests") { // build variant for running tests on CI that skips tests known to fail
             isMinifyEnabled = false
@@ -51,7 +63,7 @@ android {
             isDebuggable = true
             isMinifyEnabled = false
             isJniDebuggable = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("sharedDebug")
             applicationIdSuffix = ".debug"
         }
         base.archivesBaseName = "HeliBoard_" + defaultConfig.versionName
