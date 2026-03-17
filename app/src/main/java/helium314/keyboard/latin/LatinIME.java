@@ -1456,18 +1456,9 @@ public class LatinIME extends InputMethodService implements
         }
 
         final CharSequence before = ic.getTextBeforeCursor(FULLAPP_SYNC_MAX_CHARS, 0);
+        final CharSequence selectedText = ic.getSelectedText(0);
         final CharSequence after = ic.getTextAfterCursor(FULLAPP_SYNC_MAX_CHARS, 0);
-        if (before == null && after == null) {
-            return "";
-        }
-        final StringBuilder sb = new StringBuilder();
-        if (before != null) {
-            sb.append(before);
-        }
-        if (after != null) {
-            sb.append(after);
-        }
-        return sb.toString();
+        return FullappTextSnapshotUtils.buildFieldTextSnapshot(before, selectedText, after);
     }
 
     /**
@@ -1521,18 +1512,12 @@ public class LatinIME extends InputMethodService implements
         }
 
         final CharSequence before = ic.getTextBeforeCursor(maxChars, 0);
+        final CharSequence selectedText = ic.getSelectedText(0);
         final CharSequence after = ic.getTextAfterCursor(maxChars, 0);
-        if (before == null && after == null) {
+        if (before == null && selectedText == null && after == null) {
             return null;
         }
-        final StringBuilder fallback = new StringBuilder();
-        if (before != null) {
-            fallback.append(before);
-        }
-        if (after != null) {
-            fallback.append(after);
-        }
-        return fallback.toString();
+        return FullappTextSnapshotUtils.buildFieldTextSnapshot(before, selectedText, after);
     }
 
     /**
@@ -1553,14 +1538,14 @@ public class LatinIME extends InputMethodService implements
         try {
             ic.finishComposingText();
             final CharSequence before = ic.getTextBeforeCursor(FULLAPP_SYNC_MAX_CHARS, 0);
+            final CharSequence selectedText = ic.getSelectedText(0);
             final CharSequence after = ic.getTextAfterCursor(FULLAPP_SYNC_MAX_CHARS, 0);
-            final int beforeLength = before != null ? before.length() : 0;
-            final int afterLength = after != null ? after.length() : 0;
-            final int totalLength = beforeLength + afterLength;
+            final int totalLength = FullappTextSnapshotUtils.getFieldTextSnapshotLength(
+                    before, selectedText, after);
 
             if (totalLength > 0) {
-                final boolean selected = ic.setSelection(0, totalLength);
-                if (!selected) {
+                final boolean selectionSet = ic.setSelection(0, totalLength);
+                if (!selectionSet) {
                     ic.setSelection(totalLength, totalLength);
                     ic.deleteSurroundingText(totalLength, 0);
                 }

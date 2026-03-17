@@ -60,8 +60,9 @@ This points to `getExtractedText()` rather than the voice paragraph timer.
 to the text returned by `getExtractedText()` — likely for system fullscreen/extract-view display.
 
 **Fix**: We use `getOriginalFieldTextForFullapp()`, which bypasses `getExtractedText()` and
-reads only via `getTextBeforeCursor()` + `getTextAfterCursor()`. That path returns the actual
-field content without the editor’s extra newlines.
+reads via `getTextBeforeCursor()` + `getSelectedText()` + `getTextAfterCursor()`. That path
+returns the actual field content (including active selections) without the editor’s extra
+newlines.
 
 ### What to keep
 
