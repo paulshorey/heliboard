@@ -24,3 +24,13 @@ Only one installable APK should exist in `./dist` at a time, and regenerating it
 
 - Fullapp architecture: `docs/fullapp-keyboard.md`
 - Agent instructions: `AGENTS.md`
+
+## Run in debug mode:
+```
+./gradlew installDebug && adb logcat -c && adb logcat -v time | grep -E 'LatinIME|TextCleanupClient|VoiceInputManager|DeepgramTranscription|VoiceRecorder|cleanup|OpenAI|Deepgram|VOICE_'
+```
+or just install without logs:
+```
+./gradlew installDebug
+```
+
