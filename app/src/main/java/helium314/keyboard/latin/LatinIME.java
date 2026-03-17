@@ -2077,6 +2077,9 @@ public class LatinIME extends InputMethodService implements
                     // - manager queue/transcription drained (this callback)
                     // - no cleanup request in-flight / queued transcription waiting
                     if (!mCleanupInProgress && !hasPendingTranscriptions()) {
+                        if (mPendingNewParagraph) {
+                            processPendingVoiceInput();
+                        }
                         mKeyboardSwitcher.hideProcessingIndicator();
                     }
                 } catch (Exception e) {
@@ -2134,7 +2137,9 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onNewParagraphRequested() {
                 try {
-                    if (mCleanupInProgress) {
+                    final boolean managerStillProcessing =
+                            mVoiceInputManager != null && mVoiceInputManager.hasPendingProcessing();
+                    if (mCleanupInProgress || hasPendingTranscriptions() || managerStillProcessing) {
                         mPendingNewParagraph = true;
                     } else {
                         Log.i(TAG, "New paragraph break inserted (recording remains active)");

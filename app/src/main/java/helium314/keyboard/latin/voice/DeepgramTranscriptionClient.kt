@@ -30,7 +30,9 @@ class DeepgramTranscriptionClient {
     companion object {
         private const val TAG = "DeepgramTranscription"
         private const val STREAMING_BASE_URL = "wss://api.deepgram.com/v1/listen"
-        private const val FINALIZE_CLOSE_GRACE_MS = 1_500L
+        // Give the provider enough time to emit the final transcript after Finalize.
+        // A shorter window can drop the tail end of speech on slower networks.
+        private const val FINALIZE_CLOSE_GRACE_MS = 4_000L
     }
 
     interface StreamingCallback {

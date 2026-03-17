@@ -247,7 +247,7 @@
     <string name="google_api_key_title">OpenAI API Key</string>
     <string name="google_api_key_summary">API key for text cleanup (OpenAI). Get from platform.openai.com</string>
     <string name="gemini_model_title">OpenAI model</string>
-    <string name="gemini_model_summary">Model name for cleanup (default: gpt-4.1-nano).</string>
+    <string name="gemini_model_summary">Model name for cleanup (default: gpt-4o-mini).</string>
     <string name="cleanup_prompt_title">Cleanup Prompt</string>
     <string name="cleanup_prompt_summary">Prompt for OpenAI post-processing to fix capitalization and punctuation</string>
     <string name="cleanup_prompt_reset_button">Reset prompt</string>

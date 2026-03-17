@@ -240,13 +240,30 @@ class VoiceRecorder(private val context: Context) {
     fun pauseRecording() {
         if (isRecording && !isPaused) {
             isPaused = true
+            try {
+                // Stop the recorder to avoid keeping the microphone actively capturing
+                // while the UI reports a paused state.
+                audioRecord?.stop()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error pausing AudioRecord: ${e.message}")
+            }
             Log.i(TAG, "Recording paused")
         }
     }
 
     fun resumeRecording() {
         if (isRecording && isPaused) {
-            isPaused = false
+            try {
+                audioRecord?.startRecording()
+                isPaused = false
+            } catch (e: Exception) {
+                Log.e(TAG, "Error resuming AudioRecord: ${e.message}")
+                val callbackSnapshot = callback
+                mainHandler.post {
+                    callbackSnapshot?.onRecordingError("Failed to resume recording: ${e.message}")
+                }
+                return
+            }
             Log.i(TAG, "Recording resumed")
         }
     }
@@ -274,6 +291,17 @@ class VoiceRecorder(private val context: Context) {
 
         try {
             while (isRecording) {
+                if (isPaused) {
+                    silenceDurationMs = 0L
+                    isSpeaking = false
+                    try {
+                        Thread.sleep(READ_INTERVAL_MS)
+                    } catch (_: InterruptedException) {
+                        break
+                    }
+                    continue
+                }
+
                 val bytesRead = audioRecord?.read(readBuffer, 0, BYTES_PER_READ) ?: break
                 when {
                     bytesRead > 0 -> {
@@ -301,13 +329,6 @@ class VoiceRecorder(private val context: Context) {
                         mainHandler.post { callbackSnapshot?.onRecordingError(error) }
                         break
                     }
-                }
-
-                // When paused, discard audio but keep the loop alive
-                if (isPaused) {
-                    silenceDurationMs = 0L
-                    isSpeaking = false
-                    continue
                 }
 
                 val chunk = if (bytesRead == BYTES_PER_READ) readBuffer.copyOf()
