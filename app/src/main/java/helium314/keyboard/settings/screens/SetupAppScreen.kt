@@ -73,14 +73,14 @@ fun SetupAppScreen(
     var isImeCurrent by remember { mutableStateOf(false) }
     var microphoneGranted by remember { mutableStateOf(false) }
     var deepgramApiKey by remember { mutableStateOf("") }
-    var googleApiKey by remember { mutableStateOf("") }
+    var openAiApiKey by remember { mutableStateOf("") }
 
     fun refreshStatus() {
         isImeEnabled = UncachedInputMethodManagerUtils.isThisImeEnabled(context, imm)
         isImeCurrent = UncachedInputMethodManagerUtils.isThisImeCurrent(context, imm)
         microphoneGranted = PermissionsUtil.checkAllPermissionsGranted(context, Manifest.permission.RECORD_AUDIO)
         deepgramApiKey = prefs.getString(Settings.PREF_DEEPGRAM_API_KEY, Defaults.PREF_DEEPGRAM_API_KEY) ?: ""
-        googleApiKey = prefs.getString(Settings.PREF_GOOGLE_API_KEY, Defaults.PREF_GOOGLE_API_KEY) ?: ""
+        openAiApiKey = prefs.getString(Settings.PREF_OPENAI_API_KEY, Defaults.PREF_OPENAI_API_KEY) ?: ""
     }
 
     LaunchedEffect(prefChanged?.value) {
@@ -166,13 +166,13 @@ fun SetupAppScreen(
                 SetupRequirementItem(
                     title = stringResource(R.string.google_api_key_title),
                     summary = stringResource(R.string.google_api_key_summary),
-                    isComplete = googleApiKey.isNotBlank(),
+                    isComplete = openAiApiKey.isNotBlank(),
                 ) {
                     SetupKeyField(
-                        value = googleApiKey,
+                        value = openAiApiKey,
                         onValueChange = { newValue ->
-                            googleApiKey = newValue
-                            prefs.edit { putString(Settings.PREF_GOOGLE_API_KEY, newValue) }
+                            openAiApiKey = newValue
+                            prefs.edit { putString(Settings.PREF_OPENAI_API_KEY, newValue) }
                         }
                     )
                 }
