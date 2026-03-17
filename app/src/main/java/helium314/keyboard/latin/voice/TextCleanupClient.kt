@@ -593,7 +593,12 @@ class TextCleanupClient {
     private fun extractRefusal(responseJson: JSONObject): String? {
         val choices = responseJson.optJSONArray("choices") ?: return null
         val message = choices.optJSONObject(0)?.optJSONObject("message") ?: return null
-        return message.optString("refusal", "").trim().ifEmpty { null }
+        if (!message.has("refusal") || message.isNull("refusal")) {
+            return null
+        }
+        return message.optString("refusal", "")
+            .trim()
+            .takeUnless { it.isEmpty() || it.equals("null", ignoreCase = true) }
     }
 
     private fun extractEditedText(responseJson: JSONObject): String? {
