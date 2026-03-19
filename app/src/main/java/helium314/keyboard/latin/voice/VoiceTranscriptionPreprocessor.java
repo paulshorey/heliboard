@@ -3,7 +3,6 @@ package helium314.keyboard.latin.voice;
 
 import androidx.annotation.Nullable;
 
-import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -101,12 +100,11 @@ public final class VoiceTranscriptionPreprocessor {
             return text;
         }
 
-        final String lowered = text.toLowerCase(Locale.ROOT);
-        final Matcher trailingPeriodMatcher = TRAILING_PERIOD_PATTERN.matcher(lowered);
+        final Matcher trailingPeriodMatcher = TRAILING_PERIOD_PATTERN.matcher(text);
         if (trailingPeriodMatcher.find()) {
             return trailingPeriodMatcher.replaceFirst("$1");
         }
-        return lowered;
+        return text;
     }
 
     private static PhraseReplacement replacement(

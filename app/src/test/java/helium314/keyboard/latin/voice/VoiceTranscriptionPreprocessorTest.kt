@@ -6,17 +6,17 @@ import kotlin.test.assertEquals
 
 class VoiceTranscriptionPreprocessorTest {
     @Test
-    fun `lowercases short chunk and removes trailing period`() {
+    fun `removes trailing period from short chunk preserving casing`() {
         val processed = VoiceTranscriptionPreprocessor.preprocessChunk("Hello There. ")
 
-        assertEquals("hello there ", processed)
+        assertEquals("Hello There ", processed)
     }
 
     @Test
     fun `removes trailing period at end of short chunk`() {
         val processed = VoiceTranscriptionPreprocessor.preprocessChunk("Thanks.")
 
-        assertEquals("thanks", processed)
+        assertEquals("Thanks", processed)
     }
 
     @Test
