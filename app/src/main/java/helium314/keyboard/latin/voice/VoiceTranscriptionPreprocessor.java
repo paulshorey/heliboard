@@ -3,7 +3,6 @@ package helium314.keyboard.latin.voice;
 
 import androidx.annotation.Nullable;
 
-import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -14,7 +13,7 @@ import java.util.regex.Pattern;
  * newly transcribed text instead of any later merged queue item.</p>
  */
 public final class VoiceTranscriptionPreprocessor {
-    private static final int SHORT_PHRASE_LOWERCASE_LIMIT = 40;
+    private static final int SHORT_PHRASE_TRAILING_PERIOD_LIMIT = 40;
     private static final Pattern TRAILING_PERIOD_PATTERN = Pattern.compile("(?<!\\.)\\.(\\s*)$");
 
     private static final PhraseReplacement[] SPECIAL_CHARACTER_REPLACEMENTS =
@@ -89,24 +88,23 @@ public final class VoiceTranscriptionPreprocessor {
             return text;
         }
 
-        String normalized = normalizeShortPhrase(text);
+        String normalized = stripTrailingPeriodIfShort(text);
         for (PhraseReplacement replacement : SPECIAL_CHARACTER_REPLACEMENTS) {
             normalized = replacement.apply(normalized);
         }
         return normalized;
     }
 
-    private static String normalizeShortPhrase(final String text) {
-        if (text.trim().length() >= SHORT_PHRASE_LOWERCASE_LIMIT) {
+    private static String stripTrailingPeriodIfShort(final String text) {
+        if (text.trim().length() >= SHORT_PHRASE_TRAILING_PERIOD_LIMIT) {
             return text;
         }
 
-        final String lowered = text.toLowerCase(Locale.ROOT);
-        final Matcher trailingPeriodMatcher = TRAILING_PERIOD_PATTERN.matcher(lowered);
+        final Matcher trailingPeriodMatcher = TRAILING_PERIOD_PATTERN.matcher(text);
         if (trailingPeriodMatcher.find()) {
             return trailingPeriodMatcher.replaceFirst("$1");
         }
-        return lowered;
+        return text;
     }
 
     private static PhraseReplacement replacement(
