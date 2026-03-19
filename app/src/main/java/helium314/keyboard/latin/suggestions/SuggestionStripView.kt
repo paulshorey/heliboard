@@ -77,8 +77,6 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         fun onVoiceInputClicked()
         fun onVoiceCancelClicked()
         fun onVoicePauseClicked()
-        fun onFullappExpandClicked()
-        fun onFullappMinimizeClicked()
     }
 
     private val moreSuggestionsContainer: View
@@ -120,20 +118,15 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
     private val pinnedKeys: ViewGroup = findViewById(R.id.pinned_keys)
     private val suggestionsStrip: ViewGroup = findViewById(R.id.suggestions_strip)
     private val toolbarExpandKey = findViewById<ImageButton>(R.id.suggestions_strip_toolbar_key)
-    private val customButtonsOverlay: ViewGroup = findViewById(R.id.custom_buttons_overlay)
-    private val fullappExpandKey = findViewById<ImageButton>(R.id.fullapp_expand_key)
     private val voiceInputKey = findViewById<ImageButton>(R.id.voice_input_key)
     private val voiceCancelKey = findViewById<ImageButton>(R.id.voice_cancel_key)
     private val voicePauseKey = findViewById<ImageButton>(R.id.voice_pause_key)
     private val incognitoIcon = KeyboardIconsSet.instance.getNewDrawable(ToolbarKey.INCOGNITO.name, context)
     private val toolbarArrowIcon = KeyboardIconsSet.instance.getNewDrawable(KeyboardIconsSet.NAME_TOOLBAR_KEY, context)
-    private val fullappExpandIcon = androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_arrow_down)?.mutate()
-    private val fullappCollapseIcon = androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_arrow_up)?.mutate()
     private val voiceIcon = KeyboardIconsSet.instance.getNewDrawable(ToolbarKey.VOICE.name, context)
     private val defaultToolbarBackground: Drawable = toolbarExpandKey.background
     private val enabledToolKeyBackground = GradientDrawable()
     private var direction = 1 // 1 if LTR, -1 if RTL
-    private var isVoiceRecording = false
     private var inFullappEditor = false
 
     private val toolbarKeyLayoutParams = LinearLayout.LayoutParams(
@@ -159,23 +152,6 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         enabledToolKeyBackground.colors = intArrayOf(color, Color.TRANSPARENT)
         enabledToolKeyBackground.gradientType = GradientDrawable.RADIAL_GRADIENT
         enabledToolKeyBackground.gradientRadius = resources.getDimensionPixelSize(R.dimen.config_suggestions_strip_height) / 2.1f
-
-        // Fullapp expand key setup (icon updated in setFullappButtonMode)
-        fullappExpandKey.layoutParams.height = toolbarHeight
-        fullappExpandKey.layoutParams.width = toolbarHeight
-        fullappExpandKey.setImageDrawable(fullappExpandIcon)
-        colors.setColor(fullappExpandKey, ColorType.TOOL_BAR_KEY)
-        colors.setBackground(fullappExpandKey, ColorType.STRIP_BACKGROUND)
-        fullappExpandKey.setOnClickListener {
-            AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, this, HapticEvent.KEY_PRESS)
-            if (::listener.isInitialized) {
-                if (inFullappEditor) {
-                    listener.onFullappMinimizeClicked()
-                } else {
-                    listener.onFullappExpandClicked()
-                }
-            }
-        }
 
         // Voice input key setup
         voiceInputKey.layoutParams.height = toolbarHeight
@@ -241,6 +217,7 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         }
 
         updateKeys()
+        updateFullappButtonMode()
     }
 
     private lateinit var listener: Listener
@@ -569,21 +546,15 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         val show = Settings.getValues().mShowsVoiceInputKey
         toolbar.findViewWithTag<View>(ToolbarKey.VOICE)?.isVisible = show
         pinnedKeys.findViewWithTag<View>(ToolbarKey.VOICE)?.isVisible = show
-        fullappExpandKey.isVisible = show
     }
 
     /**
-     * Update fullapp button icon and action. When in FullappEditorActivity, show angle-down
-     * (minimize); otherwise show angle-up (expand).
+     * Update the runtime fullapp toolbar button state. When in FullappEditorActivity, show the
+     * minimize icon; otherwise show the normal fullapp toolbar icon.
      */
     fun setFullappButtonMode(inFullappEditor: Boolean) {
         this.inFullappEditor = inFullappEditor
-        fullappExpandKey.setImageDrawable(
-            if (inFullappEditor) fullappCollapseIcon else fullappExpandIcon
-        )
-        fullappExpandKey.contentDescription = context.getString(
-            if (inFullappEditor) R.string.fullapp_collapse_description else R.string.fullapp_expand_description
-        )
+        updateFullappButtonMode()
     }
 
     private fun updateKeys() {
@@ -644,12 +615,10 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
      */
     fun setVoiceInputState(state: VoiceState) {
         val isActive = state != VoiceState.IDLE
-        this.isVoiceRecording = isActive
         post {
-            // Show cancel and pause buttons when active, hide fullapp button
+            // Show cancel and pause buttons when active.
             voiceCancelKey.isVisible = isActive
             voicePauseKey.isVisible = isActive
-            fullappExpandKey.isVisible = !isActive && Settings.getValues().mShowsVoiceInputKey
 
             // Update pause button icon based on pause state
             if (state == VoiceState.PAUSED) {
@@ -682,6 +651,25 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
                 }
             }
         }
+    }
+
+    private fun updateFullappButtonMode() {
+        updateFullappButton(toolbar.findViewWithTag<ImageButton>(ToolbarKey.FULLAPP))
+        updateFullappButton(pinnedKeys.findViewWithTag<ImageButton>(ToolbarKey.FULLAPP))
+    }
+
+    private fun updateFullappButton(button: ImageButton?) {
+        if (button == null) return
+        button.setImageDrawable(getFullappButtonDrawable())
+        button.contentDescription = context.getString(
+            if (inFullappEditor) R.string.fullapp_collapse_description else R.string.fullapp_expand_description
+        )
+    }
+
+    private fun getFullappButtonDrawable() = if (inFullappEditor) {
+        androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_arrow_up)?.mutate()
+    } else {
+        KeyboardIconsSet.instance.getNewDrawable(ToolbarKey.FULLAPP.name, context)
     }
 
     companion object {

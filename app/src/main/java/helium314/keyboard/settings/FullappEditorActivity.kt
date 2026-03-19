@@ -49,7 +49,7 @@ import java.security.MessageDigest
 /**
  * Fullapp text editor Activity.
  *
- * Launched when the user taps the fullapp expand button while the keyboard is attached
+ * Launched when the user taps the fullapp toolbar button while the keyboard is attached
  * to another app (e.g. a web page textarea). The keyboard app becomes the foreground app;
  * the user edits text here with full keyboard and voice support, then returns to the
  * original app with the text synced back.

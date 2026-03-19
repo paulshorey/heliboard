@@ -9,7 +9,7 @@ This document describes how the fullapp keyboard feature works and what we learn
 
 ## Feature Overview
 
-When the user taps the fullapp expand button (next to the microphone):
+When the user taps the fullapp toolbar button (configured through the normal toolbar / pinned-toolbar settings):
 
 1. The keyboard **hides** and `FullappEditorActivity` is launched as a standalone app.
 2. The user sees a fullapp text editor (Compose UI). They can type or use voice transcription.
@@ -38,7 +38,7 @@ So we reuse that model: **treat fullapp as "opening the keyboard app"**, separat
 
 ### Flow
 
-1. **User taps fullapp expand** → `onFullappExpandClicked()` → `launchFullappEditorActivity()`.
+1. **User taps the fullapp toolbar key** → `KeyCode.FULLAPP` → `onFullappExpandClicked()` / `onFullappMinimizeClicked()` → `launchFullappEditorActivity()` or exit runnable.
 2. **Launch**: Commit typed text, stop voice gracefully, read current text and `packageName` from `InputConnection`/`EditorInfo`, call `requestHideSelf()`, start `FullappEditorActivity` with extras.
 3. **In Activity**: User edits in Compose `OutlinedTextField` (keyboard + voice work; keyboard app is foreground). No top toolbar — the keyboard's fullapp toggle (angle down) or back press exits.
 4. **While editing**: Persist a draft in credential-protected storage, keyed by an editor fingerprint (package + field metadata). This also lets multiple apps/fields keep separate unsynced drafts.
@@ -49,7 +49,8 @@ So we reuse that model: **treat fullapp as "opening the keyboard app"**, separat
 
 - `LatinIME.java`: `launchFullappEditorActivity()`, pending-text handling in `onStartInputViewInternal()`.
 - `FullappEditorActivity.kt`: Compose UI, autosave lifecycle, `FullappEditorResult` draft store.
-- `SuggestionStripView.kt`: Fullapp expand button, `onFullappExpandClicked()`.
+- `SuggestionStripView.kt`: Runtime fullapp toolbar button state (expand/minimize icon swap).
+- `ToolbarUtils.kt`: Fullapp toolbar key registration, defaults, and settings integration.
 
 ### Trailing newlines when opening
 
