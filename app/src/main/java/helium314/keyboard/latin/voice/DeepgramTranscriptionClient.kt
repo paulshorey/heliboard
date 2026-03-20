@@ -109,7 +109,7 @@ class DeepgramTranscriptionClient {
         Log.i(
             TAG,
             "VOICE_STEP_3 opening Deepgram streaming socket " +
-                "(language=${language ?: "auto"}, endpointing=deepgram-default)"
+                "(language=${language ?: "auto"}, endpointing=1000ms, utterance_end_ms=1000ms)"
         )
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
@@ -241,6 +241,10 @@ class DeepgramTranscriptionClient {
             append("&encoding=linear16")
             append("&sample_rate=").append(VoiceRecorder.SAMPLE_RATE)
             append("&channels=1")
+            append("&endpointing=1000")
+            append("&utterance_end_ms=1000")
+            // Required for utterance_end_ms (word-gap utterance boundaries).
+            append("&interim_results=true")
             append("&vad_events=true")
             if (!language.isNullOrBlank()) {
                 append("&language=").append(language)
