@@ -4,7 +4,7 @@ HeliBoard is an Android app, open-source project based on AOSP / OpenBoard keybo
 
 ## This project rewrites HeliBoard with custom experimental features
 
-1. Voice to text (using Deepgram Nova-3 transcription + Google Gemini cleanup)
+1. Voice to text (using Deepgram Nova-3 streaming transcription + OpenAI cleanup)
 2. Smart auto-capitalization
 3. UI features
 

@@ -90,7 +90,7 @@ import helium314.keyboard.latin.utils.ToolbarMode;
 import helium314.keyboard.latin.voice.TextCleanupClient;
 import helium314.keyboard.latin.voice.VoiceContextUtils;
 import helium314.keyboard.latin.voice.VoiceInputManager;
-import helium314.keyboard.latin.voice.VoiceTranscriptionPreprocessor;
+import helium314.keyboard.latin.voice.VoicePostTranscriptionFilter;
 import helium314.keyboard.latin.voice.VoiceTextSanitizer;
 import helium314.keyboard.latin.suggestions.SuggestionStripView.VoiceState;
 import helium314.keyboard.settings.FullappEditorActivity;
@@ -2109,17 +2109,17 @@ public class LatinIME extends InputMethodService implements
             public void onTranscriptionResult(@NonNull String text) {
                 try {
                     final String rawText = text != null ? text : "";
-                    final String preprocessedText =
-                            VoiceTranscriptionPreprocessor.preprocessChunk(rawText);
-                    if (!preprocessedText.equals(rawText)) {
+                    final String filteredText =
+                            VoicePostTranscriptionFilter.applyPostTranscriptionFilter(rawText);
+                    if (!filteredText.equals(rawText)) {
                         Log.i(
                                 TAG,
-                                "VOICE_STEP_4 applied manual transcript edits (" +
-                                        rawText.length() + " -> " + preprocessedText.length() +
+                                "VOICE_STEP_4 applied post-transcription filter (" +
+                                        rawText.length() + " -> " + filteredText.length() +
                                         " chars)"
                         );
                     }
-                    if (preprocessedText.trim().isEmpty()) {
+                    if (filteredText.trim().isEmpty()) {
                         Log.i(TAG, "VOICE_STEP_4 empty transcription result — nothing to insert");
                         // No cleanup/insert callback will follow for empty chunks, so clear
                         // spinner now unless another cleanup round is currently active.
@@ -2131,11 +2131,11 @@ public class LatinIME extends InputMethodService implements
                     Log.i(
                             TAG,
                             "VOICE_STEP_4 transcription arrived in IME (" +
-                                    preprocessedText.length() + " chars)"
+                                    filteredText.length() + " chars)"
                     );
                     final PendingVoiceTranscription pendingTranscription =
                             createPendingVoiceTranscription(
-                                    preprocessedText,
+                                    filteredText,
                                     SystemClock.elapsedRealtime(),
                                     1
                             );
@@ -2379,7 +2379,7 @@ public class LatinIME extends InputMethodService implements
      * Only the editable portion (text after the last line break in the context window) is
      * deleted and replaced. Earlier lines, paragraph breaks, and prior paragraphs remain untouched.
      *
-     * The cleanup model already handles capitalization and punctuation, so we do NOT apply
+     * The cleanup model rewrites the line (grammar, punctuation, etc.), so we do NOT apply
      * {@link #adjustCapitalization} here — only invisible-char stripping and trailing space.
      *
      * @param cleanedText The corrected text returned by the cleanup model (latest line only)

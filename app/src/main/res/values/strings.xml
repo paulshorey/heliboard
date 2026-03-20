@@ -249,7 +249,7 @@
     <string name="gemini_model_title">OpenAI model</string>
     <string name="gemini_model_summary">Model name for cleanup (default: gpt-4o-mini).</string>
     <string name="cleanup_prompt_title">Cleanup Prompt</string>
-    <string name="cleanup_prompt_summary">Prompt for OpenAI post-processing to fix capitalization and punctuation</string>
+    <string name="cleanup_prompt_summary">Instructions for the OpenAI cleanup step on transcribed text</string>
     <string name="cleanup_prompt_reset_button">Reset prompt</string>
     <string name="voice_chunk_silence_seconds_title">Chunk silence duration (seconds)</string>
     <string name="voice_silence_threshold_title">Silence threshold (RMS loudness)</string>
