@@ -999,9 +999,7 @@ public class LatinIME extends InputMethodService implements
 
         // Show angle-down (minimize) when keyboard is in FullappEditorActivity; angle-up (expand) otherwise
         if (hasSuggestionStripView()) {
-            final boolean inFullappEditor = FullappEditorActivity.isActive
-                    && getPackageName().equals(editorInfo.packageName);
-            mSuggestionStripView.setFullappButtonMode(inFullappEditor);
+            mSuggestionStripView.setFullappButtonMode(isConnectedToFullappEditor(editorInfo));
         }
         // ALERT: settings have not been reloaded and there is a chance they may be stale.
         // In the practice, if it is, we should have gotten onConfigurationChanged so it should
@@ -1674,6 +1672,14 @@ public class LatinIME extends InputMethodService implements
     // This method is public for testability of LatinIME, but also in the future it should
     // completely replace #onCodeInput.
     public void onEvent(@NonNull final Event event) {
+        if (KeyCode.FULLAPP == event.getKeyCode()) {
+            if (isConnectedToFullappEditor(getCurrentInputEditorInfo())) {
+                onFullappMinimizeClicked();
+            } else {
+                onFullappExpandClicked();
+            }
+            return;
+        }
         if (KeyCode.VOICE_INPUT == event.getKeyCode()) {
             mRichImm.switchToShortcutIme(this);
         }
@@ -1807,6 +1813,12 @@ public class LatinIME extends InputMethodService implements
         if (hasSuggestionStripView()) {
             mSuggestionStripView.setFullappButtonMode(inFullappEditor);
         }
+    }
+
+    private boolean isConnectedToFullappEditor(@Nullable final EditorInfo editorInfo) {
+        return editorInfo != null
+                && FullappEditorActivity.isActive
+                && getPackageName().equals(editorInfo.packageName);
     }
 
     // Called from {@link SuggestionStripView} through the {@link SuggestionStripView#Listener}
@@ -1989,12 +2001,10 @@ public class LatinIME extends InputMethodService implements
         }
     }
 
-    @Override
     public void onFullappExpandClicked() {
         launchFullappEditorActivity();
     }
 
-    @Override
     public void onFullappMinimizeClicked() {
         final Runnable runnable = FullappEditorActivity.onExitFromKeyboard;
         if (runnable != null) {

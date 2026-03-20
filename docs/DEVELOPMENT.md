@@ -25,6 +25,8 @@ gita && ./gradlew assembleDebug && ./gradlew installDebug
 
 # Configuring
 
+For **key hint / secondary character** sizing (long-press hints, number row, resource qualifiers), see [key-hint-secondary-character-sizing.md](key-hint-secondary-character-sizing.md).
+
 app/src/main/java/helium314/keyboard/latin/settings/Defaults.kt
 
 ```

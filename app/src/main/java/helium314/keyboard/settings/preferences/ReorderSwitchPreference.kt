@@ -18,6 +18,7 @@ import helium314.keyboard.keyboard.internal.KeyboardIconsSet
 import helium314.keyboard.latin.R
 import helium314.keyboard.latin.common.Constants.Separators
 import helium314.keyboard.latin.utils.getStringResourceOrName
+import helium314.keyboard.latin.utils.normalizeReorderSwitchPreferenceValue
 import helium314.keyboard.latin.utils.prefs
 import helium314.keyboard.settings.Setting
 import helium314.keyboard.settings.dialogs.ReorderDialog
@@ -35,7 +36,12 @@ fun ReorderSwitchPreference(setting: Setting, default: String) {
     if (showDialog) {
         val ctx = LocalContext.current
         val prefs = ctx.prefs()
-        val items = prefs.getString(setting.key, default)!!.split(Separators.ENTRY).map {
+        val storedValue = prefs.getString(setting.key, default) ?: default
+        val normalizedValue = normalizeReorderSwitchPreferenceValue(storedValue, default)
+        if (normalizedValue != storedValue) {
+            prefs.edit { putString(setting.key, normalizedValue) }
+        }
+        val items = normalizedValue.split(Separators.ENTRY).map {
             val both = it.split(Separators.KV)
             KeyAndState(both.first(), both.last().toBoolean())
         }

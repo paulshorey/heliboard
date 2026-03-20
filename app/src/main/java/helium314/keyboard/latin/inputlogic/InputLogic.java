@@ -810,6 +810,7 @@ public final class InputLogic {
                 inputTransaction.setRequiresUpdateSuggestions();
                 break;
             case KeyCode.VOICE_INPUT:
+            case KeyCode.FULLAPP:
                 // switching to shortcut IME, shift state, keyboard,... is handled by LatinIME,
                 // {@link KeyboardSwitcher#onEvent(Event)}, or {@link #onPressKey(int,int,boolean)} and {@link #onReleaseKey(int,boolean)}.
                 // We need to switch to the shortcut IME. This is handled by LatinIME since the

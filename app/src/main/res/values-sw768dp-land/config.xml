@@ -27,10 +27,10 @@
     <fraction name="config_key_large_letter_ratio_lxx">60%</fraction>
     <fraction name="config_key_label_ratio_holo">28%</fraction>
     <fraction name="config_key_label_ratio_lxx">32%</fraction>
-    <fraction name="config_key_hint_letter_ratio_holo">30%</fraction>
-    <fraction name="config_key_hint_letter_ratio_lxx">30%</fraction>
-    <fraction name="config_key_hint_label_ratio_holo">28%</fraction>
-    <fraction name="config_key_hint_label_ratio_lxx">20%</fraction>
+    <fraction name="config_key_hint_letter_ratio_holo">37%</fraction>
+    <fraction name="config_key_hint_letter_ratio_lxx">37%</fraction>
+    <fraction name="config_key_hint_label_ratio_holo">35%</fraction>
+    <fraction name="config_key_hint_label_ratio_lxx">25%</fraction>
     <fraction name="config_key_shifted_letter_hint_ratio_holo">24%</fraction>
     <fraction name="config_key_shifted_letter_hint_ratio_lxx">24%</fraction>
     <fraction name="config_language_on_spacebar_text_ratio">30.00%</fraction>
