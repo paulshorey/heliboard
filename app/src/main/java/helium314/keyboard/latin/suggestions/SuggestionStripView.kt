@@ -667,7 +667,7 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
     }
 
     private fun getFullappButtonDrawable() = if (inFullappEditor) {
-        androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_arrow_up)?.mutate()
+        KeyboardIconsSet.instance.getNewDrawable(KeyboardIconsSet.NAME_FULLAPP_CLOSE, context)
     } else {
         KeyboardIconsSet.instance.getNewDrawable(ToolbarKey.FULLAPP.name, context)
     }

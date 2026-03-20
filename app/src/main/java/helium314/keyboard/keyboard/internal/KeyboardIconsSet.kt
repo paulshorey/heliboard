@@ -79,6 +79,7 @@ class KeyboardIconsSet private constructor() {
         const val NAME_SWITCH_ONEHANDED_KEY = "switch_onehanded_key"
         const val NAME_RESIZE_ONEHANDED_KEY = "resize_onehanded_key"
         const val NAME_TOOLBAR_KEY = "toolbar_key"
+        const val NAME_FULLAPP_CLOSE = "fullapp_close"
         const val NAME_BIN = "bin"
 
         // names used in the past, and we can't just delete them because they might still be in use in some layouts
@@ -120,12 +121,13 @@ class KeyboardIconsSet private constructor() {
             NAME_SWITCH_ONEHANDED_KEY to        R.drawable.ic_arrow_left,
             NAME_RESIZE_ONEHANDED_KEY to        R.drawable.ic_arrow_horizontal,
             NAME_TOOLBAR_KEY to                 R.drawable.ic_arrow_right,
+            NAME_FULLAPP_CLOSE to               R.drawable.ic_fullapp_close,
             NAME_BIN to                         R.drawable.ic_bin,
         ).apply {
             ToolbarKey.entries.forEach {
                 put(it.name.lowercase(Locale.US), when (it) {
                     ToolbarKey.VOICE -> R.drawable.sym_keyboard_voice_holo
-                    ToolbarKey.FULLAPP -> R.drawable.ic_arrow_down
+                    ToolbarKey.FULLAPP -> R.drawable.ic_fullapp_open
                     ToolbarKey.CLIPBOARD -> R.drawable.sym_keyboard_clipboard_holo
                     ToolbarKey.NUMPAD -> R.drawable.sym_keyboard_numpad_key_holo
                     ToolbarKey.UNDO -> R.drawable.ic_undo
@@ -182,12 +184,13 @@ class KeyboardIconsSet private constructor() {
             NAME_SWITCH_ONEHANDED_KEY to        R.drawable.ic_arrow_left,
             NAME_RESIZE_ONEHANDED_KEY to        R.drawable.ic_arrow_horizontal,
             NAME_TOOLBAR_KEY to                 R.drawable.ic_arrow_right,
+            NAME_FULLAPP_CLOSE to               R.drawable.ic_fullapp_close,
             NAME_BIN to                         R.drawable.ic_bin,
         ).apply {
             ToolbarKey.entries.forEach {
                 put(it.name.lowercase(Locale.US), when (it) {
                     ToolbarKey.VOICE -> R.drawable.sym_keyboard_voice_lxx
-                    ToolbarKey.FULLAPP -> R.drawable.ic_arrow_down
+                    ToolbarKey.FULLAPP -> R.drawable.ic_fullapp_open
                     ToolbarKey.CLIPBOARD -> R.drawable.sym_keyboard_clipboard_lxx
                     ToolbarKey.NUMPAD -> R.drawable.sym_keyboard_numpad_key_lxx
                     ToolbarKey.UNDO -> R.drawable.ic_undo
@@ -244,12 +247,13 @@ class KeyboardIconsSet private constructor() {
             NAME_SWITCH_ONEHANDED_KEY to        R.drawable.ic_arrow_left_rounded,
             NAME_RESIZE_ONEHANDED_KEY to        R.drawable.ic_arrow_horizontal_rounded,
             NAME_TOOLBAR_KEY to                 R.drawable.ic_arrow_right_rounded,
+            NAME_FULLAPP_CLOSE to               R.drawable.ic_fullapp_close,
             NAME_BIN to                         R.drawable.ic_bin_rounded,
         ).apply {
             ToolbarKey.entries.forEach {
                 put(it.name.lowercase(Locale.US), when (it) {
                     ToolbarKey.VOICE -> R.drawable.sym_keyboard_voice_rounded
-                    ToolbarKey.FULLAPP -> R.drawable.ic_arrow_down
+                    ToolbarKey.FULLAPP -> R.drawable.ic_fullapp_open
                     ToolbarKey.CLIPBOARD -> R.drawable.sym_keyboard_clipboard_rounded
                     ToolbarKey.NUMPAD -> R.drawable.sym_keyboard_numpad_key_lxx
                     ToolbarKey.UNDO -> R.drawable.ic_undo_rounded
