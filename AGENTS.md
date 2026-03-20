@@ -73,6 +73,11 @@ This helper script:
 
 Always overwrite `/workspace/dist/HeliBoard.apk` with the latest build when regenerating it.
 
+Required final step for task completion:
+
+- After finishing any implementation task, run `./tools/build-dist-apk.sh` so `/workspace/dist/HeliBoard.apk` is up to date.
+- Commit the rebuilt `/workspace/dist/HeliBoard.apk` to the current feature branch together with the task changes before giving the final summary.
+
 ## Shared debug keystore
 
 Debug builds use `keystore/debug.keystore` so local Gradle builds and cloud-agent builds produce APKs with the **same signature**. You can install a cloud-built APK over a locally-built install (or vice versa) without uninstalling, preserving user preferences and data.

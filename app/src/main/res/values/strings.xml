@@ -377,6 +377,7 @@
     <string name="clipboard" tools:keep="@string/clipboard">Clipboard</string>
     <string name="clear_clipboard" tools:keep="@string/clear_clipboard">Clear clipboard</string>
     <string name="voice" tools:keep="@string/voice">Voice input</string>
+    <string name="fullapp" tools:keep="@string/fullapp">Full app</string>
     <string name="numpad" tools:keep="@string/numpad" translatable="false">@string/layout_numpad</string>
     <string name="settings" tools:keep="@string/settings">Settings</string>
     <string name="select_all" tools:keep="@string/select_all" translatable="false">@android:string/selectAll</string>
@@ -910,6 +911,8 @@ New dictionary:
     <string name="label_shortcut_key_disabled" tools:keep="@string/label_shortcut_key_disabled">Voice input disabled</string>
     <!-- Label for toolbar key, currently used only for showing the icon name -->
     <string name="label_toolbar_key" tools:keep="@string/label_toolbar_key">Show / hide toolbar</string>
+    <!-- Label for the runtime close-fullapp icon in icon customization -->
+    <string name="label_fullapp_close" tools:keep="@string/label_fullapp_close">Close full app</string>
     <!-- Label for language switch key, currently used only for showing the icon name -->
     <string name="label_language_switch_key" tools:keep="@string/label_language_switch_key" translatable="false">@string/show_language_switch_key</string>
     <!-- Label for zero-width joiner key, currently used only for showing the icon name -->
