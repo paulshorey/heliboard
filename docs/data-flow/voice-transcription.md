@@ -4,17 +4,17 @@ This document describes the architecture and data flow for voice transcription w
 
 ## Overview
 
-The voice input system uses a **local recording + batch transcription** architecture:
-1. **VoiceRecorder** — captures audio locally, detects silence, emits WAV segments
-2. **Deepgram API** — transcribes each audio segment into text
-3. **Google Gemini API** — cleans up the transcribed text with recent context (capitalization, punctuation, grammar)
+The voice input system uses **local recording + streaming transcription**:
+1. **VoiceRecorder** — captures PCM16 audio locally; silence detection drives paragraph breaks and auto-stop
+2. **Deepgram API** (WebSocket) — streams audio and returns finalized transcript spans (`endpointing=1000ms`; `smart_format` and `punctuate` off so cleanup owns formatting)
+3. **OpenAI API** — cleans up the transcribed text with recent context (via `TextCleanupClient`)
 
 ## Architecture
 
 ```
 ┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
 │   Microphone    │────▶│   VoiceRecorder      │────▶│  Deepgram API   │
-│   (Hardware)    │     │   (PCM16 16kHz)      │     │  (POST /v1/listen)
+│   (Hardware)    │     │   (PCM16 16kHz)      │     │  (WebSocket /v1/listen)
 └─────────────────┘     │   Silence detection  │     └────────┬────────┘
                         │   WAV segmentation   │              │
                         └──────────────────────┘              │
@@ -26,8 +26,8 @@ The voice input system uses a **local recording + batch transcription** architec
                                    │
                                    ▼ (after 3s silence)
                         ┌──────────────────────┐     ┌─────────────────┐
-                        │  TextCleanupClient   │────▶│   Google API    │
-                        │  (HTTP POST)         │◀────│ (Gemini 3.1 Flash Lite)  │
+                        │  TextCleanupClient   │────▶│   OpenAI API    │
+                        │  (HTTP POST)         │◀────│ (chat completions)       │
                         └──────────────────────┘     └─────────────────┘
 ```
 
@@ -44,16 +44,12 @@ is sent for transcription.
 Captures audio from the microphone with client-side silence detection.
 - **Format**: PCM16, 16kHz, mono
 - **Silence detection**: Adaptive RMS threshold on each 100ms chunk
-- **Segmentation**: After configured silence duration, emits accumulated audio as a WAV file
-- **Output**: Complete WAV files (44-byte header + PCM data)
+- **Callbacks**: Supplies PCM chunks to `VoiceInputManager`; long silence can request a new paragraph or auto-stop
 
 ### DeepgramTranscriptionClient.kt
-HTTP client for Deepgram's pre-recorded transcription API.
-- **Endpoint**: `POST https://api.deepgram.com/v1/listen`
-- **Model**: `nova-3`
-- **Content-Type**: `audio/wav` (raw bytes in request body)
-- **Features**: `smart_format=true`, `punctuate=true`
-- **Retry**: Single automatic retry on transient failures (5xx, 408, timeout, connection error)
+WebSocket client for Deepgram live transcription.
+- **URL**: `wss://api.deepgram.com/v1/listen` with query params (`model=nova-3`, `encoding=linear16`, `sample_rate=16000`, `channels=1`, `vad_events=true`, `endpointing=1000`, `smart_format=false`, `punctuate=false`)
+- **Transport**: Raw PCM frames over the socket; finalized spans delivered as `Results` with `is_final` / `speech_final`
 
 ### VoiceInputManager.kt
 Orchestrates the voice input flow and manages timers.
@@ -62,16 +58,14 @@ Orchestrates the voice input flow and manages timers.
 - **New Paragraph Timer** (configurable): Insert paragraph break after long silence
 
 ### TextCleanupClient.kt
-HTTP client for Google's Gemini API.
-- **Model**: `gemini-3.1-flash-lite-preview` (configurable)
-- **Purpose**: Intelligent capitalization, punctuation, and grammar cleanup
-- **Input (system prompt)**: Non-chat cleanup instructions only (no transcript data)
+HTTP client for OpenAI chat completions (cleanup).
+- **Model**: User-configurable (default `gpt-4o-mini`)
+- **Purpose**: Merge and clean the latest line using context + new transcript
+- **Input (system prompt)**: Task framing plus user-editable cleanup preferences (`Defaults.PREF_CLEANUP_PROMPT`)
 - **Input (user message)**: Structured JSON payload containing `reference_context`, `editable_text`, and `new_transcription`
-- **Output**: Corrected current paragraph (only this portion is replaced in editor)
-- **Output format**: JSON with a single `edited_text` field
-- **maxOutputTokens**: 4096 (accommodates full paragraph responses)
+- **Output**: Corrected current line only (`edited_text` in JSON schema)
 - **Cancellation**: Tracks active HTTP calls; `cancelAll()` cancels in-flight requests
-- **Retry**: Single automatic retry on transient failures (5xx, 408, timeout, connection error)
+- **Retry**: Retries on transient failures (see client constants)
 
 ### LatinIME.java
 Main orchestrator that coordinates all components and manages text insertion.
@@ -97,18 +91,17 @@ User speaks...
     → onSegmentReady(wavData) callback
 ```
 
-### 3. Transcription + Cleanup + Replace Current Paragraph
+### 3. Transcription + Cleanup + Replace Current Line
 ```
-VoiceInputManager.enqueueSegment(wavData)
-    → DeepgramTranscriptionClient.transcribe(wavData)
-    → POST /v1/listen with audio/wav body
-    → Deepgram returns JSON with transcript
-    → onTranscriptionComplete(text)
+VoiceInputManager streams PCM to Deepgram
+    → DeepgramTranscriptionClient WebSocket
+    → Finalized transcript span → onTranscriptionResult(text)
+    → LatinIME applies VoicePostTranscriptionFilter (hook; currently no-op) 
     → LatinIME captures recent context (last 3 sentences or 300 chars)
     → Split at last newline:
-        referenceContext = text before last \n  (read-only, for Gemini's understanding)
-        editableText    = text after last \n   (current paragraph, will be replaced)
-    → Send to Gemini:
+        referenceContext = text before last \n  (read-only, for the model's understanding)
+        editableText    = text after last \n   (current line, will be replaced)
+    → Send to OpenAI:
         system prompt = cleanup instructions only
         user message  = structured transcript payload
           {
@@ -116,7 +109,7 @@ VoiceInputManager.enqueueSegment(wavData)
             "editable_text": "...",
             "new_transcription": "..."
           }
-    → Gemini returns {"edited_text":"..."}
+    → OpenAI returns {"edited_text":"..."}
     → LatinIME.replaceContextWithCleanedText():
         1. Delete editableText.length() chars before cursor
         2. Insert corrected text + trailing space
@@ -126,12 +119,12 @@ VoiceInputManager.enqueueSegment(wavData)
 **Context window**: The last ~3 sentences are gathered as context (detected by
 simplified punctuation matching: `.!?:;=`). If fewer than 3 sentence boundaries exist,
 up to 300 characters are used. This crosses newline/paragraph boundaries — even at the
-start of a new line, Gemini always has adequate context.
+start of a new line, the cleanup model always has adequate context.
 
 **Paragraph break protection**: The context is split at the last `\n`. Text before it
-(earlier paragraphs) is passed to Gemini as read-only `reference_context`. Text after it
-(the current paragraph) is sent as `editable_text`, and the new transcript chunk is sent
-as `new_transcription`. Only this current-paragraph portion is replaced in the editor,
+(earlier paragraphs) is passed as read-only `reference_context`. Text after it
+(the current line) is sent as `editable_text`, and the new transcript chunk is sent
+as `new_transcription`. Only this current-line portion is replaced in the editor,
 so `\n` and `\n\n` paragraph breaks are never touched.
 
 **Retry**: Both transcription and cleanup requests automatically retry once on
@@ -185,8 +178,8 @@ mVoiceSessionId         // incremented on cancel/new session; stale callbacks ar
 
 ### Settings (TranscriptionScreen.kt)
 - **Deepgram API Key**: Required for transcription
-- **Google AI API Key**: Required for cleanup (optional feature)
-- **Cleanup Prompt**: Customizable instructions for Gemini
+- **OpenAI API Key**: Required for cleanup (optional feature)
+- **Cleanup Prompt**: Customizable instructions for the cleanup model
 - **Chunk Silence Duration**: Silence window before cutting a chunk
 - **Silence Threshold**: RMS threshold floor for silence/speech detection
 - **New Paragraph Silence Duration**: Delay before inserting a paragraph break
@@ -212,7 +205,7 @@ MAX_SEGMENT_MS = 60000L        // Force-split at 60s
 - **API errors**: Logged and surfaced to user (invalid key, rate limit, etc.)
 - **Empty transcriptions**: Silently ignored
 - **Cleanup errors**: Raw transcription is inserted as fallback (graceful degradation — no text is lost)
-- **Session cancellation**: Both Deepgram and Gemini in-flight HTTP requests are cancelled;
+- **Session cancellation**: Deepgram stream and OpenAI in-flight HTTP requests are cancelled;
   any stale callbacks are discarded via `mVoiceSessionId` check
 
 ## Thread Safety
@@ -220,7 +213,7 @@ MAX_SEGMENT_MS = 60000L        // Force-split at 60s
 All callbacks are posted to the main thread via `Handler(Looper.getMainLooper())`:
 - Audio recording runs on a dedicated background thread
 - Deepgram HTTP callbacks → main thread
-- Gemini HTTP callbacks → main thread
+- OpenAI HTTP callbacks → main thread
 - Timer callbacks → main thread
 
 This ensures all text modifications happen sequentially on the UI thread.

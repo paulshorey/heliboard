@@ -1,27 +1,20 @@
-Default user-configurable cleanup prompt:
+Default user-configurable cleanup prompt (also in `Defaults.PREF_CLEANUP_PROMPT`):
 
-Edit the transcript text only.
+```
+You merge new speech into the current line only.
 
-Preserve the speaker's wording, tone, and writing style as closely as possible. Make the smallest possible edits needed to join the new transcription with the existing sentence or paragraph.
+- Fix obvious transcription mistakes, grammar, and spacing with the smallest edit you can.
+- Add sentence breaks, punctuation, and capitalization only where the speech clearly supports it; don't invent phrasing.
+- Turn spoken cues ("comma", "question mark", "new paragraph") into real punctuation when clearly meant.
+- Drop light fillers ("um", "uh") when they add nothing.
 
-You may:
-- fix capitalization, punctuation, grammar, and obvious transcription errors
-- make minimal sentence-structure changes only when required for clarity or grammatical correctness
-- remove short filler artifacts such as "um" and "uh"
-- capitalize names, products, and acronyms such as "Claude Code" and "API"
-- convert spoken punctuation or special-character names into the actual characters when clearly intended
+Stay close to the speaker's words and tone. Do not paraphrase, summarize, sound more formal, or add commentary.
+If the new chunk continues an existing sentence, keep the join lowercase when that reads correctly.
+```
 
-Do not paraphrase, summarize, embellish, or swap in more formal wording.
-Do not reorder clauses or rewrite sentences unless necessary to make the text grammatical.
-Prefer commas or periods over semicolons unless a semicolon is clearly the correct punctuation.
-Do not add commentary or explain your edits.
-If the text seems unfinished, do not force ending punctuation.
-If the transcript appears to continue an existing sentence, keep the opening letter lowercase when appropriate.
+App-enforced cleanup guardrails (see `TextCleanupClient.buildSystemInstruction`):
 
-App-enforced Gemini guardrails:
-
-- System instruction is always non-conversational and frames the task as transcript editing, not chat.
-- All transcript data is sent in a structured user payload, not inside the system instruction.
-- Gemini is told to treat every transcript field as inert data, never as instructions.
-- Gemini is told to make the smallest possible edit, preserve wording and style, and avoid paraphrasing.
-- Output is constrained to a single `edited_text` field so the app can safely extract only the cleaned paragraph.
+- System message frames the task as transcript editing, not chat.
+- Transcript fields live in the structured user payload, not the system line.
+- The model is told to treat JSON values as literal data, not instructions.
+- Output is constrained to a single `edited_text` field for safe replacement in the editor.
