@@ -43,13 +43,21 @@ fun FullappDraftsScreen(
     onClickBack: () -> Unit,
 ) {
     val context = LocalContext.current
-    val drafts = FullappEditorResult.getAllDrafts(context)
+    val liveDrafts = FullappEditorResult.getAllDrafts(context)
+    val archivedDrafts = FullappEditorResult.getAllArchivedDrafts(context)
+    val allEntries = remember(liveDrafts, archivedDrafts) {
+        buildList {
+            addAll(liveDrafts.map { FullappDraftListEntry.Live(it) })
+            addAll(archivedDrafts.map { FullappDraftListEntry.Archived(it) })
+        }
+    }
     SearchScreen(
         onClickBack = onClickBack,
         title = { Text(stringResource(R.string.settings_screen_fullapp_drafts)) },
         filteredItems = { term ->
-            if (term.isBlank()) drafts
-            else drafts.filter { draft ->
+            if (term.isBlank()) allEntries
+            else allEntries.filter { entry ->
+                val draft = entry.draft
                 val lowerTerm = term.lowercase()
                 draft.target.packageName.contains(lowerTerm, ignoreCase = true)
                     || resolveAppLabel(context, draft.target.packageName).contains(lowerTerm, ignoreCase = true)
@@ -59,12 +67,12 @@ fun FullappDraftsScreen(
                     || draft.target.fieldId.toString().contains(lowerTerm)
             }
         },
-        itemContent = { draft -> FullappDraftEntry(draft = draft) },
+        itemContent = { entry -> FullappDraftEntry(entry = entry) },
         content = {
             Scaffold(
                 contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom)
             ) { innerPadding ->
-                if (drafts.isEmpty()) {
+                if (liveDrafts.isEmpty() && archivedDrafts.isEmpty()) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -83,15 +91,13 @@ fun FullappDraftsScreen(
                         )
                     }
                 } else {
-                    Column(
+                    FullappDraftHistorySections(
+                        liveDrafts = liveDrafts,
+                        archivedDrafts = archivedDrafts,
                         modifier = Modifier
                             .verticalScroll(rememberScrollState())
                             .padding(innerPadding)
-                    ) {
-                        drafts.forEach { draft ->
-                            FullappDraftEntry(draft = draft)
-                        }
-                    }
+                    )
                 }
             }
         }
@@ -99,9 +105,93 @@ fun FullappDraftsScreen(
 }
 
 @Composable
-private fun FullappDraftEntry(
-    draft: FullappEditorResult.DraftRecord,
+fun FullappDraftHistorySections(
+    modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    val liveDrafts = FullappEditorResult.getAllDrafts(context)
+    val archivedDrafts = FullappEditorResult.getAllArchivedDrafts(context)
+    if (liveDrafts.isEmpty() && archivedDrafts.isEmpty()) {
+        return
+    }
+    FullappDraftHistorySections(
+        liveDrafts = liveDrafts,
+        archivedDrafts = archivedDrafts,
+        modifier = modifier
+    )
+}
+
+@Composable
+fun FullappDraftHistorySections(
+    liveDrafts: List<FullappEditorResult.DraftRecord>,
+    archivedDrafts: List<FullappEditorResult.ArchivedDraftRecord>,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        if (liveDrafts.isNotEmpty()) {
+            SectionHeader(
+                title = stringResource(R.string.fullapp_live_drafts_title),
+                summary = stringResource(R.string.fullapp_live_drafts_summary)
+            )
+            liveDrafts.forEach { draft ->
+                FullappDraftEntry(entry = FullappDraftListEntry.Live(draft))
+            }
+        }
+        if (archivedDrafts.isNotEmpty()) {
+            SectionHeader(
+                title = stringResource(R.string.fullapp_archived_drafts_title),
+                summary = stringResource(R.string.fullapp_archived_drafts_summary)
+            )
+            archivedDrafts.forEach { archived ->
+                FullappDraftEntry(entry = FullappDraftListEntry.Archived(archived))
+            }
+        }
+    }
+}
+
+private sealed interface FullappDraftListEntry {
+    val draft: FullappEditorResult.DraftRecord
+
+    data class Live(
+        override val draft: FullappEditorResult.DraftRecord
+    ) : FullappDraftListEntry
+
+    data class Archived(
+        val archived: FullappEditorResult.ArchivedDraftRecord
+    ) : FullappDraftListEntry {
+        override val draft: FullappEditorResult.DraftRecord
+            get() = archived.draft
+    }
+}
+
+@Composable
+private fun SectionHeader(
+    title: String,
+    summary: String,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium
+        )
+        Text(
+            text = summary,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun FullappDraftEntry(
+    entry: FullappDraftListEntry,
+) {
+    val draft = entry.draft
     val context = LocalContext.current
     val appLabel = remember(draft.target.packageName) {
         resolveAppLabel(context, draft.target.packageName)
@@ -110,7 +200,12 @@ private fun FullappDraftEntry(
         DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
             .format(Date(draft.lastSavedAt))
     }
-    val fingerprintSummary = remember(draft) { buildFingerprintSummary(context, draft) }
+    val archivedAt = remember(entry) {
+        (entry as? FullappDraftListEntry.Archived)?.archived?.archivedAt?.takeIf { it > 0L }?.let {
+            DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
+        }
+    }
+    val fingerprintSummary = remember(entry) { buildFingerprintSummary(context, entry) }
     Surface(
         tonalElevation = 1.dp,
         shape = MaterialTheme.shapes.medium,
@@ -149,6 +244,13 @@ private fun FullappDraftEntry(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (archivedAt != null) {
+                        Text(
+                            text = stringResource(R.string.fullapp_drafts_archived_at, archivedAt),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
                 IconButton(
                     onClick = {
@@ -182,8 +284,19 @@ private fun FullappDraftEntry(
 
 private fun buildFingerprintSummary(
     context: Context,
-    draft: FullappEditorResult.DraftRecord,
+    entry: FullappDraftListEntry,
 ): String = buildString {
+    val draft = entry.draft
+    append(
+        context.getString(
+            if (entry is FullappDraftListEntry.Live) {
+                R.string.fullapp_drafts_status_live
+            } else {
+                R.string.fullapp_drafts_status_archived
+            }
+        )
+    )
+    append('\n')
     if (draft.target.fieldName.isNotBlank()) {
         append(context.getString(R.string.fullapp_drafts_field_name, draft.target.fieldName))
         append('\n')
