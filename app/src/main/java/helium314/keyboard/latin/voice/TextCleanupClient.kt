@@ -27,7 +27,7 @@ import kotlin.random.Random
  * Client for text cleanup via OpenAI.
  *
  * Sends recent context (last ~3 sentences + new transcription) to an OpenAI
- * chat completion model and receives the corrected text back. The caller is
+ * Responses API model and receives the corrected text back. The caller is
  * responsible for replacing the old context in the editor with the cleaned
  * result.
  */
@@ -48,10 +48,12 @@ class TextCleanupClient {
 
     companion object {
         private const val TAG = "TextCleanupClient"
-        private const val DEFAULT_MODEL = "gpt-4o-mini"
-        private const val API_URL = "https://api.openai.com/v1/chat/completions"
+        private const val DEFAULT_MODEL = "gpt-5.4"
+        private const val API_URL = "https://api.openai.com/v1/responses"
         private const val STRUCTURED_OUTPUT_NAME = "voice_cleanup_result"
         private const val EDITED_TEXT_KEY = "edited_text"
+        private const val REASONING_EFFORT = "low"
+        private const val TEXT_VERBOSITY = "low"
 
         /**
          * Cleanup only rewrites the latest editable line, so 768 tokens is ample
@@ -106,7 +108,7 @@ class TextCleanupClient {
      * @param editableText Text from the latest line (after last line break). This is what
      *                     OpenAI cleans up and what gets replaced in the editor.
      * @param newText Newly transcribed text to append after the editable text.
-     * @param model OpenAI model name (e.g. gpt-4o-mini). Empty = default.
+     * @param model OpenAI model name (e.g. gpt-5.4). Empty = default.
      * @param callback Callback for result (called on main thread)
      */
     fun cleanupText(
@@ -148,11 +150,16 @@ class TextCleanupClient {
 
         val requestBody = JSONObject().apply {
             put("model", effectiveModel)
-            put("temperature", 0.0)
-            put("max_tokens", MAX_TOKENS)
-            put("response_format", JSONObject().apply {
-                put("type", "json_schema")
-                put("json_schema", JSONObject().apply {
+            put("instructions", fullSystemPrompt)
+            put("input", userMessage)
+            put("max_output_tokens", MAX_TOKENS)
+            put("reasoning", JSONObject().apply {
+                put("effort", REASONING_EFFORT)
+            })
+            put("text", JSONObject().apply {
+                put("verbosity", TEXT_VERBOSITY)
+                put("format", JSONObject().apply {
+                    put("type", "json_schema")
                     put("name", STRUCTURED_OUTPUT_NAME)
                     put("strict", true)
                     put("schema", JSONObject().apply {
@@ -167,16 +174,6 @@ class TextCleanupClient {
                         })
                         put("additionalProperties", false)
                     })
-                })
-            })
-            put("messages", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("role", "system")
-                    put("content", fullSystemPrompt)
-                })
-                put(JSONObject().apply {
-                    put("role", "user")
-                    put("content", userMessage)
                 })
             })
         }
@@ -552,6 +549,7 @@ class TextCleanupClient {
             Preferences:
             $normalizedPrompt
 
+            Use this like a fast text-editing task, not a deep reasoning task.
             Smallest edit wins. Keep wording and order unless grammar forces a fix. No semicolons unless clearly needed.
         """.trimIndent()
     }
@@ -576,32 +574,46 @@ class TextCleanupClient {
     }
 
     private fun extractRefusal(responseJson: JSONObject): String? {
-        val choices = responseJson.optJSONArray("choices") ?: return null
-        val message = choices.optJSONObject(0)?.optJSONObject("message") ?: return null
-        if (!message.has("refusal") || message.isNull("refusal")) {
-            return null
+        val outputItems = responseJson.optJSONArray("output") ?: return null
+        for (itemIndex in 0 until outputItems.length()) {
+            val item = outputItems.optJSONObject(itemIndex) ?: continue
+            if (item.optString("type") != "message") {
+                continue
+            }
+            val content = item.optJSONArray("content") ?: continue
+            for (contentIndex in 0 until content.length()) {
+                val part = content.optJSONObject(contentIndex) ?: continue
+                if (part.optString("type") != "refusal") {
+                    continue
+                }
+                return part.optString("refusal", "")
+                    .trim()
+                    .takeUnless { it.isEmpty() || it.equals("null", ignoreCase = true) }
+            }
         }
-        return message.optString("refusal", "")
-            .trim()
-            .takeUnless { it.isEmpty() || it.equals("null", ignoreCase = true) }
+        return null
     }
 
     private fun extractEditedText(responseJson: JSONObject): String? {
-        val choices = responseJson.optJSONArray("choices") ?: return null
-        val message = choices.optJSONObject(0)?.optJSONObject("message") ?: return null
-        val content = message.opt("content")
-        val contentString = when (content) {
-            is String -> content
-            is JSONArray -> buildString {
+        val outputItems = responseJson.optJSONArray("output") ?: return null
+        val contentString = buildString {
+            for (itemIndex in 0 until outputItems.length()) {
+                val item = outputItems.optJSONObject(itemIndex) ?: continue
+                if (item.optString("type") != "message") {
+                    continue
+                }
+                val content = item.optJSONArray("content") ?: continue
                 for (index in 0 until content.length()) {
                     val part = content.optJSONObject(index) ?: continue
-                    if (!part.has("text") || part.isNull("text")) {
+                    if (part.optString("type") != "output_text" ||
+                        !part.has("text") ||
+                        part.isNull("text")
+                    ) {
                         continue
                     }
                     append(part.optString("text", ""))
                 }
             }
-            else -> return null
         }.trim()
 
         if (!contentString.startsWith("{")) {
