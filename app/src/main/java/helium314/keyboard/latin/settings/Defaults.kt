@@ -167,16 +167,17 @@ object Defaults {
     const val PREF_TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss"
     const val PREF_DEEPGRAM_API_KEY = ""
     const val PREF_OPENAI_API_KEY = ""
-    const val PREF_OPENAI_MODEL = "gpt-4o-mini"
+    const val PREF_OPENAI_MODEL = "gpt-5.4"
     const val PREF_TRANSCRIPTION_PROMPT_SELECTED = 0 // Default to first preset
     const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 1
     const val PREF_VOICE_SILENCE_THRESHOLD = 220
     const val PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS = 10
     const val PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = 30
     const val PREF_CLEANUP_PROMPT = """Fix the transcribed text.
-Fix obvious grammar and sentence structure mistakes.
+Fix obvious grammar mistakes and add punctuation when appropriate.
 Turn spoken cues ("comma", "question mark", "open parenthese", "close parenthese", "new paragraph") into real punctuation.
-Drop meaningless filler artifacts ("um", "uh")."""
+Drop meaningless filler artifacts ("um", "uh").
+Avoid semicolons."""
 
     val PREF_TRANSCRIBE_PROMPTS = listOf(
         // Standard

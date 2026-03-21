@@ -26,8 +26,8 @@ The voice input system uses **local recording + streaming transcription**:
                                    │
                                    ▼ (after 3s silence)
                         ┌──────────────────────┐     ┌─────────────────┐
-                        │  TextCleanupClient   │────▶│   OpenAI API    │
-                        │  (HTTP POST)         │◀────│ (chat completions)       │
+│  TextCleanupClient   │────▶│   OpenAI API    │
+│  (HTTP POST)         │◀────│ (Responses API) │
                         └──────────────────────┘     └─────────────────┘
 ```
 
@@ -58,8 +58,8 @@ Orchestrates the voice input flow and manages timers.
 - **New Paragraph Timer** (configurable): Insert paragraph break after long silence
 
 ### TextCleanupClient.kt
-HTTP client for OpenAI chat completions (cleanup).
-- **Model**: User-configurable (default `gpt-4o-mini`)
+HTTP client for the OpenAI Responses API (cleanup).
+- **Model**: User-configurable (default `gpt-5.4` with `reasoning.effort=low`)
 - **Purpose**: Merge and clean the latest line using context + new transcript
 - **Input (system prompt)**: Task framing plus user-editable cleanup preferences (`Defaults.PREF_CLEANUP_PROMPT`)
 - **Input (user message)**: Structured JSON payload containing `reference_context`, `editable_text`, and `new_transcription`

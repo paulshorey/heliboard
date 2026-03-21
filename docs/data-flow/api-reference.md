@@ -69,7 +69,7 @@ Headers:
   Content-Type: application/json
 ```
 
-Cleanup uses chat completions with `response_format` JSON schema (`edited_text` string). See `TextCleanupClient.kt` for the full payload (system + user roles, temperature `0`, `max_tokens`).
+Cleanup uses the Responses API with `text.format` JSON schema (`edited_text` string). See `TextCleanupClient.kt` for the full payload (`instructions`, `input`, `reasoning.effort=low`, `text.verbosity=low`, `max_output_tokens`).
 
 ---
 
@@ -79,7 +79,7 @@ Cleanup uses chat completions with `response_format` JSON schema (`edited_text` 
 |-----|------|-------------|
 | `PREF_DEEPGRAM_API_KEY` | String | Deepgram API key for transcription |
 | `PREF_OPENAI_API_KEY` | String | OpenAI API key for text cleanup |
-| `PREF_OPENAI_MODEL` | String | OpenAI model name (default `gpt-4o-mini`) |
+| `PREF_OPENAI_MODEL` | String | OpenAI model name (default `gpt-5.4`) |
 | `PREF_CLEANUP_PROMPT` | String | User-editable cleanup instructions (merged into system framing) |
 | `PREF_TRANSCRIPTION_PROMPT_PREFIX` | String | Prefix for transcription style prompt preset keys |
 | `PREF_TRANSCRIPTION_PROMPT_SELECTED` | Int | Index of selected prompt preset |
