@@ -16,9 +16,6 @@ import helium314.keyboard.latin.utils.prefs
  * 2. Stream raw PCM chunks to Deepgram over WebSocket.
  * 3. Receive finalized transcript updates from Deepgram in stream order.
  * 4. Deliver transcript text to [VoiceInputListener.onTranscriptionResult].
- *
- * Cleanup ordering / context replacement remains the responsibility of the IME
- * listener so the same deterministic find-and-replace behavior is preserved.
  */
 class VoiceInputManager(private val context: Context) {
 
@@ -57,7 +54,7 @@ class VoiceInputManager(private val context: Context) {
         /** A transcript unit was finalized — process and insert this text. */
         fun onTranscriptionResult(text: String)
 
-        /** Voice processing is actively running (transcription/cleanup pending). */
+        /** Voice processing is actively running (transcription pending). */
         fun onProcessingStarted()
 
         /** No queued transcription work remains at manager level. */

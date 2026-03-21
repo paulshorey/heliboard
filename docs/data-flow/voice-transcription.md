@@ -1,13 +1,15 @@
 # Voice Transcription Data Flow
 
-This document describes the architecture and data flow for voice transcription with intelligent text cleanup.
+This document describes the current voice transcription pipeline after removal of the
+cleanup/rewrite API stage.
 
 ## Overview
 
 The voice input system uses **local recording + streaming transcription**:
-1. **VoiceRecorder** — captures PCM16 audio locally; silence detection drives paragraph breaks and auto-stop
-2. **Deepgram API** (WebSocket) — streams audio and returns finalized transcript spans (`endpointing=1000ms`; `smart_format` and `punctuate` off so cleanup owns formatting)
-3. **OpenAI API** — cleans up the transcribed text with recent context (via `TextCleanupClient`)
+1. **VoiceRecorder** captures PCM16 audio locally; silence detection drives paragraph breaks and auto-stop.
+2. **Deepgram API** streams audio and returns finalized transcript spans.
+3. **VoicePostTranscriptionFilter** applies local post-processing to the transcript text.
+4. **LatinIME** inserts the processed text immediately at the current caret position through `InputConnection`.
 
 ## Architecture
 
@@ -16,27 +18,19 @@ The voice input system uses **local recording + streaming transcription**:
 │   Microphone    │────▶│   VoiceRecorder      │────▶│  Deepgram API   │
 │   (Hardware)    │     │   (PCM16 16kHz)      │     │  (WebSocket /v1/listen)
 └─────────────────┘     │   Silence detection  │     └────────┬────────┘
-                        │   WAV segmentation   │              │
-                        └──────────────────────┘              │
-                                                              ▼
+                        │   Chunking/timers     │              │
+                        └──────────────────────┘              ▼
 ┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
 │   Text Field    │◀────│   LatinIME           │◀────│  Transcription  │
 │   (App)         │     │   (Orchestrator)     │     │  Result (text)  │
-└─────────────────┘     └──────────┬───────────┘     └─────────────────┘
-                                   │
-                                   ▼ (after 3s silence)
-                        ┌──────────────────────┐     ┌─────────────────┐
-                        │  TextCleanupClient   │────▶│   OpenAI API    │
-                        │  (HTTP POST)         │◀────│ (chat completions)       │
-                        └──────────────────────┘     └─────────────────┘
+└─────────────────┘     └──────────────────────┘     └─────────────────┘
 ```
 
 ## Key Design Principle: Instant Recording
 
-Recording starts **instantly** when the user presses the microphone button (~20ms).
-There is **no network dependency** to begin recording. The microphone uses the device's
-built-in AudioRecord API. Network is only needed later, when a completed audio segment
-is sent for transcription.
+Recording starts **instantly** when the user presses the microphone button. The microphone
+is local and does not wait on any network round-trip. Network access is only needed after
+audio has already been captured and is sent for transcription.
 
 ## Components
 
@@ -48,96 +42,67 @@ Captures audio from the microphone with client-side silence detection.
 
 ### DeepgramTranscriptionClient.kt
 WebSocket client for Deepgram live transcription.
-- **URL**: `wss://api.deepgram.com/v1/listen` with query params (`model=nova-3`, `encoding=linear16`, `sample_rate=16000`, `channels=1`, `vad_events=true`, `endpointing=1000`, `smart_format=false`, `punctuate=false`)
-- **Transport**: Raw PCM frames over the socket; finalized spans delivered as `Results` with `is_final` / `speech_final`
+- **URL**: `wss://api.deepgram.com/v1/listen`
+- **Transport**: Raw PCM frames over the socket
+- **Output**: Finalized transcript spans delivered in stream order
 
 ### VoiceInputManager.kt
-Orchestrates the voice input flow and manages timers.
+Orchestrates recording, Deepgram streaming, and ordered transcript delivery.
 - **State machine**: IDLE → RECORDING ↔ PAUSED → IDLE
-- **Chunk Watchdog** (dynamic): Forces a segment flush if silence detection misses a boundary
-- **New Paragraph Timer** (configurable): Insert paragraph break after long silence
+- **Chunk Watchdog**: Forces a segment flush if silence detection misses a boundary
+- **Transcript queue**: Preserves FIFO delivery for finalized Deepgram spans
+- **New Paragraph Timer**: Requests a paragraph break after long silence
 
-### TextCleanupClient.kt
-HTTP client for OpenAI chat completions (cleanup).
-- **Model**: User-configurable (default `gpt-4o-mini`)
-- **Purpose**: Merge and clean the latest line using context + new transcript
-- **Input (system prompt)**: Task framing plus user-editable cleanup preferences (`Defaults.PREF_CLEANUP_PROMPT`)
-- **Input (user message)**: Structured JSON payload containing `reference_context`, `editable_text`, and `new_transcription`
-- **Output**: Corrected current line only (`edited_text` in JSON schema)
-- **Cancellation**: Tracks active HTTP calls; `cancelAll()` cancels in-flight requests
-- **Retry**: Retries on transient failures (see client constants)
+### VoicePostTranscriptionFilter.java
+Local post-processing hook that runs on each transcript span before insertion.
+- **Current behavior**: placeholder passthrough
+- **Purpose**: central place for future local transcript cleanup rules
 
 ### LatinIME.java
-Main orchestrator that coordinates all components and manages text insertion.
+Main orchestrator that coordinates all components and inserts text into the editor.
+- Uses `InputConnection.commitText(...)` at the caret
+- Calls `mInputLogic.finishInput()` first to keep composing state in sync
+- Defers paragraph insertion until manager processing is idle if needed
 
 ## Data Flow
 
-### 1. Recording Start (Instant)
+### 1. Recording Start
 ```
 User taps mic button
     → LatinIME.onVoiceInputClicked()
     → VoiceInputManager.toggleRecording()
-    → VoiceRecorder.startRecording()     ← ~20ms, no network
-    → State = RECORDING (red indicator)
-    → Microphone is live, buffering audio
+    → VoiceRecorder.startRecording()
+    → State = RECORDING
 ```
 
-### 2. Speech → Silence → Segment
+### 2. Speech → Deepgram
 ```
-User speaks...
-    → VoiceRecorder accumulates PCM data
-    → User pauses (configured silence duration detected)
-    → VoiceRecorder wraps PCM data in WAV header
-    → onSegmentReady(wavData) callback
-```
-
-### 3. Transcription + Cleanup + Replace Current Line
-```
-VoiceInputManager streams PCM to Deepgram
-    → DeepgramTranscriptionClient WebSocket
-    → Finalized transcript span → onTranscriptionResult(text)
-    → LatinIME applies VoicePostTranscriptionFilter (hook; currently no-op) 
-    → LatinIME captures recent context (last 3 sentences or 300 chars)
-    → Split at last newline:
-        referenceContext = text before last \n  (read-only, for the model's understanding)
-        editableText    = text after last \n   (current line, will be replaced)
-    → Send to OpenAI:
-        system prompt = cleanup instructions only
-        user message  = structured transcript payload
-          {
-            "reference_context": "...",
-            "editable_text": "...",
-            "new_transcription": "..."
-          }
-    → OpenAI returns {"edited_text":"..."}
-    → LatinIME.replaceContextWithCleanedText():
-        1. Delete editableText.length() chars before cursor
-        2. Insert corrected text + trailing space
-    → Paragraph breaks untouched; corrected text appears in text field
+User speaks
+    → VoiceRecorder captures PCM chunks
+    → VoiceInputManager streams them to Deepgram
+    → Deepgram emits finalized transcript text
 ```
 
-**Context window**: The last ~3 sentences are gathered as context (detected by
-simplified punctuation matching: `.!?:;=`). If fewer than 3 sentence boundaries exist,
-up to 300 characters are used. This crosses newline/paragraph boundaries — even at the
-start of a new line, the cleanup model always has adequate context.
+### 3. Transcript → Local Processing → Immediate Insert
+```
+Finalized transcript span arrives
+    → VoiceInputManager delivers it to LatinIME in FIFO order
+    → LatinIME applies VoicePostTranscriptionFilter
+    → LatinIME adjusts capitalization based on text before the caret
+    → LatinIME appends a trailing space if needed
+    → LatinIME commits the text at the caret via InputConnection.commitText(...)
+```
 
-**Paragraph break protection**: The context is split at the last `\n`. Text before it
-(earlier paragraphs) is passed as read-only `reference_context`. Text after it
-(the current line) is sent as `editable_text`, and the new transcript chunk is sent
-as `new_transcription`. Only this current-line portion is replaced in the editor,
-so `\n` and `\n\n` paragraph breaks are never touched.
+There is no context lookup, no rewrite API call, and no delete-and-replace logic. Each
+processed transcript chunk is inserted directly where the cursor currently is.
 
-**Retry**: Both transcription and cleanup requests automatically retry once on
-transient failures (5xx, 408, socket timeout, connection error).
-Non-retryable errors (4xx) are reported immediately.
-
-### 4. New Paragraph (after configured silence window)
+### 4. New Paragraph
 ```
 Speech stops
     → VoiceInputManager starts new paragraph timer
-    → Configured delay passes with no speech
+    → Delay elapses with no speech
     → LatinIME.onNewParagraphRequested()
-    → Insert "\n\n" to start new paragraph
+    → Insert "\n\n" when processing is idle
 ```
 
 ## State Management
@@ -150,70 +115,44 @@ RECORDING  → User taps pause  → PAUSED
 PAUSED     → User taps pause  → RECORDING (resume)
 ```
 
-### Race Condition Prevention
-```java
-mCleanupInProgress      // true while cleanup API call is in flight
-mPendingNewParagraph    // true if paragraph break waiting for cleanup
-mPendingTranscription   // StringBuilder for queued transcription during cleanup
-mVoiceSessionId         // incremented on cancel/new session; stale callbacks are discarded
-```
-
-**Ordering guarantees:**
-- When cleanup is in progress, new transcriptions are queued in `mPendingTranscription`
-  and applied (with a fresh cleanup round) after the current cleanup completes.
-- At the manager layer, audio chunks are transcribed in FIFO order (one request at a time).
-- `mVoiceSessionId` invalidates all in-flight async callbacks when the session changes
-  (user typed, cursor moved, recording cancelled, etc.).
-- `TextCleanupClient.cancelAll()` is called on session cancellation to cancel HTTP requests.
-
-**Context replacement safety:**
-- The `replacementLength` (editable text after last `\n`) is captured *before* the
-  cleanup request is sent and closed over in the callback. Since `mCleanupInProgress`
-  prevents any text insertion during cleanup, the text before the cursor is guaranteed
-  to be unchanged when the callback fires (within the same session).
-- Paragraph breaks (`\n`, `\n\n`) are outside the replacement scope — they are never
-  deleted or overwritten.
+### Ordering Guarantees
+- Deepgram transcript spans are queued and delivered in FIFO order by `VoiceInputManager`.
+- `LatinIME` inserts each processed transcript immediately when received.
+- Paragraph breaks are deferred until manager processing drains, so they do not interleave
+  in the middle of pending transcript insertion.
+- Cancelling voice input invalidates the active manager session so stale Deepgram callbacks
+  are dropped before they reach the IME.
 
 ## Configuration
 
 ### Settings (TranscriptionScreen.kt)
 - **Deepgram API Key**: Required for transcription
-- **OpenAI API Key**: Required for cleanup (optional feature)
-- **Cleanup Prompt**: Customizable instructions for the cleanup model
 - **Chunk Silence Duration**: Silence window before cutting a chunk
 - **Silence Threshold**: RMS threshold floor for silence/speech detection
 - **New Paragraph Silence Duration**: Delay before inserting a paragraph break
-
-### Timers (VoiceInputManager.kt)
-```kotlin
-MIN_CHUNK_WATCHDOG_MS = 20000L // Base watchdog lower bound
-newParagraphDelayMs (configurable via settings)
-```
+- **Auto-stop Silence Duration**: Delay before automatically stopping voice recording
+- **Transcription prompt presets**: Local prompt/style presets for future/manual processing behavior
 
 ### Silence Detection (VoiceRecorder.kt)
 ```kotlin
-silenceThreshold (configurable via settings) // RMS threshold floor
+silenceThreshold (configurable via settings)
 silenceDurationMs (configurable via settings)
-MIN_SEGMENT_MS = 500L          // Minimum segment length
-MAX_SEGMENT_MS = 60000L        // Force-split at 60s
+MIN_SEGMENT_MS = 500L
+MAX_SEGMENT_MS = 60000L
 ```
 
 ## Error Handling
 
-- **Transient failures** (5xx, 408, timeout, connection): Automatically retried once after 2s delay
-- **Network errors**: Audio is captured locally; if transcription fails after retry, the segment is lost but recording continues
-- **API errors**: Logged and surfaced to user (invalid key, rate limit, etc.)
-- **Empty transcriptions**: Silently ignored
-- **Cleanup errors**: Raw transcription is inserted as fallback (graceful degradation — no text is lost)
-- **Session cancellation**: Deepgram stream and OpenAI in-flight HTTP requests are cancelled;
-  any stale callbacks are discarded via `mVoiceSessionId` check
+- **Network/transcription failures**: surfaced to the user; recording may continue or stop depending on stream state
+- **Empty transcriptions**: ignored
+- **Session cancellation**: pending stream/transcript work is invalidated through the manager session ID
+- **Insertion failures**: logged and the processing indicator is cleared
 
 ## Thread Safety
 
-All callbacks are posted to the main thread via `Handler(Looper.getMainLooper())`:
-- Audio recording runs on a dedicated background thread
-- Deepgram HTTP callbacks → main thread
-- OpenAI HTTP callbacks → main thread
-- Timer callbacks → main thread
+Callbacks are marshalled back to the main thread before UI/editor operations:
+- Audio recording runs on a background thread
+- Deepgram callbacks are forwarded onto the main thread
+- Timer callbacks run on the main thread
 
-This ensures all text modifications happen sequentially on the UI thread.
+This keeps text insertion sequential and avoids concurrent editor mutations.

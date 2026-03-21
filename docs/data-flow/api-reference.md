@@ -1,10 +1,10 @@
 # API Reference
 
-Quick reference for the external APIs used in voice transcription.
+Quick reference for the external APIs and settings used in voice transcription.
 
 ## Deepgram API (Transcription)
 
-HeliBoard uses **live WebSocket** streaming (`wss://api.deepgram.com/v1/listen`) with raw PCM16 frames (`encoding=linear16`, `sample_rate=16000`, `channels=1`). Query parameters below apply to that URL (and are representative for REST batch calls too).
+HeliBoard uses **live WebSocket** streaming (`wss://api.deepgram.com/v1/listen`) with raw PCM16 frames (`encoding=linear16`, `sample_rate=16000`, `channels=1`). Query parameters below apply to that URL and are representative of the active integration.
 
 ### Batch endpoint (reference)
 ```
@@ -25,10 +25,10 @@ Body: <raw WAV file bytes>
 ### Query Parameters
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| `model` | `nova-3` | Deepgram's latest speech model |
-| `smart_format` | `false` | Leave formatting to the cleanup step |
-| `punctuate` | `false` | Leave punctuation to the cleanup step |
-| `endpointing` | `1000` | Ms of silence before finalizing a streaming span (live WebSocket) |
+| `model` | `nova-3` | Deepgram speech model |
+| `smart_format` | `false` | Leave formatting to local post-processing / direct insertion behavior |
+| `punctuate` | `false` | Do not add server punctuation automatically |
+| `endpointing` | `1000` | Ms of silence before finalizing a streaming span |
 | `language` | `en` (optional) | ISO-639-1 language hint |
 
 ### Response Format
@@ -59,27 +59,14 @@ Body: <raw WAV file bytes>
 
 ---
 
-## OpenAI API (Text Cleanup)
-
-### Endpoint
-```
-POST https://api.openai.com/v1/chat/completions
-Headers:
-  Authorization: Bearer <OPENAI_API_KEY>
-  Content-Type: application/json
-```
-
-Cleanup uses chat completions with `response_format` JSON schema (`edited_text` string). See `TextCleanupClient.kt` for the full payload (system + user roles, temperature `0`, `max_tokens`).
-
----
-
 ## Settings Keys
 
 | Key | Type | Description |
 |-----|------|-------------|
 | `PREF_DEEPGRAM_API_KEY` | String | Deepgram API key for transcription |
-| `PREF_OPENAI_API_KEY` | String | OpenAI API key for text cleanup |
-| `PREF_OPENAI_MODEL` | String | OpenAI model name (default `gpt-4o-mini`) |
-| `PREF_CLEANUP_PROMPT` | String | User-editable cleanup instructions (merged into system framing) |
-| `PREF_TRANSCRIPTION_PROMPT_PREFIX` | String | Prefix for transcription style prompt preset keys |
+| `PREF_TRANSCRIPTION_PROMPT_PREFIX` | String | Prefix for local post-transcription prompt preset keys |
 | `PREF_TRANSCRIPTION_PROMPT_SELECTED` | Int | Index of selected prompt preset |
+| `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Silence window before chunking voice input |
+| `PREF_VOICE_SILENCE_THRESHOLD` | Int | RMS threshold used for silence detection |
+| `PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS` | Int | Silence duration before inserting a new paragraph |
+| `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` | Int | Silence duration before auto-stopping recording |

@@ -63,15 +63,6 @@ fun TranscriptionScreen(
     var deepgramApiKey by remember {
         mutableStateOf(prefs.getString(Settings.PREF_DEEPGRAM_API_KEY, Defaults.PREF_DEEPGRAM_API_KEY) ?: "")
     }
-    var openAiApiKey by remember {
-        mutableStateOf(prefs.getString(Settings.PREF_OPENAI_API_KEY, Defaults.PREF_OPENAI_API_KEY) ?: "")
-    }
-    var openAiModel by remember {
-        mutableStateOf(prefs.getString(Settings.PREF_OPENAI_MODEL, Defaults.PREF_OPENAI_MODEL) ?: Defaults.PREF_OPENAI_MODEL)
-    }
-    var cleanupPrompt by remember {
-        mutableStateOf(prefs.getString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT) ?: Defaults.PREF_CLEANUP_PROMPT)
-    }
     var chunkSilenceSeconds by remember {
         mutableStateOf(
             prefs.getInt(
@@ -142,57 +133,6 @@ fun TranscriptionScreen(
                     minLines = 1,
                     maxLines = 2
                 )
-
-                // OpenAI API Key
-                InlineTextField(
-                    label = stringResource(R.string.google_api_key_title),
-                    value = openAiApiKey,
-                    onValueChange = { newValue ->
-                        openAiApiKey = newValue
-                        prefs.edit { putString(Settings.PREF_OPENAI_API_KEY, newValue) }
-                    },
-                    minLines = 1,
-                    maxLines = 2
-                )
-
-                // OpenAI model
-                InlineTextField(
-                    label = stringResource(R.string.gemini_model_title),
-                    value = openAiModel,
-                    onValueChange = { newValue ->
-                        openAiModel = newValue
-                        prefs.edit { putString(Settings.PREF_OPENAI_MODEL, newValue.trim()) }
-                    },
-                    minLines = 1,
-                    maxLines = 1
-                )
-
-                // Cleanup prompt
-                InlineTextField(
-                    label = stringResource(R.string.cleanup_prompt_title),
-                    value = cleanupPrompt,
-                    onValueChange = { newValue ->
-                        cleanupPrompt = newValue
-                        prefs.edit { putString(Settings.PREF_CLEANUP_PROMPT, newValue) }
-                    },
-                    minLines = 4,
-                    maxLines = 10
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    TextButton(
-                        onClick = {
-                            cleanupPrompt = Defaults.PREF_CLEANUP_PROMPT
-                            prefs.edit {
-                                putString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT)
-                            }
-                        }
-                    ) {
-                        Text(stringResource(R.string.cleanup_prompt_reset_button))
-                    }
-                }
 
                 InlineTextField(
                     label = stringResource(R.string.voice_chunk_silence_seconds_title),

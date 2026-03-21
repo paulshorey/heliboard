@@ -49,40 +49,8 @@ import kotlin.collections.component2
 import kotlin.collections.set
 
 object AppUpgrade {
-    private const val CLEANUP_PROMPT_RESET_VERSION = 3
-    private const val LEGACY_CLEANUP_PROMPT_V1 = """Edit the transcript text only.
-
-Preserve the speaker's intended meaning, but you may:
-- fix capitalization, punctuation, grammar, and sentence structure
-- remove short filler artifacts such as "um" and "uh"
-- capitalize names, products, and acronyms such as "Claude Code" and "API"
-- convert spoken punctuation or special-character names into the actual characters when clearly intended
-
-Do not add commentary or explain your edits.
-If the text seems unfinished, do not force ending punctuation.
-If the transcript appears to continue an existing sentence, keep the opening letter lowercase when appropriate."""
-
-    private const val LEGACY_CLEANUP_PROMPT_V2 = """Edit the transcript text only.
-
-Preserve the speaker's wording, tone, and writing style as closely as possible. Make the smallest possible edits needed to join the new transcription with the existing sentence or paragraph.
-
-You may:
-- fix capitalization, punctuation, grammar, and obvious transcription errors
-- make minimal sentence-structure changes only when required for clarity or grammatical correctness
-- remove short filler artifacts such as "um" and "uh"
-- capitalize names, products, and acronyms such as "Claude Code" and "API"
-- convert spoken punctuation or special-character names into the actual characters when clearly intended
-
-Do not paraphrase, summarize, embellish, or swap in more formal wording.
-Do not reorder clauses or rewrite sentences unless necessary to make the text grammatical.
-Prefer commas or periods over semicolons unless a semicolon is clearly the correct punctuation.
-Do not add commentary or explain your edits.
-If the text seems unfinished, do not force ending punctuation.
-If the transcript appears to continue an existing sentence, keep the opening letter lowercase when appropriate."""
-
     fun checkVersionUpgrade(context: Context) {
         val prefs = context.prefs()
-        maybeResetCleanupPrompt(prefs)
         val oldVersion = prefs.getInt(Settings.PREF_VERSION_CODE, 0)
         if (oldVersion == BuildConfig.VERSION_CODE)
             return
@@ -633,24 +601,6 @@ If the transcript appears to continue an existing sentence, keep the opening let
         upgradeToolbarPrefs(prefs)
         LayoutUtilsCustom.onLayoutFileChanged() // just to be sure
         prefs.edit { putInt(Settings.PREF_VERSION_CODE, BuildConfig.VERSION_CODE) }
-    }
-
-    private fun maybeResetCleanupPrompt(prefs: android.content.SharedPreferences) {
-        val appliedResetVersion = prefs.getInt(Settings.PREF_CLEANUP_PROMPT_RESET_VERSION, 0)
-        if (appliedResetVersion >= CLEANUP_PROMPT_RESET_VERSION) {
-            return
-        }
-        val currentPrompt = prefs.getString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT)
-        val shouldResetPrompt = currentPrompt.isNullOrBlank()
-            || currentPrompt == LEGACY_CLEANUP_PROMPT_V1
-            || currentPrompt == LEGACY_CLEANUP_PROMPT_V2
-        prefs.edit {
-            // Upgrade untouched users to the new safer default without overwriting custom prompts.
-            if (shouldResetPrompt) {
-                putString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT)
-            }
-            putInt(Settings.PREF_CLEANUP_PROMPT_RESET_VERSION, CLEANUP_PROMPT_RESET_VERSION)
-        }
     }
 
     // not only on upgrade, because this might also be called when db is locked

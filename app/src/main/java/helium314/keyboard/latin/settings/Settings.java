@@ -179,15 +179,11 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
     public static final String PREF_TOOLBAR_MODE = "toolbar_mode";
     public static final String PREF_TOOLBAR_HIDING_GLOBAL = "toolbar_hiding_global";
 
-    // Voice Input (Deepgram transcription + OpenAI cleanup)
+    // Voice Input (Deepgram transcription)
     public static final String PREF_DEEPGRAM_API_KEY = "deepgram_api_key";
-    public static final String PREF_OPENAI_API_KEY = "openai_api_key";
-    public static final String PREF_OPENAI_MODEL = "openai_model";
     public static final String PREF_TRANSCRIPTION_PROMPT_PREFIX = "transcription_prompt_";
     public static final String PREF_TRANSCRIPTION_PROMPT_SELECTED = "transcription_prompt_selected";
     public static final int TRANSCRIPTION_PROMPT_COUNT = 7;
-    public static final String PREF_CLEANUP_PROMPT = "cleanup_prompt";
-    public static final String PREF_CLEANUP_PROMPT_RESET_VERSION = "cleanup_prompt_reset_version";
     public static final String PREF_VOICE_CHUNK_SILENCE_SECONDS = "voice_chunk_silence_seconds";
     public static final String PREF_VOICE_SILENCE_THRESHOLD = "voice_silence_threshold";
     public static final String PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS = "voice_new_paragraph_silence_seconds";
