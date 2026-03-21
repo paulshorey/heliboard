@@ -173,15 +173,10 @@ object Defaults {
     const val PREF_VOICE_SILENCE_THRESHOLD = 220
     const val PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS = 10
     const val PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = 30
-    const val PREF_CLEANUP_PROMPT = """You merge new speech into the current line only.
-
-- Fix obvious transcription mistakes, grammar, and spacing with the smallest edit you can.
-- Add sentence breaks, punctuation, and capitalization only where the speech clearly supports it; don't invent phrasing.
-- Turn spoken cues ("comma", "question mark", "new paragraph") into real punctuation when clearly meant.
-- Drop light fillers ("um", "uh") when they add nothing.
-
-Stay close to the speaker's words and tone. Do not paraphrase, summarize, sound more formal, or add commentary.
-If the new chunk continues an existing sentence, keep the join lowercase when that reads correctly."""
+    const val PREF_CLEANUP_PROMPT = """Fix the transcribed text.
+Fix obvious grammar and sentence structure mistakes.
+Turn spoken cues ("comma", "question mark", "open parenthese", "close parenthese", "new paragraph") into real punctuation.
+Drop meaningless filler artifacts ("um", "uh")."""
 
     val PREF_TRANSCRIBE_PROMPTS = listOf(
         // Standard
