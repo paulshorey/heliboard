@@ -136,8 +136,9 @@ fun TranscriptionScreen(
                     label = stringResource(R.string.deepgram_api_key_title),
                     value = deepgramApiKey,
                     onValueChange = { newValue ->
-                        deepgramApiKey = newValue
-                        prefs.edit { putString(Settings.PREF_DEEPGRAM_API_KEY, newValue) }
+                        val trimmedValue = newValue.trim()
+                        deepgramApiKey = trimmedValue
+                        prefs.edit { putString(Settings.PREF_DEEPGRAM_API_KEY, trimmedValue) }
                     },
                     minLines = 1,
                     maxLines = 2
@@ -148,8 +149,9 @@ fun TranscriptionScreen(
                     label = stringResource(R.string.google_api_key_title),
                     value = openAiApiKey,
                     onValueChange = { newValue ->
-                        openAiApiKey = newValue
-                        prefs.edit { putString(Settings.PREF_OPENAI_API_KEY, newValue) }
+                        val trimmedValue = newValue.trim()
+                        openAiApiKey = trimmedValue
+                        prefs.edit { putString(Settings.PREF_OPENAI_API_KEY, trimmedValue) }
                     },
                     minLines = 1,
                     maxLines = 2

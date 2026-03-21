@@ -123,6 +123,15 @@ fun SetupAppScreen(
                 )
 
                 SetupRequirementItem(
+                    title = stringResource(R.string.setup_app_microphone_title),
+                    summary = stringResource(R.string.setup_app_microphone_summary),
+                    isComplete = microphoneGranted,
+                    actionLabel = stringResource(R.string.setup_app_grant_permission),
+                    onAction = {
+                        microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                )
+                SetupRequirementItem(
                     title = stringResource(R.string.setup_step1_title, appName),
                     summary = stringResource(R.string.setup_app_enable_keyboard_summary, appName),
                     isComplete = isImeEnabled,
@@ -158,8 +167,9 @@ fun SetupAppScreen(
                     SetupKeyField(
                         value = deepgramApiKey,
                         onValueChange = { newValue ->
-                            deepgramApiKey = newValue
-                            prefs.edit { putString(Settings.PREF_DEEPGRAM_API_KEY, newValue) }
+                            val trimmedValue = newValue.trim()
+                            deepgramApiKey = trimmedValue
+                            prefs.edit { putString(Settings.PREF_DEEPGRAM_API_KEY, trimmedValue) }
                         }
                     )
                 }
@@ -171,20 +181,12 @@ fun SetupAppScreen(
                     SetupKeyField(
                         value = openAiApiKey,
                         onValueChange = { newValue ->
-                            openAiApiKey = newValue
-                            prefs.edit { putString(Settings.PREF_OPENAI_API_KEY, newValue) }
+                            val trimmedValue = newValue.trim()
+                            openAiApiKey = trimmedValue
+                            prefs.edit { putString(Settings.PREF_OPENAI_API_KEY, trimmedValue) }
                         }
                     )
                 }
-                SetupRequirementItem(
-                    title = stringResource(R.string.setup_app_microphone_title),
-                    summary = stringResource(R.string.setup_app_microphone_summary),
-                    isComplete = microphoneGranted,
-                    actionLabel = stringResource(R.string.setup_app_grant_permission),
-                    onAction = {
-                        microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                    }
-                )
 
                 Text(
                     text = stringResource(R.string.setup_app_return_later),

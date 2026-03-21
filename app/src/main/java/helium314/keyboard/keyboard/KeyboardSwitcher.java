@@ -70,6 +70,10 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
     private FrameLayout mStripContainer;
     private ClipboardHistoryView mClipboardHistoryView;
     private TextView mFakeToastView;
+    private View mActionOverlayView;
+    private TextView mActionOverlayMessageView;
+    private TextView mActionOverlayActionView;
+    @Nullable private Runnable mActionOverlayRunnable;
     private ProgressBar mProcessingIndicator;
     private Runnable mHideProcessingIndicatorRunnable;
     private LatinIME mLatinIME;
@@ -564,6 +568,31 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         }
     }
 
+    public void showActionOverlay(
+            final String message,
+            final String actionLabel,
+            @NonNull final Runnable action
+    ) {
+        if (mActionOverlayView == null || mActionOverlayMessageView == null || mActionOverlayActionView == null) {
+            return;
+        }
+        mActionOverlayRunnable = action;
+        mActionOverlayMessageView.setText(message);
+        mActionOverlayActionView.setText(actionLabel);
+        mActionOverlayView.setVisibility(View.VISIBLE);
+        mActionOverlayView.bringToFront();
+        mActionOverlayView.startAnimation(AnimationUtils.loadAnimation(mLatinIME, R.anim.fade_in));
+    }
+
+    public void hideActionOverlay() {
+        if (mActionOverlayView == null || mActionOverlayView.getVisibility() != View.VISIBLE) {
+            return;
+        }
+        mActionOverlayView.startAnimation(AnimationUtils.loadAnimation(mLatinIME, R.anim.fade_out));
+        mActionOverlayView.setVisibility(View.GONE);
+        mActionOverlayRunnable = null;
+    }
+
     private static int getSecondaryStripVisibility() {
         return Settings.getValues().mSecondaryStripVisible? View.VISIBLE : View.GONE;
     }
@@ -737,7 +766,19 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         mEmojiPalettesView = mCurrentInputView.findViewById(R.id.emoji_palettes_view);
         mClipboardHistoryView = mCurrentInputView.findViewById(R.id.clipboard_history_view);
         mFakeToastView = mCurrentInputView.findViewById(R.id.fakeToast);
+        mActionOverlayView = mCurrentInputView.findViewById(R.id.action_overlay);
+        mActionOverlayMessageView = mCurrentInputView.findViewById(R.id.action_overlay_message);
+        mActionOverlayActionView = mCurrentInputView.findViewById(R.id.action_overlay_action);
         mProcessingIndicator = mCurrentInputView.findViewById(R.id.voice_processing_indicator);
+        if (mActionOverlayActionView != null) {
+            mActionOverlayActionView.setOnClickListener(v -> {
+                final Runnable action = mActionOverlayRunnable;
+                hideActionOverlay();
+                if (action != null) {
+                    action.run();
+                }
+            });
+        }
 
         mKeyboardViewWrapper = mCurrentInputView.findViewById(R.id.keyboard_view_wrapper);
         mKeyboardViewWrapper.setKeyboardActionListener(mLatinIME.mKeyboardActionListener);

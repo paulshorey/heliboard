@@ -13,6 +13,9 @@
     <include
         android:id="@+id/fakeToast"
         layout="@layout/fake_toast" />
+    <include
+        android:id="@+id/action_overlay"
+        layout="@layout/action_overlay" />
     <ProgressBar
         android:id="@+id/voice_processing_indicator"
         style="?android:attr/progressBarStyleSmall"
