@@ -174,9 +174,10 @@ object Defaults {
     const val PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS = 10
     const val PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = 30
     const val PREF_CLEANUP_PROMPT = """Fix the transcribed text.
-Fix obvious grammar and sentence structure mistakes.
+Fix obvious grammar mistakes and add punctuation when appropriate.
 Turn spoken cues ("comma", "question mark", "open parenthese", "close parenthese", "new paragraph") into real punctuation.
-Drop meaningless filler artifacts ("um", "uh")."""
+Drop meaningless filler artifacts ("um", "uh").
+Avoid semicolons."""
 
     val PREF_TRANSCRIBE_PROMPTS = listOf(
         // Standard
