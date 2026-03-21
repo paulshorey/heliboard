@@ -50,6 +50,8 @@ import kotlin.collections.set
 
 object AppUpgrade {
     private const val CLEANUP_PROMPT_RESET_VERSION = 3
+    private const val OPENAI_MODEL_MIGRATION_VERSION = 1
+    private const val LEGACY_OPENAI_MODEL = "gpt-4o-mini"
     private const val LEGACY_CLEANUP_PROMPT_V1 = """Edit the transcript text only.
 
 Preserve the speaker's intended meaning, but you may:
@@ -83,6 +85,7 @@ If the transcript appears to continue an existing sentence, keep the opening let
     fun checkVersionUpgrade(context: Context) {
         val prefs = context.prefs()
         maybeResetCleanupPrompt(prefs)
+        maybeUpgradeCleanupModel(prefs)
         val oldVersion = prefs.getInt(Settings.PREF_VERSION_CODE, 0)
         if (oldVersion == BuildConfig.VERSION_CODE)
             return
@@ -650,6 +653,21 @@ If the transcript appears to continue an existing sentence, keep the opening let
                 putString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT)
             }
             putInt(Settings.PREF_CLEANUP_PROMPT_RESET_VERSION, CLEANUP_PROMPT_RESET_VERSION)
+        }
+    }
+
+    private fun maybeUpgradeCleanupModel(prefs: android.content.SharedPreferences) {
+        val appliedModelMigration = prefs.getInt("openai_model_migration_version", 0)
+        if (appliedModelMigration >= OPENAI_MODEL_MIGRATION_VERSION) {
+            return
+        }
+        val currentModel = prefs.getString(Settings.PREF_OPENAI_MODEL, null)
+        prefs.edit {
+            // Only rewrite the old default so custom user overrides still win.
+            if (currentModel.isNullOrBlank() || currentModel == LEGACY_OPENAI_MODEL) {
+                putString(Settings.PREF_OPENAI_MODEL, Defaults.PREF_OPENAI_MODEL)
+            }
+            putInt("openai_model_migration_version", OPENAI_MODEL_MIGRATION_VERSION)
         }
     }
 
