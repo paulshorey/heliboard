@@ -263,8 +263,8 @@
     <string name="setup_app_microphone_title">Microphone permission</string>
     <string name="setup_app_microphone_summary">Allow microphone access so voice transcription can start recording.</string>
     <string name="setup_app_open_system_settings">Open system settings</string>
+    <string name="setup_app_open_app_settings">Open app settings</string>
     <string name="setup_app_choose_keyboard">Choose keyboard</string>
-    <string name="setup_app_grant_permission">Grant permission</string>
     <string name="setup_app_configured">Configured</string>
     <string name="setup_app_missing">Missing</string>
     <string name="setup_app_return_later">Come back to finish later in "Settings -&gt; Setup this app".</string>

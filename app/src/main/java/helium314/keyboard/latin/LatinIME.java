@@ -1998,7 +1998,6 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public void onVoiceInputClicked() {
-        mKeyboardSwitcher.hideActionOverlay();
         if (mVoiceInputManager != null) {
             mVoiceInputManager.toggleRecording();
         }

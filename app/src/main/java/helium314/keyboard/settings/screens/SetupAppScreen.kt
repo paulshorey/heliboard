@@ -4,6 +4,7 @@ package helium314.keyboard.settings.screens
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings as AndroidSettings
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -90,10 +91,6 @@ fun SetupAppScreen(
     val systemSettingsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         refreshStatus()
     }
-    val microphonePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        microphoneGranted = it
-    }
-
     SearchSettingsScreen(
         onClickBack = onClickBack,
         title = stringResource(R.string.settings_screen_setup_app),
@@ -126,9 +123,12 @@ fun SetupAppScreen(
                     title = stringResource(R.string.setup_app_microphone_title),
                     summary = stringResource(R.string.setup_app_microphone_summary),
                     isComplete = microphoneGranted,
-                    actionLabel = stringResource(R.string.setup_app_grant_permission),
+                    actionLabel = stringResource(R.string.setup_app_open_app_settings),
                     onAction = {
-                        microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        val intent = Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.fromParts("package", context.packageName, null)
+                        }
+                        systemSettingsLauncher.launch(intent)
                     }
                 )
                 SetupRequirementItem(
