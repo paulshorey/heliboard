@@ -2128,12 +2128,11 @@ public class LatinIME extends InputMethodService implements
                 }
             }
 
-            // Check if last character is sentence-ending punctuation
+            // If the preceding visible character ends a sentence, keep original capitalization.
+            // A space here means we only found leading whitespace before the caret.
             boolean isSentenceEnd = (lastChar == '.' || lastChar == '!' || lastChar == '?' ||
-                                      lastChar == '\n' || lastChar == ' '); // space at position 0 means start
-
-            // If previous text ends a sentence, keep original capitalization
-            if (isSentenceEnd || lastChar == ' ') {
+                                      lastChar == '\n' || lastChar == ' ');
+            if (isSentenceEnd) {
                 return text;
             }
 

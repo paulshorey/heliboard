@@ -2,9 +2,7 @@
 package helium314.keyboard.settings.screens
 
 import android.content.Context
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,27 +10,21 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
@@ -94,21 +86,6 @@ fun TranscriptionScreen(
                 Defaults.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS
             ).toString()
         )
-    }
-
-    // Prompt presets
-    var selectedIndex by remember {
-        mutableIntStateOf(prefs.getInt(Settings.PREF_TRANSCRIPTION_PROMPT_SELECTED, Defaults.PREF_TRANSCRIPTION_PROMPT_SELECTED))
-    }
-
-    val prompts = remember {
-        mutableStateListOf<String>().apply {
-            for (i in 0 until Settings.TRANSCRIPTION_PROMPT_COUNT) {
-                val key = Settings.PREF_TRANSCRIPTION_PROMPT_PREFIX + i
-                val defaultValue = Defaults.PREF_TRANSCRIBE_PROMPTS.getOrElse(i) { "" }
-                add(prefs.getString(key, defaultValue) ?: defaultValue)
-            }
-        }
     }
 
     SearchSettingsScreen(
@@ -206,22 +183,6 @@ fun TranscriptionScreen(
                     maxLines = 1
                 )
 
-                // Prompt presets
-                for (i in 0 until Settings.TRANSCRIPTION_PROMPT_COUNT) {
-                    PromptPresetItem(
-                        prompt = prompts[i],
-                        isSelected = selectedIndex == i,
-                        onSelected = {
-                            selectedIndex = i
-                            prefs.edit { putInt(Settings.PREF_TRANSCRIPTION_PROMPT_SELECTED, i) }
-                        },
-                        onPromptChanged = { newPrompt ->
-                            prompts[i] = newPrompt
-                            val key = Settings.PREF_TRANSCRIPTION_PROMPT_PREFIX + i
-                            prefs.edit { putString(key, newPrompt) }
-                        }
-                    )
-                }
             }
         }
     }
@@ -255,42 +216,6 @@ private fun InlineTextField(
             modifier = Modifier.fillMaxWidth(),
             minLines = minLines,
             maxLines = maxLines,
-            textStyle = MaterialTheme.typography.bodySmall,
-            shape = MaterialTheme.shapes.small,
-        )
-    }
-}
-
-@Composable
-private fun PromptPresetItem(
-    prompt: String,
-    isSelected: Boolean,
-    onSelected: () -> Unit,
-    onPromptChanged: (String) -> Unit
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        RadioButton(
-            selected = isSelected,
-            onClick = onSelected,
-            modifier = Modifier
-                .selectable(
-                    selected = isSelected,
-                    onClick = onSelected,
-                    role = Role.RadioButton
-                )
-                .padding(start = 4.dp, top = 8.dp, bottom = 0.dp)
-        )
-
-        OutlinedTextField(
-            value = prompt,
-            onValueChange = onPromptChanged,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 0.dp, end = 0.dp, top = 0.dp, bottom = 12.dp),
-            minLines = 3,
-            maxLines = 6,
             textStyle = MaterialTheme.typography.bodySmall,
             shape = MaterialTheme.shapes.small,
         )

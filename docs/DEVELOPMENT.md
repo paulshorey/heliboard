@@ -27,14 +27,6 @@ gita && ./gradlew assembleDebug && ./gradlew installDebug
 
 For **key hint / secondary character** sizing (long-press hints, number row, resource qualifiers), see [key-hint-secondary-character-sizing.md](key-hint-secondary-character-sizing.md).
 
-app/src/main/java/helium314/keyboard/latin/settings/Defaults.kt
-
-```
-    val PREF_TRANSCRIBE_PROMPTS = listOf(
-        // Technical/Standard
-        "Capitalize first letter only in a full sentence. Do not capitalize words and phrases. Add punctuation where necessary.",
-```
-
 # Install app on phone
 
 To install HeliBoard permanently on your phone (sideloading), you have two options:

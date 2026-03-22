@@ -64,9 +64,7 @@ Body: <raw WAV file bytes>
 | Key | Type | Description |
 |-----|------|-------------|
 | `PREF_DEEPGRAM_API_KEY` | String | Deepgram API key for transcription |
-| `PREF_TRANSCRIPTION_PROMPT_PREFIX` | String | Prefix for local post-transcription prompt preset keys |
-| `PREF_TRANSCRIPTION_PROMPT_SELECTED` | Int | Index of selected prompt preset |
-| `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Silence window before chunking voice input |
+| `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Silence window before treating speech as paused |
 | `PREF_VOICE_SILENCE_THRESHOLD` | Int | RMS threshold used for silence detection |
 | `PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS` | Int | Silence duration before inserting a new paragraph |
 | `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` | Int | Silence duration before auto-stopping recording |

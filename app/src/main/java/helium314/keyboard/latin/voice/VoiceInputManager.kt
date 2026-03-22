@@ -54,7 +54,7 @@ class VoiceInputManager(private val context: Context) {
         /** A transcript unit was finalized — process and insert this text. */
         fun onTranscriptionResult(text: String)
 
-        /** Voice processing is actively running (transcription pending). */
+        /** Voice processing is actively running (transcripts are pending delivery). */
         fun onProcessingStarted()
 
         /** No queued transcription work remains at manager level. */
@@ -479,13 +479,17 @@ class VoiceInputManager(private val context: Context) {
         if (isDispatchingTranscripts) return
         isDispatchingTranscripts = true
         try {
+            var notifiedProcessingStarted = false
             while (true) {
                 val pending = pendingTranscripts.removeFirstOrNull() ?: break
                 if (pending.sessionId != activeSessionId) {
                     Log.i(TAG, "Skipping transcript from stale session ${pending.sessionId}")
                     continue
                 }
-                listener?.onProcessingStarted()
+                if (!notifiedProcessingStarted) {
+                    listener?.onProcessingStarted()
+                    notifiedProcessingStarted = true
+                }
                 listener?.onTranscriptionResult(pending.text)
             }
         } finally {

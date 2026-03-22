@@ -4,7 +4,7 @@ package helium314.keyboard.latin.voice;
 import androidx.annotation.Nullable;
 
 /**
- * Sanitizes voice text returned by remote transcription and cleanup APIs.
+ * Sanitizes voice text returned by remote transcription APIs.
  *
  * <p>These APIs occasionally emit invisible Unicode formatting controls. They render with no
  * width, but still occupy cursor positions, so backspace appears to get "stuck" while it deletes

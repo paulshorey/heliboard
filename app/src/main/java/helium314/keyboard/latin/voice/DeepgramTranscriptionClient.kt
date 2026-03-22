@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit
  *
  * Deepgram receives raw PCM16 chunks continuously and sends transcription events
  * back over the same socket. We only surface finalized transcript updates so the
- * downstream cleanup queue stays deterministic.
+ * downstream insertion order stays deterministic.
  *
  * API docs: https://developers.deepgram.com/docs/streaming
  */

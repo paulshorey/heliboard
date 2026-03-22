@@ -127,7 +127,7 @@ android {
 }
 
 dependencies {
-    // OkHttp for WebSocket (OpenAI Realtime API)
+    // OkHttp for Deepgram WebSocket streaming
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     // androidx

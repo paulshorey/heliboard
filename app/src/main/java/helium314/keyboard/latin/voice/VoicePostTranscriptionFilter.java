@@ -5,7 +5,7 @@ import androidx.annotation.Nullable;
 
 /**
  * Optional hook for deterministic post-transcription filtering on each finalized chunk
- * before cleanup and insertion.
+ * before insertion.
  *
  * <p>Reserved for future rules (e.g. length-based filtering). The character threshold below
  * is kept for upcoming use.</p>

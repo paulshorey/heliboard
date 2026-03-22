@@ -11,24 +11,22 @@ HeliBoard is an Android app, open-source project based on AOSP / OpenBoard keybo
 ## Voice to text UI
 
 1. User taps microphone button in the top right corner of the keyboard
-2. Recording starts
-3. After a period of silence, recording is chunked (stops to save the file and start processing, but restarts immediately)
-4. Send recorded audio chunk to Deepgram API for transcription
-5. Received transcribed text, apply post-processing
-6. Received transcribed text, apply local post-processing
-7. Immediately insert the processed text at the current caret position through `InputConnection`
+2. Recording starts immediately on-device
+3. PCM audio streams continuously to Deepgram while silence timers run locally
+4. Deepgram returns finalized transcript spans in order
+5. Apply local post-processing to each finalized transcript span
+6. Immediately insert the processed text at the current caret position through `InputConnection`
 
 ## Handling chunked audio recordings
 
-1 ChunkA audio → Deepgram
-2 ChunkB audio queued in VoiceInputManager
-3 ChunkA transcription received → onTranscriptionResult(textA)
-4 Local post-processing runs on textA
-5 textA is committed immediately at the caret via `InputConnection`
-6 processNextSegment() → ChunkB sent to Deepgram
-7 ChunkB transcription arrives in FIFO order
-8 Local post-processing runs on textB
-9 textB is committed immediately at the caret
+1 ChunkA audio frames → Deepgram
+2 ChunkB audio frames continue streaming while ChunkA is being finalized
+3 ChunkA transcription received → `onTranscriptionResult(textA)`
+4 Local post-processing runs on `textA`
+5 `textA` is committed immediately at the caret via `InputConnection`
+6 ChunkB transcription arrives later in FIFO order
+7 Local post-processing runs on `textB`
+8 `textB` is committed immediately at the caret
 
 ## Fullapp keyboard
 

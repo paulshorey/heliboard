@@ -127,18 +127,17 @@ PAUSED     → User taps pause  → RECORDING (resume)
 
 ### Settings (TranscriptionScreen.kt)
 - **Deepgram API Key**: Required for transcription
-- **Chunk Silence Duration**: Silence window before cutting a chunk
+- **Chunk Silence Duration**: Silence window before detecting a speech boundary
 - **Silence Threshold**: RMS threshold floor for silence/speech detection
 - **New Paragraph Silence Duration**: Delay before inserting a paragraph break
 - **Auto-stop Silence Duration**: Delay before automatically stopping voice recording
-- **Transcription prompt presets**: Local prompt/style presets for future/manual processing behavior
 
 ### Silence Detection (VoiceRecorder.kt)
 ```kotlin
 silenceThreshold (configurable via settings)
 silenceDurationMs (configurable via settings)
-MIN_SEGMENT_MS = 500L
-MAX_SEGMENT_MS = 60000L
+MIN_SILENCE_DURATION_MS = 1000L
+MAX_SILENCE_DURATION_MS = 30000L
 ```
 
 ## Error Handling
