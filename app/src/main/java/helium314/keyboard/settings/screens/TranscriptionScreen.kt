@@ -183,6 +183,7 @@ fun TranscriptionScreen(
                     maxLines = 1
                 )
 
+                FullappDraftHistorySections()
             }
         }
     }

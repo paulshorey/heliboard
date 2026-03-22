@@ -48,30 +48,6 @@ Gradle builds (`./gradlew :app:compileDebugKotlin`) work out of the box in Curso
 2. After setup, `./gradlew :app:compileDebugKotlin` works out of the box (Gradle reads `local.properties`).
 3. To get env vars in the current shell: `source ./.android-env` or `source ./tools/setup-android-sdk.sh` (idempotent if SDK already installed).
 
-## Installable APK artifact
-
-When a task requires a phone-installable build artifact, generate a debug APK and save exactly one canonical copy at:
-
-- `/workspace/dist/HeliBoard.apk`
-
-Preferred flow:
-
-1. Run `./tools/build-dist-apk.sh`
-
-This helper script:
-
-- sources `./tools/setup-android-sdk.sh`
-- builds the debug APK with Gradle
-- removes older files in `/workspace/dist`
-- copies the generated APK to `/workspace/dist/HeliBoard.apk`
-
-Always overwrite `/workspace/dist/HeliBoard.apk` with the latest build when regenerating it.
-
-Required final step for task completion:
-
-- After finishing any implementation task, run `./tools/build-dist-apk.sh` so `/workspace/dist/HeliBoard.apk` is up to date.
-- Commit the rebuilt `/workspace/dist/HeliBoard.apk` to the current feature branch together with the task changes before giving the final summary.
-
 ## Shared debug keystore
 
 Debug builds use `keystore/debug.keystore` so local Gradle builds and cloud-agent builds produce APKs with the **same signature**. You can install a cloud-built APK over a locally-built install (or vice versa) without uninstalling, preserving user preferences and data.

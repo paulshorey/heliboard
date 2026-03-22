@@ -15,7 +15,8 @@ When the user taps the fullapp toolbar button (configured through the normal too
 2. The user sees a fullapp text editor (Compose UI). They can type or use voice transcription.
 3. The fullapp editor autosaves while editing and when backgrounded, so Home/app-switcher/process recreation does not drop the draft.
 4. Any explicit exit (back press, keyboard toggle button) keeps the latest draft ready to sync to the original app's textarea.
-5. When the IME reconnects to the matching editor, it retries the replay and only clears the stored draft after sync succeeds.
+5. When the IME reconnects to the matching editor, it retries the replay. After sync succeeds (or the target field already matches the draft), the draft is removed from the live-sync list and archived into read-only history instead of being deleted.
+6. Users can review and copy both live drafts and archived fullapp history from Settings. Archived entries never sync automatically again.
 
 ## Why Activity-Based Fullapp (Not Extract View)
 
@@ -41,14 +42,15 @@ So we reuse that model: **treat fullapp as "opening the keyboard app"**, separat
 1. **User taps the fullapp toolbar key** → `KeyCode.FULLAPP` → `onFullappExpandClicked()` / `onFullappMinimizeClicked()` → `launchFullappEditorActivity()` or exit runnable.
 2. **Launch**: Commit typed text, stop voice gracefully, read current text and `packageName` from `InputConnection`/`EditorInfo`, call `requestHideSelf()`, start `FullappEditorActivity` with extras.
 3. **In Activity**: User edits in Compose `OutlinedTextField` (keyboard + voice work; keyboard app is foreground). No top toolbar — the keyboard's fullapp toggle (angle down) or back press exits.
-4. **While editing**: Persist a draft in credential-protected storage, keyed by an editor fingerprint (package + field metadata). This also lets multiple apps/fields keep separate unsynced drafts.
-5. **On exit/background**: Keep the latest draft persisted instead of relying on a one-shot in-memory handoff.
-6. **When user returns**: They go back to the original app. When they focus the matching text area, `onStartInputViewInternal()` looks up the saved draft, retries `replaceEntireFieldText()` if needed, restores selection, and only then clears the stored draft and hides the keyboard.
+4. **While editing**: Persist a live draft in credential-protected storage, keyed by an editor fingerprint (package + field metadata). This also lets multiple apps/fields keep separate unsynced drafts.
+5. **On exit/background**: Keep the latest live draft persisted instead of relying on a one-shot in-memory handoff.
+6. **When user returns**: They go back to the original app. When they focus the matching text area, `onStartInputViewInternal()` looks up the live draft, retries `replaceEntireFieldText()` if needed, restores selection, and then archives the finished draft into read-only history instead of deleting it.
+7. **Settings history**: The settings UI shows two sections: live in-progress fullapp edits (still eligible for sync) and archived fullapp edit history (reference only, copyable, never auto-synced).
 
 ### Key files
 
 - `LatinIME.java`: `launchFullappEditorActivity()`, pending-text handling in `onStartInputViewInternal()`.
-- `FullappEditorActivity.kt`: Compose UI, autosave lifecycle, `FullappEditorResult` draft store.
+- `FullappEditorActivity.kt`: Compose UI, autosave lifecycle, `FullappEditorResult` live-draft + archive store.
 - `SuggestionStripView.kt`: Runtime fullapp toolbar button state (expand/minimize icon swap).
 - `ToolbarUtils.kt`: Fullapp toolbar key registration, defaults, and settings integration.
 
@@ -69,7 +71,7 @@ newlines.
 
 - `replaceEntireFieldText()` — used for inserting pending text when the IME reconnects.
 - `getOriginalFieldText()`, `getOriginalFieldCursorPosition()`, `readCurrentFieldText()` — used to seed the Activity and for `replaceEntireFieldText()`.
-- `FullappEditorResult` — draft store and editor-target matching between the Activity and IME.
+- `FullappEditorResult` — live draft store, archived history store, and editor-target matching between the Activity and IME.
 
 ## What Did NOT Work (Extract View)
 

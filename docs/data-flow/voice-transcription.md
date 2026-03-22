@@ -18,12 +18,12 @@ The voice input system uses **local recording + streaming transcription**:
 │   Microphone    │────▶│   VoiceRecorder      │────▶│  Deepgram API   │
 │   (Hardware)    │     │   (PCM16 16kHz)      │     │  (WebSocket /v1/listen)
 └─────────────────┘     │   Silence detection  │     └────────┬────────┘
-                        │   Chunking/timers     │              │
-                        └──────────────────────┘              ▼
-┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
-│   Text Field    │◀────│   LatinIME           │◀────│  Transcription  │
-│   (App)         │     │   (Orchestrator)     │     │  Result (text)  │
-└─────────────────┘     └──────────────────────┘     └─────────────────┘
+                        │   Chunking/timers     │              ▼
+                        └──────────────────────┘     ┌─────────────────┐
+┌─────────────────┐     ┌──────────────────────┐◀────│  Transcription  │
+│   Text Field    │◀────│   LatinIME           │     │  Result (text)  │
+│   (App)         │     │   (Orchestrator)     │     └─────────────────┘
+└─────────────────┘     └──────────────────────┘
 ```
 
 ## Key Design Principle: Instant Recording
