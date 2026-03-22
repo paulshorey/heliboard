@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -29,7 +30,8 @@ import java.util.regex.Pattern;
  *    - Strip invisible Unicode control characters via VoiceTextSanitizer.
  *    - Adjust capitalization using text before the caret so mid-sentence insertions
  *      do not stay incorrectly capitalized.
- *    - Ensure a trailing space so the IME can commit the final text directly.
+ *    - As the very last step, prepend a single leading space when the finished
+ *      chunk starts with an ASCII letter or "-". Do not append trailing space.
  *
  * The IME should treat this class as the single owner of voice text shaping.
  * Callers should pass in raw finalized transcript text and commit the returned
@@ -48,6 +50,8 @@ public final class VoicePostTranscriptionFilter {
             Pattern.compile("(?<=[^a-zA-Z])\\s+(?=[^a-zA-Z])");
     private static final Pattern REMAINING_ONE_WORD_PATTERN =
             Pattern.compile("\\b1(\\s?)([a-zA-Z]+)");
+    private static final Pattern STANDALONE_Y_PATTERN =
+            Pattern.compile("(^|\\s)([Yy])(?=\\W|$)");
 
     private VoicePostTranscriptionFilter() {
         // Utility class.
@@ -74,7 +78,7 @@ public final class VoicePostTranscriptionFilter {
      * Prepare finalized transcript text for insertion into the editor.
      *
      * <p>Applies deterministic voice-specific cleanup, then context-aware capitalization, and
-     * finally normalizes trailing spacing so step 3 only needs to commit the result.</p>
+     * finally prepends a leading space when the finished chunk starts with an ASCII letter or "-".</p>
      */
     public static String prepareForInsertion(
             @Nullable final String rawText,
@@ -87,7 +91,7 @@ public final class VoicePostTranscriptionFilter {
         }
 
         final String capitalized = adjustCapitalization(sanitized, textBeforeCursor);
-        return ensureTrailingSpace(capitalized);
+        return prependLeadingSpaceIfAlphabeticOrDash(capitalized);
     }
 
     private static String adjustCapitalization(
@@ -124,11 +128,23 @@ public final class VoicePostTranscriptionFilter {
         return c == '.' || c == '!' || c == '?' || c == '\n';
     }
 
-    private static String ensureTrailingSpace(final String text) {
-        if (text.isEmpty() || text.endsWith(" ")) {
+    private static String prependLeadingSpaceIfAlphabeticOrDash(final String text) {
+        if (text.isEmpty()) {
             return text;
         }
-        return text + " ";
+        final char firstChar = text.charAt(0);
+        if (!shouldPrependLeadingSpace(firstChar)) {
+            return text;
+        }
+        return " " + text;
+    }
+
+    private static boolean shouldPrependLeadingSpace(final char c) {
+        return c == '-' || isAsciiAlphabetic(c);
+    }
+
+    private static boolean isAsciiAlphabetic(final char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
     }
 
     private static String replaceSpokenAliases(final String text) {
@@ -281,8 +297,22 @@ public final class VoicePostTranscriptionFilter {
         result = result.replaceAll("(?i)\\be\\s+t\\s+c\\.\\.\\.", "etc...");
         result = result.replaceAll("(?i)\\betcetera\\b", "etc");
         result = result.replaceAll("(?i)\\betc(?=\\s)", "etc.");
+        result = replaceStandaloneYWithWhy(result);
 
         return REMAINING_ONE_WORD_PATTERN.matcher(result).replaceAll("one$1$2");
+    }
+
+    private static String replaceStandaloneYWithWhy(final String text) {
+        final Matcher matcher = STANDALONE_Y_PATTERN.matcher(text);
+        final StringBuffer result = new StringBuffer();
+        while (matcher.find()) {
+            final String prefix = matcher.group(1);
+            final String matchedY = matcher.group(2);
+            final String replacement = Character.isUpperCase(matchedY.charAt(0)) ? "Why" : "why";
+            matcher.appendReplacement(result, Matcher.quoteReplacement(prefix + replacement));
+        }
+        matcher.appendTail(result);
+        return result.toString();
     }
 
     private static String collapseSpacesBetweenNonAlphabeticChars(final String text) {
@@ -351,14 +381,14 @@ public final class VoicePostTranscriptionFilter {
     private static Map<String, String> createSpokenSymbolAliases() {
         final Map<String, String> aliases = new HashMap<>();
 
-        registerAliases(aliases, ".", "period", "full stop", "dot");
+        registerAliases(aliases, ".", "full stop", "dot");
         registerAliases(aliases, ",", "comma");
         registerAliases(aliases, "!", "exclamation", "exclamation point", "exclamation mark", "bang");
         registerAliases(aliases, "?", "question mark", "question point", "question-mark");
         registerAliases(aliases, ":", "colon");
         registerAliases(aliases, ";", "semicolon", "semi colon");
         registerAliases(aliases, "...", "ellipsis", "dot dot dot");
-        registerAliases(aliases, "•", "bullet", "bullet point");
+        registerAliases(aliases, "•", "bullet point");
         registerAliases(aliases, "°", "degree", "degree sign");
         registerAliases(aliases, "©", "copyright", "copyright sign");
         registerAliases(aliases, "®", "registered", "registered sign");
@@ -438,9 +468,7 @@ public final class VoicePostTranscriptionFilter {
                 "curly bracket",
                 "curly brackets",
                 "curly brace",
-                "curly braces",
-                "brace",
-                "braces"
+                "curly braces"
         );
 
         registerAliases(aliases, "(", "left parenthesis", "left parentheses", "left parenthese", "left paren", "open round bracket", "opening round bracket");
@@ -451,8 +479,8 @@ public final class VoicePostTranscriptionFilter {
 
         registerAliases(aliases, "{", "open curly bracket", "opening curly bracket", "left curly bracket", "open curly brace", "opening curly brace", "left curly brace");
         registerAliases(aliases, "}", "close curly bracket", "closing curly bracket", "right curly bracket", "close curly brace", "closing curly brace", "right curly brace");
-        registerAliases(aliases, "<", "open the angle bracket", "open the chevron", "opening angle bracket", "opening chevron");
-        registerAliases(aliases, ">", "close the angle bracket", "close the chevron", "closing angle bracket", "closing chevron");
+        registerAliases(aliases, "<", "less than", "less than sign", "open the angle bracket", "open the chevron", "opening angle bracket", "opening chevron");
+        registerAliases(aliases, ">", "greater than", "greater than sign", "close the angle bracket", "close the chevron", "closing angle bracket", "closing chevron");
 
         registerAliases(aliases, "(", "open the parenthesis", "open the parentheses", "open the parenthese", "open the paren", "parentheses", "parenthesis");
         registerAliases(aliases, ")", "close the parenthesis", "close the parentheses", "close the parenthese", "close the paren");

@@ -122,7 +122,27 @@ class VoicePostTranscriptionFilterTest {
     }
 
     @Test
+    fun `normalizes standalone y to why`() {
+        assertEquals("I know why.", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("I know y."))
+        assertEquals("I know why", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("I know y"))
+        assertEquals("why?", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("y?"))
+    }
+
+    @Test
     fun `turns remaining one before words back into word one`() {
         assertEquals("one apple", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("one apple"))
+    }
+
+    @Test
+    fun `prepare for insertion prepends leading space for alphabetic chunks`() {
+        assertEquals(" hello", VoicePostTranscriptionFilter.prepareForInsertion("hello", null))
+        assertEquals(" hello", VoicePostTranscriptionFilter.prepareForInsertion("Hello", "already typing"))
+        assertEquals(" - and another thought", VoicePostTranscriptionFilter.prepareForInsertion("dash and another thought", null))
+    }
+
+    @Test
+    fun `prepare for insertion only prepends space for configured chunk starts`() {
+        assertEquals("(7/7)", VoicePostTranscriptionFilter.prepareForInsertion("(7/ 7 )", null))
+        assertEquals(" -5", VoicePostTranscriptionFilter.prepareForInsertion("negative five", null))
     }
 }

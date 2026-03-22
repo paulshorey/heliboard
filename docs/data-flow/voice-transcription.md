@@ -58,7 +58,7 @@ Orchestrates recording, Deepgram streaming, and ordered transcript delivery.
 Local text preparation layer that runs on each finalized transcript span before insertion.
 - **Alias pass**: single longest-match token scan for spoken numbers (`zero`..`ninety nine`) and spoken symbols (`open parenthesis`, `slash`, `comma`, etc.)
 - **Cleanup pass**: fixes spacing between adjacent symbols/numbers and applies ordered edge-case rewrites such as `one hundred -> 100`, `negative five -> -5`, and delayed `dash` / `hyphen` / `minus` handling
-- **Insertion prep**: strips invisible Unicode control characters, adjusts capitalization from text before the caret, and ensures trailing space
+- **Insertion prep**: strips invisible Unicode control characters, adjusts capitalization from text before the caret, and as the final step prepends a space only when the finished chunk starts with an ASCII letter
 
 ### LatinIME.java
 Main orchestrator that coordinates all components and inserts text into the editor.
@@ -98,7 +98,7 @@ Finalized transcript span arrives
         - fixes deterministic edge cases
         - strips invisible control characters
         - adjusts capitalization
-        - ensures trailing spacing
+        - prepends a leading space only when the finished chunk starts with an ASCII letter
     → LatinIME commits the prepared text at the caret via InputConnection.commitText(...)
 ```
 
