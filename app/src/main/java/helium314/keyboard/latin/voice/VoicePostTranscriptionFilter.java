@@ -23,6 +23,8 @@ public final class VoicePostTranscriptionFilter {
     public static final int POST_TRANSCRIPTION_FILTER_SHORT_CHUNK_CHAR_LIMIT = 40;
     private static final Map<String, String> SPOKEN_SYMBOL_ALIASES = createSpokenSymbolAliases();
     private static final int MAX_ALIAS_WORDS = findMaxAliasWords(SPOKEN_SYMBOL_ALIASES);
+    private static final Map<String, String> SPOKEN_NUMBER_WORDS = createSpokenNumberWords();
+    private static final int MAX_NUMBER_WORDS = 2;
 
     private VoicePostTranscriptionFilter() {
         // Utility class.
@@ -41,7 +43,8 @@ public final class VoicePostTranscriptionFilter {
         if (text.isBlank()) {
             return "";
         }
-        return replaceSpokenSymbols(text);
+        String result = replaceSpokenNumbers(text);
+        return replaceSpokenSymbols(result);
     }
 
     /**
@@ -246,6 +249,85 @@ public final class VoicePostTranscriptionFilter {
         return token.toLowerCase(Locale.US)
                 .replace('\u2019', '\'')
                 .replaceAll("^[^a-z0-9]+|[^a-z0-9]+$", "");
+    }
+
+    private static String replaceSpokenNumbers(final String text) {
+        final String trimmed = text.trim();
+        if (trimmed.isEmpty()) {
+            return "";
+        }
+
+        final String[] originalTokens = trimmed.split("\\s+");
+        final String[] normalizedTokens = new String[originalTokens.length];
+        for (int i = 0; i < originalTokens.length; i++) {
+            normalizedTokens[i] = normalizeToken(originalTokens[i]);
+        }
+
+        final List<String> segments = new ArrayList<>();
+        int index = 0;
+        while (index < originalTokens.length) {
+            final Match match = findLongestNumberMatch(normalizedTokens, index);
+            if (match != null) {
+                segments.add(match.symbol);
+                index += match.wordCount;
+            } else {
+                segments.add(originalTokens[index]);
+                index += 1;
+            }
+        }
+        return String.join(" ", segments);
+    }
+
+    @Nullable
+    private static Match findLongestNumberMatch(final String[] normalizedTokens, final int startIndex) {
+        final int maxWords = Math.min(MAX_NUMBER_WORDS, normalizedTokens.length - startIndex);
+        for (int wordCount = maxWords; wordCount >= 1; wordCount--) {
+            final StringBuilder candidate = new StringBuilder();
+            boolean valid = true;
+            for (int i = 0; i < wordCount; i++) {
+                final String token = normalizedTokens[startIndex + i];
+                if (token.isEmpty()) {
+                    valid = false;
+                    break;
+                }
+                if (candidate.length() > 0) {
+                    candidate.append(' ');
+                }
+                candidate.append(token);
+            }
+            if (!valid) {
+                continue;
+            }
+            final String number = SPOKEN_NUMBER_WORDS.get(candidate.toString());
+            if (number != null) {
+                return new Match(number, wordCount);
+            }
+        }
+        return null;
+    }
+
+    private static Map<String, String> createSpokenNumberWords() {
+        final Map<String, String> numbers = new HashMap<>();
+
+        final String[] ones = {
+                "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+                "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
+                "seventeen", "eighteen", "nineteen"
+        };
+        for (int i = 0; i < ones.length; i++) {
+            numbers.put(ones[i], String.valueOf(i));
+        }
+
+        final String[] tens = {"twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"};
+        for (int i = 0; i < tens.length; i++) {
+            final int tenValue = (i + 2) * 10;
+            numbers.put(tens[i], String.valueOf(tenValue));
+            for (int j = 1; j <= 9; j++) {
+                numbers.put(tens[i] + " " + ones[j], String.valueOf(tenValue + j));
+            }
+        }
+
+        return numbers;
     }
 
     private static Map<String, String> createSpokenSymbolAliases() {
