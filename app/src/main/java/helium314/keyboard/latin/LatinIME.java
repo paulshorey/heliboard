@@ -92,7 +92,9 @@ import helium314.keyboard.latin.voice.VoiceTextSanitizer;
 import helium314.keyboard.latin.suggestions.SuggestionStripView.VoiceState;
 import helium314.keyboard.settings.FullappEditorActivity;
 import helium314.keyboard.settings.FullappEditorResult;
+import helium314.keyboard.settings.SettingsActivity;
 import helium314.keyboard.settings.SettingsActivity2;
+import helium314.keyboard.settings.SettingsDestination;
 import kotlin.Unit;
 
 import java.io.FileDescriptor;
@@ -2089,7 +2091,7 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onPermissionRequired() {
                 Log.w(TAG, "Microphone permission required");
-                mKeyboardSwitcher.showToast("Microphone permission required. Please grant permission in Settings.", true);
+                launchSetupAppSettings();
             }
         });
     }
@@ -2390,7 +2392,15 @@ public class LatinIME extends InputMethodService implements
         return mClipboardHistoryManager;
     }
 
-    void launchSettings() {
+    public void launchSettings() {
+        launchSettings(null);
+    }
+
+    public void launchSetupAppSettings() {
+        launchSettings(SettingsDestination.SetupApp);
+    }
+
+    public void launchSettings(@Nullable final String startDestination) {
         mInputLogic.commitTyped(mSettings.getCurrent(), LastComposedWord.NOT_A_SEPARATOR);
         requestHideSelf(0);
         final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
@@ -2402,6 +2412,9 @@ public class LatinIME extends InputMethodService implements
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK
                 | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
                 | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        if (startDestination != null) {
+            intent.putExtra(SettingsActivity.EXTRA_START_DESTINATION, startDestination);
+        }
         startActivity(intent);
     }
 

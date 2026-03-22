@@ -77,6 +77,7 @@ open class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPre
         settingsContainer = SettingsContainer(this)
 
         val spellchecker = intent?.getBooleanExtra("spellchecker", false) ?: false
+        val startDestination = getRequestedDestination(intent)
 
         val cv = ComposeView(context = this)
         setContentView(cv)
@@ -106,7 +107,10 @@ open class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPre
                             }
                         }
                     else {
-                        SettingsNavHost(onClickBack = { this.finish() })
+                        SettingsNavHost(
+                            onClickBack = { this.finish() },
+                            startDestination = startDestination,
+                        )
                         if (showWelcomeWizard) {
                             WelcomeWizard(close = { showWelcomeWizard = false }, finish = this::finish)
                         } else if (crashReports.isNotEmpty()) {
@@ -148,6 +152,12 @@ open class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPre
         }
 
         enableEdgeToEdge()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        getRequestedDestination(intent)?.let(SettingsDestination::navigateTo)
     }
 
     override fun onStart() {
@@ -213,10 +223,15 @@ open class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPre
         }
     }
 
+    private fun getRequestedDestination(intent: Intent?): String? {
+        return intent?.getStringExtra(EXTRA_START_DESTINATION)?.takeIf { it.isNotBlank() }
+    }
+
     companion object {
         // public write so compose previews can show the screens
         // having it in a companion object is not ideal as it will stay in memory even after settings are closed
         // but it's small enough to not care
+        const val EXTRA_START_DESTINATION = "start_destination"
         lateinit var settingsContainer: SettingsContainer
 
         var forceNight: Boolean? = null

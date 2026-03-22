@@ -257,14 +257,14 @@
     <string name="voice_auto_stop_silence_seconds_title">Auto-stop silence duration (seconds)</string>
     <string name="setup_app_breadcrumb">Settings -&gt; Setup this app</string>
     <string name="setup_app_checklist_title">Checklist</string>
-    <string name="setup_app_intro">Complete these steps so HeliBoard is fully set up for typing and voice input.</string>
+    <string name="setup_app_intro">Add permissions and API keys. Navigate to this page by clicking the settings button in the keyboard.</string>
     <string name="setup_app_enable_keyboard_summary">Enable %s in your system keyboard settings.</string>
     <string name="setup_app_select_keyboard_summary">Select %s as your active keyboard when typing.</string>
     <string name="setup_app_microphone_title">Microphone permission</string>
     <string name="setup_app_microphone_summary">Allow microphone access so voice transcription can start recording.</string>
     <string name="setup_app_open_system_settings">Open system settings</string>
+    <string name="setup_app_open_app_settings">Open app settings</string>
     <string name="setup_app_choose_keyboard">Choose keyboard</string>
-    <string name="setup_app_grant_permission">Grant permission</string>
     <string name="setup_app_configured">Configured</string>
     <string name="setup_app_missing">Missing</string>
     <string name="setup_app_return_later">Come back to finish later in "Settings -&gt; Setup this app".</string>
