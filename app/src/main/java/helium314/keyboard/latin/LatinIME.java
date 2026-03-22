@@ -2104,8 +2104,8 @@ public class LatinIME extends InputMethodService implements
     }
 
     private void insertParagraphBreak() {
-        mInputLogic.finishInput();
         mInputLogic.mConnection.beginBatchEdit();
+        mInputLogic.finishInput();
         mInputLogic.mConnection.commitText("\n\n", 1);
         mInputLogic.mConnection.endBatchEdit();
     }
@@ -2131,10 +2131,13 @@ public class LatinIME extends InputMethodService implements
             return;
         }
         try {
-            // Reset InputLogic composing state before direct connection manipulation.
-            // This ensures the WordComposer is properly synchronized with the connection.
-            mInputLogic.finishInput();
+            // Wrap finishInput + commitText in a single batch edit so the framework
+            // delivers only one onUpdateSelection after both operations complete.
+            // Without this, finishComposingText fires an intermediate onUpdateSelection
+            // that can desync mExpectedSelStart before commitText runs, causing the
+            // cursor to jump instead of inserting the text.
             mInputLogic.mConnection.beginBatchEdit();
+            mInputLogic.finishInput();
             mInputLogic.mConnection.commitText(text, 1);
             mInputLogic.mConnection.endBatchEdit();
 
