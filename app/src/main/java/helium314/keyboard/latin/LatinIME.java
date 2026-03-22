@@ -2030,6 +2030,7 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onTranscriptionResult(@NonNull String text) {
                 try {
+                    Log.i(TAG, "VOICE raw transcript=[" + text + "]");
                     final int enterCount = VoicePostTranscriptionFilter.getNewlineCommandCount(text);
                     if (enterCount > 0) {
                         Log.i(TAG, "VOICE_STEP_4 newline command (" + enterCount + " enters)");
