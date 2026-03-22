@@ -22,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -242,7 +243,7 @@ private fun FullappDraftEntry(
                         painter = painterResource(R.drawable.ic_arrow_left),
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.rotate(if (metadataExpanded) -90f else 90f)
+                        modifier = Modifier.rotate(if (metadataExpanded) 90f else -90f)
                     )
                     Text(
                         text = appLabel,
@@ -251,6 +252,8 @@ private fun FullappDraftEntry(
                     )
                 }
                 IconButton(
+                    modifier = Modifier.padding(top = 2.dp),
+                    colors = IconButtonDefaults.iconButtonColors(),
                     onClick = {
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         clipboard.setPrimaryClip(
@@ -261,7 +264,8 @@ private fun FullappDraftEntry(
                 ) {
                     Icon(
                         painter = painterResource(R.drawable.sym_keyboard_copy_rounded),
-                        contentDescription = stringResource(R.string.copy_to_clipboard)
+                        contentDescription = stringResource(R.string.copy_to_clipboard),
+                        modifier = Modifier.padding(2.dp)
                     )
                 }
             }
