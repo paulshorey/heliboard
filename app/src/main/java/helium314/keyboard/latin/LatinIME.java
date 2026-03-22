@@ -1107,7 +1107,9 @@ public class LatinIME extends InputMethodService implements
         // Wrapped in try-catch because the InputConnection may be in an invalid state
         // (e.g., text field removed while recording is active).
         try {
-            if (mVoiceInputManager != null && !mVoiceInputManager.isIdle()
+            final boolean voiceSessionActive = mVoiceInputManager != null
+                    && (!mVoiceInputManager.isIdle() || mVoiceInputManager.hasPendingProcessing());
+            if (voiceSessionActive
                     && (oldSelStart != newSelStart || oldSelEnd != newSelEnd)
                     && !mInputLogic.mConnection.isBelatedExpectedUpdate(
                             oldSelStart, newSelStart, oldSelEnd, newSelEnd,
@@ -2009,7 +2011,10 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onProcessingIdle() {
                 try {
-                    if (mPendingNewParagraph) {
+                    if (mPendingNewParagraph
+                            && mVoiceInputManager != null
+                            && mVoiceInputManager.isIdle()
+                            && !mVoiceInputManager.hasPendingProcessing()) {
                         insertParagraphBreak();
                         mPendingNewParagraph = false;
                     }
@@ -2067,6 +2072,11 @@ public class LatinIME extends InputMethodService implements
                 } catch (Exception e) {
                     Log.e(TAG, "Error inserting paragraph break: " + e.getMessage(), e);
                 }
+            }
+
+            @Override
+            public void onPendingProcessingCancelled() {
+                resetVoiceInputState();
             }
 
             @Override
@@ -2210,6 +2220,11 @@ public class LatinIME extends InputMethodService implements
         if (sanitized.isEmpty()) {
             return;
         }
+        if (mInputLogic.mConnection.hasSelection()) {
+            Log.w(TAG, "Skipping voice insertion because the editor selection changed");
+            mKeyboardSwitcher.hideProcessingIndicator();
+            return;
+        }
         try {
             String adjustedText = adjustCapitalization(sanitized);
             String textToInsert = ensureTrailingSpace(adjustedText);
@@ -2331,10 +2346,12 @@ public class LatinIME extends InputMethodService implements
     // Hooks for hardware keyboard
     @Override
     public boolean onKeyDown(final int keyCode, final KeyEvent keyEvent) {
-        // Stop voice recording if user types on a hardware/Bluetooth keyboard.
-        stopVoiceRecordingOnUserInput();
-        if (mKeyboardActionListener.onKeyDown(keyCode, keyEvent))
+        final boolean handledByIme = mKeyboardActionListener.onKeyDown(keyCode, keyEvent);
+        if (handledByIme) {
+            // Stop voice recording when the hardware key event was consumed by the IME as input.
+            stopVoiceRecordingOnUserInput();
             return true;
+        }
         return super.onKeyDown(keyCode, keyEvent);
     }
 

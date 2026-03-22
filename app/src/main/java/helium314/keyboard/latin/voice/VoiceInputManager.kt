@@ -63,6 +63,9 @@ class VoiceInputManager(private val context: Context) {
         /** Configured silence window elapsed — start a new paragraph. */
         fun onNewParagraphRequested()
 
+        /** A transcript may still arrive later; keep pending inserts aligned to the current field. */
+        fun onPendingProcessingCancelled()
+
         fun onError(error: String)
         fun onPermissionRequired()
     }
@@ -293,6 +296,7 @@ class VoiceInputManager(private val context: Context) {
     }
 
     private fun invalidateActiveSession(reason: String) {
+        val hadPendingWork = hasPendingProcessing()
         activeSessionId += 1
         streamSessionId = 0L
         isStreamingReady = false
@@ -307,6 +311,9 @@ class VoiceInputManager(private val context: Context) {
         pendingTranscripts.clear()
         isDispatchingTranscripts = false
         transcriptionClient.cancelAll()
+        if (hadPendingWork) {
+            listener?.onPendingProcessingCancelled()
+        }
         notifyProcessingIdleIfDrained()
         Log.i(TAG, "Voice session invalidated ($reason), sessionId=$activeSessionId")
     }
@@ -406,6 +413,11 @@ class VoiceInputManager(private val context: Context) {
             return
         }
 
+        if (pendingAudioChunks.isNotEmpty()) {
+            val message = "Final voice segment could not be transcribed completely"
+            Log.e(TAG, "$message: stream was unavailable during finalize")
+            listener?.onError(message)
+        }
         // If the socket already died/closed, transition to idle processing state.
         pendingAudioChunks.clear()
         notifyProcessingIdleIfDrained()
@@ -422,6 +434,7 @@ class VoiceInputManager(private val context: Context) {
                 "Dropped oldest buffered audio chunk " +
                     "(buffer full at $MAX_PENDING_AUDIO_CHUNKS)"
             )
+            listener?.onError("Voice audio buffer overflowed before transcription completed")
         }
         // VoiceRecorder already delivers a fresh chunk copy for each callback.
         pendingAudioChunks.addLast(PendingAudioChunk(sessionId, pcmData))
