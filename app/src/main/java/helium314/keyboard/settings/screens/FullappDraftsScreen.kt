@@ -231,24 +231,23 @@ private fun FullappDraftEntry(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.Top
             ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { metadataExpanded = !metadataExpanded },
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_arrow_left),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.rotate(if (metadataExpanded) -90f else 90f)
+                    )
                     Text(
                         text = appLabel,
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    if (appLabel != draft.target.packageName) {
-                        Text(
-                            text = draft.target.packageName,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    MetadataToggleRow(
-                        expanded = metadataExpanded,
-                        onToggle = { metadataExpanded = !metadataExpanded }
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary
                     )
                 }
                 IconButton(
@@ -271,6 +270,13 @@ private fun FullappDraftEntry(
                 Column(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    if (appLabel != draft.target.packageName) {
+                        Text(
+                            text = draft.target.packageName,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Text(
                         text = stringResource(R.string.fullapp_drafts_saved_at, savedAt),
                         style = MaterialTheme.typography.bodySmall,
@@ -297,32 +303,6 @@ private fun FullappDraftEntry(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun MetadataToggleRow(
-    expanded: Boolean,
-    onToggle: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .clickable(onClick = onToggle)
-            .padding(top = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = stringResource(R.string.fullapp_drafts_metadata_toggle),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.primary
-        )
-        Icon(
-            painter = painterResource(R.drawable.ic_arrow_left),
-            contentDescription = stringResource(R.string.fullapp_drafts_metadata_toggle),
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.rotate(if (expanded) -90f else 90f)
-        )
     }
 }
 
