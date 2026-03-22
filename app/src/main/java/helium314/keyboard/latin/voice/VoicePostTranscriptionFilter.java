@@ -31,7 +31,8 @@ import java.util.regex.Pattern;
  *    - Adjust capitalization using text before the caret so mid-sentence insertions
  *      do not stay incorrectly capitalized.
  *    - As the very last step, prepend a single leading space when the finished
- *      chunk starts with an ASCII letter or "-". Do not append trailing space.
+ *      chunk starts with a word-like token and the caret is not already preceded by whitespace.
+ *      Do not append trailing space.
  *
  * The IME should treat this class as the single owner of voice text shaping.
  * Callers should pass in raw finalized transcript text and commit the returned
@@ -63,6 +64,26 @@ public final class VoicePostTranscriptionFilter {
      * <p>This is the hook for future substitutions such as spoken punctuation and number
      * conversions. It intentionally stays independent of editor context.</p>
      */
+    /**
+     * Check if the raw transcription chunk is a standalone newline command.
+     * Must be called on the raw Deepgram text BEFORE any other processing.
+     *
+     * @return number of ENTER key events to send (1 for new line, 2 for new paragraph), or 0
+     */
+    public static int getNewlineCommandCount(@Nullable final String rawText) {
+        if (rawText == null) {
+            return 0;
+        }
+        final String trimmed = rawText.trim().toLowerCase(Locale.US);
+        if (trimmed.equals("new paragraph")) {
+            return 2;
+        }
+        if (trimmed.equals("new line") || trimmed.equals("line break")) {
+            return 1;
+        }
+        return 0;
+    }
+
     public static String applyPostTranscriptionFilter(@Nullable final String text) {
         if (text == null) {
             return "";
@@ -78,20 +99,21 @@ public final class VoicePostTranscriptionFilter {
      * Prepare finalized transcript text for insertion into the editor.
      *
      * <p>Applies deterministic voice-specific cleanup, then context-aware capitalization, and
-     * finally prepends a leading space when the finished chunk starts with an ASCII letter or "-".</p>
+     * finally prepends a leading space when the finished chunk starts with a word-like token and
+     * the caret is not already preceded by whitespace.</p>
      */
     public static String prepareForInsertion(
             @Nullable final String rawText,
             @Nullable final CharSequence textBeforeCursor
     ) {
         final String filtered = applyPostTranscriptionFilter(rawText);
-        final String sanitized = VoiceTextSanitizer.stripInvisibleChars(filtered).trim();
+        final String sanitized = VoiceTextSanitizer.stripInvisibleChars(filtered);
         if (sanitized.isEmpty()) {
             return sanitized;
         }
 
         final String capitalized = adjustCapitalization(sanitized, textBeforeCursor);
-        return prependLeadingSpaceIfAlphabeticOrDash(capitalized);
+        return prependLeadingSpaceIfNeeded(capitalized, textBeforeCursor);
     }
 
     private static String adjustCapitalization(
@@ -128,23 +150,59 @@ public final class VoicePostTranscriptionFilter {
         return c == '.' || c == '!' || c == '?' || c == '\n';
     }
 
-    private static String prependLeadingSpaceIfAlphabeticOrDash(final String text) {
+    private static String prependLeadingSpaceIfNeeded(
+            final String text,
+            @Nullable final CharSequence textBeforeCursor
+    ) {
         if (text.isEmpty()) {
             return text;
         }
-        final char firstChar = text.charAt(0);
-        if (!shouldPrependLeadingSpace(firstChar)) {
+        if (!shouldPrependLeadingSpace(text, textBeforeCursor)) {
             return text;
         }
         return " " + text;
     }
 
-    private static boolean shouldPrependLeadingSpace(final char c) {
-        return c == '-' || isAsciiAlphabetic(c);
+    private static boolean shouldPrependLeadingSpace(
+            final String text,
+            @Nullable final CharSequence textBeforeCursor
+    ) {
+        if (isPrecededByWhitespace(textBeforeCursor)) {
+            return false;
+        }
+        final char firstChar = text.charAt(0);
+        if (firstChar == '-'
+                || isAsciiAlphabetic(firstChar)
+                || Character.isDigit(firstChar)
+                || isOpeningBracket(firstChar)
+                || isPrefixWordStarter(firstChar)) {
+            return true;
+        }
+        return isQuoteStarter(firstChar) && text.length() > 1 && isAsciiAlphabetic(text.charAt(1));
+    }
+
+    private static boolean isPrecededByWhitespace(@Nullable final CharSequence textBeforeCursor) {
+        if (textBeforeCursor == null || textBeforeCursor.length() == 0) {
+            return true;
+        }
+        final char lastChar = textBeforeCursor.charAt(textBeforeCursor.length() - 1);
+        return Character.isWhitespace(lastChar);
     }
 
     private static boolean isAsciiAlphabetic(final char c) {
         return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+    }
+
+    private static boolean isQuoteStarter(final char c) {
+        return c == '"' || c == '\'';
+    }
+
+    private static boolean isOpeningBracket(final char c) {
+        return c == '(' || c == '[' || c == '{';
+    }
+
+    private static boolean isPrefixWordStarter(final char c) {
+        return c == '$' || c == '#' || c == '@';
     }
 
     private static String replaceSpokenAliases(final String text) {
@@ -278,7 +336,10 @@ public final class VoicePostTranscriptionFilter {
     }
 
     private static String fixReplacedEdgeCases(final String text) {
-        String result = collapseSpacesBetweenNonAlphabeticChars(text);
+        String result = text;
+        // Disabled for now because users often say the literal word "space".
+        // result = replaceSpokenWhitespace(result);
+        result = collapseSpacesBetweenNonAlphabeticChars(result);
 
         result = result.replaceAll("(?i)\\b0\\s+in\\b", "zero in");
         result = result.replaceAll("(?i)\\b1\\s+hundred\\b", "100");
@@ -300,6 +361,10 @@ public final class VoicePostTranscriptionFilter {
         result = replaceStandaloneYWithWhy(result);
 
         return REMAINING_ONE_WORD_PATTERN.matcher(result).replaceAll("one$1$2");
+    }
+
+    private static String replaceSpokenWhitespace(final String text) {
+        return text.replaceAll("(?i)\\s*\\bspace\\b\\s*", " ");
     }
 
     private static String replaceStandaloneYWithWhy(final String text) {

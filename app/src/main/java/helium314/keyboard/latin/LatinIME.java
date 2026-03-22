@@ -2030,6 +2030,13 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onTranscriptionResult(@NonNull String text) {
                 try {
+                    final int enterCount = VoicePostTranscriptionFilter.getNewlineCommandCount(text);
+                    if (enterCount > 0) {
+                        Log.i(TAG, "VOICE_STEP_4 newline command (" + enterCount + " enters)");
+                        sendEnterKeyEvents(enterCount);
+                        return;
+                    }
+
                     final String processedText = VoicePostTranscriptionFilter.prepareForInsertion(
                             text,
                             getTextBeforeCursorForVoiceContext(5)
@@ -2104,9 +2111,18 @@ public class LatinIME extends InputMethodService implements
     }
 
     private void insertParagraphBreak() {
+        sendEnterKeyEvents(2);
+    }
+
+    private void sendEnterKeyEvents(final int count) {
         mInputLogic.mConnection.beginBatchEdit();
         mInputLogic.finishInput();
-        mInputLogic.mConnection.commitText("\n\n", 1);
+        for (int i = 0; i < count; i++) {
+            mInputLogic.mConnection.sendKeyEvent(
+                    new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER));
+            mInputLogic.mConnection.sendKeyEvent(
+                    new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER));
+        }
         mInputLogic.mConnection.endBatchEdit();
     }
 

@@ -134,15 +134,52 @@ class VoicePostTranscriptionFilterTest {
     }
 
     @Test
-    fun `prepare for insertion prepends leading space for alphabetic chunks`() {
-        assertEquals(" hello", VoicePostTranscriptionFilter.prepareForInsertion("hello", null))
-        assertEquals(" hello", VoicePostTranscriptionFilter.prepareForInsertion("Hello", "already typing"))
-        assertEquals(" - and another thought", VoicePostTranscriptionFilter.prepareForInsertion("dash and another thought", null))
+    fun `preserves literal word space in text`() {
+        assertEquals("hello space world", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("hello space world"))
     }
 
     @Test
-    fun `prepare for insertion only prepends space for configured chunk starts`() {
-        assertEquals("(7/7)", VoicePostTranscriptionFilter.prepareForInsertion("(7/ 7 )", null))
-        assertEquals(" -5", VoicePostTranscriptionFilter.prepareForInsertion("negative five", null))
+    fun `detects standalone newline commands`() {
+        assertEquals(1, VoicePostTranscriptionFilter.getNewlineCommandCount("new line"))
+        assertEquals(1, VoicePostTranscriptionFilter.getNewlineCommandCount("New Line"))
+        assertEquals(1, VoicePostTranscriptionFilter.getNewlineCommandCount("line break"))
+        assertEquals(2, VoicePostTranscriptionFilter.getNewlineCommandCount("new paragraph"))
+        assertEquals(2, VoicePostTranscriptionFilter.getNewlineCommandCount("New Paragraph"))
+        assertEquals(0, VoicePostTranscriptionFilter.getNewlineCommandCount("hello new line world"))
+        assertEquals(0, VoicePostTranscriptionFilter.getNewlineCommandCount("hello"))
+        assertEquals(0, VoicePostTranscriptionFilter.getNewlineCommandCount(null))
+    }
+
+    @Test
+    fun `prepare for insertion prepends leading space for word-like starters mid line`() {
+        assertEquals(" hello", VoicePostTranscriptionFilter.prepareForInsertion("hello", "already typing"))
+        assertEquals(" hello", VoicePostTranscriptionFilter.prepareForInsertion("Hello", "already typing"))
+        assertEquals(" - and another thought", VoicePostTranscriptionFilter.prepareForInsertion("dash and another thought", "already typing"))
+        assertEquals(" 2024", VoicePostTranscriptionFilter.prepareForInsertion("2024", "already typing"))
+        assertEquals(" (note)", VoicePostTranscriptionFilter.prepareForInsertion("(note)", "already typing"))
+        assertEquals(" $5", VoicePostTranscriptionFilter.prepareForInsertion("$5", "already typing"))
+        assertEquals(" #topic", VoicePostTranscriptionFilter.prepareForInsertion("#topic", "already typing"))
+        assertEquals(" @name", VoicePostTranscriptionFilter.prepareForInsertion("@name", "already typing"))
+        assertEquals(" \"hello", VoicePostTranscriptionFilter.prepareForInsertion("\"hello", "already typing"))
+    }
+
+    @Test
+    fun `prepare for insertion does not prepend space after trailing whitespace`() {
+        assertEquals("hello", VoicePostTranscriptionFilter.prepareForInsertion("hello", null))
+        assertEquals("hello", VoicePostTranscriptionFilter.prepareForInsertion("hello", ""))
+        assertEquals("hello", VoicePostTranscriptionFilter.prepareForInsertion("hello", " "))
+        assertEquals("hello", VoicePostTranscriptionFilter.prepareForInsertion("hello", "\t"))
+        assertEquals("hello", VoicePostTranscriptionFilter.prepareForInsertion("hello", "\n"))
+        assertEquals("2024", VoicePostTranscriptionFilter.prepareForInsertion("2024", "\n"))
+    }
+
+    @Test
+    fun `prepare for insertion does not prepend space for non word-like starters`() {
+        assertEquals("\"7", VoicePostTranscriptionFilter.prepareForInsertion("\"7", "already typing"))
+    }
+
+    @Test
+    fun `prepare for insertion preserves literal word space`() {
+        assertEquals(" space&", VoicePostTranscriptionFilter.prepareForInsertion("space ampersand", "already typing"))
     }
 }
