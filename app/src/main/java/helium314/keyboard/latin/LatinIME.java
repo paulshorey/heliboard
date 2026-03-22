@@ -88,7 +88,6 @@ import helium314.keyboard.latin.utils.SubtypeState;
 import helium314.keyboard.latin.utils.ToolbarMode;
 import helium314.keyboard.latin.voice.VoiceInputManager;
 import helium314.keyboard.latin.voice.VoicePostTranscriptionFilter;
-import helium314.keyboard.latin.voice.VoiceTextSanitizer;
 import helium314.keyboard.latin.suggestions.SuggestionStripView.VoiceState;
 import helium314.keyboard.settings.FullappEditorActivity;
 import helium314.keyboard.settings.FullappEditorResult;
@@ -2031,18 +2030,19 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onTranscriptionResult(@NonNull String text) {
                 try {
-                    final String rawText = text != null ? text : "";
-                    final String filteredText =
-                            VoicePostTranscriptionFilter.applyPostTranscriptionFilter(rawText);
-                    if (!filteredText.equals(rawText)) {
+                    final String processedText = VoicePostTranscriptionFilter.prepareForInsertion(
+                            text,
+                            getTextBeforeCursorForVoiceContext(5)
+                    );
+                    if (!processedText.equals(text)) {
                         Log.i(
                                 TAG,
-                                "VOICE_STEP_4 applied post-transcription filter (" +
-                                        rawText.length() + " -> " + filteredText.length() +
+                                "VOICE_STEP_4 prepared transcription text (" +
+                                        text.length() + " -> " + processedText.length() +
                                         " chars)"
                         );
                     }
-                    if (filteredText.trim().isEmpty()) {
+                    if (processedText.isEmpty()) {
                         Log.i(TAG, "VOICE_STEP_4 empty transcription result — nothing to insert");
                         if (mVoiceInputManager == null || !mVoiceInputManager.hasPendingProcessing()) {
                             mKeyboardSwitcher.hideProcessingIndicator();
@@ -2052,9 +2052,9 @@ public class LatinIME extends InputMethodService implements
                     Log.i(
                             TAG,
                             "VOICE_STEP_4 transcription arrived in IME (" +
-                                    filteredText.length() + " chars)"
+                                    processedText.length() + " chars)"
                     );
-                    insertTranscriptionText(filteredText);
+                    commitVoiceTranscriptionText(processedText);
                 } catch (Exception e) {
                     Log.e(TAG, "Error processing transcription result: " + e.getMessage(), e);
                 }
@@ -2111,100 +2111,7 @@ public class LatinIME extends InputMethodService implements
     }
 
     /**
-     * Adjust capitalization of transcribed text based on context.
-     * If the previous text doesn't end with sentence-ending punctuation,
-     * lowercase the first letter of the new transcription.
-     */
-    private String adjustCapitalization(String text) {
-        if (text == null || text.isEmpty()) {
-            return text != null ? text : "";
-        }
-
-        try {
-            // Get text before cursor to check context
-            CharSequence textBeforeCursor = getTextBeforeCursorForVoiceContext(5);
-
-            // If no text before cursor or at start, keep original capitalization
-            if (textBeforeCursor == null || textBeforeCursor.length() == 0) {
-                return text;
-            }
-
-            // Find the last non-space character
-            String beforeText = textBeforeCursor.toString();
-            char lastChar = ' ';
-            for (int i = beforeText.length() - 1; i >= 0; i--) {
-                char c = beforeText.charAt(i);
-                if (c != ' ') {
-                    lastChar = c;
-                    break;
-                }
-            }
-
-            // If the preceding visible character ends a sentence, keep original capitalization.
-            // A space here means we only found leading whitespace before the caret.
-            boolean isSentenceEnd = (lastChar == '.' || lastChar == '!' || lastChar == '?' ||
-                                      lastChar == '\n' || lastChar == ' ');
-            if (isSentenceEnd) {
-                return text;
-            }
-
-            // Otherwise, lowercase the first letter if it's uppercase
-            char firstChar = text.charAt(0);
-            if (Character.isUpperCase(firstChar)) {
-                return Character.toLowerCase(firstChar) + text.substring(1);
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error adjusting capitalization: " + e.getMessage());
-        }
-
-        return text;
-    }
-
-    /**
-     * Strip invisible and zero-width Unicode characters from text.
-     *
-     * The transcription pipeline can return invisible Unicode characters such
-     * as zero-width spaces, byte order marks, directional marks, and bidi isolate /
-     * embedding controls. These characters are inserted into the text field but are
-     * invisible and have no width, making it appear that backspace "doesn't work"
-     * because the user must delete each invisible character individually before
-     * reaching the visible text behind them.
-     *
-     * @param text The text to sanitize
-     * @return The text with invisible characters removed
-     */
-    private String stripInvisibleChars(String text) {
-        final String sanitized = VoiceTextSanitizer.stripInvisibleChars(text);
-        if (text != null && !sanitized.equals(text)) {
-            final int removedCodePoints = text.codePointCount(0, text.length())
-                    - sanitized.codePointCount(0, sanitized.length());
-            Log.i(TAG, "Removed " + removedCodePoints
-                    + " hidden Unicode formatting character(s) from voice text");
-        }
-        return sanitized;
-    }
-
-    /**
-     * Ensure the text ends with a trailing space.
-     * This ensures proper spacing after transcribed text.
-     */
-    private String ensureTrailingSpace(String text) {
-        if (text == null) {
-            return " ";
-        }
-        if (text.isEmpty()) {
-            return " ";
-        }
-        if (text.endsWith(" ")) {
-            return text;
-        }
-        return text + " ";
-    }
-
-    /**
-     * Insert transcription text into the text field.
-     * Handles capitalization adjustment and trailing space.
-     * Uses batch edit to ensure atomic operation.
+     * Commit already-processed voice text into the active editor.
      *
      * IMPORTANT: We must call mInputLogic.finishInput() before committing text
      * through the connection directly. Without this, the InputLogic's WordComposer
@@ -2212,14 +2119,10 @@ public class LatinIME extends InputMethodService implements
      * by commitText(). This desync causes subsequent backspace presses to modify
      * a phantom composing buffer instead of actually deleting text in the editor.
      *
-     * @param text The raw transcription text to insert
+     * @param text The prepared transcription text to insert
      */
-    private void insertTranscriptionText(String text) {
-        if (text == null || text.isEmpty()) {
-            return;
-        }
-        String sanitized = stripInvisibleChars(text);
-        if (sanitized.isEmpty()) {
+    private void commitVoiceTranscriptionText(@NonNull final String text) {
+        if (text.isEmpty()) {
             return;
         }
         if (mInputLogic.mConnection.hasSelection()) {
@@ -2228,13 +2131,11 @@ public class LatinIME extends InputMethodService implements
             return;
         }
         try {
-            String adjustedText = adjustCapitalization(sanitized);
-            String textToInsert = ensureTrailingSpace(adjustedText);
             // Reset InputLogic composing state before direct connection manipulation.
             // This ensures the WordComposer is properly synchronized with the connection.
             mInputLogic.finishInput();
             mInputLogic.mConnection.beginBatchEdit();
-            mInputLogic.mConnection.commitText(textToInsert, 1);
+            mInputLogic.mConnection.commitText(text, 1);
             mInputLogic.mConnection.endBatchEdit();
 
             // Text has been inserted — hide the processing spinner.

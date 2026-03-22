@@ -258,7 +258,6 @@ class DeepgramTranscriptionClient {
                         ?.optJSONArray("alternatives")
                         ?.optJSONObject(0)
                         ?.optString("transcript", "")
-                        ?.trim()
                         .orEmpty()
                     val isFinal = json.optBoolean("is_final", false) ||
                         json.optBoolean("speech_final", false)
