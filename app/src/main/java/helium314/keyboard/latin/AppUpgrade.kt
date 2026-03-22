@@ -49,7 +49,9 @@ import kotlin.collections.component2
 import kotlin.collections.set
 
 object AppUpgrade {
-    private const val CLEANUP_PROMPT_RESET_VERSION = 3
+    private const val CLEANUP_PROMPT_RESET_VERSION = 4
+    private const val OPENAI_MODEL_MIGRATION_VERSION = 1
+    private const val LEGACY_OPENAI_MODEL = "gpt-4o-mini"
     private const val LEGACY_CLEANUP_PROMPT_V1 = """Edit the transcript text only.
 
 Preserve the speaker's intended meaning, but you may:
@@ -80,9 +82,15 @@ Do not add commentary or explain your edits.
 If the text seems unfinished, do not force ending punctuation.
 If the transcript appears to continue an existing sentence, keep the opening letter lowercase when appropriate."""
 
+    private const val LEGACY_CLEANUP_PROMPT_V3 = """Fix the transcribed text.
+Fix obvious grammar and sentence structure mistakes.
+Turn spoken cues ("comma", "question mark", "open parenthese", "close parenthese", "new paragraph") into real punctuation.
+Drop meaningless filler artifacts ("um", "uh")."""
+
     fun checkVersionUpgrade(context: Context) {
         val prefs = context.prefs()
         maybeResetCleanupPrompt(prefs)
+        maybeUpgradeCleanupModel(prefs)
         val oldVersion = prefs.getInt(Settings.PREF_VERSION_CODE, 0)
         if (oldVersion == BuildConfig.VERSION_CODE)
             return
@@ -644,12 +652,28 @@ If the transcript appears to continue an existing sentence, keep the opening let
         val shouldResetPrompt = currentPrompt.isNullOrBlank()
             || currentPrompt == LEGACY_CLEANUP_PROMPT_V1
             || currentPrompt == LEGACY_CLEANUP_PROMPT_V2
+            || currentPrompt == LEGACY_CLEANUP_PROMPT_V3
         prefs.edit {
             // Upgrade untouched users to the new safer default without overwriting custom prompts.
             if (shouldResetPrompt) {
                 putString(Settings.PREF_CLEANUP_PROMPT, Defaults.PREF_CLEANUP_PROMPT)
             }
             putInt(Settings.PREF_CLEANUP_PROMPT_RESET_VERSION, CLEANUP_PROMPT_RESET_VERSION)
+        }
+    }
+
+    private fun maybeUpgradeCleanupModel(prefs: android.content.SharedPreferences) {
+        val appliedModelMigration = prefs.getInt("openai_model_migration_version", 0)
+        if (appliedModelMigration >= OPENAI_MODEL_MIGRATION_VERSION) {
+            return
+        }
+        val currentModel = prefs.getString(Settings.PREF_OPENAI_MODEL, null)
+        prefs.edit {
+            // Only rewrite the old default so custom user overrides still win.
+            if (currentModel.isNullOrBlank() || currentModel == LEGACY_OPENAI_MODEL) {
+                putString(Settings.PREF_OPENAI_MODEL, Defaults.PREF_OPENAI_MODEL)
+            }
+            putInt("openai_model_migration_version", OPENAI_MODEL_MIGRATION_VERSION)
         }
     }
 

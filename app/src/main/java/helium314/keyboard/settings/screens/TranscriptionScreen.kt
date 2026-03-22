@@ -284,6 +284,8 @@ fun TranscriptionScreen(
                         }
                     )
                 }
+
+                FullappDraftHistorySections()
             }
         }
     }

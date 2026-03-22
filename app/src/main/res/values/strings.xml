@@ -222,14 +222,21 @@
     <!-- Voice Input (Deepgram transcription + OpenAI cleanup) settings -->
     <string name="settings_screen_setup_app">Setup this app</string>
     <string name="settings_screen_transcription">Transcription</string>
-    <!-- Settings screen showing saved standalone fullapp edits -->
-    <string name="settings_screen_fullapp_drafts">In-progress fullapp edits</string>
+    <!-- Settings screen showing saved standalone fullapp edits and archived history -->
+    <string name="settings_screen_fullapp_drafts">Fullapp edit history</string>
     <!-- Empty-state title for fullapp drafts screen -->
-    <string name="fullapp_drafts_empty_title">No saved fullapp drafts</string>
+    <string name="fullapp_drafts_empty_title">No saved fullapp edits</string>
     <!-- Empty-state description for fullapp drafts screen -->
-    <string name="fullapp_drafts_empty_summary">Drafts saved while using standalone fullapp editing will appear here until they are synced back to the original app field.</string>
+    <string name="fullapp_drafts_empty_summary">Standalone fullapp edits will appear here while they are still live and remain here after they are archived for later reference.</string>
+    <string name="fullapp_live_drafts_title">Live in-progress edits</string>
+    <string name="fullapp_live_drafts_summary">These edits are still eligible to sync back to the original app field.</string>
+    <string name="fullapp_archived_drafts_title">Archived edit history</string>
+    <string name="fullapp_archived_drafts_summary">These finished fullapp edits are read-only reference copies and will not sync back automatically.</string>
     <!-- Timestamp shown for a saved fullapp draft -->
     <string name="fullapp_drafts_saved_at">Saved %s</string>
+    <string name="fullapp_drafts_archived_at">Archived %s</string>
+    <string name="fullapp_drafts_status_live">Status: Live</string>
+    <string name="fullapp_drafts_status_archived">Status: Archived</string>
     <!-- Field name label in the fullapp drafts screen -->
     <string name="fullapp_drafts_field_name">Field name: %s</string>
     <!-- Field id label in the fullapp drafts screen -->

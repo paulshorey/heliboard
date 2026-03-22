@@ -3221,7 +3221,7 @@ public class LatinIME extends InputMethodService implements
             return;
         }
         if (pendingDraft.getDraftText().equals(currentFieldText)) {
-            FullappEditorResult.clearDraft(this, pendingDraft.getTarget());
+            FullappEditorResult.archiveAndClearDraft(this, pendingDraft);
             mFullappSyncInFlightKey = null;
             return;
         }
@@ -3257,7 +3257,7 @@ public class LatinIME extends InputMethodService implements
         mMainHandler.postDelayed(() -> {
             final String currentFieldText = getOriginalFieldTextForFullapp();
             if (pendingDraft.getDraftText().equals(currentFieldText)) {
-                FullappEditorResult.clearDraft(LatinIME.this, pendingDraft.getTarget());
+                FullappEditorResult.archiveAndClearDraft(LatinIME.this, pendingDraft);
                 mFullappSyncInFlightKey = null;
                 return;
             }
@@ -3278,7 +3278,7 @@ public class LatinIME extends InputMethodService implements
             final boolean synced = replaceEntireFieldText(pendingDraft.getDraftText(), true);
             if (synced) {
                 restoreFullappSelection(pendingDraft);
-                FullappEditorResult.clearDraft(LatinIME.this, pendingDraft.getTarget());
+                FullappEditorResult.archiveAndClearDraft(LatinIME.this, pendingDraft);
                 mFullappSyncInFlightKey = null;
                 Log.i(TAG, "Fullapp draft sync succeeded for " + pendingDraft.getTarget().debugSummary());
                 requestHideSelf(0);
