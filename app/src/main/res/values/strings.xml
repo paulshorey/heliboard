@@ -235,6 +235,7 @@
     <!-- Timestamp shown for a saved fullapp draft -->
     <string name="fullapp_drafts_saved_at">Saved %s</string>
     <string name="fullapp_drafts_archived_at">Archived %s</string>
+    <string name="fullapp_drafts_metadata_toggle">Metadata</string>
     <string name="fullapp_drafts_status_live">Status: Live</string>
     <string name="fullapp_drafts_status_archived">Status: Archived</string>
     <!-- Field name label in the fullapp drafts screen -->

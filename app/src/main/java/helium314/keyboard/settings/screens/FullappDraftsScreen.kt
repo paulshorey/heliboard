@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -25,9 +27,13 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -193,6 +199,7 @@ private fun FullappDraftEntry(
 ) {
     val draft = entry.draft
     val context = LocalContext.current
+    var metadataExpanded by remember(entry) { mutableStateOf(false) }
     val appLabel = remember(draft.target.packageName) {
         resolveAppLabel(context, draft.target.packageName)
     }
@@ -239,18 +246,10 @@ private fun FullappDraftEntry(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Text(
-                        text = stringResource(R.string.fullapp_drafts_saved_at, savedAt),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    MetadataToggleRow(
+                        expanded = metadataExpanded,
+                        onToggle = { metadataExpanded = !metadataExpanded }
                     )
-                    if (archivedAt != null) {
-                        Text(
-                            text = stringResource(R.string.fullapp_drafts_archived_at, archivedAt),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                 }
                 IconButton(
                     onClick = {
@@ -267,11 +266,30 @@ private fun FullappDraftEntry(
                     )
                 }
             }
-            Text(
-                text = fingerprintSummary,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            if (metadataExpanded) {
+                HorizontalDivider()
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.fullapp_drafts_saved_at, savedAt),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (archivedAt != null) {
+                        Text(
+                            text = stringResource(R.string.fullapp_drafts_archived_at, archivedAt),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(
+                        text = fingerprintSummary,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             SelectionContainer {
                 Text(
                     text = draft.draftText,
@@ -279,6 +297,32 @@ private fun FullappDraftEntry(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun MetadataToggleRow(
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clickable(onClick = onToggle)
+            .padding(top = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = stringResource(R.string.fullapp_drafts_metadata_toggle),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Icon(
+            painter = painterResource(R.drawable.ic_arrow_left),
+            contentDescription = stringResource(R.string.fullapp_drafts_metadata_toggle),
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.rotate(if (expanded) -90f else 90f)
+        )
     }
 }
 
