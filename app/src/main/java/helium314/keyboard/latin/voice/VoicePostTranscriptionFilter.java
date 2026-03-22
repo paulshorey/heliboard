@@ -13,8 +13,27 @@ import java.util.regex.Pattern;
 /**
  * Centralized text preparation for finalized voice transcripts before insertion.
  *
- * <p>This keeps all deterministic voice-specific string shaping in one place so the IME only
- * needs to commit the already-prepared text into the editor.</p>
+ * Execution order is intentionally split into two public stages:
+ *
+ * 1. applyPostTranscriptionFilter(String)
+ *    - Normalize spoken aliases in a single token pass. This combines number words
+ *      like "zero" through "ninety nine" and spoken symbol phrases like
+ *      "open parenthesis", "slash", and "comma" into one longest-match scan.
+ *    - Run deterministic cleanup rules on the replaced text. This handles spacing
+ *      between adjacent non-letters and a small ordered set of edge-case rewrites
+ *      such as "one hundred" -> "100", "negative five" -> "-5", and delayed
+ *      "dash" / "hyphen" / "minus" handling.
+ *
+ * 2. prepareForInsertion(String, CharSequence)
+ *    - Call applyPostTranscriptionFilter.
+ *    - Strip invisible Unicode control characters via VoiceTextSanitizer.
+ *    - Adjust capitalization using text before the caret so mid-sentence insertions
+ *      do not stay incorrectly capitalized.
+ *    - Ensure a trailing space so the IME can commit the final text directly.
+ *
+ * The IME should treat this class as the single owner of voice text shaping.
+ * Callers should pass in raw finalized transcript text and commit the returned
+ * string without applying extra formatting rules elsewhere.
  */
 public final class VoicePostTranscriptionFilter {
 
@@ -22,10 +41,9 @@ public final class VoicePostTranscriptionFilter {
      * Reserved for future filtering that may treat short chunks differently (e.g. length cutoff).
      */
     public static final int POST_TRANSCRIPTION_FILTER_SHORT_CHUNK_CHAR_LIMIT = 40;
-    private static final Map<String, String> SPOKEN_SYMBOL_ALIASES = createSpokenSymbolAliases();
-    private static final int MAX_ALIAS_WORDS = findMaxAliasWords(SPOKEN_SYMBOL_ALIASES);
-    private static final Map<String, String> SPOKEN_NUMBER_WORDS = createSpokenNumberWords();
-    private static final int MAX_NUMBER_WORDS = 2;
+    private static final Map<String, String> SPOKEN_REPLACEMENT_ALIASES =
+            createSpokenReplacementAliases();
+    private static final int MAX_REPLACEMENT_WORDS = findMaxAliasWords(SPOKEN_REPLACEMENT_ALIASES);
     private static final Pattern NON_ALPHA_SPACE_PATTERN =
             Pattern.compile("(?<=[^a-zA-Z])\\s+(?=[^a-zA-Z])");
     private static final Pattern REMAINING_ONE_WORD_PATTERN =
@@ -48,8 +66,7 @@ public final class VoicePostTranscriptionFilter {
         if (text.isBlank()) {
             return "";
         }
-        String result = replaceSpokenNumbers(text);
-        result = replaceSpokenSymbols(result);
+        String result = replaceSpokenAliases(text);
         return fixReplacedEdgeCases(result);
     }
 
@@ -114,24 +131,21 @@ public final class VoicePostTranscriptionFilter {
         return text + " ";
     }
 
-    private static String replaceSpokenSymbols(final String text) {
+    private static String replaceSpokenAliases(final String text) {
         final String trimmed = text.trim();
         if (trimmed.isEmpty()) {
             return "";
         }
 
         final String[] originalTokens = trimmed.split("\\s+");
-        final String[] normalizedTokens = new String[originalTokens.length];
-        for (int i = 0; i < originalTokens.length; i++) {
-            normalizedTokens[i] = normalizeToken(originalTokens[i]);
-        }
+        final String[] normalizedTokens = normalizeTokens(originalTokens);
 
         final List<String> segments = new ArrayList<>();
         int index = 0;
         while (index < originalTokens.length) {
-            Match match = findLongestAliasMatch(normalizedTokens, index);
+            final Match match = findLongestAliasMatch(normalizedTokens, index);
             if (match != null) {
-                segments.add(match.symbol);
+                segments.add(match.replacement);
                 index += match.wordCount;
             } else {
                 segments.add(originalTokens[index]);
@@ -143,27 +157,15 @@ public final class VoicePostTranscriptionFilter {
 
     @Nullable
     private static Match findLongestAliasMatch(final String[] normalizedTokens, final int startIndex) {
-        final int maxWords = Math.min(MAX_ALIAS_WORDS, normalizedTokens.length - startIndex);
+        final int maxWords = Math.min(MAX_REPLACEMENT_WORDS, normalizedTokens.length - startIndex);
         for (int wordCount = maxWords; wordCount >= 1; wordCount--) {
-            final StringBuilder candidate = new StringBuilder();
-            boolean valid = true;
-            for (int i = 0; i < wordCount; i++) {
-                final String token = normalizedTokens[startIndex + i];
-                if (token.isEmpty()) {
-                    valid = false;
-                    break;
-                }
-                if (candidate.length() > 0) {
-                    candidate.append(' ');
-                }
-                candidate.append(token);
-            }
-            if (!valid) {
+            final String candidate = buildCandidate(normalizedTokens, startIndex, wordCount);
+            if (candidate == null) {
                 continue;
             }
-            final String symbol = SPOKEN_SYMBOL_ALIASES.get(candidate.toString());
-            if (symbol != null) {
-                return new Match(symbol, wordCount);
+            final String replacement = SPOKEN_REPLACEMENT_ALIASES.get(candidate);
+            if (replacement != null) {
+                return new Match(replacement, wordCount);
             }
         }
         return null;
@@ -171,14 +173,16 @@ public final class VoicePostTranscriptionFilter {
 
     private static String joinSegments(final List<String> segments) {
         final StringBuilder joined = new StringBuilder();
+        String previousSegment = "";
         for (String segment : segments) {
             if (segment.isEmpty()) {
                 continue;
             }
-            if (joined.length() > 0 && shouldInsertSpace(joined.toString(), segment)) {
+            if (joined.length() > 0 && shouldInsertSpace(previousSegment, segment)) {
                 joined.append(' ');
             }
             joined.append(segment);
+            previousSegment = segment;
         }
         return joined.toString();
     }
@@ -257,33 +261,6 @@ public final class VoicePostTranscriptionFilter {
                 .replaceAll("^[^a-z0-9]+|[^a-z0-9]+$", "");
     }
 
-    private static String replaceSpokenNumbers(final String text) {
-        final String trimmed = text.trim();
-        if (trimmed.isEmpty()) {
-            return "";
-        }
-
-        final String[] originalTokens = trimmed.split("\\s+");
-        final String[] normalizedTokens = new String[originalTokens.length];
-        for (int i = 0; i < originalTokens.length; i++) {
-            normalizedTokens[i] = normalizeToken(originalTokens[i]);
-        }
-
-        final List<String> segments = new ArrayList<>();
-        int index = 0;
-        while (index < originalTokens.length) {
-            final Match match = findLongestNumberMatch(normalizedTokens, index);
-            if (match != null) {
-                segments.add(match.symbol);
-                index += match.wordCount;
-            } else {
-                segments.add(originalTokens[index]);
-                index += 1;
-            }
-        }
-        return String.join(" ", segments);
-    }
-
     private static String fixReplacedEdgeCases(final String text) {
         String result = collapseSpacesBetweenNonAlphabeticChars(text);
 
@@ -301,6 +278,9 @@ public final class VoicePostTranscriptionFilter {
         result = result.replaceAll("(?i)\\s*\\bdash\\b\\s*", " - ");
         result = result.replaceAll("(?i)\\s*\\bhyphen\\b\\s*", "-");
         result = result.replaceAll("(?i)\\s*\\bminus\\b\\s*", "-");
+        result = result.replaceAll("(?i)\\be\\s+t\\s+c\\.\\.\\.", "etc...");
+        result = result.replaceAll("(?i)\\betcetera\\b", "etc");
+        result = result.replaceAll("(?i)\\betc(?=\\s)", "etc.");
 
         return REMAINING_ONE_WORD_PATTERN.matcher(result).replaceAll("one$1$2");
     }
@@ -309,32 +289,39 @@ public final class VoicePostTranscriptionFilter {
         return NON_ALPHA_SPACE_PATTERN.matcher(text).replaceAll("");
     }
 
-    @Nullable
-    private static Match findLongestNumberMatch(final String[] normalizedTokens, final int startIndex) {
-        final int maxWords = Math.min(MAX_NUMBER_WORDS, normalizedTokens.length - startIndex);
-        for (int wordCount = maxWords; wordCount >= 1; wordCount--) {
-            final StringBuilder candidate = new StringBuilder();
-            boolean valid = true;
-            for (int i = 0; i < wordCount; i++) {
-                final String token = normalizedTokens[startIndex + i];
-                if (token.isEmpty()) {
-                    valid = false;
-                    break;
-                }
-                if (candidate.length() > 0) {
-                    candidate.append(' ');
-                }
-                candidate.append(token);
-            }
-            if (!valid) {
-                continue;
-            }
-            final String number = SPOKEN_NUMBER_WORDS.get(candidate.toString());
-            if (number != null) {
-                return new Match(number, wordCount);
-            }
+    private static String[] normalizeTokens(final String[] originalTokens) {
+        final String[] normalizedTokens = new String[originalTokens.length];
+        for (int i = 0; i < originalTokens.length; i++) {
+            normalizedTokens[i] = normalizeToken(originalTokens[i]);
         }
-        return null;
+        return normalizedTokens;
+    }
+
+    @Nullable
+    private static String buildCandidate(
+            final String[] normalizedTokens,
+            final int startIndex,
+            final int wordCount
+    ) {
+        final StringBuilder candidate = new StringBuilder();
+        for (int i = 0; i < wordCount; i++) {
+            final String token = normalizedTokens[startIndex + i];
+            if (token.isEmpty()) {
+                return null;
+            }
+            if (candidate.length() > 0) {
+                candidate.append(' ');
+            }
+            candidate.append(token);
+        }
+        return candidate.toString();
+    }
+
+    private static Map<String, String> createSpokenReplacementAliases() {
+        final Map<String, String> aliases = new HashMap<>();
+        aliases.putAll(createSpokenNumberWords());
+        aliases.putAll(createSpokenSymbolAliases());
+        return aliases;
     }
 
     private static Map<String, String> createSpokenNumberWords() {
@@ -467,7 +454,7 @@ public final class VoicePostTranscriptionFilter {
         registerAliases(aliases, "<", "open the angle bracket", "open the chevron", "opening angle bracket", "opening chevron");
         registerAliases(aliases, ">", "close the angle bracket", "close the chevron", "closing angle bracket", "closing chevron");
 
-        registerAliases(aliases, "(", "open the parenthesis", "open the parentheses", "open the parenthese", "open the paren");
+        registerAliases(aliases, "(", "open the parenthesis", "open the parentheses", "open the parenthese", "open the paren", "parentheses", "parenthesis");
         registerAliases(aliases, ")", "close the parenthesis", "close the parentheses", "close the parenthese", "close the paren");
         registerAliases(aliases, "[", "open the square bracket", "open the square brackets");
         registerAliases(aliases, "]", "close the square bracket", "close the square brackets");
@@ -523,11 +510,11 @@ public final class VoicePostTranscriptionFilter {
     }
 
     private static final class Match {
-        private final String symbol;
+        private final String replacement;
         private final int wordCount;
 
-        private Match(final String symbol, final int wordCount) {
-            this.symbol = symbol;
+        private Match(final String replacement, final int wordCount) {
+            this.replacement = replacement;
             this.wordCount = wordCount;
         }
     }

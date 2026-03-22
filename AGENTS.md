@@ -17,16 +17,29 @@ HeliBoard is an Android app, open-source project based on AOSP / OpenBoard keybo
 5. Apply local post-processing to each finalized transcript span
 6. Immediately insert the processed text at the current caret position through `InputConnection`
 
+### Voice transcription ownership
+
+1. Deepgram streaming transcription:
+   `app/src/main/java/helium314/keyboard/latin/voice/DeepgramTranscriptionClient.kt`
+2. Post-transcription text preparation:
+   `app/src/main/java/helium314/keyboard/latin/voice/VoicePostTranscriptionFilter.java`
+3. Insert-at-caret orchestration:
+   `app/src/main/java/helium314/keyboard/latin/LatinIME.java`
+
+`VoiceInputManager.kt` sits between these layers. It owns recording flow, streams audio to
+Deepgram, preserves FIFO ordering for finalized transcript spans, and forwards each span to
+`LatinIME`.
+
 ## Handling chunked audio recordings
 
 1 ChunkA audio frames → Deepgram
 2 ChunkB audio frames continue streaming while ChunkA is being finalized
 3 ChunkA transcription received → `onTranscriptionResult(textA)`
-4 Local post-processing runs on `textA`
-5 `textA` is committed immediately at the caret via `InputConnection`
+4 `VoicePostTranscriptionFilter.prepareForInsertion(textA, textBeforeCursor)` runs on `textA`
+5 `LatinIME` commits `textA` immediately at the caret via `InputConnection`
 6 ChunkB transcription arrives later in FIFO order
-7 Local post-processing runs on `textB`
-8 `textB` is committed immediately at the caret
+7 `VoicePostTranscriptionFilter.prepareForInsertion(textB, textBeforeCursor)` runs on `textB`
+8 `LatinIME` commits `textB` immediately at the caret
 
 ## Fullapp keyboard
 

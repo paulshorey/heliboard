@@ -1,15 +1,16 @@
 # Voice Transcription Data Flow
 
 This document describes the end-to-end voice transcription pipeline: local capture, Deepgram
-streaming, a small local filter hook on each finalized span, and immediate caret insertion.
+streaming, local post-transcription preparation on each finalized span, and immediate caret
+insertion.
 
 ## Overview
 
 The voice input system uses **local recording + streaming transcription**:
 1. **VoiceRecorder** captures PCM16 audio locally; silence detection drives paragraph breaks and auto-stop.
-2. **Deepgram API** streams audio and returns finalized transcript spans.
-3. **VoicePostTranscriptionFilter** applies local post-processing to the transcript text.
-4. **LatinIME** inserts the processed text immediately at the current caret position through `InputConnection`.
+2. **DeepgramTranscriptionClient** streams audio to Deepgram and receives finalized transcript spans.
+3. **VoicePostTranscriptionFilter** converts spoken aliases, cleans up edge cases, sanitizes hidden characters, adjusts capitalization, and ensures final spacing.
+4. **LatinIME** inserts the prepared text immediately at the current caret position through `InputConnection`.
 
 ## Architecture
 
@@ -54,13 +55,15 @@ Orchestrates recording, Deepgram streaming, and ordered transcript delivery.
 - **New Paragraph Timer**: Requests a paragraph break after long silence
 
 ### VoicePostTranscriptionFilter.java
-Local filter hook that runs on each transcript span before insertion.
-- **Current behavior**: placeholder passthrough
-- **Purpose**: central place for future deterministic rules on each chunk (length, substitutions, etc.)
+Local text preparation layer that runs on each finalized transcript span before insertion.
+- **Alias pass**: single longest-match token scan for spoken numbers (`zero`..`ninety nine`) and spoken symbols (`open parenthesis`, `slash`, `comma`, etc.)
+- **Cleanup pass**: fixes spacing between adjacent symbols/numbers and applies ordered edge-case rewrites such as `one hundred -> 100`, `negative five -> -5`, and delayed `dash` / `hyphen` / `minus` handling
+- **Insertion prep**: strips invisible Unicode control characters, adjusts capitalization from text before the caret, and ensures trailing space
 
 ### LatinIME.java
 Main orchestrator that coordinates all components and inserts text into the editor.
 - Uses `InputConnection.commitText(...)` at the caret
+- Calls `VoicePostTranscriptionFilter.prepareForInsertion(...)` on each finalized span
 - Calls `mInputLogic.finishInput()` first to keep composing state in sync
 - Defers paragraph insertion until manager processing is idle if needed
 
@@ -79,18 +82,24 @@ User taps mic button
 ```
 User speaks
     → VoiceRecorder captures PCM chunks
-    → VoiceInputManager streams them to Deepgram
+    → VoiceInputManager forwards them to DeepgramTranscriptionClient
+    → DeepgramTranscriptionClient streams them to Deepgram
     → Deepgram emits finalized transcript text
 ```
 
 ### 3. Transcript → Local Processing → Immediate Insert
 ```
 Finalized transcript span arrives
-    → VoiceInputManager delivers it to LatinIME in FIFO order
-    → LatinIME applies VoicePostTranscriptionFilter
-    → LatinIME adjusts capitalization based on text before the caret
-    → LatinIME appends a trailing space if needed
-    → LatinIME commits the text at the caret via InputConnection.commitText(...)
+    → DeepgramTranscriptionClient.onTranscriptionResult(text)
+    → VoiceInputManager queues and delivers the text to LatinIME in FIFO order
+    → LatinIME calls VoicePostTranscriptionFilter.prepareForInsertion(text, textBeforeCursor)
+    → VoicePostTranscriptionFilter:
+        - replaces spoken numbers and symbols in one pass
+        - fixes deterministic edge cases
+        - strips invisible control characters
+        - adjusts capitalization
+        - ensures trailing spacing
+    → LatinIME commits the prepared text at the caret via InputConnection.commitText(...)
 ```
 
 There is no second pass over the field: each processed chunk is inserted at the current
@@ -117,7 +126,8 @@ PAUSED     → User taps pause  → RECORDING (resume)
 
 ### Ordering Guarantees
 - Deepgram transcript spans are queued and delivered in FIFO order by `VoiceInputManager`.
-- `LatinIME` inserts each processed transcript immediately when received.
+- `LatinIME` inserts each prepared transcript immediately when received.
+- Deterministic text shaping stays inside `VoicePostTranscriptionFilter`; `LatinIME` does not apply a separate second formatting layer after that.
 - Paragraph breaks are deferred until manager processing drains, so they do not interleave
   in the middle of pending transcript insertion.
 - Cancelling voice input invalidates the active manager session so stale Deepgram callbacks

@@ -86,6 +86,16 @@ class VoicePostTranscriptionFilterTest {
     }
 
     @Test
+    fun `replaces numbers and symbols in a single utterance`() {
+        assertEquals(
+            "(7/7)",
+            VoicePostTranscriptionFilter.applyPostTranscriptionFilter(
+                "open parenthesis seven slash seven close parenthesis"
+            )
+        )
+    }
+
+    @Test
     fun `replaces dash hyphen and minus during cleanup`() {
         assertEquals("word-word", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("word hyphen word"))
         assertEquals("word - word", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("word dash word"))
@@ -101,6 +111,14 @@ class VoicePostTranscriptionFilterTest {
         assertEquals("1000000", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("one million"))
         assertEquals("1000000000", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("one billion"))
         assertEquals("-5", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("negative five"))
+    }
+
+    @Test
+    fun `normalizes etc edge cases`() {
+        assertEquals("etc...", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("e t c..."))
+        assertEquals("etc", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("etcetera"))
+        assertEquals("etc. please", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("etc please"))
+        assertEquals("etc. please", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("etcetera please"))
     }
 
     @Test
