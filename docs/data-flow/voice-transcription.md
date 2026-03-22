@@ -1,7 +1,7 @@
 # Voice Transcription Data Flow
 
-This document describes the current voice transcription pipeline after removal of the
-cleanup/rewrite API stage.
+This document describes the end-to-end voice transcription pipeline: local capture, Deepgram
+streaming, a small local filter hook on each finalized span, and immediate caret insertion.
 
 ## Overview
 
@@ -54,9 +54,9 @@ Orchestrates recording, Deepgram streaming, and ordered transcript delivery.
 - **New Paragraph Timer**: Requests a paragraph break after long silence
 
 ### VoicePostTranscriptionFilter.java
-Local post-processing hook that runs on each transcript span before insertion.
+Local filter hook that runs on each transcript span before insertion.
 - **Current behavior**: placeholder passthrough
-- **Purpose**: central place for future local transcript cleanup rules
+- **Purpose**: central place for future deterministic rules on each chunk (length, substitutions, etc.)
 
 ### LatinIME.java
 Main orchestrator that coordinates all components and inserts text into the editor.
@@ -93,8 +93,8 @@ Finalized transcript span arrives
     → LatinIME commits the text at the caret via InputConnection.commitText(...)
 ```
 
-There is no context lookup, no rewrite API call, and no delete-and-replace logic. Each
-processed transcript chunk is inserted directly where the cursor currently is.
+There is no second pass over the field: each processed chunk is inserted at the current
+caret via `commitText` only.
 
 ### 4. New Paragraph
 ```

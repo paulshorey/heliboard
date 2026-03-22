@@ -63,7 +63,7 @@ class VoiceInputManager(private val context: Context) {
         /** Configured silence window elapsed — start a new paragraph. */
         fun onNewParagraphRequested()
 
-        /** A transcript may still arrive later; keep pending inserts aligned to the current field. */
+        /** Transcripts queued for the previous session were dropped (cancel, new session, etc.). */
         fun onPendingProcessingCancelled()
 
         fun onError(error: String)
