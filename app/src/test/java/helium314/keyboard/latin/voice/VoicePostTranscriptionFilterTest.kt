@@ -79,4 +79,32 @@ class VoicePostTranscriptionFilterTest {
     fun `number conversion is case insensitive`() {
         assertEquals("42", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("Forty Two"))
     }
+
+    @Test
+    fun `collapses spaces between consecutive non alphabetic characters`() {
+        assertEquals("(7/7)", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("(7/ 7 )"))
+    }
+
+    @Test
+    fun `replaces dash hyphen and minus during cleanup`() {
+        assertEquals("word-word", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("word hyphen word"))
+        assertEquals("word - word", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("word dash word"))
+        assertEquals("8-3", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("eight minus three"))
+        assertEquals("8-3", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("eight minus sign three"))
+    }
+
+    @Test
+    fun `replaces simple cleanup edge cases`() {
+        assertEquals("zero in", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("zero in"))
+        assertEquals("100", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("one hundred"))
+        assertEquals("1000", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("one thousand"))
+        assertEquals("1000000", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("one million"))
+        assertEquals("1000000000", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("one billion"))
+        assertEquals("-5", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("negative five"))
+    }
+
+    @Test
+    fun `turns remaining one before words back into word one`() {
+        assertEquals("one apple", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("one apple"))
+    }
 }

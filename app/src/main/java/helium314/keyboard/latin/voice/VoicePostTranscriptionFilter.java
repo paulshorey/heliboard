@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Centralized text preparation for finalized voice transcripts before insertion.
@@ -25,6 +26,10 @@ public final class VoicePostTranscriptionFilter {
     private static final int MAX_ALIAS_WORDS = findMaxAliasWords(SPOKEN_SYMBOL_ALIASES);
     private static final Map<String, String> SPOKEN_NUMBER_WORDS = createSpokenNumberWords();
     private static final int MAX_NUMBER_WORDS = 2;
+    private static final Pattern NON_ALPHA_SPACE_PATTERN =
+            Pattern.compile("(?<=[^a-zA-Z])\\s+(?=[^a-zA-Z])");
+    private static final Pattern REMAINING_ONE_WORD_PATTERN =
+            Pattern.compile("\\b1(\\s?)([a-zA-Z]+)");
 
     private VoicePostTranscriptionFilter() {
         // Utility class.
@@ -44,7 +49,8 @@ public final class VoicePostTranscriptionFilter {
             return "";
         }
         String result = replaceSpokenNumbers(text);
-        return replaceSpokenSymbols(result);
+        result = replaceSpokenSymbols(result);
+        return fixReplacedEdgeCases(result);
     }
 
     /**
@@ -278,6 +284,31 @@ public final class VoicePostTranscriptionFilter {
         return String.join(" ", segments);
     }
 
+    private static String fixReplacedEdgeCases(final String text) {
+        String result = collapseSpacesBetweenNonAlphabeticChars(text);
+
+        result = result.replaceAll("(?i)\\b0\\s+in\\b", "zero in");
+        result = result.replaceAll("(?i)\\b1\\s+hundred\\b", "100");
+        result = result.replaceAll("(?i)\\b1\\s+thousand\\b", "1000");
+        result = result.replaceAll("(?i)\\b1\\s+million\\b", "1000000");
+        result = result.replaceAll("(?i)\\b1\\s+billion\\b", "1000000000");
+
+        for (int i = 1; i <= 9; i++) {
+            result = result.replaceAll("(?i)\\bnegative\\s+" + i + "\\b", "-" + i);
+        }
+
+        result = result.replaceAll("(?i)\\s*\\bminus\\s+sign\\b\\s*", "-");
+        result = result.replaceAll("(?i)\\s*\\bdash\\b\\s*", " - ");
+        result = result.replaceAll("(?i)\\s*\\bhyphen\\b\\s*", "-");
+        result = result.replaceAll("(?i)\\s*\\bminus\\b\\s*", "-");
+
+        return REMAINING_ONE_WORD_PATTERN.matcher(result).replaceAll("one$1$2");
+    }
+
+    private static String collapseSpacesBetweenNonAlphabeticChars(final String text) {
+        return NON_ALPHA_SPACE_PATTERN.matcher(text).replaceAll("");
+    }
+
     @Nullable
     private static Match findLongestNumberMatch(final String[] normalizedTokens, final int startIndex) {
         final int maxWords = Math.min(MAX_NUMBER_WORDS, normalizedTokens.length - startIndex);
@@ -378,7 +409,6 @@ public final class VoicePostTranscriptionFilter {
         registerAliases(aliases, "^", "caret", "caret sign");
         registerAliases(aliases, "|", "pipe", "vertical bar");
         registerAliases(aliases, "_", "underscore", "under score");
-        registerAliases(aliases, "-", "dash", "hyphen", "minus", "minus sign");
         registerAliases(aliases, "+", "plus", "plus sign");
         registerAliases(aliases, "=", "equals", "equal sign", "equals sign");
         registerAliases(aliases, "*", "asterisk", "star");
