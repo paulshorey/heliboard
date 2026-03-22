@@ -75,10 +75,10 @@ public final class VoicePostTranscriptionFilter {
             return 0;
         }
         final String trimmed = rawText.trim().toLowerCase(Locale.US);
-        if (trimmed.equals("new paragraph")) {
+        if (trimmed.equals("new paragraph") || trimmed.equals("New paragraph.")) {
             return 2;
         }
-        if (trimmed.equals("new line") || trimmed.equals("line break")) {
+        if (trimmed.equals("new line") || trimmed.equals("line break") || trimmed.equals("New line.") || trimmed.equals("Line break.")) {
             return 1;
         }
         return 0;
