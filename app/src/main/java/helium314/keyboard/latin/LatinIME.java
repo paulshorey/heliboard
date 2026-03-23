@@ -195,7 +195,6 @@ public class LatinIME extends InputMethodService implements
     private VoiceInputManager mVoiceInputManager;
     // Wake lock to prevent CPU sleep during voice recording
     private PowerManager.WakeLock mVoiceWakeLock;
-    private boolean mPendingNewParagraph = false;
     private static final int FULLAPP_SYNC_MAX_CHARS = 100_000;
     private static final int FULLAPP_SYNC_RETRY_ATTEMPTS = 5;
     private static final long FULLAPP_SYNC_RETRY_DELAY_MS = 120L;
@@ -2012,13 +2011,6 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onProcessingIdle() {
                 try {
-                    if (mPendingNewParagraph
-                            && mVoiceInputManager != null
-                            && mVoiceInputManager.isIdle()
-                            && !mVoiceInputManager.hasPendingProcessing()) {
-                        insertParagraphBreak();
-                        mPendingNewParagraph = false;
-                    }
                     if (mVoiceInputManager == null || !mVoiceInputManager.hasPendingProcessing()) {
                         mKeyboardSwitcher.hideProcessingIndicator();
                     }
@@ -2069,22 +2061,6 @@ public class LatinIME extends InputMethodService implements
             }
 
             @Override
-            public void onNewParagraphRequested() {
-                try {
-                    final boolean managerStillProcessing =
-                            mVoiceInputManager != null && mVoiceInputManager.hasPendingProcessing();
-                    if (managerStillProcessing) {
-                        mPendingNewParagraph = true;
-                    } else {
-                        Log.i(TAG, "New paragraph break inserted (recording remains active)");
-                        insertParagraphBreak();
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "Error inserting paragraph break: " + e.getMessage(), e);
-                }
-            }
-
-            @Override
             public void onPendingProcessingCancelled() {
                 resetVoiceInputState();
             }
@@ -2109,10 +2085,6 @@ public class LatinIME extends InputMethodService implements
         // Always read from InputConnection (app field). In fullscreen, the extract view
         // mirrors the app; the app is the source of truth.
         return mInputLogic.mConnection.getTextBeforeCursor(maxChars, 0);
-    }
-
-    private void insertParagraphBreak() {
-        sendEnterKeyEvents(2);
     }
 
     private void sendEnterKeyEvents(final int count) {
@@ -2171,7 +2143,6 @@ public class LatinIME extends InputMethodService implements
      * Called when voice input session ends.
      */
     private void resetVoiceInputState() {
-        mPendingNewParagraph = false;
         mKeyboardSwitcher.hideProcessingIndicator();
     }
 
@@ -2347,9 +2318,6 @@ public class LatinIME extends InputMethodService implements
     private void launchFullappEditorActivity() {
         mInputLogic.commitTyped(mSettings.getCurrent(), LastComposedWord.NOT_A_SEPARATOR);
         stopVoiceRecordingGracefully();
-
-        // Prevent the paragraph timer from inserting "\n\n" into the field before we read it.
-        mPendingNewParagraph = false;
 
         // Use fallback path to avoid trailing newlines that getExtractedText adds (e.g. WebView)
         String initialText = getOriginalFieldTextForFullapp();

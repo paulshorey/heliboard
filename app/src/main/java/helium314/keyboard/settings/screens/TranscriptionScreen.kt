@@ -31,6 +31,7 @@ import androidx.core.content.edit
 import helium314.keyboard.latin.R
 import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
+import helium314.keyboard.latin.voice.VoiceTranscriptionSettings
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.getActivity
 import helium314.keyboard.latin.utils.prefs
@@ -55,36 +56,9 @@ fun TranscriptionScreen(
     var deepgramApiKey by remember {
         mutableStateOf(prefs.getString(Settings.PREF_DEEPGRAM_API_KEY, Defaults.PREF_DEEPGRAM_API_KEY) ?: "")
     }
-    var chunkSilenceSeconds by remember {
+    var chunkSilenceMs by remember {
         mutableStateOf(
-            prefs.getInt(
-                Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS,
-                Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS
-            ).toString()
-        )
-    }
-    var silenceThreshold by remember {
-        mutableStateOf(
-            prefs.getInt(
-                Settings.PREF_VOICE_SILENCE_THRESHOLD,
-                Defaults.PREF_VOICE_SILENCE_THRESHOLD
-            ).toString()
-        )
-    }
-    var newParagraphSilenceSeconds by remember {
-        mutableStateOf(
-            prefs.getInt(
-                Settings.PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS,
-                Defaults.PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS
-            ).toString()
-        )
-    }
-    var autoStopSilenceSeconds by remember {
-        mutableStateOf(
-            prefs.getInt(
-                Settings.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS,
-                Defaults.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS
-            ).toString()
+            VoiceTranscriptionSettings.readDeepgramEndpointingMs(prefs).toString()
         )
     }
 
@@ -112,69 +86,18 @@ fun TranscriptionScreen(
                     maxLines = 2
                 )
                 InlineTextField(
-                    label = stringResource(R.string.voice_chunk_silence_seconds_title),
-                    value = chunkSilenceSeconds,
+                    label = stringResource(R.string.voice_chunk_silence_ms_title),
+                    value = chunkSilenceMs,
                     onValueChange = { newValue ->
-                        chunkSilenceSeconds = newValue
+                        chunkSilenceMs = newValue
                         newValue.toIntOrNull()?.let { parsed ->
                             prefs.edit {
                                 putInt(
-                                    Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS,
-                                    parsed.coerceIn(1, 30)
-                                )
-                            }
-                        }
-                    },
-                    minLines = 1,
-                    maxLines = 1
-                )
-
-                InlineTextField(
-                    label = stringResource(R.string.voice_silence_threshold_title),
-                    value = silenceThreshold,
-                    onValueChange = { newValue ->
-                        silenceThreshold = newValue
-                        newValue.toIntOrNull()?.let { parsed ->
-                            prefs.edit {
-                                putInt(
-                                    Settings.PREF_VOICE_SILENCE_THRESHOLD,
-                                    parsed.coerceIn(40, 5000)
-                                )
-                            }
-                        }
-                    },
-                    minLines = 1,
-                    maxLines = 1
-                )
-
-                InlineTextField(
-                    label = stringResource(R.string.voice_new_paragraph_silence_seconds_title),
-                    value = newParagraphSilenceSeconds,
-                    onValueChange = { newValue ->
-                        newParagraphSilenceSeconds = newValue
-                        newValue.toIntOrNull()?.let { parsed ->
-                            prefs.edit {
-                                putInt(
-                                    Settings.PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS,
-                                    parsed.coerceIn(3, 120)
-                                )
-                            }
-                        }
-                    },
-                    minLines = 1,
-                    maxLines = 1
-                )
-
-                InlineTextField(
-                    label = stringResource(R.string.voice_auto_stop_silence_seconds_title),
-                    value = autoStopSilenceSeconds,
-                    onValueChange = { newValue ->
-                        autoStopSilenceSeconds = newValue
-                        newValue.toIntOrNull()?.let { parsed ->
-                            prefs.edit {
-                                putInt(
-                                    Settings.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS,
-                                    parsed.coerceIn(5, 300)
+                                    Settings.PREF_VOICE_CHUNK_SILENCE_MS,
+                                    parsed.coerceIn(
+                                        VoiceTranscriptionSettings.MIN_ENDPOINTING_MS,
+                                        VoiceTranscriptionSettings.MAX_ENDPOINTING_MS
+                                    )
                                 )
                             }
                         }

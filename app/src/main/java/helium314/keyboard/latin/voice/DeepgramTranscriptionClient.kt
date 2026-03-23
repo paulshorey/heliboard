@@ -88,6 +88,8 @@ class DeepgramTranscriptionClient {
     fun startStreaming(
         apiKey: String,
         language: String? = null,
+        /** Deepgram `endpointing` (ms of silence before utterance is considered complete). */
+        endpointingMs: Int,
         callback: StreamingCallback
     ) {
         val newToken = activeConnectionToken + 1
@@ -100,7 +102,7 @@ class DeepgramTranscriptionClient {
         lastFinalResultFingerprint = ""
         clearFinalizeCloseTimer()
 
-        val url = buildStreamingUrl(language)
+        val url = buildStreamingUrl(language, endpointingMs)
         val request = Request.Builder()
             .url(url)
             .addHeader("Authorization", "Token $apiKey")
@@ -109,7 +111,7 @@ class DeepgramTranscriptionClient {
         Log.i(
             TAG,
             "VOICE_STEP_3 opening Deepgram streaming socket " +
-                "(language=${language ?: "auto"}, endpointing=500ms, smart_format=false, punctuate=false)"
+                "(language=${language ?: "auto"}, endpointing=${endpointingMs}ms, smart_format=true, punctuate=true)"
         )
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
@@ -232,7 +234,7 @@ class DeepgramTranscriptionClient {
         }
     }
 
-    private fun buildStreamingUrl(language: String?): String {
+    private fun buildStreamingUrl(language: String?, endpointingMs: Int): String {
         return buildString {
             append(STREAMING_BASE_URL)
             append("?model=nova-3")
@@ -241,7 +243,7 @@ class DeepgramTranscriptionClient {
             append("&encoding=linear16")
             append("&sample_rate=").append(VoiceRecorder.SAMPLE_RATE)
             append("&channels=1")
-            append("&endpointing=300")
+            append("&endpointing=").append(endpointingMs)
             append("&vad_events=true")
             if (!language.isNullOrBlank()) {
                 append("&language=").append(language)

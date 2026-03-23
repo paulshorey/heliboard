@@ -22,15 +22,6 @@ class VoiceInputManager(private val context: Context) {
     companion object {
         private const val TAG = "VoiceInputManager"
 
-        private const val MIN_CHUNK_SILENCE_SECONDS = 1
-        private const val MAX_CHUNK_SILENCE_SECONDS = 30
-        private const val MIN_NEW_PARAGRAPH_SILENCE_SECONDS = 3
-        private const val MAX_NEW_PARAGRAPH_SILENCE_SECONDS = 120
-        private const val MIN_AUTO_STOP_SILENCE_SECONDS = 5
-        private const val MAX_AUTO_STOP_SILENCE_SECONDS = 300
-        private const val MIN_SILENCE_THRESHOLD = 40
-        private const val MAX_SILENCE_THRESHOLD = 5000
-
         /** Maximum buffered raw PCM chunks while waiting for socket readiness. */
         private const val MAX_PENDING_AUDIO_CHUNKS = 300
 
@@ -60,9 +51,6 @@ class VoiceInputManager(private val context: Context) {
         /** No queued transcription work remains at manager level. */
         fun onProcessingIdle()
 
-        /** Configured silence window elapsed — start a new paragraph. */
-        fun onNewParagraphRequested()
-
         /** Transcripts queued for the previous session were dropped (cancel, new session, etc.). */
         fun onPendingProcessingCancelled()
 
@@ -88,12 +76,8 @@ class VoiceInputManager(private val context: Context) {
     private var currentState = State.IDLE
     private var activeSessionId = 0L
 
-    // Local speech-boundary detection window used by VoiceRecorder callbacks
-    // (paragraph/auto-stop behavior). Deepgram chunking/finalization is server-managed.
-    private var chunkSilenceDurationMs = Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS * 1000L
-    private var chunkSilenceThreshold = Defaults.PREF_VOICE_SILENCE_THRESHOLD.toDouble()
-    private var newParagraphDelayMs = Defaults.PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS * 1000L
-    private var autoStopSilenceMs = Defaults.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS * 1000L
+    /** Deepgram streaming `endpointing` (ms), from preferences. */
+    private var deepgramEndpointingMs = Defaults.PREF_VOICE_CHUNK_SILENCE_MS
 
     // Streaming state
     private var streamSessionId = 0L
@@ -112,29 +96,6 @@ class VoiceInputManager(private val context: Context) {
     // Finalized transcript delivery queue (strict FIFO)
     private val pendingTranscripts = ArrayDeque<PendingTranscript>()
     private var isDispatchingTranscripts = false
-
-    // New paragraph timer — insert paragraph break after long silence
-    private val newParagraphTimerRunnable = Runnable {
-        if (currentState == State.RECORDING) {
-            Log.i(
-                TAG,
-                "New paragraph timer fired after ${newParagraphDelayMs}ms " +
-                    "(paragraph break only; recording continues)"
-            )
-            listener?.onNewParagraphRequested()
-        }
-    }
-
-    // Auto-stop timer — stop recording after prolonged silence (no speech)
-    private val autoStopSilenceRunnable = Runnable {
-        if (currentState == State.RECORDING) {
-            Log.i(
-                TAG,
-                "Auto-stop timer fired after ${autoStopSilenceMs}ms of silence — stopping recording"
-            )
-            stopRecording()
-        }
-    }
 
     val isRecording: Boolean get() = currentState == State.RECORDING
     val isPaused: Boolean get() = currentState == State.PAUSED
@@ -204,14 +165,10 @@ class VoiceInputManager(private val context: Context) {
 
             override fun onSpeechStarted() {
                 if (sessionId != activeSessionId) return
-                cancelNewParagraphTimer()
-                cancelAutoStopTimer()
             }
 
             override fun onSpeechStopped() {
                 if (sessionId != activeSessionId) return
-                startNewParagraphTimer()
-                startAutoStopTimer()
             }
 
             override fun onRecordingStopped() {
@@ -239,7 +196,6 @@ class VoiceInputManager(private val context: Context) {
         // Enter RECORDING immediately after AudioRecord starts so lifecycle guards
         // don't treat this startup window as idle.
         updateState(State.RECORDING)
-        startAutoStopTimer()
 
         return true
     }
@@ -257,8 +213,6 @@ class VoiceInputManager(private val context: Context) {
 
     fun pauseRecording() {
         if (currentState != State.RECORDING) return
-        cancelNewParagraphTimer()
-        cancelAutoStopTimer()
         voiceRecorder.pauseRecording()
         cancelPendingReconnect()
         streamReconnectAttempts = 0
@@ -273,7 +227,6 @@ class VoiceInputManager(private val context: Context) {
         }
         voiceRecorder.resumeRecording()
         updateState(State.RECORDING)
-        startAutoStopTimer()
     }
 
     fun togglePause() {
@@ -319,8 +272,6 @@ class VoiceInputManager(private val context: Context) {
     }
 
     private fun stopRecordingInternal(cancelPending: Boolean) {
-        cancelNewParagraphTimer()
-        cancelAutoStopTimer()
         cancelStreamConnectTimeout()
 
         val sessionAtStop = activeSessionId
@@ -358,6 +309,7 @@ class VoiceInputManager(private val context: Context) {
         transcriptionClient.startStreaming(
             apiKey = apiKey,
             language = language,
+            endpointingMs = deepgramEndpointingMs,
             callback = object : DeepgramTranscriptionClient.StreamingCallback {
                 override fun onStreamReady() {
                     if (sessionId != activeSessionId) return
@@ -697,51 +649,8 @@ class VoiceInputManager(private val context: Context) {
     }
 
     private fun reloadRuntimeConfig() {
-        val prefs = context.prefs()
-
-        val chunkSilenceSeconds = prefs.getInt(
-            Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS,
-            Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS
-        ).coerceIn(MIN_CHUNK_SILENCE_SECONDS, MAX_CHUNK_SILENCE_SECONDS)
-
-        val paragraphSilenceSeconds = prefs.getInt(
-            Settings.PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS,
-            Defaults.PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS
-        ).coerceIn(
-            MIN_NEW_PARAGRAPH_SILENCE_SECONDS,
-            MAX_NEW_PARAGRAPH_SILENCE_SECONDS
-        )
-
-        val autoStopSilenceSeconds = prefs.getInt(
-            Settings.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS,
-            Defaults.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS
-        ).coerceIn(
-            MIN_AUTO_STOP_SILENCE_SECONDS,
-            MAX_AUTO_STOP_SILENCE_SECONDS
-        )
-
-        val silenceThreshold = prefs.getInt(
-            Settings.PREF_VOICE_SILENCE_THRESHOLD,
-            Defaults.PREF_VOICE_SILENCE_THRESHOLD
-        ).coerceIn(MIN_SILENCE_THRESHOLD, MAX_SILENCE_THRESHOLD)
-
-        chunkSilenceDurationMs = chunkSilenceSeconds * 1000L
-        newParagraphDelayMs = paragraphSilenceSeconds * 1000L
-        autoStopSilenceMs = autoStopSilenceSeconds * 1000L
-        chunkSilenceThreshold = silenceThreshold.toDouble()
-
-        voiceRecorder.updateSilenceConfig(
-            silenceDurationMs = chunkSilenceDurationMs,
-            silenceThreshold = chunkSilenceThreshold
-        )
-
-        Log.i(
-            TAG,
-            "Voice config loaded: localSpeechSilence=${chunkSilenceDurationMs}ms, " +
-                "silenceThreshold=${chunkSilenceThreshold}, " +
-                "newParagraphSilence=${newParagraphDelayMs}ms, " +
-                "autoStopSilence=${autoStopSilenceMs}ms"
-        )
+        deepgramEndpointingMs = VoiceTranscriptionSettings.readDeepgramEndpointingMs(context.prefs())
+        Log.i(TAG, "Voice config loaded: deepgramEndpointing=${deepgramEndpointingMs}ms")
     }
 
     private fun updateState(newState: State) {
@@ -749,32 +658,6 @@ class VoiceInputManager(private val context: Context) {
             currentState = newState
             listener?.onStateChanged(newState)
         }
-    }
-
-    // ── Timers ─────────────────────────────────────────────────────────
-
-    private fun startNewParagraphTimer() {
-        mainHandler.removeCallbacks(newParagraphTimerRunnable)
-        if (currentState == State.RECORDING) {
-            Log.i(TAG, "Starting new paragraph timer: ${newParagraphDelayMs}ms")
-            mainHandler.postDelayed(newParagraphTimerRunnable, newParagraphDelayMs)
-        }
-    }
-
-    private fun cancelNewParagraphTimer() {
-        mainHandler.removeCallbacks(newParagraphTimerRunnable)
-    }
-
-    private fun startAutoStopTimer() {
-        mainHandler.removeCallbacks(autoStopSilenceRunnable)
-        if (currentState == State.RECORDING) {
-            Log.i(TAG, "Starting auto-stop timer: ${autoStopSilenceMs}ms")
-            mainHandler.postDelayed(autoStopSilenceRunnable, autoStopSilenceMs)
-        }
-    }
-
-    private fun cancelAutoStopTimer() {
-        mainHandler.removeCallbacks(autoStopSilenceRunnable)
     }
 
     // ── Settings ───────────────────────────────────────────────────────

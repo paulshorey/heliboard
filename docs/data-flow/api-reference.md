@@ -64,7 +64,4 @@ Body: <raw WAV file bytes>
 | Key | Type | Description |
 |-----|------|-------------|
 | `PREF_DEEPGRAM_API_KEY` | String | Deepgram API key for transcription |
-| `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Silence window before treating speech as paused |
-| `PREF_VOICE_SILENCE_THRESHOLD` | Int | RMS threshold used for silence detection |
-| `PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS` | Int | Silence duration before inserting a new paragraph |
-| `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` | Int | Silence duration before auto-stopping recording |
+| `PREF_VOICE_CHUNK_SILENCE_MS` | Int | Deepgram streaming `endpointing` (ms of silence before finalizing an utterance) |

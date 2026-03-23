@@ -105,15 +105,6 @@ Finalized transcript span arrives
 There is no second pass over the field: each processed chunk is inserted at the current
 caret via `commitText` only.
 
-### 4. New Paragraph
-```
-Speech stops
-    → VoiceInputManager starts new paragraph timer
-    → Delay elapses with no speech
-    → LatinIME.onNewParagraphRequested()
-    → Insert "\n\n" when processing is idle
-```
-
 ## State Management
 
 ### Voice Input States
@@ -128,8 +119,6 @@ PAUSED     → User taps pause  → RECORDING (resume)
 - Deepgram transcript spans are queued and delivered in FIFO order by `VoiceInputManager`.
 - `LatinIME` inserts each prepared transcript immediately when received.
 - Deterministic text shaping stays inside `VoicePostTranscriptionFilter`; `LatinIME` does not apply a separate second formatting layer after that.
-- Paragraph breaks are deferred until manager processing drains, so they do not interleave
-  in the middle of pending transcript insertion.
 - Cancelling voice input invalidates the active manager session so stale Deepgram callbacks
   are dropped before they reach the IME.
 
@@ -137,18 +126,10 @@ PAUSED     → User taps pause  → RECORDING (resume)
 
 ### Settings (TranscriptionScreen.kt)
 - **Deepgram API Key**: Required for transcription
-- **Chunk Silence Duration**: Silence window before detecting a speech boundary
-- **Silence Threshold**: RMS threshold floor for silence/speech detection
-- **New Paragraph Silence Duration**: Delay before inserting a paragraph break
-- **Auto-stop Silence Duration**: Delay before automatically stopping voice recording
+- **Utterance silence (ms)**: Maps to Deepgram streaming `endpointing` — how long to wait after speech before finalizing a chunk (default 200 ms)
 
 ### Silence Detection (VoiceRecorder.kt)
-```kotlin
-silenceThreshold (configurable via settings)
-silenceDurationMs (configurable via settings)
-MIN_SILENCE_DURATION_MS = 1000L
-MAX_SILENCE_DURATION_MS = 30000L
-```
+Adaptive RMS-based detection uses built-in defaults (`DEFAULT_SILENCE_DURATION_MS`, `DEFAULT_SILENCE_THRESHOLD`); it is not exposed in Settings. It only drives `onSpeechStarted` / `onSpeechStopped` logging boundaries, not transcript chunking (Deepgram handles that).
 
 ## Error Handling
 

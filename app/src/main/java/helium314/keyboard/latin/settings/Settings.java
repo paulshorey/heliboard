@@ -181,10 +181,8 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
 
     // Voice Input (Deepgram transcription)
     public static final String PREF_DEEPGRAM_API_KEY = "deepgram_api_key";
-    public static final String PREF_VOICE_CHUNK_SILENCE_SECONDS = "voice_chunk_silence_seconds";
-    public static final String PREF_VOICE_SILENCE_THRESHOLD = "voice_silence_threshold";
-    public static final String PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS = "voice_new_paragraph_silence_seconds";
-    public static final String PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = "voice_auto_stop_silence_seconds";
+    /** Deepgram streaming endpointing (silence before finalizing an utterance), milliseconds. */
+    public static final String PREF_VOICE_CHUNK_SILENCE_MS = "voice_chunk_silence_ms";
 
     // Emoji
     public static final String PREF_EMOJI_MAX_SDK = "emoji_max_sdk";
