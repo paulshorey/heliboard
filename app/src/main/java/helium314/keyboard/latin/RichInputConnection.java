@@ -330,28 +330,36 @@ public final class RichInputConnection implements PrivateCommandPerformer {
         mExpectedSelEnd = mExpectedSelStart;
         mComposingText.setLength(0);
         if (isConnected()) {
-            mTempObjectForCommitText.clear();
-            mTempObjectForCommitText.append(text);
-            final CharacterStyle[] spans = mTempObjectForCommitText.getSpans(
-                    0, text.length(), CharacterStyle.class);
-            for (final CharacterStyle span : spans) {
-                final int spanStart = mTempObjectForCommitText.getSpanStart(span);
-                final int spanEnd = mTempObjectForCommitText.getSpanEnd(span);
-                final int spanFlags = mTempObjectForCommitText.getSpanFlags(span);
-                // We have to adjust the end of the span to include an additional character.
-                // This is to avoid splitting a unicode surrogate pair.
-                // See helium314.keyboard.latin.common.Constants.UnicodeSurrogate
-                // See https://b.corp.google.com/issues/19255233
-                if (0 < spanEnd && spanEnd < mTempObjectForCommitText.length()) {
-                    final char spanEndChar = mTempObjectForCommitText.charAt(spanEnd - 1);
-                    final char nextChar = mTempObjectForCommitText.charAt(spanEnd);
-                    if (UnicodeSurrogate.isLowSurrogate(spanEndChar)
-                            && UnicodeSurrogate.isHighSurrogate(nextChar)) {
-                        mTempObjectForCommitText.setSpan(span, spanStart, spanEnd + 1, spanFlags);
+            if (isWebTextField()) {
+                // Web fields (contentEditable, WebView textareas) interpret Android Spannables
+                // as DOM operations. SuggestionSpan and other spans get mapped to invisible
+                // elements that create "walls" the cursor cannot pass through. Commit only
+                // the raw character data for maximum compatibility.
+                mIC.commitText(text.toString(), newCursorPosition);
+            } else {
+                mTempObjectForCommitText.clear();
+                mTempObjectForCommitText.append(text);
+                final CharacterStyle[] spans = mTempObjectForCommitText.getSpans(
+                        0, text.length(), CharacterStyle.class);
+                for (final CharacterStyle span : spans) {
+                    final int spanStart = mTempObjectForCommitText.getSpanStart(span);
+                    final int spanEnd = mTempObjectForCommitText.getSpanEnd(span);
+                    final int spanFlags = mTempObjectForCommitText.getSpanFlags(span);
+                    // We have to adjust the end of the span to include an additional character.
+                    // This is to avoid splitting a unicode surrogate pair.
+                    // See helium314.keyboard.latin.common.Constants.UnicodeSurrogate
+                    // See https://b.corp.google.com/issues/19255233
+                    if (0 < spanEnd && spanEnd < mTempObjectForCommitText.length()) {
+                        final char spanEndChar = mTempObjectForCommitText.charAt(spanEnd - 1);
+                        final char nextChar = mTempObjectForCommitText.charAt(spanEnd);
+                        if (UnicodeSurrogate.isLowSurrogate(spanEndChar)
+                                && UnicodeSurrogate.isHighSurrogate(nextChar)) {
+                            mTempObjectForCommitText.setSpan(span, spanStart, spanEnd + 1, spanFlags);
+                        }
                     }
                 }
+                mIC.commitText(mTempObjectForCommitText, newCursorPosition);
             }
-            mIC.commitText(mTempObjectForCommitText, newCursorPosition);
         }
     }
 
@@ -476,7 +484,10 @@ public final class RichInputConnection implements PrivateCommandPerformer {
         detectLaggyConnection(operation, timeout, startTime);
 
         // only do the consistency check if we actually have text (i.e. we're not coming from some reload / reset)
-        if ((mCommittedTextBeforeComposingText.length() > 0 || mComposingText.length() > 0)
+        // Skip consistency checks for web fields where getTextBeforeCursor can return
+        // stale data that doesn't match our cache, causing spurious reloads that disrupt input.
+        if (!isWebTextField()
+                && (mCommittedTextBeforeComposingText.length() > 0 || mComposingText.length() > 0)
                 && result != null && !checkTextBeforeCursorConsistency(result)) {
             // inconsistent state can occur for (at least) two reasons
             // 1. the app actively changes text field content, e.g. joplin when deleting list markers like "2."
@@ -657,6 +668,14 @@ public final class RichInputConnection implements PrivateCommandPerformer {
     public void setComposingRegion(final int start, final int end) {
         if (DEBUG_BATCH_NESTING) checkBatchEdit();
         if (DEBUG_PREVIOUS_TEXT) checkConsistencyForDebug();
+        // Web fields (contentEditable divs) don't handle composing regions reliably.
+        // Setting a composing region causes cursor jumping and interferes with native
+        // selection handles. Skip the composing region entirely for web fields.
+        if (isWebTextField()) {
+            if (DebugFlags.DEBUG_ENABLED)
+                Log.d(TAG, "skipping setComposingRegion for web text field");
+            return;
+        }
         final int moveBy = mExpectedSelStart - start; // determine now, as mExpectedSelStart may change in getTextBeforeCursor
         final CharSequence textBeforeCursor =
                 getTextBeforeCursor(Constants.EDITOR_CONTENTS_CACHE_SIZE + (end - start), 0);
@@ -694,7 +713,9 @@ public final class RichInputConnection implements PrivateCommandPerformer {
         if (isConnected()) {
             if (DebugFlags.DEBUG_ENABLED)
                 Log.d(TAG, "setting composing text of length "+text.length()); // don't log actual text
-            mIC.setComposingText(text, newCursorPosition);
+            // Web fields get plain text to avoid DOM interference from spans
+            final CharSequence textToSet = isWebTextField() ? text.toString() : text;
+            mIC.setComposingText(textToSet, newCursorPosition);
             if (!Settings.getValues().mInputAttributes.mShouldShowSuggestions && text.length() > 0) {
                 // We have a field that disables suggestions, but still committed text is set.
                 // This might lead to weird bugs (e.g. https://github.com/Helium314/HeliBoard/issues/225), so better do
@@ -1086,6 +1107,15 @@ public final class RichInputConnection implements PrivateCommandPerformer {
      * being initial and thus possibly outdated)
      */
     public void tryFixIncorrectCursorPosition() {
+        // Web fields (contentEditable) frequently report inconsistent cursor positions
+        // through getTextBeforeCursor and getExtractedText. Attempting to "fix" the cursor
+        // position often makes things worse, causing the cursor to jump to unexpected locations.
+        // Trust the framework's onUpdateSelection for web fields instead.
+        if (isWebTextField()) {
+            if (DebugFlags.DEBUG_ENABLED)
+                Log.d(TAG, "skipping cursor position fix for web text field");
+            return;
+        }
         mIC = mParent.getCurrentInputConnection();
         final CharSequence textBeforeCursor = getTextBeforeCursor(
                 Constants.EDITOR_CONTENTS_CACHE_SIZE, 0);
@@ -1192,5 +1222,19 @@ public final class RichInputConnection implements PrivateCommandPerformer {
             return "";
         }
         return new StringBuilder(mCommittedTextBeforeComposingText).append(mComposingText);
+    }
+
+    /**
+     * Returns whether the current field is a web text field (contentEditable, WebView textarea).
+     * Web fields require special handling because they translate Android InputConnection
+     * operations into DOM/JavaScript operations, which can cause issues with composing spans,
+     * SuggestionSpans, and selection management.
+     */
+    public boolean isWebTextField() {
+        try {
+            return Settings.getValues().mInputAttributes.isWebEditTextField();
+        } catch (Exception e) {
+            return false;
+        }
     }
 }

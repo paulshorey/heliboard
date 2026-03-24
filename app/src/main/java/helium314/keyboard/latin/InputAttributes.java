@@ -141,6 +141,17 @@ public final class InputAttributes {
         return InputType.TYPE_NULL == mInputType;
     }
 
+    /**
+     * Returns whether this is a web edit text field (contentEditable, textarea in WebView, etc.).
+     * Web fields often have issues with composing spans, SuggestionSpans, and setComposingRegion
+     * because these get mapped to DOM operations that can create invisible elements, interfere
+     * with cursor positioning, and prevent native selection handles from appearing.
+     */
+    public boolean isWebEditTextField() {
+        final int variation = mInputType & InputType.TYPE_MASK_VARIATION;
+        return variation == InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT;
+    }
+
     public boolean isSameInputType(final EditorInfo editorInfo) {
         return editorInfo.inputType == mInputType && mEditorInfo != null
                 && (mEditorInfo.imeOptions & EditorInfo.IME_FLAG_FORCE_ASCII) == (editorInfo.imeOptions & EditorInfo.IME_FLAG_FORCE_ASCII);

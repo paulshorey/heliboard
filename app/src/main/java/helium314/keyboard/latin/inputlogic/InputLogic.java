@@ -1349,25 +1349,18 @@ public final class InputLogic {
                 StatsUtils.onBackspaceSelectedText(numCharsDeleted);
             } else {
                 // There is no selection, just delete one character.
+                final boolean isWebField = inputTransaction.getSettingsValues().mInputAttributes.isWebEditTextField();
                 if (inputTransaction.getSettingsValues().mInputAttributes.isTypeNull()
-                        || Constants.NOT_A_CURSOR_POSITION == mConnection.getExpectedSelectionEnd()) {
-                    // There are three possible reasons to send a key event: either the field has
-                    // type TYPE_NULL, in which case the keyboard should send events, or we are
-                    // running in backward compatibility mode, or we don't know the cursor position.
-                    // Before Jelly bean, the keyboard would simulate a hardware keyboard event on
-                    // pressing enter or delete. This is bad for many reasons (there are race
-                    // conditions with commits) but some applications are relying on this behavior
-                    // so we continue to support it for older apps, so we retain this behavior if
-                    // the app has target SDK < JellyBean.
-                    // As for the case where we don't know the cursor position, it can happen
-                    // because of bugs in the framework. But the framework should know, so the next
-                    // best thing is to leave it to whatever it thinks is best.
+                        || Constants.NOT_A_CURSOR_POSITION == mConnection.getExpectedSelectionEnd()
+                        || isWebField) {
+                    // Send key events for TYPE_NULL, unknown cursor position, or web fields.
+                    // Web fields (contentEditable divs) often mishandle deleteSurroundingText,
+                    // causing invisible characters to become undeletable. Key events are
+                    // processed by the browser's native input handler which handles deletion
+                    // correctly across all DOM node boundaries.
                     sendDownUpKeyEvent(KeyEvent.KEYCODE_DEL);
                     int totalDeletedLength = 1;
                     if (mDeleteCount > Constants.DELETE_ACCELERATE_AT) {
-                        // If this is an accelerated (i.e., double) deletion, then we need to
-                        // consider unlearning here because we may have already reached
-                        // the previous word, and will lose it after next deletion.
                         hasUnlearnedWordBeingDeleted |= unlearnWordBeingDeleted(
                                 inputTransaction.getSettingsValues(), currentKeyboardScript);
                         sendDownUpKeyEvent(KeyEvent.KEYCODE_DEL);
@@ -1377,20 +1370,9 @@ public final class InputLogic {
                 } else {
                     final int codePointBeforeCursor = mConnection.getCodePointBeforeCursor();
                     if (codePointBeforeCursor == Constants.NOT_A_CODE) {
-                        // HACK for backward compatibility with broken apps that haven't realized
-                        // yet that hardware keyboards are not the only way of inputting text.
-                        // Nothing to delete before the cursor. We should not do anything, but many
-                        // broken apps expect something to happen in this case so that they can
-                        // catch it and have their broken interface react. If you need the keyboard
-                        // to do this, you're doing it wrong -- please fix your app.
-                        //  To make this more interesting, web browsers, and apps that are basically
-                        // browsers under the hood, in too many cases don't understand "deleteSurroundingText".
-                        // So we try to send a backspace keypress instead.
-                        if ((getCurrentInputEditorInfo().inputType & InputType.TYPE_MASK_VARIATION)
-                                == InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT)
-                            sendDownUpKeyEvent(KeyEvent.KEYCODE_DEL);
-                        else mConnection.deleteTextBeforeCursor(1);
-                        // TODO: Add a new StatsUtils method onBackspaceWhenNoText()
+                        // Nothing to delete before the cursor. Send a key event as a fallback
+                        // since some apps expect something to happen here.
+                        sendDownUpKeyEvent(KeyEvent.KEYCODE_DEL);
                         return;
                     }
                     final int lengthToDelete = codePointBeforeCursor > 0xFE00 || StringUtils.mightBeEmoji(codePointBeforeCursor)
@@ -1398,9 +1380,6 @@ public final class InputLogic {
                     mConnection.deleteTextBeforeCursor(lengthToDelete);
                     int totalDeletedLength = lengthToDelete;
                     if (mDeleteCount > Constants.DELETE_ACCELERATE_AT) {
-                        // If this is an accelerated (i.e., double) deletion, then we need to
-                        // consider unlearning here because we may have already reached
-                        // the previous word, and will lose it after next deletion.
                         hasUnlearnedWordBeingDeleted |= unlearnWordBeingDeleted(
                                 inputTransaction.getSettingsValues(), currentKeyboardScript);
                         final int codePointBeforeCursorToDeleteAgain =
@@ -1784,7 +1763,10 @@ public final class InputLogic {
                 // If the cursor is not touching a word, or if there is a selection, return right away.
                 || mConnection.hasSelection()
                 // If we don't know the cursor location, return.
-                || mConnection.getExpectedSelectionStart() < 0) {
+                || mConnection.getExpectedSelectionStart() < 0
+                // Web fields (contentEditable) don't handle setComposingRegion reliably.
+                // Recorrection causes cursor jumping and removes native selection handles.
+                || settingsValues.mInputAttributes.isWebEditTextField()) {
             mSuggestionStripViewAccessor.setNeutralSuggestionStrip();
             return;
         }
