@@ -596,7 +596,16 @@ public final class RichInputConnection implements PrivateCommandPerformer {
             mExpectedSelStart = 0;
         }
         if (isConnected()) {
-            mIC.deleteSurroundingText(beforeLength, 0);
+            if (isWebTextField()) {
+                // Web fields handle deleteSurroundingText unreliably. Use key events which
+                // the browser's native input handler processes correctly.
+                for (int i = 0; i < beforeLength; i++) {
+                    mIC.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL));
+                    mIC.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL));
+                }
+            } else {
+                mIC.deleteSurroundingText(beforeLength, 0);
+            }
         }
         if (DEBUG_PREVIOUS_TEXT) checkConsistencyForDebug();
     }
