@@ -53,6 +53,27 @@ import java.util.concurrent.TimeUnit;
  * InputConnection. It also keeps track of a number of things to avoid having to call upon IPC
  * all the time to find out what text is in the buffer, when we need it to determine caps mode
  * for example.
+ * <p>
+ * <b>Web field compatibility:</b> This class implements a dual-path architecture for text input.
+ * Standard native text fields (EditText, etc.) use the full Android InputConnection API including
+ * composing spans, SuggestionSpans, composing regions, and {@code deleteSurroundingText}.
+ * Web-based text fields (contentEditable divs, WebView textareas) use a simplified "plain text"
+ * path that avoids these APIs because they get translated into DOM operations that cause invisible
+ * characters, cursor jumping, and missing selection handles.
+ * <p>
+ * The web field detection is done by {@link #isWebTextField()}, which delegates to
+ * {@link InputAttributes#isWebEditTextField()}. The affected methods are:
+ * <ul>
+ *   <li>{@link #commitText} — strips spans, commits plain text</li>
+ *   <li>{@link #setComposingText} — strips spans from composing text</li>
+ *   <li>{@link #setComposingRegion} — skipped entirely (prevents cursor jumping)</li>
+ *   <li>{@link #deleteTextBeforeCursor} — uses KEYCODE_DEL key events instead of
+ *       deleteSurroundingText</li>
+ *   <li>{@link #tryFixIncorrectCursorPosition} — skipped (prevents cursor jumping)</li>
+ *   <li>Cache consistency checks — skipped (web fields return stale data)</li>
+ * </ul>
+ *
+ * @see InputAttributes#isWebEditTextField() for detection details and rationale
  */
 public final class RichInputConnection implements PrivateCommandPerformer {
     private static final String TAG = "RichInputConnection";
@@ -331,10 +352,7 @@ public final class RichInputConnection implements PrivateCommandPerformer {
         mComposingText.setLength(0);
         if (isConnected()) {
             if (isWebTextField()) {
-                // Web fields (contentEditable, WebView textareas) interpret Android Spannables
-                // as DOM operations. SuggestionSpan and other spans get mapped to invisible
-                // elements that create "walls" the cursor cannot pass through. Commit only
-                // the raw character data for maximum compatibility.
+                // Web path: commit plain text only. See class javadoc for rationale.
                 mIC.commitText(text.toString(), newCursorPosition);
             } else {
                 mTempObjectForCommitText.clear();
@@ -484,8 +502,7 @@ public final class RichInputConnection implements PrivateCommandPerformer {
         detectLaggyConnection(operation, timeout, startTime);
 
         // only do the consistency check if we actually have text (i.e. we're not coming from some reload / reset)
-        // Skip consistency checks for web fields where getTextBeforeCursor can return
-        // stale data that doesn't match our cache, causing spurious reloads that disrupt input.
+        // Web path: skip consistency checks (web fields return stale data). See class javadoc.
         if (!isWebTextField()
                 && (mCommittedTextBeforeComposingText.length() > 0 || mComposingText.length() > 0)
                 && result != null && !checkTextBeforeCursorConsistency(result)) {
@@ -597,8 +614,7 @@ public final class RichInputConnection implements PrivateCommandPerformer {
         }
         if (isConnected()) {
             if (isWebTextField()) {
-                // Web fields handle deleteSurroundingText unreliably. Use key events which
-                // the browser's native input handler processes correctly.
+                // Web path: key events instead of deleteSurroundingText. See class javadoc.
                 for (int i = 0; i < beforeLength; i++) {
                     mIC.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL));
                     mIC.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL));
@@ -677,9 +693,7 @@ public final class RichInputConnection implements PrivateCommandPerformer {
     public void setComposingRegion(final int start, final int end) {
         if (DEBUG_BATCH_NESTING) checkBatchEdit();
         if (DEBUG_PREVIOUS_TEXT) checkConsistencyForDebug();
-        // Web fields (contentEditable divs) don't handle composing regions reliably.
-        // Setting a composing region causes cursor jumping and interferes with native
-        // selection handles. Skip the composing region entirely for web fields.
+        // Web path: skip composing region entirely. See class javadoc.
         if (isWebTextField()) {
             if (DebugFlags.DEBUG_ENABLED)
                 Log.d(TAG, "skipping setComposingRegion for web text field");
@@ -722,7 +736,7 @@ public final class RichInputConnection implements PrivateCommandPerformer {
         if (isConnected()) {
             if (DebugFlags.DEBUG_ENABLED)
                 Log.d(TAG, "setting composing text of length "+text.length()); // don't log actual text
-            // Web fields get plain text to avoid DOM interference from spans
+            // Web path: strip spans from composing text. See class javadoc.
             final CharSequence textToSet = isWebTextField() ? text.toString() : text;
             mIC.setComposingText(textToSet, newCursorPosition);
             if (!Settings.getValues().mInputAttributes.mShouldShowSuggestions && text.length() > 0) {
@@ -1116,10 +1130,7 @@ public final class RichInputConnection implements PrivateCommandPerformer {
      * being initial and thus possibly outdated)
      */
     public void tryFixIncorrectCursorPosition() {
-        // Web fields (contentEditable) frequently report inconsistent cursor positions
-        // through getTextBeforeCursor and getExtractedText. Attempting to "fix" the cursor
-        // position often makes things worse, causing the cursor to jump to unexpected locations.
-        // Trust the framework's onUpdateSelection for web fields instead.
+        // Web path: skip cursor position heuristic fixes. See class javadoc.
         if (isWebTextField()) {
             if (DebugFlags.DEBUG_ENABLED)
                 Log.d(TAG, "skipping cursor position fix for web text field");
@@ -1234,10 +1245,12 @@ public final class RichInputConnection implements PrivateCommandPerformer {
     }
 
     /**
-     * Returns whether the current field is a web text field (contentEditable, WebView textarea).
-     * Web fields require special handling because they translate Android InputConnection
-     * operations into DOM/JavaScript operations, which can cause issues with composing spans,
-     * SuggestionSpans, and selection management.
+     * Returns whether the current field is a web text field requiring simplified input handling.
+     * Delegates to {@link InputAttributes#isWebEditTextField()} — see that method for full
+     * documentation on detection reliability and the rationale for each behavioral change.
+     * <p>
+     * Callers within this class use this to branch between the standard span-rich path and the
+     * web-compatible plain-text path. The value cannot change during an input session.
      */
     public boolean isWebTextField() {
         try {

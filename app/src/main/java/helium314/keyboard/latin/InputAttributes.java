@@ -142,10 +142,37 @@ public final class InputAttributes {
     }
 
     /**
-     * Returns whether this is a web edit text field (contentEditable, textarea in WebView, etc.).
-     * Web fields often have issues with composing spans, SuggestionSpans, and setComposingRegion
-     * because these get mapped to DOM operations that can create invisible elements, interfere
-     * with cursor positioning, and prevent native selection handles from appearing.
+     * Returns whether this is a web-based text field (contentEditable div, textarea in a
+     * WebView/browser, HTML input, etc.).
+     * <p>
+     * <b>How detection works:</b> The Android framework sets
+     * {@link InputType#TYPE_TEXT_VARIATION_WEB_EDIT_TEXT} on the {@link EditorInfo#inputType}
+     * when a WebView-hosted text field gains focus. Chrome, Chromium-based browsers (Edge, Brave,
+     * Opera, Samsung Internet), and Android's stock WebView all set this flag reliably. Firefox
+     * is a known exception — it omits this flag, which is why
+     * {@link helium314.keyboard.compat.AppWorkarounds} patches it for known Firefox packages.
+     * <p>
+     * <b>Why web fields need special handling:</b> Web fields translate Android
+     * {@link android.view.inputmethod.InputConnection} operations into DOM/JavaScript operations.
+     * This causes three categories of problems:
+     * <ol>
+     *   <li><b>Invisible characters:</b> {@link android.text.style.SuggestionSpan} and other spans
+     *       attached to committed text are mapped to invisible DOM elements that create undeletable
+     *       barriers in the text.</li>
+     *   <li><b>Cursor jumping:</b> {@code setComposingRegion()} and cursor position "fixing"
+     *       heuristics interact badly with the browser's asynchronous DOM updates, causing the
+     *       caret to jump to wrong positions.</li>
+     *   <li><b>Missing selection handles:</b> Composing regions interfere with the browser's
+     *       native cursor handle rendering.</li>
+     * </ol>
+     * <p>
+     * When this returns {@code true}, the keyboard uses a web-compatible input mode:
+     * plain text only (no spans), no composing region for recorrection, key events for
+     * deletion, and no cursor position heuristic fixes. See
+     * {@link helium314.keyboard.latin.RichInputConnection} for the implementation.
+     *
+     * @return true if this is a web text field
+     * @see helium314.keyboard.compat.AppWorkarounds#adjustInputType
      */
     public boolean isWebEditTextField() {
         final int variation = mInputType & InputType.TYPE_MASK_VARIATION;

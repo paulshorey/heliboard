@@ -1349,15 +1349,14 @@ public final class InputLogic {
                 StatsUtils.onBackspaceSelectedText(numCharsDeleted);
             } else {
                 // There is no selection, just delete one character.
+                // Web fields use the fast key-event path here (skipping emoji/codepoint
+                // detection that relies on getTextBeforeCursor which can be stale in web
+                // fields). RichInputConnection.deleteTextBeforeCursor also sends key events
+                // for web fields, but this early branch avoids unnecessary IPC round-trips.
                 final boolean isWebField = inputTransaction.getSettingsValues().mInputAttributes.isWebEditTextField();
                 if (inputTransaction.getSettingsValues().mInputAttributes.isTypeNull()
                         || Constants.NOT_A_CURSOR_POSITION == mConnection.getExpectedSelectionEnd()
                         || isWebField) {
-                    // Send key events for TYPE_NULL, unknown cursor position, or web fields.
-                    // Web fields (contentEditable divs) often mishandle deleteSurroundingText,
-                    // causing invisible characters to become undeletable. Key events are
-                    // processed by the browser's native input handler which handles deletion
-                    // correctly across all DOM node boundaries.
                     sendDownUpKeyEvent(KeyEvent.KEYCODE_DEL);
                     int totalDeletedLength = 1;
                     if (mDeleteCount > Constants.DELETE_ACCELERATE_AT) {
@@ -1764,8 +1763,8 @@ public final class InputLogic {
                 || mConnection.hasSelection()
                 // If we don't know the cursor location, return.
                 || mConnection.getExpectedSelectionStart() < 0
-                // Web fields (contentEditable) don't handle setComposingRegion reliably.
-                // Recorrection causes cursor jumping and removes native selection handles.
+                // Web path: skip recorrection (setComposingRegion causes cursor jumping).
+                // See InputAttributes.isWebEditTextField() javadoc for full rationale.
                 || settingsValues.mInputAttributes.isWebEditTextField()) {
             mSuggestionStripViewAccessor.setNeutralSuggestionStrip();
             return;
