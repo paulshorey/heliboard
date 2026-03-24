@@ -15,6 +15,7 @@ import helium314.keyboard.event.Event
 import helium314.keyboard.keyboard.KeyboardSwitcher
 import helium314.keyboard.keyboard.MainKeyboardView
 import helium314.keyboard.keyboard.internal.keyboard_parser.floris.KeyCode
+import helium314.keyboard.compat.AppWorkarounds
 import helium314.keyboard.latin.ShadowFacilitator2.Companion.lastAddedWord
 import helium314.keyboard.latin.SuggestedWords.SuggestedWordInfo
 import helium314.keyboard.latin.common.Constants
@@ -196,6 +197,17 @@ class InputLogicTest {
         assertEquals("hi", text)
         assertEquals("hi", composingText)
         assertEquals(true, settingsValues.needsToLookupSuggestions())
+    }
+
+    @Test fun browserWorkaroundMarksFirefoxWebEditorsAsWebEditText() {
+        val adjusted = AppWorkarounds.adjustInputType(
+            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_IME_MULTI_LINE,
+            "org.mozilla.firefox"
+        )
+        assertEquals(
+            InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT,
+            adjusted and InputType.TYPE_MASK_VARIATION
+        )
     }
 
     @Test fun autospace() {
