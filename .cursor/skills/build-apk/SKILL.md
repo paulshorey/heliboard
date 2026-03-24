@@ -49,4 +49,6 @@ REPO_PATH="$(printf '%s\n' "$ORIGIN_URL" | sed -E 's#^https://[^/]+/##; s#\.git$
 echo "https://github.com/${REPO_PATH}/raw/refs/heads/${BRANCH}/dist/HeliBoard.apk"
 ```
 
-Include that URL in your final response so the user can download and sideload the APK.
+Include that URL in your final response so the user can download and sideload the APK. Write it as a markdown link, for example:
+
+[Download HeliBoard.apk](https://github.com/owner/repo/raw/refs/heads/my-branch/dist/HeliBoard.apk)
