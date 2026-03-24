@@ -178,6 +178,26 @@ class InputLogicTest {
         assertEquals("", composingText)
     }
 
+    @Test fun webEditTextDoesNotComposeOrShowSuggestions() {
+        reset()
+        setInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT)
+        input('h')
+        input('i')
+        assertEquals("hi", text)
+        assertEquals("", composingText)
+        assertEquals(false, settingsValues.needsToLookupSuggestions())
+    }
+
+    @Test fun normalTextStillComposesAndLooksUpSuggestions() {
+        reset()
+        setInputType(InputType.TYPE_CLASS_TEXT)
+        input('h')
+        input('i')
+        assertEquals("hi", text)
+        assertEquals("hi", composingText)
+        assertEquals(true, settingsValues.needsToLookupSuggestions())
+    }
+
     @Test fun autospace() {
         reset()
         setText("hello")
