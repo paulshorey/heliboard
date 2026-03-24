@@ -1,12 +1,9 @@
 # Voice Transcription Data Flow
 
-This document describes the end-to-end voice transcription pipeline: local capture, Deepgram
-streaming, local post-transcription preparation on each finalized span, and immediate caret
-insertion.
+End-to-end voice transcription pipeline: local capture, Deepgram streaming, local post-transcription preparation on each finalized span, and immediate caret insertion.
 
 ## Overview
 
-The voice input system uses **local recording + streaming transcription**:
 1. **VoiceRecorder** captures PCM16 audio locally; silence detection drives paragraph breaks and auto-stop.
 2. **DeepgramTranscriptionClient** streams audio to Deepgram and receives finalized transcript spans.
 3. **VoicePostTranscriptionFilter** converts spoken aliases, cleans up edge cases, sanitizes hidden characters, adjusts capitalization, and ensures final spacing.
@@ -26,12 +23,6 @@ The voice input system uses **local recording + streaming transcription**:
 │   (App)         │     │   (Orchestrator)     │     └─────────────────┘
 └─────────────────┘     └──────────────────────┘
 ```
-
-## Key Design Principle: Instant Recording
-
-Recording starts **instantly** when the user presses the microphone button. The microphone
-is local and does not wait on any network round-trip. Network access is only needed after
-audio has already been captured and is sent for transcription.
 
 ## Components
 
@@ -67,7 +58,7 @@ Main orchestrator that coordinates all components and inserts text into the edit
 - Calls `mInputLogic.finishInput()` first to keep composing state in sync
 - Defers paragraph insertion until manager processing is idle if needed
 
-## Data Flow
+## Data Flow Steps
 
 ### 1. Recording Start
 ```
@@ -102,9 +93,6 @@ Finalized transcript span arrives
     → LatinIME commits the prepared text at the caret via InputConnection.commitText(...)
 ```
 
-There is no second pass over the field: each processed chunk is inserted at the current
-caret via `commitText` only.
-
 ### 4. New Paragraph
 ```
 Speech stops
@@ -128,10 +116,8 @@ PAUSED     → User taps pause  → RECORDING (resume)
 - Deepgram transcript spans are queued and delivered in FIFO order by `VoiceInputManager`.
 - `LatinIME` inserts each prepared transcript immediately when received.
 - Deterministic text shaping stays inside `VoicePostTranscriptionFilter`; `LatinIME` does not apply a separate second formatting layer after that.
-- Paragraph breaks are deferred until manager processing drains, so they do not interleave
-  in the middle of pending transcript insertion.
-- Cancelling voice input invalidates the active manager session so stale Deepgram callbacks
-  are dropped before they reach the IME.
+- Paragraph breaks are deferred until manager processing drains, so they do not interleave in the middle of pending transcript insertion.
+- Cancelling voice input invalidates the active manager session so stale Deepgram callbacks are dropped before they reach the IME.
 
 ## Configuration
 

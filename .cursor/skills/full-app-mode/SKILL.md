@@ -1,15 +1,13 @@
 ---
 name: full-app-mode
-description: This android keyboard app has a unique feature not available in any other keyboard app. Full-screen mode. We call it "fullapp" or "full app" to differentiate from the system OS fullscreen mode. When entering full-app mode, the keyboard is opened as its own standalone app, in its own full screen window. Text from the source app input field is copied to the full keyboard app. When user is done editing in full mode, they can minimize it or click back button. Then the edited text syncs back to the original app input field. User is then able to continue editing using the regular keyboard mode.
+description: Fullapp keyboard opens the keyboard as a standalone app in its own full-screen window. Text syncs between the source app field and the fullapp editor. Use when working on FullappEditorActivity, fullapp drafts, text sync, extract view, or the fullapp toolbar button.
 ---
 
 # Fullapp Keyboard — Architecture and Lessons Learned
 
-This document describes how the fullapp keyboard feature works and what we learned from implementing it. Use it to avoid pitfalls and stick to the approach that works.
-
 ## Feature Overview
 
-When the user taps the fullapp toolbar button (configured through the normal toolbar / pinned-toolbar settings):
+When the user taps the fullapp toolbar button:
 
 1. The keyboard **hides** and `FullappEditorActivity` is launched as a standalone app.
 2. The user sees a fullapp text editor (Compose UI). They can type or use voice transcription.
@@ -18,7 +16,7 @@ When the user taps the fullapp toolbar button (configured through the normal too
 5. When the IME reconnects to the matching editor, it retries the replay. After sync succeeds (or the target field already matches the draft), the draft is removed from the live-sync list and archived into read-only history instead of being deleted.
 6. Users can review and copy both live drafts and archived fullapp history from Settings. Archived entries never sync automatically again.
 
-## Why Activity-Based Fullapp (Not Extract View)
+## Why Activity-Based (Not Extract View)
 
 ### Extract view fails on web pages
 
@@ -47,7 +45,7 @@ So we reuse that model: **treat fullapp as "opening the keyboard app"**, separat
 6. **When user returns**: They go back to the original app. When they focus the matching text area, `onStartInputViewInternal()` looks up the live draft, retries `replaceEntireFieldText()` if needed, restores selection, and then archives the finished draft into read-only history instead of deleting it.
 7. **Settings history**: The settings UI shows two sections: live in-progress fullapp edits (still eligible for sync) and archived fullapp edit history (reference only, copyable, never auto-synced).
 
-### Key files
+### Key Files
 
 - `LatinIME.java`: `launchFullappEditorActivity()`, pending-text handling in `onStartInputViewInternal()`.
 - `FullappEditorActivity.kt`: Compose UI, autosave lifecycle, `FullappEditorResult` live-draft + archive store.
@@ -64,7 +62,7 @@ to the text returned by `getExtractedText()` — likely for system fullscreen/ex
 
 **Fix**: We use `getOriginalFieldTextForFullapp()`, which bypasses `getExtractedText()` and
 reads via `getTextBeforeCursor()` + `getSelectedText()` + `getTextAfterCursor()`. That path
-returns the actual field content (including active selections) without the editor’s extra
+returns the actual field content (including active selections) without the editor's extra
 newlines.
 
 ### What to keep
@@ -75,31 +73,23 @@ newlines.
 
 ## What Did NOT Work (Extract View)
 
-### ❌ Extract view on web pages
+| Attempt | Result |
+|---------|--------|
+| Extract view on web pages | Web textarea loses focus → keyboard closes |
+| Writing directly to extract EditText | Framework syncs from app → overwrites our edits |
+| Blocking `setExtractedText()` | Stops all display updates; typing/voice stop showing |
 
-When the extract view gains focus, the web textarea loses focus and the keyboard closes. No workaround within the extract view model.
+## Rules of Thumb
 
-### ❌ Writing directly to the extract EditText
-
-The framework periodically syncs from the app to the extract view. Our direct edits were overwritten.
-
-### ❌ Blocking `setExtractedText()`
-
-Stopped all display updates; typing and voice transcription stopped showing.
-
----
-
-## Summary: Rules of Thumb
-
-| Do                                                             | Don't                                                  |
-| -------------------------------------------------------------- | ------------------------------------------------------ |
-| Launch `FullappEditorActivity` for fullapp editing             | Use extract view for web page textareas                |
+| Do | Don't |
+|----|-------|
+| Launch `FullappEditorActivity` for fullapp editing | Use extract view for web page textareas |
 | Store result in `FullappEditorResult`, insert on IME reconnect | Try to keep IME attached while switching to fullapp UI |
-| Treat fullapp as "keyboard app as standalone app"              | Assume extract view works everywhere                   |
-| Use `replaceEntireFieldText()` when inserting pending text     | Assume `InputConnection` is always ready immediately   |
+| Treat fullapp as "keyboard app as standalone app" | Assume extract view works everywhere |
+| Use `replaceEntireFieldText()` when inserting pending text | Assume `InputConnection` is always ready immediately |
 
-**Bottom line**: For web pages and apps where the extract view causes focus loss, use an Activity so the keyboard app runs as a standalone app. Sync text back when the user returns and focuses the original field again.
+**Key rule**: The extract view is a mirror of the app's field. All text input (typing, voice) must go through `InputConnection` to the app — never write to the extract view directly. The framework syncs app → extract view via `setExtractedText()`.
 
 ## Update documentation
 
-IMPORTANT: When you change something, or discover that the code or functionality is different than described, update and fix the documentation. Always keep this skill file up to date (.claude/skills/full-app-mode/SKILL.md) after any change or after you discover any difference in implementation or functionality.
+IMPORTANT: When you change something, or discover that the code or functionality differs from what's described, update this skill file immediately.

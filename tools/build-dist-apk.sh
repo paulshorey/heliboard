@@ -7,7 +7,12 @@ CANONICAL_APK="$DIST_DIR/HeliBoard.apk"
 DEBUG_APK_DIR="$ROOT_DIR/app/build/outputs/apk/debug"
 
 cd "$ROOT_DIR"
-source "$ROOT_DIR/tools/setup-android-sdk.sh"
+
+if [[ -f "$ROOT_DIR/local.properties" ]] && grep -q '^sdk\.dir=' "$ROOT_DIR/local.properties"; then
+  echo "Using existing SDK from local.properties"
+else
+  source "$ROOT_DIR/tools/setup-android-sdk.sh"
+fi
 
 ./gradlew :app:assembleDebug
 
