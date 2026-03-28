@@ -602,16 +602,11 @@ public final class InputLogic {
         mSuggestedWords = suggestedWords;
         final boolean newAutoCorrectionIndicator = suggestedWords.mWillAutoCorrect;
 
-        // Put a blue underline to a word in TextView which will be auto-corrected.
-        if (mIsAutoCorrectionIndicatorOn != newAutoCorrectionIndicator && mWordComposer.isComposingWord()) {
-            mIsAutoCorrectionIndicatorOn = newAutoCorrectionIndicator;
-            final CharSequence textWithUnderline = getTextWithUnderline(mWordComposer.getTypedWord());
-            // TODO: when called from an updateSuggestionStrip() call that results from a posted
-            // message, this is called outside any batch edit. Potentially, this may result in some
-            // janky flickering of the screen, although the display speed makes it unlikely in
-            // the practice.
-            setComposingTextInternal(textWithUnderline, 1);
-        }
+        // The simplified architecture keeps the in-progress word inside the keyboard and mirrors
+        // plain committed text into the host editor. Suggestion/autocorrect state remains visible
+        // in the suggestion strip; we intentionally no longer rewrite host text just to toggle an
+        // editor-side underline/composing presentation.
+        mIsAutoCorrectionIndicatorOn = newAutoCorrectionIndicator;
     }
 
     /**
