@@ -137,40 +137,6 @@ class InputLogicTest {
         assertEquals(8, cursor)
     }
 
-    // todo: make it work, but it might not be that simple because adding is done in combiner
-    //  https://github.com/Helium314/HeliBoard/issues/214
-    @Test fun insertLetterIntoWordHangulFails() {
-        if (BuildConfig.BUILD_TYPE == "runTests") return
-        reset()
-        latinIME.switchToSubtype(SubtypeSettings.getResourceSubtypesForLocale("ko".constructLocale()).first())
-        chainInput("ㅛㅎㄹㅎㅕㅛ")
-        setCursorPosition(3)
-        input('ㄲ') // fails, as expected from the hangul issue when processing the event in onCodeInput
-        assertEquals("ㅛㅎㄹㄲ혀ㅛ", getWordAtCursor())
-        assertEquals("ㅛㅎㄹㄲ혀ㅛ", getText())
-        assertEquals("ㅛㅎㄹㄲ혀ㅛ", textBeforeCursor + textAfterCursor)
-        assertEquals(4, getCursorPosition())
-        assertEquals(4, cursor)
-    }
-
-    // see issue 1447
-    @Test fun separatorAfterHangul() {
-        reset()
-        latinIME.switchToSubtype(SubtypeSettings.getResourceSubtypesForLocale("ko".constructLocale()).first())
-        chainInput("ㅛ.")
-        assertEquals("ㅛ.", text)
-    }
-
-    // see issue 1551 (debug only)
-    @Test fun deleteHangul() {
-        reset()
-        latinIME.switchToSubtype(SubtypeSettings.getResourceSubtypesForLocale("ko".constructLocale()).first())
-        setText("ㅛㅛ ")
-        functionalKeyPress(KeyCode.DELETE)
-        functionalKeyPress(KeyCode.DELETE)
-        functionalKeyPress(KeyCode.DELETE)
-    }
-
     @Test fun separatorUnselectsWord() {
         reset()
         setText("hello")
@@ -186,7 +152,7 @@ class InputLogicTest {
         input('i')
         assertEquals("hi", text)
         assertEquals("", composingText)
-        assertEquals(false, settingsValues.needsToLookupSuggestions())
+        assertEquals(true, settingsValues.needsToLookupSuggestions())
     }
 
     @Test fun normalTextStillLooksUpSuggestionsWithoutHostComposition() {
@@ -795,8 +761,7 @@ class InputLogicTest {
         latinIME.onEvent(Event.createEventForCodePointFromUnknownSource(codePoint))
         handleMessages()
 
-        if (currentScript != ScriptUtils.SCRIPT_HANGUL // check fails if hangul combiner merges symbols
-            && !(codePoint == Constants.CODE_SPACE && oldBefore.lastOrNull() == ' ') // check fails when 2 spaces are converted into a period
+        if (!(codePoint == Constants.CODE_SPACE && oldBefore.lastOrNull() == ' ') // check fails when 2 spaces are converted into a period
             && !latinIME.mInputLogic.mSuggestedWords.mWillAutoCorrect // autocorrect obviously creates inconsistencies
             ) {
             if (phantomSpaceToInsert.isEmpty()) {

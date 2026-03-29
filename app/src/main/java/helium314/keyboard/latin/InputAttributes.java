@@ -35,12 +35,6 @@ public final class InputAttributes {
     final public boolean mShouldShowSuggestions;
     final public boolean mMayOverrideShowingSuggestions;
     final public boolean mApplicationSpecifiedCompletionOn;
-    /**
-     * Some web/contenteditable editors mishandle IME composing spans and selection-driven
-     * recorrection, causing invisible formatting characters, blocked backspace, and cursor jumps.
-     * In these fields we fall back to a more conservative direct-commit behavior.
-     */
-    final public boolean mShouldAvoidComposingText;
     final public boolean mShouldInsertSpacesAutomatically;
     final public boolean mShouldShowVoiceInputKey;
     final public boolean mNoLearning;
@@ -83,7 +77,6 @@ public final class InputAttributes {
             mMayOverrideShowingSuggestions = false;
             mInputTypeShouldAutoCorrect = false;
             mApplicationSpecifiedCompletionOn = false;
-            mShouldAvoidComposingText = false;
             mShouldInsertSpacesAutomatically = false;
             mShouldShowVoiceInputKey = false;
             mDisableGestureFloatingPreviewText = false;
@@ -97,13 +90,10 @@ public final class InputAttributes {
         final boolean flagMultiLine = 0 != (mInputType & InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         final boolean flagAutoCorrect = 0 != (mInputType & InputType.TYPE_TEXT_FLAG_AUTO_CORRECT);
         final boolean flagAutoComplete = 0 != (mInputType & InputType.TYPE_TEXT_FLAG_AUTO_COMPLETE);
-        mShouldAvoidComposingText = variation == InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT;
-
         // TODO: Have a helper method in InputTypeUtils
         // Make sure that passwords are not displayed in {@link SuggestionStripView}.
-        mShouldShowSuggestions = !mIsPasswordField && !flagNoSuggestions
-                && !mShouldAvoidComposingText;
-        mMayOverrideShowingSuggestions = !mIsPasswordField && !mShouldAvoidComposingText;
+        mShouldShowSuggestions = !mIsPasswordField && !flagNoSuggestions;
+        mMayOverrideShowingSuggestions = !mIsPasswordField;
 
         mShouldInsertSpacesAutomatically = InputTypeUtils.isAutoSpaceFriendlyType(mInputType);
 
@@ -259,7 +249,6 @@ public final class InputAttributes {
                 (mInputTypeShouldAutoCorrect ? " shouldAutoCorrect" : ""),
                 (mIsPasswordField ? " password" : ""),
                 (mShouldShowSuggestions ? " shouldShowSuggestions" : ""),
-                (mShouldAvoidComposingText ? " avoidComposingText" : ""),
                 (mApplicationSpecifiedCompletionOn ? " appSpecified" : ""),
                 (mShouldInsertSpacesAutomatically ? " insertSpaces" : ""),
                 mTargetApplicationPackageName);
