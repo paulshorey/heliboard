@@ -94,6 +94,7 @@ public final class InputLogic {
     public final Suggest mSuggest;
     private final DictionaryFacilitator mDictionaryFacilitator;
     private SingleDictionaryFacilitator mEmojiDictionaryFacilitator;
+    private final EditorWordMirror mEditorWordMirror;
 
     public LastComposedWord mLastComposedWord = LastComposedWord.NOT_A_COMPOSED_WORD;
     // This has package visibility so it can be accessed from InputLogicHandler.
@@ -134,9 +135,24 @@ public final class InputLogic {
         mSuggestionStripViewAccessor = suggestionStripViewAccessor;
         mWordComposer = new WordComposer();
         mConnection = new RichInputConnection(latinIME);
+        mEditorWordMirror = new EditorWordMirror(mConnection);
         mInputLogicHandler = new InputLogicHandler(mLatinIME.mHandler, this);
         mSuggest = new Suggest(dictionaryFacilitator);
         mDictionaryFacilitator = dictionaryFacilitator;
+    }
+
+    private void mirrorCurrentWordToEditor() {
+        mEditorWordMirror.mirrorWord(getTextWithUnderline(mWordComposer.getTypedWord()));
+    }
+
+    private void clearMirroredCurrentWord() {
+        mEditorWordMirror.clearMirroredWord();
+    }
+
+    private void finalizeMirroredCurrentWord(@NonNull final CharSequence committedWord) {
+        if (mEditorWordMirror.isMirroringWord()) {
+            mEditorWordMirror.commitMirroredWord(committedWord);
+        }
     }
 
     /**
@@ -150,6 +166,7 @@ public final class InputLogic {
     public void startInput(final String combiningSpec, final SettingsValues settingsValues) {
         mEnteredText = null;
         mWordBeingCorrectedByCursor = null;
+        mEditorWordMirror.reset();
         mConnection.onStartInput();
         if (!mWordComposer.getTypedWord().isEmpty()) {
             // For messaging apps that offer send button, the IME does not get the opportunity
@@ -205,7 +222,7 @@ public final class InputLogic {
      */
     public void finishInput() {
         if (mWordComposer.isComposingWord()) {
-            mConnection.finishComposingText();
+            mEditorWordMirror.clear();
             StatsUtils.onWordCommitUserTyped(mWordComposer.getTypedWord(), mWordComposer.isBatchMode());
         }
         resetComposingState(true);
@@ -635,7 +652,7 @@ public final class InputLogic {
                 insertAutomaticSpaceIfOptionsAndTextAllow(inputTransaction.getSettingsValues());
                 mSpaceState = SpaceState.NONE;
             }
-            setComposingTextInternal(mWordComposer.getTypedWord(), 1);
+            mirrorCurrentWordToEditor();
             inputTransaction.setDidAffectContents();
             inputTransaction.setRequiresUpdateSuggestions();
         }
@@ -1059,7 +1076,7 @@ public final class InputLogic {
             if (mWordComposer.isSingleLetter()) {
                 mWordComposer.setCapitalizedModeAtStartComposingTime(inputTransaction.getShiftState());
             }
-            setComposingTextInternal(getTextWithUnderline(mWordComposer.getTypedWord()), 1);
+            mirrorCurrentWordToEditor();
         } else {
             final boolean swapWeakSpace = tryStripSpaceAndReturnWhetherShouldSwapInstead(event, inputTransaction);
 
@@ -1264,9 +1281,9 @@ public final class InputLogic {
                 StatsUtils.onBackspacePressed(1);
             }
             if (mWordComposer.isComposingWord()) {
-                setComposingTextInternal(getTextWithUnderline(mWordComposer.getTypedWord()), 1);
+                mirrorCurrentWordToEditor();
             } else {
-                mConnection.commitText("", 1);
+                clearMirroredCurrentWord();
             }
             updateInlineEmojiSearch();
             inputTransaction.setRequiresUpdateSuggestions();
@@ -1795,8 +1812,6 @@ public final class InputLogic {
             // Show predictions.
             mWordComposer.setCapitalizedModeAtStartComposingTime(WordComposer.CAPS_MODE_OFF);
             mLatinIME.mHandler.postUpdateSuggestionStrip(SuggestedWords.INPUT_STYLE_RECORRECTION);
-            // "unselect" the previous text
-            mConnection.finishComposingText();
             return;
         }
         final TextRange range = mConnection.getWordRangeAtCursor(settingsValues.mSpacingAndPunctuations, currentKeyboardScript);
@@ -1804,7 +1819,6 @@ public final class InputLogic {
         if (range.length() <= 0) {
             // Race condition, or touching a word in a non-supported script.
             mLatinIME.setNeutralSuggestionStrip();
-            mConnection.finishComposingText();
             return;
         }
         // If for some strange reason (editor bug or so) we measure the text before the cursor as
@@ -1816,8 +1830,6 @@ public final class InputLogic {
         // we just do not resume because it's safer.
         if (!isResumableWord(settingsValues, range.mWord.toString())) {
             mSuggestionStripViewAccessor.setNeutralSuggestionStrip();
-            // "unselect" the previous text
-            mConnection.finishComposingText();
             return;
         }
         restartSuggestions(range);
@@ -1851,9 +1863,11 @@ public final class InputLogic {
         }
         final int[] codePoints = StringUtils.toCodePointArray(typedWordString);
         mWordComposer.setComposingWord(codePoints, mLatinIME.getCoordinatesForCurrentKeyboard(codePoints));
-        mWordComposer.setCursorPositionWithinWord(typedWordString.codePointCount(0, numberOfCharsInWordBeforeCursor));
-        mConnection.setComposingRegion(expectedCursorPosition - numberOfCharsInWordBeforeCursor,
-                expectedCursorPosition + range.getNumberOfCharsInWordAfterCursor());
+        mWordComposer.setCursorPositionWithinWord(
+                typedWordString.codePointCount(0, numberOfCharsInWordBeforeCursor));
+        // The host editor already contains this word. Just arm the mirror so future edits replace
+        // it instead of appending after it.
+        mEditorWordMirror.setMirroredWord(typedWordString, true);
         if (suggestions.size() <= 1) {
             // If there weren't any suggestion spans on this word, suggestions#size() will be 1
             // if shouldIncludeResumedWordInSuggestions is true, 0 otherwise. In this case, we
@@ -2160,6 +2174,7 @@ public final class InputLogic {
      * @param alsoResetLastComposedWord whether to also reset the last composed word.
      */
     private void resetComposingState(final boolean alsoResetLastComposedWord) {
+        mEditorWordMirror.reset();
         mWordComposer.reset();
         if (alsoResetLastComposedWord) {
             mLastComposedWord = LastComposedWord.NOT_A_COMPOSED_WORD;
@@ -2327,7 +2342,7 @@ public final class InputLogic {
         }
         enterInlineEmojiSearchIfNeeded(batchInputText.codePointAt(0), settingsValues);
         mWordComposer.setBatchInputWord(batchInputText);
-        setComposingTextInternal(batchInputText, 1);
+        mirrorCurrentWordToEditor();
         mConnection.endBatchEdit();
         // Space state must be updated before calling updateShiftState
         if (settingsValues.mAutospaceAfterGestureTyping)
@@ -2460,7 +2475,11 @@ public final class InputLogic {
             Log.d(TAG, "commitChosenWord() : NgramContext = " + ngramContext);
             startTimeMillis = System.currentTimeMillis();
         }
-        mConnection.commitText(chosenWordWithSuggestions, 1);
+        if (mEditorWordMirror.isMirroringWord()) {
+            mEditorWordMirror.commitMirroredWord(chosenWordWithSuggestions);
+        } else {
+            mConnection.commitText(chosenWordWithSuggestions, 1);
+        }
         if (DebugFlags.DEBUG_ENABLED) {
             long runTimeMillis = System.currentTimeMillis() - startTimeMillis;
             Log.d(TAG, "commitChosenWord() : " + runTimeMillis + " ms to run "
