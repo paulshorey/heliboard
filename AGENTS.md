@@ -26,8 +26,32 @@ Each feature area has a dedicated skill with architecture docs, key files, and l
 
 - **Voice transcription key files**: `VoiceInputManager.kt`, `DeepgramTranscriptionClient.kt`, `VoicePostTranscriptionFilter.java`, `VoiceRecorder.kt`, `LatinIME.java`
 - **Fullapp key files**: `FullappEditorActivity.kt`, `FullappEditorResult`, `LatinIME.java`
+- **Main input pipeline**: `LatinIME.java` → `InputLogic.java` → `WordComposer.java` / `RichInputConnection.java`
+- **Current-word host sync**: `EditorWordMirror.java` mirrors keyboard-owned word edits into the host field
 - **Build**: `./tools/build-dist-apk.sh` (distributable APK), `./tools/setup-android-sdk.sh` (SDK setup)
 - **Keystore**: `keystore/debug.keystore` — shared across local and cloud builds for same-signature APKs
+
+## File structure overview
+
+- `app/src/main/java/helium314/keyboard/latin/`
+  - `LatinIME.java`: main IME service and top-level orchestration
+  - `WordComposer.java`: keyboard-owned current-word state
+  - `RichInputConnection.java`: cached editor connection wrapper
+  - `inputlogic/`: text-entry rules, suggestion flow, and host mirroring
+  - `voice/`: voice recording, streaming, and transcript post-processing
+  - `suggestions/`, `dictionary/`, `spellcheck/`: suggestion UI and dictionary/spellcheck support
+- `app/src/main/java/helium314/keyboard/keyboard/`
+  - key handling, layouts, views, and keyboard state
+- `app/src/main/res/`
+  - Android resources, subtype definitions, UI strings, and themes
+- `app/src/main/assets/`
+  - keyboard layouts and locale key text assets
+- `app/src/test/`
+  - unit and Robolectric tests, especially `InputLogicTest.kt`
+- `docs/`
+  - project-specific architecture notes and implementation guides
+- `tools/`
+  - SDK setup, APK build, and utility scripts
 
 ## Key rules
 

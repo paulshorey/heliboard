@@ -69,7 +69,6 @@ import helium314.keyboard.latin.utils.TimestampKt;
 
 import java.util.ArrayList;
 import java.util.Locale;
-import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -94,6 +93,7 @@ public final class InputLogic {
     public final Suggest mSuggest;
     private final DictionaryFacilitator mDictionaryFacilitator;
     private SingleDictionaryFacilitator mEmojiDictionaryFacilitator;
+    private final EditorWordMirror mEditorWordMirror;
 
     public LastComposedWord mLastComposedWord = LastComposedWord.NOT_A_COMPOSED_WORD;
     // This has package visibility so it can be accessed from InputLogicHandler.
@@ -103,9 +103,6 @@ public final class InputLogic {
 
     private int mDeleteCount;
     private long mLastKeyTime;
-    // todo: this is not used, so either remove it or do something with it
-    public final TreeSet<Long> mCurrentlyPressedHardwareKeys = new TreeSet<>();
-
     // Keeps track of most recently inserted text (multi-character key) for reverting
     private String mEnteredText;
 
@@ -134,9 +131,24 @@ public final class InputLogic {
         mSuggestionStripViewAccessor = suggestionStripViewAccessor;
         mWordComposer = new WordComposer();
         mConnection = new RichInputConnection(latinIME);
+        mEditorWordMirror = new EditorWordMirror(mConnection);
         mInputLogicHandler = new InputLogicHandler(mLatinIME.mHandler, this);
         mSuggest = new Suggest(dictionaryFacilitator);
         mDictionaryFacilitator = dictionaryFacilitator;
+    }
+
+    private void mirrorCurrentWordToEditor() {
+        mEditorWordMirror.mirrorWord(getTextWithUnderline(mWordComposer.getTypedWord()));
+    }
+
+    private void clearMirroredCurrentWord() {
+        mEditorWordMirror.clearMirroredWord();
+    }
+
+    private void finalizeMirroredCurrentWord(@NonNull final CharSequence committedWord) {
+        if (mEditorWordMirror.isMirroringWord()) {
+            mEditorWordMirror.commitMirroredWord(committedWord);
+        }
     }
 
     /**
@@ -150,6 +162,7 @@ public final class InputLogic {
     public void startInput(final String combiningSpec, final SettingsValues settingsValues) {
         mEnteredText = null;
         mWordBeingCorrectedByCursor = null;
+        mEditorWordMirror.reset();
         mConnection.onStartInput();
         if (!mWordComposer.getTypedWord().isEmpty()) {
             // For messaging apps that offer send button, the IME does not get the opportunity
@@ -162,7 +175,6 @@ public final class InputLogic {
         mDeleteCount = 0;
         mSpaceState = SpaceState.NONE;
         mRecapitalizeStatus.disable(); // Do not perform recapitalize until the cursor is moved once
-        mCurrentlyPressedHardwareKeys.clear();
         mSuggestedWords = SuggestedWords.getEmptyInstance();
         // In some cases (e.g. after rotation of the device, or when scrolling the text before bringing up keyboard)
         // editorInfo.initialSelStart is not the actual cursor position, so we try using some heuristics to find the correct position.
@@ -205,7 +217,7 @@ public final class InputLogic {
      */
     public void finishInput() {
         if (mWordComposer.isComposingWord()) {
-            mConnection.finishComposingText();
+            mEditorWordMirror.clear();
             StatsUtils.onWordCommitUserTyped(mWordComposer.getTypedWord(), mWordComposer.isBatchMode());
         }
         resetComposingState(true);
@@ -602,16 +614,11 @@ public final class InputLogic {
         mSuggestedWords = suggestedWords;
         final boolean newAutoCorrectionIndicator = suggestedWords.mWillAutoCorrect;
 
-        // Put a blue underline to a word in TextView which will be auto-corrected.
-        if (mIsAutoCorrectionIndicatorOn != newAutoCorrectionIndicator && mWordComposer.isComposingWord()) {
-            mIsAutoCorrectionIndicatorOn = newAutoCorrectionIndicator;
-            final CharSequence textWithUnderline = getTextWithUnderline(mWordComposer.getTypedWord());
-            // TODO: when called from an updateSuggestionStrip() call that results from a posted
-            // message, this is called outside any batch edit. Potentially, this may result in some
-            // janky flickering of the screen, although the display speed makes it unlikely in
-            // the practice.
-            setComposingTextInternal(textWithUnderline, 1);
-        }
+        // The simplified architecture keeps the in-progress word inside the keyboard and mirrors
+        // plain committed text into the host editor. Suggestion/autocorrect state remains visible
+        // in the suggestion strip; we intentionally no longer rewrite host text just to toggle an
+        // editor-side underline/composing presentation.
+        mIsAutoCorrectionIndicatorOn = newAutoCorrectionIndicator;
     }
 
     /**
@@ -640,7 +647,7 @@ public final class InputLogic {
                 insertAutomaticSpaceIfOptionsAndTextAllow(inputTransaction.getSettingsValues());
                 mSpaceState = SpaceState.NONE;
             }
-            setComposingTextInternal(mWordComposer.getTypedWord(), 1);
+            mirrorCurrentWordToEditor();
             inputTransaction.setDidAffectContents();
             inputTransaction.setRequiresUpdateSuggestions();
         }
@@ -721,9 +728,6 @@ public final class InputLogic {
                 inputTransaction.setDidAffectContents();
                 break;
             case KeyCode.MULTIPLE_CODE_POINTS:
-                // added in the hangul branch, createEventChainFromSequence
-                // this introduces issues like space being added behind cursor, or input deleting
-                // a word, but the keepCursorPosition applyProcessedEvent seems to help here
                 mWordComposer.applyProcessedEvent(event, true);
                 break;
             case KeyCode.CLIPBOARD_SELECT_ALL:
@@ -1064,7 +1068,7 @@ public final class InputLogic {
             if (mWordComposer.isSingleLetter()) {
                 mWordComposer.setCapitalizedModeAtStartComposingTime(inputTransaction.getShiftState());
             }
-            setComposingTextInternal(getTextWithUnderline(mWordComposer.getTypedWord()), 1);
+            mirrorCurrentWordToEditor();
         } else {
             final boolean swapWeakSpace = tryStripSpaceAndReturnWhetherShouldSwapInstead(event, inputTransaction);
 
@@ -1269,9 +1273,9 @@ public final class InputLogic {
                 StatsUtils.onBackspacePressed(1);
             }
             if (mWordComposer.isComposingWord()) {
-                setComposingTextInternal(getTextWithUnderline(mWordComposer.getTypedWord()), 1);
+                mirrorCurrentWordToEditor();
             } else {
-                mConnection.commitText("", 1);
+                clearMirroredCurrentWord();
             }
             updateInlineEmojiSearch();
             inputTransaction.setRequiresUpdateSuggestions();
@@ -1800,8 +1804,6 @@ public final class InputLogic {
             // Show predictions.
             mWordComposer.setCapitalizedModeAtStartComposingTime(WordComposer.CAPS_MODE_OFF);
             mLatinIME.mHandler.postUpdateSuggestionStrip(SuggestedWords.INPUT_STYLE_RECORRECTION);
-            // "unselect" the previous text
-            mConnection.finishComposingText();
             return;
         }
         final TextRange range = mConnection.getWordRangeAtCursor(settingsValues.mSpacingAndPunctuations, currentKeyboardScript);
@@ -1809,7 +1811,6 @@ public final class InputLogic {
         if (range.length() <= 0) {
             // Race condition, or touching a word in a non-supported script.
             mLatinIME.setNeutralSuggestionStrip();
-            mConnection.finishComposingText();
             return;
         }
         // If for some strange reason (editor bug or so) we measure the text before the cursor as
@@ -1821,8 +1822,6 @@ public final class InputLogic {
         // we just do not resume because it's safer.
         if (!isResumableWord(settingsValues, range.mWord.toString())) {
             mSuggestionStripViewAccessor.setNeutralSuggestionStrip();
-            // "unselect" the previous text
-            mConnection.finishComposingText();
             return;
         }
         restartSuggestions(range);
@@ -1856,9 +1855,11 @@ public final class InputLogic {
         }
         final int[] codePoints = StringUtils.toCodePointArray(typedWordString);
         mWordComposer.setComposingWord(codePoints, mLatinIME.getCoordinatesForCurrentKeyboard(codePoints));
-        mWordComposer.setCursorPositionWithinWord(typedWordString.codePointCount(0, numberOfCharsInWordBeforeCursor));
-        mConnection.setComposingRegion(expectedCursorPosition - numberOfCharsInWordBeforeCursor,
-                expectedCursorPosition + range.getNumberOfCharsInWordAfterCursor());
+        mWordComposer.setCursorPositionWithinWord(
+                typedWordString.codePointCount(0, numberOfCharsInWordBeforeCursor));
+        // The host editor already contains this word. Arm the mirror so future edits replace
+        // the touched word instead of appending after it.
+        mEditorWordMirror.setMirroredWord(typedWordString, true);
         if (suggestions.size() <= 1) {
             // If there weren't any suggestion spans on this word, suggestions#size() will be 1
             // if shouldIncludeResumedWordInSuggestions is true, 0 otherwise. In this case, we
@@ -1964,7 +1965,7 @@ public final class InputLogic {
             // with the typed word, so we need to resume suggestions right away.
             final int[] codePoints = StringUtils.toCodePointArray(stringToCommit);
             mWordComposer.setComposingWord(codePoints, mLatinIME.getCoordinatesForCurrentKeyboard(codePoints));
-            setComposingTextInternal(textToCommit, 1);
+            finalizeMirroredCurrentWord(textToCommit);
         }
         // Don't restart suggestion yet. We'll restart if the user deletes the separator.
         mLastComposedWord = LastComposedWord.NOT_A_COMPOSED_WORD;
@@ -2165,6 +2166,7 @@ public final class InputLogic {
      * @param alsoResetLastComposedWord whether to also reset the last composed word.
      */
     private void resetComposingState(final boolean alsoResetLastComposedWord) {
+        mEditorWordMirror.reset();
         mWordComposer.reset();
         if (alsoResetLastComposedWord) {
             mLastComposedWord = LastComposedWord.NOT_A_COMPOSED_WORD;
@@ -2332,7 +2334,7 @@ public final class InputLogic {
         }
         enterInlineEmojiSearchIfNeeded(batchInputText.codePointAt(0), settingsValues);
         mWordComposer.setBatchInputWord(batchInputText);
-        setComposingTextInternal(batchInputText, 1);
+        mirrorCurrentWordToEditor();
         mConnection.endBatchEdit();
         // Space state must be updated before calling updateShiftState
         if (settingsValues.mAutospaceAfterGestureTyping)
@@ -2465,7 +2467,11 @@ public final class InputLogic {
             Log.d(TAG, "commitChosenWord() : NgramContext = " + ngramContext);
             startTimeMillis = System.currentTimeMillis();
         }
-        mConnection.commitText(chosenWordWithSuggestions, 1);
+        if (mEditorWordMirror.isMirroringWord()) {
+            mEditorWordMirror.commitMirroredWord(chosenWordWithSuggestions);
+        } else {
+            mConnection.commitText(chosenWordWithSuggestions, 1);
+        }
         if (DebugFlags.DEBUG_ENABLED) {
             long runTimeMillis = System.currentTimeMillis() - startTimeMillis;
             Log.d(TAG, "commitChosenWord() : " + runTimeMillis + " ms to run "
@@ -2580,40 +2586,24 @@ public final class InputLogic {
     }
 
     /**
-     * Used as an injection point for each call of
-     * {@link RichInputConnection#setComposingText(CharSequence, int)}.
+     * Legacy helper for the few remaining paths that still rely on
+     * {@link RichInputConnection#setComposingText(CharSequence, int)} instead of the main
+     * committed-text mirroring model.
      *
-     * <p>Currently using this method is optional and you can still directly call
-     * {@link RichInputConnection#setComposingText(CharSequence, int)}, but it is recommended to
-     * use this method whenever possible.<p>
-     * <p>TODO: Should we move this mechanism to {@link RichInputConnection}?</p>
-     *
-     * @param newComposingText the composing text to be set
-     * @param newCursorPosition the new cursor position
+     * <p>This is retained for non-space-language fallback behavior only. The main typed-word path
+     * now keeps word state inside the keyboard and mirrors committed text into the host editor.
      */
-    private void setComposingTextInternal(final CharSequence newComposingText,
+    private void setLegacyComposingText(final CharSequence newComposingText,
             final int newCursorPosition) {
-        setComposingTextInternalWithBackgroundColor(newComposingText, newCursorPosition,
+        setLegacyComposingTextWithBackgroundColor(newComposingText, newCursorPosition,
                 Color.TRANSPARENT, newComposingText.length());
     }
 
     /**
-     * Equivalent to {@link #setComposingTextInternal(CharSequence, int)} except that this method
-     * allows to set {@link BackgroundColorSpan} to the composing text with the given color.
-     *
-     * <p>TODO: Currently the background color is exclusive with the black underline, which is
-     * automatically added by the framework. We need to change the framework if we need to have both
-     * of them at the same time.</p>
-     * <p>TODO: Should we move this method to {@link RichInputConnection}?</p>
-     *
-     * @param newComposingText the composing text to be set
-     * @param newCursorPosition the new cursor position
-     * @param backgroundColor the background color to be set to the composing text. Set
-     * {@link Color#TRANSPARENT} to disable the background color.
-     * @param coloredTextLength the length of text, in Java chars, which should be rendered with
-     * the given background color.
+     * Equivalent to {@link #setLegacyComposingText(CharSequence, int)} but allows an explicit
+     * background color span for the legacy composing-text path.
      */
-    private void setComposingTextInternalWithBackgroundColor(final CharSequence newComposingText,
+    private void setLegacyComposingTextWithBackgroundColor(final CharSequence newComposingText,
             final int newCursorPosition, final int backgroundColor, final int coloredTextLength) {
         final CharSequence composingTextToBeSet;
         if (backgroundColor == Color.TRANSPARENT) {
@@ -2640,19 +2630,13 @@ public final class InputLogic {
     }
 
     /**
-     * Gets the expected index of the first char of the composing span within the editor's text.
-     * Returns a negative value in case there appears to be no valid composing span.
+     * Gets the expected start index of the keyboard-owned current word in editor coordinates.
      *
-     * @see #getComposingLength()
-     * @see RichInputConnection#hasSelection()
-     * @see RichInputConnection#isCursorPositionKnown()
-     * @see RichInputConnection#getExpectedSelectionStart()
-     * @see RichInputConnection#getExpectedSelectionEnd()
-     * @return The expected index in Java chars of the first char of the composing span.
+     * <p>This is used by gesture-related UI code. It no longer implies that the host editor owns
+     * a visible composing span; it is simply the expected word start based on the keyboard's local
+     * current-word state.
      */
-    // TODO: try and see if we can get rid of this method. Ideally the users of this class should
-    // never need to know this.
-    public int getComposingStart() {
+    public int getCurrentWordStart() {
         if (!mConnection.isCursorPositionKnown() || mConnection.hasSelection()) {
             return -1;
         }
@@ -2660,14 +2644,9 @@ public final class InputLogic {
     }
 
     /**
-     * Gets the expected length in Java chars of the composing span.
-     * May be 0 if there is no valid composing span.
-     * @see #getComposingStart()
-     * @return The expected length of the composing span.
+     * Gets the current keyboard-owned word length in Java chars.
      */
-    // TODO: try and see if we can get rid of this method. Ideally the users of this class should
-    // never need to know this.
-    public int getComposingLength() {
+    public int getCurrentWordLength() {
         return mWordComposer.size();
     }
 

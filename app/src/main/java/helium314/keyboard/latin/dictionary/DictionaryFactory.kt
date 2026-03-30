@@ -90,10 +90,6 @@ object DictionaryFactory {
         )
 
         if (readOnlyBinaryDictionary.isValidDictionary) {
-            if (locale.language == "ko") {
-                // Use KoreanDictionary for Korean locale
-                return KoreanDictionary(readOnlyBinaryDictionary)
-            }
             return readOnlyBinaryDictionary
         }
         readOnlyBinaryDictionary.close()

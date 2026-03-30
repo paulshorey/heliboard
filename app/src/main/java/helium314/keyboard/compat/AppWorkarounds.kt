@@ -6,6 +6,17 @@ import android.view.inputmethod.EditorInfo
 import helium314.keyboard.latin.utils.InputTypeUtils
 
 object AppWorkarounds {
+    private val browserPackagesMissingWebEditHints = setOf(
+        "com.android.chrome",
+        "com.chrome.beta",
+        "com.chrome.dev",
+        "com.chrome.canary",
+        "org.chromium.chrome",
+        "com.brave.browser",
+        "com.microsoft.emmx",
+        "com.sec.android.app.sbrowser",
+    )
+
     fun adjustInputType(inputType: Int, packageName: String?): Int {
         return when (packageName) {
             "org.mozilla.fennec_fdroid", "org.mozilla.fenix", "org.mozilla.firefox_beta", "org.mozilla.focus",
@@ -22,6 +33,16 @@ object AppWorkarounds {
                 if (inputType and InputType.TYPE_TEXT_FLAG_AUTO_CORRECT == 0) return inputType or InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT
                 // for all others we also add NO_SUGGESTIONS to avoid JS messing with the composing text
                 inputType or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT
+            }
+            in browserPackagesMissingWebEditHints -> {
+                // Some Chromium-based browser editors (notably contenteditable/chat inputs) don't
+                // reliably report WEB_EDIT_TEXT. Mark likely browser web editors so downstream IME
+                // logic can avoid fragile composing-region behavior there.
+                if (inputType and InputType.TYPE_MASK_CLASS != InputType.TYPE_CLASS_TEXT) return inputType
+                if (inputType and InputType.TYPE_MASK_VARIATION != 0) return inputType
+                val hasMultilineHints = inputType and (InputType.TYPE_TEXT_FLAG_IME_MULTI_LINE or InputType.TYPE_TEXT_FLAG_MULTI_LINE) != 0
+                if (!hasMultilineHints) return inputType
+                inputType or InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT
             }
             else -> inputType
         }

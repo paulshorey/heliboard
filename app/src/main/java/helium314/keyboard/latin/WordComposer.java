@@ -166,8 +166,7 @@ public final class WordComposer {
         applyProcessedEvent(event, false);
     }
 
-    // specifically for that KeyCode.MULTIPLE_CODE_POINTS Hangul event: try keeping cursor position
-    // because typically nothing changes, todo: if really nothing changes maybe there is a better way to do it
+    // Keep cursor position for special multi-code-point events.
     public void applyProcessedEvent(final Event event, final boolean keepCursorPosition) {
         mCombinerChain.applyProcessedEvent(event);
         final int primaryCode = event.getCodePoint();

@@ -7,7 +7,6 @@ import android.view.KeyEvent
 import android.view.inputmethod.InputMethodSubtype
 import androidx.core.util.forEach
 import helium314.keyboard.event.Event
-import helium314.keyboard.event.HangulEventDecoder
 import helium314.keyboard.event.HapticEvent
 import helium314.keyboard.event.HardwareEventDecoder
 import helium314.keyboard.event.HardwareKeyboardEventDecoder
@@ -65,11 +64,7 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
 
     override fun onKeyUp(keyCode: Int, keyEvent: KeyEvent): Boolean {
         emojiAltPhysicalKeyDetector.onKeyUp(keyEvent)
-        if (!ProductionFlags.IS_HARDWARE_KEYBOARD_SUPPORTED)
-            return false
-
-        val keyIdentifier = keyEvent.deviceId.toLong() shl 32 + keyEvent.keyCode
-        return inputLogic.mCurrentlyPressedHardwareKeys.remove(keyIdentifier)
+        return false
     }
 
     override fun onKeyDown(keyCode: Int, keyEvent: KeyEvent): Boolean {
@@ -77,15 +72,7 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
         if (!ProductionFlags.IS_HARDWARE_KEYBOARD_SUPPORTED)
             return false
 
-        val event: Event
-        if (settings.current.mLocale.language == "ko") { // todo: this does not appear to be the right place
-            val subtype = keyboardSwitcher.keyboard?.mId?.mSubtype ?: RichInputMethodManager.getInstance().currentSubtype
-            event = HangulEventDecoder.decodeHardwareKeyEvent(subtype, keyEvent) {
-                getHardwareKeyEventDecoder(keyEvent.deviceId).decodeHardwareKey(keyEvent)
-            }
-        } else {
-            event = getHardwareKeyEventDecoder(keyEvent.deviceId).decodeHardwareKey(keyEvent)
-        }
+        val event = getHardwareKeyEventDecoder(keyEvent.deviceId).decodeHardwareKey(keyEvent)
 
         if (event.isHandled) {
             inputLogic.onCodeInput(
