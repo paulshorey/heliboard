@@ -7,7 +7,6 @@ Ominaisuudet:
  <ul>
  <li>rakenna omasi tai hanki ne <a href="https://codeberg.org/Helium314/aosp-dictionaries#dictionaries">täältä</a> tai <a href="https://codeberg.org/Helium314/aosp-dictionaries#experimental-dictionaries">kokeellinen toukokuu</a> -osiossa (laatu voi vaihdella)</li>
  <li>hymiöiden tai tieteellisten symbolien lisäsanakirjoja voidaan käyttää ehdotusten antamiseen (samanlainen kuin "emojihaku")</li>
- <li>huomaa, että korean asetteluissa ehdotukset toimivat vain käyttämällä <a href="https://github.com/openboard-team/openboard/commit/83fca9533c03b9fecc009fc632577226bbd6301f">tätä sanakirjaa</a>. Sanakirjan työskentelytyökalut</a> eivät ole käytettävissä.</li>
  </ul>
  <li>Muokkaa näppäimistöteemoja (tyyli, värit ja taustakuva)</li>
  <ul>

@@ -326,7 +326,7 @@ class KeyboardParser(private val params: KeyboardParams, private val context: Co
     // some layouts have numbers hardcoded in the main layout (pcqwerty as keys, and others as popups)
     private fun hasBuiltInNumbers() = params.mId.mSubtype.mainLayoutName == "pcqwerty"
             || (Settings.getValues().mPopupKeyTypes.contains(POPUP_KEYS_LAYOUT)
-                && params.mId.mSubtype.mainLayoutName in listOf("lao", "thai", "korean_sebeolsik_390", "korean_sebeolsik_final")
+                && params.mId.mSubtype.mainLayoutName in listOf("lao", "thai")
             )
 
     companion object {

@@ -52,8 +52,6 @@ public final class VoiceTextSanitizer {
 
         // Additional zero-width characters that are not FORMAT chars on Android.
         return codePoint == 0x034F  // Combining grapheme joiner
-                || codePoint == 0x115F  // Hangul choseong filler
-                || codePoint == 0x1160  // Hangul jungseong filler
                 || codePoint == 0x17B4  // Khmer vowel inherent AQ
                 || codePoint == 0x17B5; // Khmer vowel inherent AA
     }
