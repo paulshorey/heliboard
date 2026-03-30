@@ -1671,7 +1671,7 @@ public class LatinIME extends InputMethodService implements
      */
     public void onTailBatchInputResultShown(final SuggestedWords suggestedWords) {
         mGestureConsumer.onImeSuggestionsProcessed(suggestedWords,
-                mInputLogic.getComposingStart(), mInputLogic.getComposingLength(),
+                mInputLogic.getCurrentWordStart(), mInputLogic.getCurrentWordLength(),
                 mDictionaryFacilitator);
     }
 

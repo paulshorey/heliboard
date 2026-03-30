@@ -136,7 +136,7 @@ class Event private constructor(
         private const val FLAG_REPEAT = 0x2
         // This event has already been consumed.
         private const val FLAG_CONSUMED = 0x4
-        // This event is a combining character, usually a hangul input.
+        // This event is a combining character sequence.
         private const val FLAG_COMBINING = 0x8
 
         @JvmStatic
