@@ -64,11 +64,7 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
 
     override fun onKeyUp(keyCode: Int, keyEvent: KeyEvent): Boolean {
         emojiAltPhysicalKeyDetector.onKeyUp(keyEvent)
-        if (!ProductionFlags.IS_HARDWARE_KEYBOARD_SUPPORTED)
-            return false
-
-        val keyIdentifier = keyEvent.deviceId.toLong() shl 32 + keyEvent.keyCode
-        return inputLogic.mCurrentlyPressedHardwareKeys.remove(keyIdentifier)
+        return false
     }
 
     override fun onKeyDown(keyCode: Int, keyEvent: KeyEvent): Boolean {

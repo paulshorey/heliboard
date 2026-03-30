@@ -74,8 +74,6 @@ class Event private constructor(
 
     val isConsumed: Boolean get() = 0 != FLAG_CONSUMED and flags
 
-    val isCombining: Boolean get() = 0 != FLAG_COMBINING and flags
-
     val isGesture: Boolean get() = EVENT_TYPE_GESTURE == eventType
 
     // Returns whether this is a fake key press from the suggestion strip. This happens with
@@ -136,9 +134,6 @@ class Event private constructor(
         private const val FLAG_REPEAT = 0x2
         // This event has already been consumed.
         private const val FLAG_CONSUMED = 0x4
-        // This event is a combining character sequence.
-        private const val FLAG_COMBINING = 0x8
-
         @JvmStatic
         fun createSoftwareKeypressEvent(codePoint: Int, keyCode: Int, metaState: Int, x: Int, y: Int, isKeyRepeat: Boolean) =
             Event(
@@ -283,10 +278,6 @@ class Event private constructor(
         fun createConsumedEvent(source: Event) =
              Event(source.eventType, source.text, source.codePoint, source.keyCode, source.metaState,
                     source.x, source.y, source.suggestedWordInfo, source.flags or FLAG_CONSUMED, source.nextEvent)
-
-        fun createCombiningEvent(source: Event) =
-            Event(source.eventType, source.text, source.codePoint, source.keyCode, source.metaState,
-                    source.x, source.y, source.suggestedWordInfo, source.flags or FLAG_COMBINING, source.nextEvent)
 
         val notHandledEvent = Event(eventType = EVENT_TYPE_NOT_HANDLED)
     }

@@ -69,7 +69,6 @@ import helium314.keyboard.latin.utils.TimestampKt;
 
 import java.util.ArrayList;
 import java.util.Locale;
-import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -104,9 +103,6 @@ public final class InputLogic {
 
     private int mDeleteCount;
     private long mLastKeyTime;
-    // todo: this is not used, so either remove it or do something with it
-    public final TreeSet<Long> mCurrentlyPressedHardwareKeys = new TreeSet<>();
-
     // Keeps track of most recently inserted text (multi-character key) for reverting
     private String mEnteredText;
 
@@ -179,7 +175,6 @@ public final class InputLogic {
         mDeleteCount = 0;
         mSpaceState = SpaceState.NONE;
         mRecapitalizeStatus.disable(); // Do not perform recapitalize until the cursor is moved once
-        mCurrentlyPressedHardwareKeys.clear();
         mSuggestedWords = SuggestedWords.getEmptyInstance();
         // In some cases (e.g. after rotation of the device, or when scrolling the text before bringing up keyboard)
         // editorInfo.initialSelStart is not the actual cursor position, so we try using some heuristics to find the correct position.
