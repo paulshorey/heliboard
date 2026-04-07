@@ -195,6 +195,8 @@ public class LatinIME extends InputMethodService implements
     // Wake lock to prevent CPU sleep during voice recording
     private PowerManager.WakeLock mVoiceWakeLock;
     private boolean mPendingNewParagraph = false;
+    /** Whether voice input currently owns the composing region (interim text is displayed). */
+    private boolean mVoiceComposingActive = false;
     private static final int FULLAPP_SYNC_MAX_CHARS = 100_000;
     private static final int FULLAPP_SYNC_RETRY_ATTEMPTS = 5;
     private static final long FULLAPP_SYNC_RETRY_DELAY_MS = 120L;
@@ -2000,6 +2002,27 @@ public class LatinIME extends InputMethodService implements
             }
 
             @Override
+            public void onInterimDisplayUpdate(@NonNull String text) {
+                try {
+                    if (text.isEmpty()) return;
+
+                    // First interim of this utterance: clear any keyboard composing state
+                    if (!mVoiceComposingActive) {
+                        mInputLogic.mConnection.beginBatchEdit();
+                        mInputLogic.finishInput();
+                        mInputLogic.mConnection.endBatchEdit();
+                        mVoiceComposingActive = true;
+                    }
+
+                    // Replace the entire composing region with the new interim text.
+                    // setComposingText replaces any existing composing text atomically.
+                    mInputLogic.mConnection.setComposingText(text, 1);
+                } catch (Exception e) {
+                    Log.e(TAG, "Error updating interim voice text: " + e.getMessage(), e);
+                }
+            }
+
+            @Override
             public void onProcessingStarted() {
                 try {
                     mKeyboardSwitcher.showProcessingIndicator();
@@ -2033,6 +2056,10 @@ public class LatinIME extends InputMethodService implements
                     final String trimmed = text.trim();
                     if (trimmed.isEmpty()) {
                         Log.i(TAG, "VOICE_STEP_4 empty transcription result — nothing to insert");
+                        if (mVoiceComposingActive) {
+                            mInputLogic.mConnection.finishComposingText();
+                            mVoiceComposingActive = false;
+                        }
                         if (mVoiceInputManager == null || !mVoiceInputManager.hasPendingProcessing()) {
                             mKeyboardSwitcher.hideProcessingIndicator();
                         }
@@ -2122,14 +2149,19 @@ public class LatinIME extends InputMethodService implements
             return;
         }
         try {
-            // Wrap finishInput + commitText in a single batch edit so the framework
-            // delivers only one onUpdateSelection after both operations complete.
-            // Without this, finishComposingText fires an intermediate onUpdateSelection
-            // that can desync mExpectedSelStart before commitText runs, causing the
-            // cursor to jump instead of inserting the text.
             mInputLogic.mConnection.beginBatchEdit();
-            mInputLogic.finishInput();
-            mInputLogic.mConnection.commitText(text, 1);
+            if (mVoiceComposingActive) {
+                // Replace composing region with final text and commit atomically.
+                // commitText replaces any existing composing text and inserts in one call,
+                // so the final (better-punctuated) text supersedes the last interim.
+                mInputLogic.mConnection.commitText(text, 1);
+                mVoiceComposingActive = false;
+            } else {
+                // No composing region active (e.g., speech_final arrived without interims) —
+                // finish any keyboard composing state, then commit directly.
+                mInputLogic.finishInput();
+                mInputLogic.mConnection.commitText(text, 1);
+            }
             mInputLogic.mConnection.endBatchEdit();
 
             // Text has been inserted — hide the processing spinner.
@@ -2145,6 +2177,14 @@ public class LatinIME extends InputMethodService implements
      * Called when voice input session ends.
      */
     private void resetVoiceInputState() {
+        if (mVoiceComposingActive) {
+            try {
+                mInputLogic.mConnection.finishComposingText();
+            } catch (Exception e) {
+                Log.e(TAG, "Error finishing composing text on voice reset: " + e.getMessage());
+            }
+            mVoiceComposingActive = false;
+        }
         mPendingNewParagraph = false;
         mKeyboardSwitcher.hideProcessingIndicator();
     }

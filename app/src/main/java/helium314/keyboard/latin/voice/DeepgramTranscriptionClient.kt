@@ -20,8 +20,10 @@ import java.util.concurrent.TimeUnit
  * Client for Deepgram's streaming transcription API (WebSocket).
  *
  * Deepgram receives raw PCM16 chunks continuously and sends transcription events
- * back over the same socket. We only surface finalized transcript updates so the
- * downstream insertion order stays deterministic.
+ * back over the same socket. We surface three levels of transcript signal:
+ * - interim (is_final=false): fast preliminary guess shown immediately
+ * - finalized segment (is_final=true, speech_final=false): locked segment, speaker continues
+ * - utterance complete (is_final=true, speech_final=true): commit permanently
  *
  * API docs: https://developers.deepgram.com/docs/streaming
  */
@@ -39,8 +41,14 @@ class DeepgramTranscriptionClient {
         /** WebSocket opened and ready to receive audio chunks. */
         fun onStreamReady()
 
-        /** Finalized transcription text from Deepgram's streaming result event. */
-        fun onTranscriptionResult(text: String)
+        /** Interim transcript — show immediately, will be revised. */
+        fun onInterimTranscript(text: String)
+
+        /** Finalized segment — locked in, but utterance continues. */
+        fun onFinalizedSegment(text: String)
+
+        /** Utterance complete — speaker paused. Commit this text permanently. */
+        fun onUtteranceComplete(text: String)
 
         /** Streaming failed and this stream can no longer be used. */
         fun onStreamError(error: String)
@@ -109,7 +117,7 @@ class DeepgramTranscriptionClient {
         Log.i(
             TAG,
             "VOICE_STEP_3 opening Deepgram streaming socket " +
-                "(language=${language ?: "auto"}, endpointing=500ms, smart_format=false, punctuate=false)"
+                "(language=${language ?: "auto"}, endpointing=300ms, interim_results=true, dictation=true)"
         )
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
@@ -241,6 +249,8 @@ class DeepgramTranscriptionClient {
             append("&encoding=linear16")
             append("&sample_rate=").append(VoiceRecorder.SAMPLE_RATE)
             append("&channels=1")
+            append("&interim_results=true")
+            append("&dictation=true")
             append("&endpointing=300")
             append("&vad_events=true")
             if (!language.isNullOrBlank()) {
@@ -259,33 +269,52 @@ class DeepgramTranscriptionClient {
                         ?.optJSONObject(0)
                         ?.optString("transcript", "")
                         .orEmpty()
-                    val isFinal = json.optBoolean("is_final", false) ||
-                        json.optBoolean("speech_final", false)
-                    if (!isFinal || transcript.isBlank()) {
-                        return
-                    }
+                    val isFinal = json.optBoolean("is_final", false)
+                    val speechFinal = json.optBoolean("speech_final", false)
 
-                    // Deduplicate identical replayed final events from reconnect/flush edges.
-                    val start = json.optDouble("start", -1.0)
-                    val duration = json.optDouble("duration", -1.0)
-                    val fingerprint = "$start|$duration|$transcript"
-                    if (fingerprint == lastFinalResultFingerprint) {
-                        return
-                    }
-                    lastFinalResultFingerprint = fingerprint
-
-                    Log.i(
-                        TAG,
-                        "VOICE_STEP_4 Deepgram final transcript (${transcript.length} chars)"
-                    )
-                    postIfCurrent(connectionToken) {
-                        callback?.onTranscriptionResult(transcript)
-                    }
-
-                    if (isClosing) {
-                        // Final result arrived after Finalize request; close immediately.
-                        clearFinalizeCloseTimer()
-                        webSocket?.close(1000, "client_stop")
+                    when {
+                        !isFinal -> {
+                            // Interim — no deduplication needed (they always change)
+                            if (transcript.isNotBlank()) {
+                                postIfCurrent(connectionToken) {
+                                    callback?.onInterimTranscript(transcript)
+                                }
+                            }
+                        }
+                        speechFinal -> {
+                            // Utterance complete — deduplicate, then commit
+                            val start = json.optDouble("start", -1.0)
+                            val duration = json.optDouble("duration", -1.0)
+                            if (deduplicate(transcript, start, duration)) {
+                                Log.i(
+                                    TAG,
+                                    "VOICE_STEP_4 Deepgram utterance complete (${transcript.length} chars)"
+                                )
+                                postIfCurrent(connectionToken) {
+                                    callback?.onUtteranceComplete(transcript)
+                                }
+                            }
+                            if (isClosing) {
+                                clearFinalizeCloseTimer()
+                                webSocket?.close(1000, "client_stop")
+                            }
+                        }
+                        else -> {
+                            // Finalized segment, speaker continues
+                            if (transcript.isNotBlank()) {
+                                val start = json.optDouble("start", -1.0)
+                                val duration = json.optDouble("duration", -1.0)
+                                if (deduplicate(transcript, start, duration)) {
+                                    Log.i(
+                                        TAG,
+                                        "VOICE_STEP_4 Deepgram finalized segment (${transcript.length} chars)"
+                                    )
+                                    postIfCurrent(connectionToken) {
+                                        callback?.onFinalizedSegment(transcript)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -309,6 +338,17 @@ class DeepgramTranscriptionClient {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to parse Deepgram event: ${e.message}")
         }
+    }
+
+    /**
+     * Returns true if this (transcript, start, duration) triple is new.
+     * Only applied to finalized results (is_final=true) — interims naturally supersede each other.
+     */
+    private fun deduplicate(transcript: String, start: Double, duration: Double): Boolean {
+        val fingerprint = "$start|$duration|$transcript"
+        if (fingerprint == lastFinalResultFingerprint) return false
+        lastFinalResultFingerprint = fingerprint
+        return true
     }
 
     private fun mapConnectionError(error: Throwable, response: Response?): String {

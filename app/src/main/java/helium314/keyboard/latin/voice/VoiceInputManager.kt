@@ -51,7 +51,10 @@ class VoiceInputManager(private val context: Context) {
     interface VoiceInputListener {
         fun onStateChanged(state: State)
 
-        /** A transcript unit was finalized — process and insert this text. */
+        /** Interim/in-progress text to display. Replaces any previous interim text. */
+        fun onInterimDisplayUpdate(text: String)
+
+        /** Finalized utterance — commit permanently. */
         fun onTranscriptionResult(text: String)
 
         /** Voice processing is actively running (transcripts are pending delivery). */
@@ -82,6 +85,7 @@ class VoiceInputManager(private val context: Context) {
 
     private val voiceRecorder = VoiceRecorder(context)
     private val transcriptionClient = DeepgramTranscriptionClient()
+    private val transcriptAssembler = TranscriptAssembler()
     private var listener: VoiceInputListener? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -310,6 +314,7 @@ class VoiceInputManager(private val context: Context) {
         pendingAudioChunks.clear()
         pendingTranscripts.clear()
         isDispatchingTranscripts = false
+        transcriptAssembler.reset()
         transcriptionClient.cancelAll()
         if (hadPendingWork) {
             listener?.onPendingProcessingCancelled()
@@ -373,9 +378,28 @@ class VoiceInputManager(private val context: Context) {
                     }
                 }
 
-                override fun onTranscriptionResult(text: String) {
+                override fun onInterimTranscript(text: String) {
                     if (sessionId != activeSessionId) return
-                    enqueueTranscript(text, sessionId)
+                    val display = transcriptAssembler.onInterim(text)
+                    mainHandler.post {
+                        if (sessionId != activeSessionId) return@post
+                        listener?.onInterimDisplayUpdate(display)
+                    }
+                }
+
+                override fun onFinalizedSegment(text: String) {
+                    if (sessionId != activeSessionId) return
+                    val display = transcriptAssembler.onFinalizedSegment(text)
+                    mainHandler.post {
+                        if (sessionId != activeSessionId) return@post
+                        listener?.onInterimDisplayUpdate(display)
+                    }
+                }
+
+                override fun onUtteranceComplete(text: String) {
+                    if (sessionId != activeSessionId) return
+                    val committed = transcriptAssembler.onUtteranceComplete(text)
+                    enqueueTranscript(committed, sessionId)
                 }
 
                 override fun onStreamError(error: String) {
@@ -523,6 +547,20 @@ class VoiceInputManager(private val context: Context) {
         }
     }
 
+    /**
+     * If the assembler holds buffered content when the stream closes without a speech_final,
+     * commit whatever we have as a partial utterance rather than silently dropping it.
+     */
+    private fun flushAssemblerIfNeeded(sessionId: Long) {
+        if (!transcriptAssembler.hasContent()) return
+        val partial = transcriptAssembler.getDisplayText()
+        transcriptAssembler.reset()
+        if (partial.isNotBlank()) {
+            Log.i(TAG, "Flushing assembler partial content on stream close (${partial.length} chars)")
+            enqueueTranscript(partial, sessionId)
+        }
+    }
+
     private fun mergeTranscriptText(first: String?, second: String?): String {
         val left = first.orEmpty()
         val right = second.orEmpty()
@@ -560,6 +598,8 @@ class VoiceInputManager(private val context: Context) {
                 listener?.onError(message)
             }
             pendingAudioChunks.clear()
+            // Flush any assembler content that arrived before speech_final — commit as partial
+            flushAssemblerIfNeeded(sessionId)
             notifyProcessingIdleIfDrained()
             return
         }
