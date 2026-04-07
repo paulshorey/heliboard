@@ -131,6 +131,16 @@ class VoicePostTranscriptionFilterTest {
     }
 
     @Test
+    fun `removes sentence period placed after letter-dash compound`() {
+        assertEquals("build-apk", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("build-apk."))
+        assertEquals("foo-bar", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("foo-bar."))
+        assertEquals(
+            "build-apk.exe",
+            VoicePostTranscriptionFilter.applyPostTranscriptionFilter("build-apk.exe")
+        )
+    }
+
+    @Test
     fun `replaces simple cleanup edge cases`() {
         assertEquals("zero in", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("zero in"))
         assertEquals("100", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("one hundred"))

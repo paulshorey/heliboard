@@ -69,6 +69,12 @@ public final class VoicePostTranscriptionFilter {
     /** Spoken "dash" between two letter-words → hyphenated compound (same as spoken "hyphen"). */
     private static final Pattern SPOKEN_DASH_BETWEEN_LETTERS = Pattern.compile(
             "(?i)\\b([\\p{L}]+)\\s+dash\\s+([\\p{L}]+)\\b");
+    /**
+     * Sentence-ending period placed right after a letter-only dash compound (e.g. ASR:
+     * "build-apk."). {@code (?!\\p{L})} keeps real dots before extensions like {@code .exe}.
+     */
+    private static final Pattern LETTER_DASH_CHAIN_TRAILING_PERIOD = Pattern.compile(
+            "(?i)([\\p{L}]+(?:[\\-\\u2013\\u2014][\\p{L}]+)+)\\.(?!\\p{L})");
 
     private VoicePostTranscriptionFilter() {
         // Utility class.
@@ -373,6 +379,7 @@ public final class VoicePostTranscriptionFilter {
         result = result.replaceAll("(?i)\\s*\\bminus\\b\\s*", "-");
         result = collapseSpacesAroundDashLikeBetweenLetters(result);
         result = lowercaseLetterDashChains(result);
+        result = removeTrailingPeriodAfterLetterDashChains(result);
         result = result.replaceAll("(?i)\\be\\s+t\\s+c\\.\\.\\.", "etc...");
         result = result.replaceAll("(?i)\\betcetera\\b", "etc");
         result = result.replaceAll("(?i)\\betc(?=\\s)", "etc.");
@@ -438,6 +445,10 @@ public final class VoicePostTranscriptionFilter {
         }
         matcher.appendTail(out);
         return out.toString();
+    }
+
+    private static String removeTrailingPeriodAfterLetterDashChains(final String text) {
+        return LETTER_DASH_CHAIN_TRAILING_PERIOD.matcher(text).replaceAll("$1");
     }
 
     private static String[] normalizeTokens(final String[] originalTokens) {

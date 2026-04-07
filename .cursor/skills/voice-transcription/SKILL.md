@@ -44,7 +44,7 @@ Each processed chunk is inserted once via `commitText`; no second pass over the 
 `VoicePostTranscriptionFilter.prepareForInsertion(text, textBeforeCursor)`:
 
 1. **Alias pass** — single longest-match scan: spoken numbers (`zero`..`ninety nine`), spoken symbols (`open parenthesis`, `slash`, `comma`, etc.)
-2. **Cleanup pass** — fixes spacing between adjacent symbols/numbers, ordered edge-case rewrites (`one hundred → 100`, `negative five → -5`), spoken `dash`/`hyphen`/`minus` → `-`, collapse spaces around typed dashes between letter-words, lowercase letter-only hyphen/dash compounds (for mid-sentence capitalization)
+2. **Cleanup pass** — fixes spacing between adjacent symbols/numbers, ordered edge-case rewrites (`one hundred → 100`, `negative five → -5`), spoken `dash`/`hyphen`/`minus` → `-`, collapse spaces around typed dashes between letter-words, lowercase letter-only hyphen/dash compounds (for mid-sentence capitalization), strip a sentence-ending `.` placed immediately after such a compound (e.g. `build-apk.` → `build-apk`; keeps `build-apk.exe`)
 3. **Insertion prep** — strips invisible Unicode control characters, adjusts capitalization from text before caret, prepends space only when the finished chunk starts with an ASCII letter
 
 ## Paragraph Breaks
