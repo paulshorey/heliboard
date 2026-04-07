@@ -98,9 +98,36 @@ class VoicePostTranscriptionFilterTest {
     @Test
     fun `replaces dash hyphen and minus during cleanup`() {
         assertEquals("word-word", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("word hyphen word"))
-        assertEquals("word - word", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("word dash word"))
+        assertEquals("word-word", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("word dash word"))
         assertEquals("8-3", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("eight minus three"))
         assertEquals("8-3", VoicePostTranscriptionFilter.applyPostTranscriptionFilter("eight minus sign three"))
+    }
+
+    @Test
+    fun `collapses spaces around typed dashes between letters`() {
+        assertEquals(
+            "Build the notes-android APK.",
+            VoicePostTranscriptionFilter.applyPostTranscriptionFilter("Build the notes - Android APK.")
+        )
+        assertEquals(
+            "a–b",
+            VoicePostTranscriptionFilter.applyPostTranscriptionFilter("a – b")
+        )
+    }
+
+    @Test
+    fun `lowercases letter words in dash compounds`() {
+        assertEquals(
+            " build the notes-android APK.",
+            VoicePostTranscriptionFilter.prepareForInsertion(
+                "Build the notes - Android APK.",
+                "already typing"
+            )
+        )
+        assertEquals(
+            "foo-bar-baz",
+            VoicePostTranscriptionFilter.applyPostTranscriptionFilter("Foo-Bar-Baz")
+        )
     }
 
     @Test

@@ -53,6 +53,22 @@ public final class VoicePostTranscriptionFilter {
             Pattern.compile("\\b1(\\s?)([a-zA-Z]+)");
     private static final Pattern STANDALONE_Y_PATTERN =
             Pattern.compile("(^|\\s)([Yy])(?=\\W|$)");
+    /**
+     * Collapse spaces around ASCII hyphen or common Unicode dashes between two letter-words
+     * (e.g. ASR: "notes - Android" → "notes-Android"). Uses full words so we do not match
+     * a single trailing letter (e.g. "the" + dash + "Android").
+     */
+    private static final Pattern SPACED_DASH_LIKE_BETWEEN_LETTERS = Pattern.compile(
+            "(?i)\\b([\\p{L}]+)\\s*([\\-\\u2013\\u2014])\\s*([\\p{L}]+)\\b");
+    /**
+     * Letter-only words joined by dash-like characters (hyphen, en dash, em dash), for lowercasing
+     * compounds as a unit (e.g. "Notes-Android" in mid-sentence → "notes-android").
+     */
+    private static final Pattern LETTER_DASH_LETTER_CHAIN = Pattern.compile(
+            "[\\p{L}]+(?:[\\-\\u2013\\u2014][\\p{L}]+)+");
+    /** Spoken "dash" between two letter-words → hyphenated compound (same as spoken "hyphen"). */
+    private static final Pattern SPOKEN_DASH_BETWEEN_LETTERS = Pattern.compile(
+            "(?i)\\b([\\p{L}]+)\\s+dash\\s+([\\p{L}]+)\\b");
 
     private VoicePostTranscriptionFilter() {
         // Utility class.
@@ -352,9 +368,11 @@ public final class VoicePostTranscriptionFilter {
         }
 
         result = result.replaceAll("(?i)\\s*\\bminus\\s+sign\\b\\s*", "-");
-        result = result.replaceAll("(?i)\\s*\\bdash\\b\\s*", " - ");
+        result = replaceSpokenDash(result);
         result = result.replaceAll("(?i)\\s*\\bhyphen\\b\\s*", "-");
         result = result.replaceAll("(?i)\\s*\\bminus\\b\\s*", "-");
+        result = collapseSpacesAroundDashLikeBetweenLetters(result);
+        result = lowercaseLetterDashChains(result);
         result = result.replaceAll("(?i)\\be\\s+t\\s+c\\.\\.\\.", "etc...");
         result = result.replaceAll("(?i)\\betcetera\\b", "etc");
         result = result.replaceAll("(?i)\\betc(?=\\s)", "etc.");
@@ -382,6 +400,44 @@ public final class VoicePostTranscriptionFilter {
 
     private static String collapseSpacesBetweenNonAlphabeticChars(final String text) {
         return NON_ALPHA_SPACE_PATTERN.matcher(text).replaceAll("");
+    }
+
+    /**
+     * Map spoken "dash" to "-" like "hyphen", without stealing the space after "dash" when it
+     * starts a phrase ("dash and another thought" must stay spaced from the following word).
+     */
+    private static String replaceSpokenDash(final String text) {
+        String result = text;
+        String previous;
+        do {
+            previous = result;
+            result = SPOKEN_DASH_BETWEEN_LETTERS.matcher(result).replaceAll("$1-$2");
+        } while (!result.equals(previous));
+        return result.replaceAll("(?i)\\bdash\\b", "-");
+    }
+
+    private static String collapseSpacesAroundDashLikeBetweenLetters(final String text) {
+        String result = text;
+        String previous;
+        do {
+            previous = result;
+            result = SPACED_DASH_LIKE_BETWEEN_LETTERS.matcher(result).replaceAll("$1$2$3");
+        } while (!result.equals(previous));
+        return result;
+    }
+
+    /**
+     * Lowercase letter-only segments in hyphen/dash compounds so mid-sentence capitalization
+     * does not title-case both sides (e.g. "Build the Notes-Android-APK" → "... notes-android-apk").
+     */
+    private static String lowercaseLetterDashChains(final String text) {
+        final Matcher matcher = LETTER_DASH_LETTER_CHAIN.matcher(text);
+        final StringBuffer out = new StringBuffer();
+        while (matcher.find()) {
+            matcher.appendReplacement(out, Matcher.quoteReplacement(matcher.group().toLowerCase(Locale.ROOT)));
+        }
+        matcher.appendTail(out);
+        return out.toString();
     }
 
     private static String[] normalizeTokens(final String[] originalTokens) {
