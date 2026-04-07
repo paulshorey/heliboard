@@ -195,6 +195,8 @@ public class LatinIME extends InputMethodService implements
     // Wake lock to prevent CPU sleep during voice recording
     private PowerManager.WakeLock mVoiceWakeLock;
     private boolean mPendingNewParagraph = false;
+    /** Whether voice input currently owns the composing region. */
+    private boolean mVoiceComposingActive = false;
     private static final int FULLAPP_SYNC_MAX_CHARS = 100_000;
     private static final int FULLAPP_SYNC_RETRY_ATTEMPTS = 5;
     private static final long FULLAPP_SYNC_RETRY_DELAY_MS = 120L;
@@ -1136,6 +1138,19 @@ public class LatinIME extends InputMethodService implements
             Log.e(TAG, "Error in voice input onUpdateSelection guard: " + e.getMessage());
             discardPendingVoiceWork("Voice input selection guard failed — discarding voice input");
         }
+        // Clean up voice composing state if cursor was moved by user action
+        try {
+            if (mVoiceComposingActive
+                    && (oldSelStart != newSelStart || oldSelEnd != newSelEnd)
+                    && !mInputLogic.mConnection.isBelatedExpectedUpdate(
+                            oldSelStart, newSelStart, oldSelEnd, newSelEnd,
+                            composingSpanStart, composingSpanEnd)) {
+                mInputLogic.mConnection.finishComposingText();
+                mVoiceComposingActive = false;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error cleaning up voice composing state: " + e.getMessage());
+        }
 
         // This call happens whether our view is displayed or not, but if it's not then we should
         // not attempt recorrection. This is true even with a hardware keyboard connected: if the
@@ -2000,6 +2015,27 @@ public class LatinIME extends InputMethodService implements
             }
 
             @Override
+            public void onInterimDisplayUpdate(@NonNull String text) {
+                try {
+                    if (text.isEmpty()) return;
+
+                    // First interim of this utterance: clear any keyboard composing state
+                    if (!mVoiceComposingActive) {
+                        mInputLogic.mConnection.beginBatchEdit();
+                        mInputLogic.finishInput();
+                        mInputLogic.mConnection.endBatchEdit();
+                        mVoiceComposingActive = true;
+                    }
+
+                    // Replace the entire composing region with the new interim text.
+                    // setComposingText replaces any existing composing text atomically.
+                    mInputLogic.mConnection.setComposingText(text, 1);
+                } catch (Exception e) {
+                    Log.e(TAG, "Error updating interim voice text: " + e.getMessage(), e);
+                }
+            }
+
+            @Override
             public void onProcessingStarted() {
                 try {
                     mKeyboardSwitcher.showProcessingIndicator();
@@ -2033,6 +2069,10 @@ public class LatinIME extends InputMethodService implements
                     final String trimmed = text.trim();
                     if (trimmed.isEmpty()) {
                         Log.i(TAG, "VOICE_STEP_4 empty transcription result — nothing to insert");
+                        if (mVoiceComposingActive) {
+                            mInputLogic.mConnection.finishComposingText();
+                            mVoiceComposingActive = false;
+                        }
                         if (mVoiceInputManager == null || !mVoiceInputManager.hasPendingProcessing()) {
                             mKeyboardSwitcher.hideProcessingIndicator();
                         }
@@ -2118,24 +2158,32 @@ public class LatinIME extends InputMethodService implements
         }
         if (mInputLogic.mConnection.hasSelection()) {
             Log.w(TAG, "Skipping voice insertion because the editor selection changed");
+            if (mVoiceComposingActive) {
+                mInputLogic.mConnection.finishComposingText();
+                mVoiceComposingActive = false;
+            }
             mKeyboardSwitcher.hideProcessingIndicator();
             return;
         }
         try {
-            // Wrap finishInput + commitText in a single batch edit so the framework
-            // delivers only one onUpdateSelection after both operations complete.
-            // Without this, finishComposingText fires an intermediate onUpdateSelection
-            // that can desync mExpectedSelStart before commitText runs, causing the
-            // cursor to jump instead of inserting the text.
             mInputLogic.mConnection.beginBatchEdit();
-            mInputLogic.finishInput();
-            mInputLogic.mConnection.commitText(text, 1);
+            if (mVoiceComposingActive) {
+                // Replace composing region with final text and commit atomically.
+                // commitText replaces any existing composing text.
+                mInputLogic.mConnection.commitText(text, 1);
+                mVoiceComposingActive = false;
+            } else {
+                // No composing region active (edge case) — direct commit
+                mInputLogic.finishInput();
+                mInputLogic.mConnection.commitText(text, 1);
+            }
             mInputLogic.mConnection.endBatchEdit();
 
             // Text has been inserted — hide the processing spinner.
             mKeyboardSwitcher.hideProcessingIndicator();
         } catch (Exception e) {
             Log.e(TAG, "Error inserting transcription text: " + e.getMessage(), e);
+            mVoiceComposingActive = false;
             mKeyboardSwitcher.hideProcessingIndicator();
         }
     }
@@ -2145,6 +2193,10 @@ public class LatinIME extends InputMethodService implements
      * Called when voice input session ends.
      */
     private void resetVoiceInputState() {
+        if (mVoiceComposingActive) {
+            mInputLogic.mConnection.finishComposingText();
+            mVoiceComposingActive = false;
+        }
         mPendingNewParagraph = false;
         mKeyboardSwitcher.hideProcessingIndicator();
     }
