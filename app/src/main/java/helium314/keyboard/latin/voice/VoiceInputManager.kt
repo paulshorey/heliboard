@@ -51,7 +51,10 @@ class VoiceInputManager(private val context: Context) {
     interface VoiceInputListener {
         fun onStateChanged(state: State)
 
-        /** A transcript unit was finalized — process and insert this text. */
+        /** Interim/in-progress text to display. Replaces any previous interim text. */
+        fun onInterimDisplayUpdate(text: String)
+
+        /** Finalized utterance — commit permanently. */
         fun onTranscriptionResult(text: String)
 
         /** Voice processing is actively running (transcripts are pending delivery). */
@@ -82,6 +85,7 @@ class VoiceInputManager(private val context: Context) {
 
     private val voiceRecorder = VoiceRecorder(context)
     private val transcriptionClient = DeepgramTranscriptionClient()
+    private val transcriptAssembler = TranscriptAssembler()
     private var listener: VoiceInputListener? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -310,6 +314,7 @@ class VoiceInputManager(private val context: Context) {
         pendingAudioChunks.clear()
         pendingTranscripts.clear()
         isDispatchingTranscripts = false
+        transcriptAssembler.reset()
         transcriptionClient.cancelAll()
         if (hadPendingWork) {
             listener?.onPendingProcessingCancelled()
@@ -353,6 +358,14 @@ class VoiceInputManager(private val context: Context) {
         scheduleStreamConnectTimeout(sessionId)
         if (!isReconnect) {
             finalizeWhenStreamReady = false
+        } else if (transcriptAssembler.hasContent()) {
+            // Flush assembler on reconnect — audio timestamps reset, so old partial
+            // segments can't be combined with new ones.
+            val partial = transcriptAssembler.getDisplayText()
+            transcriptAssembler.reset()
+            if (partial.isNotBlank()) {
+                enqueueTranscript(partial, sessionId)
+            }
         }
 
         transcriptionClient.startStreaming(
@@ -373,9 +386,28 @@ class VoiceInputManager(private val context: Context) {
                     }
                 }
 
-                override fun onTranscriptionResult(text: String) {
+                override fun onInterimTranscript(text: String) {
                     if (sessionId != activeSessionId) return
-                    enqueueTranscript(text, sessionId)
+                    val display = transcriptAssembler.onInterim(text)
+                    mainHandler.post {
+                        if (sessionId != activeSessionId) return@post
+                        listener?.onInterimDisplayUpdate(display)
+                    }
+                }
+
+                override fun onFinalizedSegment(text: String) {
+                    if (sessionId != activeSessionId) return
+                    val display = transcriptAssembler.onFinalizedSegment(text)
+                    mainHandler.post {
+                        if (sessionId != activeSessionId) return@post
+                        listener?.onInterimDisplayUpdate(display)
+                    }
+                }
+
+                override fun onUtteranceComplete(text: String) {
+                    if (sessionId != activeSessionId) return
+                    val committed = transcriptAssembler.onUtteranceComplete(text)
+                    enqueueTranscript(committed, sessionId)
                 }
 
                 override fun onStreamError(error: String) {
@@ -553,6 +585,14 @@ class VoiceInputManager(private val context: Context) {
                 scheduleReconnect(sessionId, error ?: "stream closed while stopping", allowWhileStopping = true)
             ) {
                 return
+            }
+            // Flush any assembler content as a committed utterance before giving up
+            if (transcriptAssembler.hasContent()) {
+                val partial = transcriptAssembler.getDisplayText()
+                transcriptAssembler.reset()
+                if (partial.isNotBlank()) {
+                    enqueueTranscript(partial, sessionId)
+                }
             }
             if (pendingAudioChunks.isNotEmpty()) {
                 val message = "Final voice segment could not be transcribed completely"
