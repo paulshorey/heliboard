@@ -87,7 +87,6 @@ import helium314.keyboard.latin.utils.SubtypeSettings;
 import helium314.keyboard.latin.utils.SubtypeState;
 import helium314.keyboard.latin.utils.ToolbarMode;
 import helium314.keyboard.latin.voice.VoiceInputManager;
-import helium314.keyboard.latin.voice.VoicePostTranscriptionFilter;
 import helium314.keyboard.latin.suggestions.SuggestionStripView.VoiceState;
 import helium314.keyboard.settings.FullappEditorActivity;
 import helium314.keyboard.settings.FullappEditorResult;
@@ -2031,26 +2030,8 @@ public class LatinIME extends InputMethodService implements
             public void onTranscriptionResult(@NonNull String text) {
                 try {
                     Log.i(TAG, "VOICE raw transcript=[" + text + "]");
-                    final int enterCount = VoicePostTranscriptionFilter.getNewlineCommandCount(text);
-                    if (enterCount > 0) {
-                        Log.i(TAG, "VOICE_STEP_4 newline command (" + enterCount + " enters)");
-                        sendEnterKeyEvents(enterCount);
-                        return;
-                    }
-
-                    final String processedText = VoicePostTranscriptionFilter.prepareForInsertion(
-                            text,
-                            getTextBeforeCursorForVoiceContext(5)
-                    );
-                    if (!processedText.equals(text)) {
-                        Log.i(
-                                TAG,
-                                "VOICE_STEP_4 prepared transcription text (" +
-                                        text.length() + " -> " + processedText.length() +
-                                        " chars)"
-                        );
-                    }
-                    if (processedText.isEmpty()) {
+                    final String trimmed = text.trim();
+                    if (trimmed.isEmpty()) {
                         Log.i(TAG, "VOICE_STEP_4 empty transcription result — nothing to insert");
                         if (mVoiceInputManager == null || !mVoiceInputManager.hasPendingProcessing()) {
                             mKeyboardSwitcher.hideProcessingIndicator();
@@ -2060,9 +2041,9 @@ public class LatinIME extends InputMethodService implements
                     Log.i(
                             TAG,
                             "VOICE_STEP_4 transcription arrived in IME (" +
-                                    processedText.length() + " chars)"
+                                    trimmed.length() + " chars)"
                     );
-                    commitVoiceTranscriptionText(processedText);
+                    commitVoiceTranscriptionText(trimmed);
                 } catch (Exception e) {
                     Log.e(TAG, "Error processing transcription result: " + e.getMessage(), e);
                 }
@@ -2102,13 +2083,6 @@ public class LatinIME extends InputMethodService implements
                 launchSetupAppSettings();
             }
         });
-    }
-
-    @Nullable
-    private CharSequence getTextBeforeCursorForVoiceContext(final int maxChars) {
-        // Always read from InputConnection (app field). In fullscreen, the extract view
-        // mirrors the app; the app is the source of truth.
-        return mInputLogic.mConnection.getTextBeforeCursor(maxChars, 0);
     }
 
     private void insertParagraphBreak() {
