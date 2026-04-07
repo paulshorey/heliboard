@@ -48,7 +48,7 @@ Orchestrates recording, Deepgram streaming, and ordered transcript delivery.
 ### VoicePostTranscriptionFilter.java
 Local text preparation layer that runs on each finalized transcript span before insertion.
 - **Alias pass**: single longest-match token scan for spoken numbers (`zero`..`ninety nine`) and spoken symbols (`open parenthesis`, `slash`, `comma`, etc.)
-- **Cleanup pass**: fixes spacing between adjacent symbols/numbers and applies ordered edge-case rewrites such as `one hundred -> 100`, `negative five -> -5`, and delayed `dash` / `hyphen` / `minus` handling
+- **Cleanup pass**: fixes spacing between adjacent symbols/numbers and applies ordered edge-case rewrites such as `one hundred -> 100`, `negative five -> -5`, spoken `dash` / `hyphen` / `minus` → `-` (with a special case so `dash and …` keeps a space after the dash token), collapses spaces around typed ASCII/Unicode dashes between two letter-words, and lowercases letter-only dash/hyphen compounds so ASR title case does not stick on both sides
 - **Insertion prep**: strips invisible Unicode control characters, adjusts capitalization from text before the caret, and as the final step prepends a space only when the finished chunk starts with an ASCII letter
 
 ### LatinIME.java
