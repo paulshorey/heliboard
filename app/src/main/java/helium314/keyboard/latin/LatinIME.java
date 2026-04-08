@@ -197,6 +197,8 @@ public class LatinIME extends InputMethodService implements
     private boolean mPendingNewParagraph = false;
     /** Whether voice input currently owns the composing region. */
     private boolean mVoiceComposingActive = false;
+    /** Character immediately before the voice composing region, for spacing/capitalization. */
+    private char mCharBeforeVoiceComposing = 0;
     private static final int FULLAPP_SYNC_MAX_CHARS = 100_000;
     private static final int FULLAPP_SYNC_RETRY_ATTEMPTS = 5;
     private static final long FULLAPP_SYNC_RETRY_DELAY_MS = 120L;
@@ -1142,6 +1144,11 @@ public class LatinIME extends InputMethodService implements
         try {
             if (mVoiceComposingActive
                     && (oldSelStart != newSelStart || oldSelEnd != newSelEnd)
+                    // Skip cleanup when cursor is at end of composing span with collapsed
+                    // selection — this is our own setComposingText update, not user action.
+                    && (composingSpanStart < 0
+                            || newSelStart != composingSpanEnd
+                            || newSelStart != newSelEnd)
                     && !mInputLogic.mConnection.isBelatedExpectedUpdate(
                             oldSelStart, newSelStart, oldSelEnd, newSelEnd,
                             composingSpanStart, composingSpanEnd)) {
@@ -2019,17 +2026,22 @@ public class LatinIME extends InputMethodService implements
                 try {
                     if (text.isEmpty()) return;
 
-                    // First interim of this utterance: clear any keyboard composing state
+                    // First interim of this utterance: save context and clear keyboard state
                     if (!mVoiceComposingActive) {
+                        final CharSequence before =
+                                mInputLogic.mConnection.getTextBeforeCursor(1, 0);
+                        mCharBeforeVoiceComposing = (before != null && before.length() > 0)
+                                ? before.charAt(0) : 0;
                         mInputLogic.mConnection.beginBatchEdit();
                         mInputLogic.finishInput();
                         mInputLogic.mConnection.endBatchEdit();
                         mVoiceComposingActive = true;
                     }
 
-                    // Replace the entire composing region with the new interim text.
-                    // setComposingText replaces any existing composing text atomically.
-                    mInputLogic.mConnection.setComposingText(text, 1);
+                    // Format with leading space and auto-capitalize based on context,
+                    // then replace the entire composing region atomically.
+                    final String formatted = formatVoiceTextForDisplay(text);
+                    mInputLogic.mConnection.setComposingText(formatted, 1);
                 } catch (Exception e) {
                     Log.e(TAG, "Error updating interim voice text: " + e.getMessage(), e);
                 }
@@ -2166,16 +2178,25 @@ public class LatinIME extends InputMethodService implements
             return;
         }
         try {
+            // Refresh context if no composing region is active (edge case)
+            if (!mVoiceComposingActive) {
+                final CharSequence before =
+                        mInputLogic.mConnection.getTextBeforeCursor(1, 0);
+                mCharBeforeVoiceComposing = (before != null && before.length() > 0)
+                        ? before.charAt(0) : 0;
+            }
+            final String formatted = formatVoiceTextForDisplay(text);
+
             mInputLogic.mConnection.beginBatchEdit();
             if (mVoiceComposingActive) {
                 // Replace composing region with final text and commit atomically.
                 // commitText replaces any existing composing text.
-                mInputLogic.mConnection.commitText(text, 1);
+                mInputLogic.mConnection.commitText(formatted, 1);
                 mVoiceComposingActive = false;
             } else {
                 // No composing region active (edge case) — direct commit
                 mInputLogic.finishInput();
-                mInputLogic.mConnection.commitText(text, 1);
+                mInputLogic.mConnection.commitText(formatted, 1);
             }
             mInputLogic.mConnection.endBatchEdit();
 
@@ -2189,6 +2210,38 @@ public class LatinIME extends InputMethodService implements
     }
 
     /**
+     * Format voice transcription text for display or insertion.
+     * Prepends a space when following non-whitespace text, and capitalizes
+     * the first letter when following sentence-ending punctuation or at
+     * the start of a text field.
+     */
+    private String formatVoiceTextForDisplay(@NonNull final String text) {
+        if (text.isEmpty()) return text;
+
+        final char prevChar = mCharBeforeVoiceComposing;
+        final char firstChar = text.charAt(0);
+        final boolean needsSpace = prevChar != 0
+                && !Character.isWhitespace(prevChar)
+                && (Character.isLetterOrDigit(firstChar)
+                        || firstChar == '\'' || firstChar == '"');
+        final boolean shouldCapitalize = prevChar == 0
+                || prevChar == '.' || prevChar == '!' || prevChar == '?'
+                || prevChar == '\n';
+
+        final StringBuilder sb = new StringBuilder(text.length() + 2);
+        if (needsSpace) sb.append(' ');
+
+        if (shouldCapitalize && Character.isLowerCase(firstChar)) {
+            sb.append(Character.toUpperCase(firstChar));
+            if (text.length() > 1) sb.append(text, 1, text.length());
+        } else {
+            sb.append(text);
+        }
+
+        return sb.toString();
+    }
+
+    /**
      * Reset all voice input state variables.
      * Called when voice input session ends.
      */
@@ -2197,6 +2250,7 @@ public class LatinIME extends InputMethodService implements
             mInputLogic.mConnection.finishComposingText();
             mVoiceComposingActive = false;
         }
+        mCharBeforeVoiceComposing = 0;
         mPendingNewParagraph = false;
         mKeyboardSwitcher.hideProcessingIndicator();
     }
