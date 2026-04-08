@@ -26,10 +26,15 @@ Body: <raw WAV file bytes>
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | `model` | `nova-3` | Deepgram speech model |
-| `smart_format` | `false` | Leave formatting to local post-processing / direct insertion behavior |
-| `punctuate` | `false` | Do not add server punctuation automatically |
-| `endpointing` | `1000` | Ms of silence before finalizing a streaming span |
+| `smart_format` | `true` | Deepgram-native formatting: punctuation, capitalization, paragraphs, numerals |
+| `interim_results` | `true` | Show preliminary transcripts as the user speaks (composing text) |
+| `endpointing` | `300` | Ms of silence before finalizing an utterance (`speech_final=true`) |
+| `vad_events` | `true` | Receive SpeechStarted events for VAD state tracking |
 | `language` | `en` (optional) | ISO-639-1 language hint |
+
+**Removed parameters:**
+- `punctuate=true` — redundant, already included in `smart_format`
+- `dictation=true` — converted spoken punctuation words to symbols ("question mark" → "?"), causing incorrect substitutions mid-sentence
 
 ### Response Format
 ```json

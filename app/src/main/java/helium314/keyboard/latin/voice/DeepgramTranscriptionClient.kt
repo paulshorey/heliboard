@@ -115,7 +115,7 @@ class DeepgramTranscriptionClient {
         Log.i(
             TAG,
             "VOICE_STEP_3 opening Deepgram streaming socket " +
-                "(language=${language ?: "auto"}, endpointing=300ms, interim_results=true, dictation=true)"
+                "(language=${language ?: "auto"}, endpointing=300ms, interim_results=true)"
         )
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
@@ -243,12 +243,10 @@ class DeepgramTranscriptionClient {
             append(STREAMING_BASE_URL)
             append("?model=nova-3")
             append("&smart_format=true")
-            append("&punctuate=true")
             append("&encoding=linear16")
             append("&sample_rate=").append(VoiceRecorder.SAMPLE_RATE)
             append("&channels=1")
             append("&interim_results=true")
-            append("&dictation=true")
             append("&endpointing=300")
             append("&vad_events=true")
             if (!language.isNullOrBlank()) {

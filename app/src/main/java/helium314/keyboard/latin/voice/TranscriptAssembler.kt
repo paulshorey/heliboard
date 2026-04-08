@@ -36,16 +36,7 @@ class TranscriptAssembler {
 
     fun onUtteranceComplete(text: String): String {
         if (text.isNotBlank()) finalizedSegments.add(text)
-        var full = finalizedSegments.joinToString(" ")
-        // Add trailing period at utterance boundary if text doesn't already end with punctuation.
-        // This ensures sentences are properly terminated when the speaker pauses.
-        if (full.isNotBlank()) {
-            val lastChar = full.last()
-            if (lastChar != '.' && lastChar != '!' && lastChar != '?'
-                && lastChar != ',' && lastChar != ';' && lastChar != ':') {
-                full = "$full."
-            }
-        }
+        val full = finalizedSegments.joinToString(" ")
         reset()
         return full
     }
