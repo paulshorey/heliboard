@@ -7,8 +7,10 @@ import android.os.Looper
 import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.settings.TranscriptionPreferences
+import helium314.keyboard.latin.settings.TranscriptionPreferences.SpeechmaticsConfig
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.prefs
+import java.util.Locale
 
 /**
  * Manages the voice input workflow:
@@ -95,6 +97,7 @@ class VoiceInputManager(private val context: Context) {
     private var chunkSilenceThreshold = Defaults.PREF_VOICE_SILENCE_THRESHOLD.toDouble()
     private var newParagraphDelayMs = Defaults.PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS * 1000L
     private var autoStopSilenceMs = Defaults.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS * 1000L
+    private var speechmaticsConfig = TranscriptionPreferences.readSpeechmaticsConfig(context.prefs())
 
     // Streaming state
     private var streamSessionId = 0L
@@ -347,7 +350,12 @@ class VoiceInputManager(private val context: Context) {
 
     private fun startStreamingSession(sessionId: Long, apiKey: String, isReconnect: Boolean = false) {
         if (sessionId != activeSessionId) return
-        val language = getCurrentLanguage()
+        val sessionConfig = SpeechmaticsTranscriptionClient.buildSessionConfig(
+            languageTag = getCurrentSpeechmaticsLanguage(),
+            maxDelaySeconds = speechmaticsConfig.maxDelaySeconds,
+            removeDisfluencies = speechmaticsConfig.removeDisfluencies,
+            endOfUtteranceSilenceTriggerSeconds = speechmaticsConfig.endOfUtteranceSilenceSeconds
+        )
         streamSessionId = sessionId
         isStreamingConnecting = true
         isStreamingReady = false
@@ -358,7 +366,7 @@ class VoiceInputManager(private val context: Context) {
 
         transcriptionClient.startStreaming(
             apiKey = apiKey,
-            language = language,
+            sessionConfig = sessionConfig,
             callback = object : SpeechmaticsTranscriptionClient.StreamingCallback {
                 override fun onStreamReady() {
                     if (sessionId != activeSessionId) return
@@ -732,6 +740,7 @@ class VoiceInputManager(private val context: Context) {
         newParagraphDelayMs = paragraphSilenceSeconds * 1000L
         autoStopSilenceMs = autoStopSilenceSeconds * 1000L
         chunkSilenceThreshold = silenceThreshold.toDouble()
+        speechmaticsConfig = TranscriptionPreferences.readSpeechmaticsConfig(prefs)
 
         voiceRecorder.updateSilenceConfig(
             silenceDurationMs = chunkSilenceDurationMs,
@@ -743,7 +752,10 @@ class VoiceInputManager(private val context: Context) {
             "Voice config loaded: localSpeechSilence=${chunkSilenceDurationMs}ms, " +
                 "silenceThreshold=${chunkSilenceThreshold}, " +
                 "newParagraphSilence=${newParagraphDelayMs}ms, " +
-                "autoStopSilence=${autoStopSilenceMs}ms"
+                "autoStopSilence=${autoStopSilenceMs}ms, " +
+                "speechmaticsMaxDelay=${speechmaticsConfig.maxDelaySeconds}s, " +
+                "speechmaticsEou=${speechmaticsConfig.endOfUtteranceSilenceSeconds}s, " +
+                "speechmaticsDisfluencies=${speechmaticsConfig.removeDisfluencies}"
         )
     }
 
@@ -791,16 +803,32 @@ class VoiceInputManager(private val context: Context) {
         }
     }
 
-    private fun getCurrentLanguage(): String? {
+    private fun getCurrentSpeechmaticsLanguage(): String? {
         return try {
-            val language = Settings.getValues()?.mLocale?.toLanguageTag().orEmpty()
+            val locale = Settings.getValues()?.mLocale ?: return null
+            val language = locale.language
             when {
                 language.isBlank() -> null
                 language == "und" -> null
-                else -> language
+                else -> language.lowercase(Locale.US)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error getting language: ${e.message}")
+            null
+        }
+    }
+
+    private fun getCurrentSpeechmaticsOutputLocale(): String? {
+        return try {
+            val locale = Settings.getValues()?.mLocale ?: return null
+            val language = locale.language.lowercase(Locale.US)
+            val country = locale.country.uppercase(Locale.US)
+            if (language != "en" || country.isBlank()) {
+                return null
+            }
+            locale.toLanguageTag()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting output locale: ${e.message}")
             null
         }
     }

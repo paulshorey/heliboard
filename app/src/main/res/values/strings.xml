@@ -251,6 +251,10 @@
     <string name="fullapp_drafts_private_ime_options">Private IME options: %s</string>
     <string name="speechmatics_api_key_title">Speechmatics API Key</string>
     <string name="speechmatics_api_key_summary">API key for voice transcription. Get from portal.speechmatics.com</string>
+    <string name="speechmatics_max_delay_title">Final transcript delay (seconds)</string>
+    <string name="speechmatics_end_of_utterance_title">End-of-utterance silence (seconds)</string>
+    <string name="speechmatics_remove_disfluencies_title">Remove English disfluencies</string>
+    <string name="speechmatics_remove_disfluencies_summary">Removes fillers like um and uh before text is inserted. Speechmatics only supports this in English.</string>
     <string name="voice_chunk_silence_seconds_title">Chunk silence duration (seconds)</string>
     <string name="voice_silence_threshold_title">Silence threshold (RMS loudness)</string>
     <string name="voice_new_paragraph_silence_seconds_title">New paragraph silence duration (seconds)</string>

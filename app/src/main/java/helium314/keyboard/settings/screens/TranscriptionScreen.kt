@@ -56,6 +56,19 @@ fun TranscriptionScreen(
     var speechmaticsApiKey by remember {
         mutableStateOf(TranscriptionPreferences.readSpeechmaticsApiKey(prefs))
     }
+    var speechmaticsMaxDelay by remember {
+        mutableStateOf(
+            TranscriptionPreferences.readSpeechmaticsMaxDelaySeconds(prefs).toString()
+        )
+    }
+    var speechmaticsEndOfUtterance by remember {
+        mutableStateOf(
+            TranscriptionPreferences.readSpeechmaticsEndOfUtteranceSeconds(prefs).toString()
+        )
+    }
+    var speechmaticsRemoveDisfluencies by remember {
+        mutableStateOf(TranscriptionPreferences.readSpeechmaticsRemoveDisfluencies(prefs))
+    }
     var chunkSilenceSeconds by remember {
         mutableStateOf(
             prefs.getInt(
@@ -110,6 +123,64 @@ fun TranscriptionScreen(
                     },
                     minLines = 1,
                     maxLines = 2
+                )
+                InlineTextField(
+                    label = stringResource(R.string.speechmatics_max_delay_title),
+                    value = speechmaticsMaxDelay,
+                    onValueChange = { newValue ->
+                        speechmaticsMaxDelay = newValue
+                        newValue.toDoubleOrNull()?.let { parsed ->
+                            val sanitized = TranscriptionPreferences.sanitizeSpeechmaticsMaxDelaySeconds(parsed)
+                            TranscriptionPreferences.writeSpeechmaticsMaxDelayTenths(
+                                prefs,
+                                (sanitized * 10).toInt()
+                            )
+                            val currentEndOfUtterance =
+                                TranscriptionPreferences.readSpeechmaticsEndOfUtteranceSeconds(prefs)
+                            val adjustedEndOfUtterance = minOf(
+                                currentEndOfUtterance,
+                                TranscriptionPreferences.maxEndOfUtteranceForMaxDelay(sanitized)
+                            )
+                            if (adjustedEndOfUtterance != currentEndOfUtterance) {
+                                TranscriptionPreferences.writeSpeechmaticsEndOfUtteranceMs(
+                                    prefs,
+                                    (adjustedEndOfUtterance * 1000).toInt()
+                                )
+                                speechmaticsEndOfUtterance = adjustedEndOfUtterance.toString()
+                            }
+                        }
+                    },
+                    minLines = 1,
+                    maxLines = 1
+                )
+                InlineTextField(
+                    label = stringResource(R.string.speechmatics_end_of_utterance_title),
+                    value = speechmaticsEndOfUtterance,
+                    onValueChange = { newValue ->
+                        speechmaticsEndOfUtterance = newValue
+                        newValue.toDoubleOrNull()?.let { parsed ->
+                            val maxDelay = TranscriptionPreferences.readSpeechmaticsMaxDelaySeconds(prefs)
+                            val sanitized = TranscriptionPreferences.sanitizeSpeechmaticsEndOfUtteranceSeconds(
+                                value = parsed,
+                                maxDelaySeconds = maxDelay
+                            )
+                            TranscriptionPreferences.writeSpeechmaticsEndOfUtteranceMs(
+                                prefs,
+                                (sanitized * 1000).toInt()
+                            )
+                        }
+                    },
+                    minLines = 1,
+                    maxLines = 1
+                )
+                BooleanSettingRow(
+                    label = stringResource(R.string.speechmatics_remove_disfluencies_title),
+                    summary = stringResource(R.string.speechmatics_remove_disfluencies_summary),
+                    checked = speechmaticsRemoveDisfluencies,
+                    onCheckedChange = { checked ->
+                        speechmaticsRemoveDisfluencies = checked
+                        TranscriptionPreferences.writeSpeechmaticsRemoveDisfluencies(prefs, checked)
+                    }
                 )
                 InlineTextField(
                     label = stringResource(R.string.voice_chunk_silence_seconds_title),
@@ -186,6 +257,37 @@ fun TranscriptionScreen(
                 FullappDraftHistorySections()
             }
         }
+    }
+}
+
+@Composable
+private fun BooleanSettingRow(
+    label: String,
+    summary: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
+        )
+        Text(
+            text = summary,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
+        )
+        androidx.compose.material3.Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
+        )
     }
 }
 

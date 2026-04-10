@@ -5,8 +5,8 @@ End-to-end voice transcription pipeline: local capture, Speechmatics realtime st
 ## Overview
 
 1. **VoiceRecorder** captures PCM16 audio locally; silence detection drives paragraph breaks and auto-stop.
-2. **SpeechmaticsTranscriptionClient** opens the realtime websocket, sends `StartRecognition`, streams binary PCM frames, tracks `AudioAdded` acknowledgements, and surfaces finalized `AddTranscript` text.
-3. **VoiceInputManager** buffers audio until the stream is ready, retries broken sessions, queues finalized transcript spans in FIFO order, and performs graceful `EndOfStream` shutdown.
+2. **SpeechmaticsTranscriptionClient** opens the realtime websocket, sends `StartRecognition`, streams binary PCM frames, tracks `AudioAdded` acknowledgements, can request `ForceEndOfUtterance`, and surfaces finalized `AddTranscript` text.
+3. **VoiceInputManager** buffers audio until the stream is ready, retries broken sessions, derives a provider config from preferences + current subtype locale, queues finalized transcript spans in FIFO order, and performs graceful `EndOfStream` shutdown.
 4. **LatinIME** inserts each finalized transcript immediately at the current caret position through `InputConnection`.
 
 ## Architecture
@@ -36,9 +36,10 @@ Captures audio from the microphone with client-side silence detection.
 WebSocket client for Speechmatics realtime transcription.
 - **URL**: `wss://eu.rt.speechmatics.com/v2/`
 - **Handshake**: `Authorization: Bearer <API_KEY>`
-- **Startup**: Sends `StartRecognition` with raw PCM16 audio settings
+- **Startup**: Sends `StartRecognition` with raw PCM16 audio settings plus a configurable `transcription_config`
 - **Transport**: Binary PCM frames over the socket
 - **Acks**: Tracks `AudioAdded.seq_no` so `EndOfStream(last_seq_no=...)` can be sent safely on stop
+- **Turn flush**: Sends `ForceEndOfUtterance` before `EndOfStream` during graceful stop to help flush the tail transcript
 - **Output**: Finalized `AddTranscript.metadata.transcript` spans delivered in stream order
 
 ### VoiceInputManager.kt
@@ -47,8 +48,9 @@ Orchestrates recording, Speechmatics streaming, and ordered transcript delivery.
 - **Buffered audio**: Holds PCM chunks until `RecognitionStarted`
 - **Transcript queue**: Preserves FIFO delivery for finalized Speechmatics spans
 - **Reconnects**: Retries transient websocket failures while the recording session remains active
+- **Session config**: Maps current subtype locale to Speechmatics `language` and optional `output_locale`; sanitizes max-delay, end-of-utterance, and disfluency settings from preferences
 - **New Paragraph Timer**: Requests a paragraph break after long silence
-- **Graceful stop**: Waits for pending acks, sends `EndOfStream`, then lets the tail transcript drain
+- **Graceful stop**: Waits for pending acks, sends `ForceEndOfUtterance`, then `EndOfStream`, and lets the tail transcript drain
 
 ### LatinIME.java
 Main orchestrator that coordinates all components and inserts text into the editor.
@@ -74,6 +76,16 @@ User speaks
     → VoiceInputManager buffers/sends them to SpeechmaticsTranscriptionClient
     → SpeechmaticsTranscriptionClient streams them to Speechmatics
     → Speechmatics emits finalized AddTranscript messages
+```
+
+### 2b. Speechmatics session config
+```
+Current subtype locale + transcription preferences
+    → VoiceInputManager.buildTranscriptionConfig()
+    → language = base language / supported provider language
+    → output_locale = locale-specific spelling when Speechmatics documents it
+    → max_delay / end_of_utterance_silence_trigger sanitized to provider-safe ranges
+    → remove_disfluencies enabled only for English when requested
 ```
 
 ### 3. Transcript → Immediate Insert
@@ -113,6 +125,9 @@ PAUSED     → User taps pause  → RECORDING (resume)
 
 ### Settings (TranscriptionScreen.kt)
 - **Speechmatics API Key**: Required for transcription
+- **Final transcript delay**: Upper bound for Speechmatics finalization latency
+- **End of utterance trigger**: Server-side silence duration before Speechmatics finalizes an utterance
+- **Remove disfluencies**: Removes English hesitation sounds like “um” and “uh”
 - **Chunk Silence Duration**: Silence window before detecting a speech boundary
 - **Silence Threshold**: RMS threshold floor for silence/speech detection
 - **New Paragraph Silence Duration**: Delay before inserting a paragraph break

@@ -9,7 +9,7 @@ HeliBoard uses Speechmatics realtime transcription for voice input.
 3. `SpeechmaticsTranscriptionClient` sends:
    - `StartRecognition` JSON
    - binary PCM audio chunks
-   - `EndOfStream(last_seq_no=...)` on graceful stop after all audio acks arrive
+   - `ForceEndOfUtterance` and `EndOfStream(last_seq_no=...)` on graceful stop after all audio acks arrive
 4. Finalized transcript text arrives as `AddTranscript` messages.
 5. `VoiceInputManager` queues transcript spans in FIFO order.
 6. `LatinIME` calls `finishInput()` and then `commitText(...)` to insert the finalized text at the caret.
@@ -27,6 +27,10 @@ HeliBoard uses Speechmatics realtime transcription for voice input.
 ## Configuration
 
 - Provider key preference: `Settings.PREF_SPEECHMATICS_API_KEY`
+- Speechmatics session settings:
+  - `Settings.PREF_SPEECHMATICS_MAX_DELAY_MILLIS`
+  - `Settings.PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS`
+  - `Settings.PREF_SPEECHMATICS_REMOVE_DISFLUENCIES`
 - Local silence settings remain unchanged:
   - chunk silence duration
   - silence threshold
@@ -37,3 +41,5 @@ HeliBoard uses Speechmatics realtime transcription for voice input.
 
 - The app no longer uses the previous provider websocket client or its API key preference.
 - A stale legacy provider key is cleared from shared preferences so setup reflects the new backend accurately.
+- Speechmatics formatting is optimized by sending a base language (`language`) plus a locale-specific `output_locale` when the active subtype provides one.
+- English sessions can remove disfluencies server-side so dictation inserts cleaner finalized text without extra client-side cleanup.

@@ -22,28 +22,29 @@ Recording starts **instantly** on mic tap — no network round-trip delay.
 | File | Role |
 |------|------|
 | `VoiceRecorder.kt` | PCM16 capture, adaptive RMS silence detection |
-| `SpeechmaticsTranscriptionClient.kt` | WebSocket client for `wss://eu.rt.speechmatics.com/v2/` with `StartRecognition`, binary audio, `AudioAdded`, `AddTranscript`, and `EndOfStream` |
-| `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO transcript queue, reconnects, paragraph timer |
-| `TranscriptionPreferences.kt` | Reads/writes the Speechmatics API key and drops the legacy provider key |
+| `SpeechmaticsTranscriptionClient.kt` | WebSocket client for `wss://eu.rt.speechmatics.com/v2/` with configurable `StartRecognition`, binary audio, `AudioAdded`, `ForceEndOfUtterance`, `AddTranscript`, and `EndOfStream` |
+| `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO transcript queue, reconnects, paragraph timer, Speechmatics locale/config assembly |
+| `TranscriptionPreferences.kt` | Reads/writes sanitized Speechmatics settings and drops the legacy provider key |
 | `LatinIME.java` | Orchestrator — finalizes composing state and commits transcript text at the caret |
-| `TranscriptionScreen.kt` / `SetupAppScreen.kt` | Settings UI for API key, silence thresholds, paragraph timing |
+| `TranscriptionScreen.kt` / `SetupAppScreen.kt` | Settings UI for API key, Speechmatics latency/formatting controls, silence thresholds, paragraph timing |
 
 All source files live under `app/src/main/java/helium314/keyboard/latin/voice/` except `LatinIME.java` (parent package) and the settings UI/preferences helpers in `latin/settings` and `settings/screens`.
 
 ## Chunked Audio Flow
 
 1. Mic chunks are captured locally in `VoiceRecorder`
-2. `VoiceInputManager` buffers chunks until Speechmatics sends `RecognitionStarted`
-3. Chunks stream as binary PCM16 frames; Speechmatics replies with `AudioAdded` sequence acks
-4. Final transcript spans arrive as `AddTranscript` messages
-5. `VoiceInputManager` delivers them in FIFO order to `LatinIME`
-6. `LatinIME` inserts each finalized span with `commitText(...)`
+2. `VoiceInputManager` builds a provider config from settings + current subtype locale
+3. `VoiceInputManager` buffers chunks until Speechmatics sends `RecognitionStarted`
+4. Chunks stream as binary PCM16 frames; Speechmatics replies with `AudioAdded` sequence acks
+5. Final transcript spans arrive as `AddTranscript` messages
+6. `VoiceInputManager` delivers them in FIFO order to `LatinIME`
+7. `LatinIME` inserts each finalized span with `commitText(...)`
 
-On graceful stop, the client waits for all sent audio to be acknowledged, sends `EndOfStream(last_seq_no=...)`, and only closes after the tail transcript is flushed or a close timeout expires.
+On graceful stop, the client waits for all sent audio to be acknowledged, sends `ForceEndOfUtterance`, then `EndOfStream(last_seq_no=...)`, and only closes after the tail transcript is flushed or a close timeout expires.
 
 ## Transcript Handling
 
-Speechmatics smart formatting is used for finalized transcript text. HeliBoard does not run a second provider-specific normalization pass before insertion; it trims empty spans and commits the finalized text exactly once at the caret.
+Speechmatics smart formatting is used for finalized transcript text. `output_locale` is supplied for English locales when available so spelling stays consistent, and optional English disfluency removal can be enabled from settings. HeliBoard does not run a second provider-specific normalization pass before insertion; it trims empty spans and commits the finalized text exactly once at the caret.
 
 ## Paragraph Breaks
 

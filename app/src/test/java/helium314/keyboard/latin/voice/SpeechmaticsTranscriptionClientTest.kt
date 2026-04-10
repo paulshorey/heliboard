@@ -14,7 +14,17 @@ class SpeechmaticsTranscriptionClientTest {
 
     @Test
     fun buildStartRecognitionMessage_usesSpeechmaticsRealtimeConfig() {
-        val payload = JSONObject(SpeechmaticsTranscriptionClient.buildStartRecognitionMessage("en-US"))
+        val payload = JSONObject(
+            SpeechmaticsTranscriptionClient.buildStartRecognitionMessage(
+                language = "en",
+                sessionConfig = SpeechmaticsSessionConfig(
+                    maxDelaySeconds = 1.2,
+                    endOfUtteranceSilenceSeconds = 0.9,
+                    removeDisfluencies = true,
+                    outputLocale = "en-US"
+                )
+            )
+        )
 
         assertEquals("StartRecognition", payload.getString("message"))
 
@@ -24,18 +34,47 @@ class SpeechmaticsTranscriptionClientTest {
         assertEquals(VoiceRecorder.SAMPLE_RATE, audioFormat.getInt("sample_rate"))
 
         val config = payload.getJSONObject("transcription_config")
-        assertEquals("en-US", config.getString("language"))
-        assertEquals(0.7, config.getDouble("max_delay"))
+        assertEquals("en", config.getString("language"))
+        assertEquals("en-US", config.getString("output_locale"))
+        assertEquals(1.2, config.getDouble("max_delay"))
         assertEquals("flexible", config.getString("max_delay_mode"))
         assertFalse(config.getBoolean("enable_partials"))
+        assertTrue(config.getBoolean("enable_entities"))
+        assertEquals(
+            0.9,
+            config.getJSONObject("conversation_config")
+                .getDouble("end_of_utterance_silence_trigger")
+        )
+        assertTrue(
+            config.getJSONObject("transcript_filtering_config")
+                .getBoolean("remove_disfluencies")
+        )
     }
 
     @Test
     fun buildStartRecognitionMessage_fallsBackToEnglishWhenLanguageMissing() {
-        val payload = JSONObject(SpeechmaticsTranscriptionClient.buildStartRecognitionMessage(null))
+        val payload = JSONObject(
+            SpeechmaticsTranscriptionClient.buildStartRecognitionMessage(
+                language = null,
+                sessionConfig = SpeechmaticsSessionConfig()
+            )
+        )
         val config = payload.getJSONObject("transcription_config")
 
         assertEquals("en", config.getString("language"))
+    }
+
+    @Test
+    fun buildStartRecognitionMessage_skipsOutputLocaleWhenMismatched() {
+        val payload = JSONObject(
+            SpeechmaticsTranscriptionClient.buildStartRecognitionMessage(
+                language = "fr",
+                sessionConfig = SpeechmaticsSessionConfig(outputLocale = "en-GB")
+            )
+        )
+        val config = payload.getJSONObject("transcription_config")
+
+        assertFalse(config.has("output_locale"))
     }
 
     @Test
@@ -123,5 +162,14 @@ class SpeechmaticsTranscriptionClientTest {
         )
 
         assertEquals(SpeechmaticsServerEvent.EndOfTranscript, event)
+    }
+
+    @Test
+    fun parseServerEvent_parsesEndOfUtterance() {
+        val event = SpeechmaticsTranscriptionClient.parseServerEvent(
+            """{"message":"EndOfUtterance"}"""
+        )
+
+        assertEquals(SpeechmaticsServerEvent.EndOfUtterance, event)
     }
 }

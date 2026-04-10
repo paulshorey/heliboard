@@ -3,6 +3,7 @@ package helium314.keyboard.latin.voice
 
 import android.os.Handler
 import android.os.Looper
+import helium314.keyboard.latin.settings.TranscriptionPreferences
 import helium314.keyboard.latin.utils.Log
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -45,10 +46,33 @@ class SpeechmaticsTranscriptionClient {
         private const val STREAMING_BASE_URL = "wss://eu.rt.speechmatics.com/v2/"
         private const val FINALIZE_CLOSE_GRACE_MS = 8_000L
         private const val DEFAULT_LANGUAGE = "en"
-        private const val FINAL_TRANSCRIPT_MAX_DELAY_SECONDS = 0.7
 
-        internal fun buildStartRecognitionMessage(language: String?): String {
-            val normalizedLanguage = normalizeLanguage(language)
+        internal data class SessionConfig(
+            val language: String,
+            val outputLocale: String?,
+            val maxDelaySeconds: Double,
+            val removeDisfluencies: Boolean,
+            val endOfUtteranceSilenceTriggerSeconds: Double
+        )
+
+        internal fun buildSessionConfig(
+            languageTag: String?,
+            maxDelaySeconds: Double,
+            removeDisfluencies: Boolean,
+            endOfUtteranceSilenceTriggerSeconds: Double
+        ): SessionConfig {
+            val normalizedLanguage = normalizeLanguage(languageTag)
+            val normalizedOutputLocale = normalizeOutputLocale(languageTag, normalizedLanguage)
+            return SessionConfig(
+                language = normalizedLanguage,
+                outputLocale = normalizedOutputLocale,
+                maxDelaySeconds = maxDelaySeconds,
+                removeDisfluencies = removeDisfluencies && normalizedLanguage == "en",
+                endOfUtteranceSilenceTriggerSeconds = endOfUtteranceSilenceTriggerSeconds
+            )
+        }
+
+        internal fun buildStartRecognitionMessage(config: SessionConfig): String {
             val message = JSONObject()
                 .put("message", "StartRecognition")
                 .put(
@@ -60,11 +84,30 @@ class SpeechmaticsTranscriptionClient {
                 )
                 .put(
                     "transcription_config",
-                    JSONObject()
-                        .put("language", normalizedLanguage)
-                        .put("max_delay", FINAL_TRANSCRIPT_MAX_DELAY_SECONDS)
-                        .put("max_delay_mode", "flexible")
-                        .put("enable_partials", false)
+                    JSONObject().apply {
+                        put("language", config.language)
+                        put("max_delay", config.maxDelaySeconds)
+                        put("max_delay_mode", "flexible")
+                        put("enable_partials", false)
+                        if (config.outputLocale != null) {
+                            put("output_locale", config.outputLocale)
+                        }
+                        if (config.removeDisfluencies) {
+                            put(
+                                "transcript_filtering_config",
+                                JSONObject().put("remove_disfluencies", true)
+                            )
+                        }
+                        if (config.endOfUtteranceSilenceTriggerSeconds > 0.0) {
+                            put(
+                                "conversation_config",
+                                JSONObject().put(
+                                    "end_of_utterance_silence_trigger",
+                                    config.endOfUtteranceSilenceTriggerSeconds
+                                )
+                            )
+                        }
+                    }
                 )
             return message.toString()
         }
@@ -94,6 +137,7 @@ class SpeechmaticsTranscriptionClient {
                 }
 
                 "Error" -> SpeechmaticsServerEvent.Error(buildServerErrorDescription(json))
+                "EndOfUtterance" -> null
                 "EndOfTranscript" -> SpeechmaticsServerEvent.EndOfTranscript
                 else -> null
             }
@@ -122,18 +166,36 @@ class SpeechmaticsTranscriptionClient {
         }
 
         private fun normalizeLanguage(language: String?): String {
-            val normalized = language
+            val normalizedTag = language
                 ?.trim()
                 ?.replace('_', '-')
                 .orEmpty()
-            val canonical = Locale.forLanguageTag(normalized).toLanguageTag()
+            val locale = Locale.forLanguageTag(normalizedTag)
+            val languageCode = locale.language.orEmpty()
             return when {
-                normalized.isBlank() -> DEFAULT_LANGUAGE
-                normalized == "und" -> DEFAULT_LANGUAGE
-                normalized == "zz" -> DEFAULT_LANGUAGE
-                canonical.isBlank() -> normalized
-                canonical == "und" -> normalized
-                else -> canonical
+                normalizedTag.isBlank() -> DEFAULT_LANGUAGE
+                normalizedTag == "und" -> DEFAULT_LANGUAGE
+                normalizedTag == "zz" -> DEFAULT_LANGUAGE
+                languageCode.isBlank() -> DEFAULT_LANGUAGE
+                languageCode == "und" -> DEFAULT_LANGUAGE
+                else -> languageCode
+            }
+        }
+
+        private fun normalizeOutputLocale(languageTag: String?, normalizedLanguage: String): String? {
+            val normalizedTag = languageTag
+                ?.trim()
+                ?.replace('_', '-')
+                .orEmpty()
+            if (normalizedLanguage != "en") {
+                return null
+            }
+
+            val locale = Locale.forLanguageTag(normalizedTag)
+            val region = locale.country.orEmpty().uppercase(Locale.US)
+            return when (region) {
+                "GB", "US", "AU" -> "en-$region"
+                else -> null
             }
         }
     }
@@ -194,9 +256,12 @@ class SpeechmaticsTranscriptionClient {
     @Volatile
     private var lastAcknowledgedSequenceNumber = -1
 
-    fun startStreaming(
+    @Volatile
+    private var forceEndOfUtteranceSent = false
+
+    internal fun startStreaming(
         apiKey: String,
-        language: String? = null,
+        sessionConfig: SessionConfig,
         callback: StreamingCallback
     ) {
         val newToken = activeConnectionToken + 1
@@ -211,8 +276,8 @@ class SpeechmaticsTranscriptionClient {
         totalAudioChunksSent = 0
         pendingAudioAcknowledgements = 0
         lastAcknowledgedSequenceNumber = -1
+        forceEndOfUtteranceSent = false
         clearFinalizeCloseTimer()
-
         val request = Request.Builder()
             .url(STREAMING_BASE_URL)
             .addHeader("Authorization", "Bearer $apiKey")
@@ -221,7 +286,9 @@ class SpeechmaticsTranscriptionClient {
         Log.i(
             TAG,
             "VOICE_STEP_3 opening Speechmatics realtime socket " +
-                "(language=${language ?: DEFAULT_LANGUAGE}, max_delay=${FINAL_TRANSCRIPT_MAX_DELAY_SECONDS}s)"
+                "(language=${sessionConfig.language}, outputLocale=${sessionConfig.outputLocale ?: "default"}, " +
+                "max_delay=${sessionConfig.maxDelaySeconds}s, removeDisfluencies=${sessionConfig.removeDisfluencies}, " +
+                "eou=${sessionConfig.endOfUtteranceSilenceTriggerSeconds}s)"
         )
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
@@ -229,7 +296,7 @@ class SpeechmaticsTranscriptionClient {
                 if (newToken != activeConnectionToken) return
                 this@SpeechmaticsTranscriptionClient.webSocket = webSocket
 
-                val startMessage = buildStartRecognitionMessage(language)
+                val startMessage = buildStartRecognitionMessage(sessionConfig)
                 val started = try {
                     webSocket.send(startMessage)
                 } catch (e: Exception) {
@@ -339,6 +406,7 @@ class SpeechmaticsTranscriptionClient {
         totalAudioChunksSent = 0
         pendingAudioAcknowledgements = 0
         lastAcknowledgedSequenceNumber = -1
+        forceEndOfUtteranceSent = false
         val socket = webSocket
         webSocket = null
         if (socket != null) {
@@ -420,6 +488,22 @@ class SpeechmaticsTranscriptionClient {
         if (lastAcknowledgedSequenceNumber < 0) {
             socket.close(1000, "client_stop")
             return
+        }
+
+        if (!forceEndOfUtteranceSent) {
+            val forcePayload = JSONObject()
+                .put("message", "ForceEndOfUtterance")
+                .toString()
+            val forceSent = try {
+                socket.send(forcePayload)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to send ForceEndOfUtterance: ${e.message}")
+                false
+            }
+            if (forceSent) {
+                forceEndOfUtteranceSent = true
+                Log.i(TAG, "Speechmatics ForceEndOfUtterance sent before EndOfStream")
+            }
         }
 
         val payload = JSONObject()

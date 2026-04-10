@@ -16,10 +16,18 @@ HeliBoard uses the Speechmatics **Realtime WebSocket** API (`wss://eu.rt.speechm
     "sample_rate": 16000
   },
   "transcription_config": {
-    "language": "en-US",
-    "max_delay": 0.7,
+    "language": "en",
+    "output_locale": "en-US",
+    "max_delay": 1.2,
     "max_delay_mode": "flexible",
-    "enable_partials": false
+    "enable_partials": false,
+    "enable_entities": false,
+    "conversation_config": {
+      "end_of_utterance_silence_trigger": 0.9
+    },
+    "transcript_filtering_config": {
+      "remove_disfluencies": true
+    }
   }
 }
 ```
@@ -60,6 +68,7 @@ HeliBoard uses the Speechmatics **Realtime WebSocket** API (`wss://eu.rt.speechm
 ```
 
 ### Graceful stop
+- Client can send `ForceEndOfUtterance` before ending the stream to flush the tail of an utterance sooner
 - Client keeps track of `AudioAdded.seq_no`
 - On stop, once all sent audio chunks are acknowledged, client sends:
 
@@ -84,6 +93,9 @@ HeliBoard uses the Speechmatics **Realtime WebSocket** API (`wss://eu.rt.speechm
 | Key | Type | Description |
 |-----|------|-------------|
 | `PREF_SPEECHMATICS_API_KEY` | String | Speechmatics API key for transcription |
+| `PREF_SPEECHMATICS_MAX_DELAY_MILLIS` | Int | Final transcript latency target in milliseconds |
+| `PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS` | Int | Speechmatics server-side end-of-utterance trigger in milliseconds |
+| `PREF_SPEECHMATICS_REMOVE_DISFLUENCIES` | Boolean | Removes English hesitation words like "um" and "uh" |
 | `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Silence window before treating speech as paused |
 | `PREF_VOICE_SILENCE_THRESHOLD` | Int | RMS threshold used for silence detection |
 | `PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS` | Int | Silence duration before inserting a new paragraph |
