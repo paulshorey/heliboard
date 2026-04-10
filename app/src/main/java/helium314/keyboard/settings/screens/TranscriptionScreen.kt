@@ -31,6 +31,7 @@ import androidx.core.content.edit
 import helium314.keyboard.latin.R
 import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
+import helium314.keyboard.latin.settings.TranscriptionPreferences
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.getActivity
 import helium314.keyboard.latin.utils.prefs
@@ -52,8 +53,8 @@ fun TranscriptionScreen(
         Log.v("irrelevant", "stupid way to trigger recomposition on preference change")
 
     // API keys
-    var deepgramApiKey by remember {
-        mutableStateOf(prefs.getString(Settings.PREF_DEEPGRAM_API_KEY, Defaults.PREF_DEEPGRAM_API_KEY) ?: "")
+    var speechmaticsApiKey by remember {
+        mutableStateOf(TranscriptionPreferences.readSpeechmaticsApiKey(prefs))
     }
     var chunkSilenceSeconds by remember {
         mutableStateOf(
@@ -99,14 +100,13 @@ fun TranscriptionScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(innerPadding)
             ) {
-                // Deepgram API Key
+                // Speechmatics API Key
                 InlineTextField(
-                    label = stringResource(R.string.deepgram_api_key_title),
-                    value = deepgramApiKey,
+                    label = stringResource(R.string.speechmatics_api_key_title),
+                    value = speechmaticsApiKey,
                     onValueChange = { newValue ->
-                        val trimmedValue = newValue.trim()
-                        deepgramApiKey = trimmedValue
-                        prefs.edit { putString(Settings.PREF_DEEPGRAM_API_KEY, trimmedValue) }
+                        speechmaticsApiKey = newValue.trim()
+                        TranscriptionPreferences.writeSpeechmaticsApiKey(prefs, newValue)
                     },
                     minLines = 1,
                     maxLines = 2

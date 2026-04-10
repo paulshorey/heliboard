@@ -178,8 +178,8 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
     public static final String PREF_TOOLBAR_MODE = "toolbar_mode";
     public static final String PREF_TOOLBAR_HIDING_GLOBAL = "toolbar_hiding_global";
 
-    // Voice Input (Deepgram transcription)
-    public static final String PREF_DEEPGRAM_API_KEY = "deepgram_api_key";
+    // Voice Input (Speechmatics transcription)
+    public static final String PREF_SPEECHMATICS_API_KEY = "speechmatics_api_key";
     public static final String PREF_VOICE_CHUNK_SILENCE_SECONDS = "voice_chunk_silence_seconds";
     public static final String PREF_VOICE_SILENCE_THRESHOLD = "voice_silence_threshold";
     public static final String PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS = "voice_new_paragraph_silence_seconds";

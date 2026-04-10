@@ -164,7 +164,7 @@ object Defaults {
     const val PREF_REMOVE_REDUNDANT_POPUPS = false
     const val PREF_SPACE_BAR_TEXT = ""
     const val PREF_TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss"
-    const val PREF_DEEPGRAM_API_KEY = ""
+    const val PREF_SPEECHMATICS_API_KEY = ""
     const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 1
     const val PREF_VOICE_SILENCE_THRESHOLD = 220
     const val PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS = 10

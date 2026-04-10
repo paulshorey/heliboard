@@ -219,7 +219,7 @@
     <string name="backup_restored">Backup restored</string>
     <!-- Preferences item for format for timestamp keycode -->
     <string name="timestamp_format_title">Format for timestamp key</string>
-    <!-- Voice Input (Deepgram transcription) settings -->
+    <!-- Voice Input (Speechmatics transcription) settings -->
     <string name="settings_screen_setup_app">Setup this app</string>
     <string name="settings_screen_transcription">Transcription</string>
     <!-- Settings screen showing saved standalone fullapp edits and archived history -->
@@ -249,8 +249,8 @@
     <string name="fullapp_drafts_ime_options">IME options: 0x%s</string>
     <!-- Private IME options label in the fullapp drafts screen -->
     <string name="fullapp_drafts_private_ime_options">Private IME options: %s</string>
-    <string name="deepgram_api_key_title">Deepgram API Key</string>
-    <string name="deepgram_api_key_summary">API key for voice transcription (Nova-3). Get from console.deepgram.com</string>
+    <string name="speechmatics_api_key_title">Speechmatics API Key</string>
+    <string name="speechmatics_api_key_summary">API key for voice transcription. Get from portal.speechmatics.com</string>
     <string name="voice_chunk_silence_seconds_title">Chunk silence duration (seconds)</string>
     <string name="voice_silence_threshold_title">Silence threshold (RMS loudness)</string>
     <string name="voice_new_paragraph_silence_seconds_title">New paragraph silence duration (seconds)</string>
