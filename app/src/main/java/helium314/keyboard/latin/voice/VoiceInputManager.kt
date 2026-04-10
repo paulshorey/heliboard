@@ -55,7 +55,7 @@ class VoiceInputManager(private val context: Context) {
         fun onStateChanged(state: State)
 
         /** A transcript unit was finalized — process and insert this text. */
-        fun onTranscriptionResult(text: String)
+        fun onTranscriptionResult(text: String, attachesToPrevious: Boolean)
 
         /** Voice processing is actively running (transcripts are pending delivery). */
         fun onProcessingStarted()
@@ -80,7 +80,8 @@ class VoiceInputManager(private val context: Context) {
 
     private data class PendingTranscript(
         val sessionId: Long,
-        val text: String
+        val text: String,
+        val attachesToPrevious: Boolean
     )
 
     private val voiceRecorder = VoiceRecorder(context)
@@ -354,7 +355,8 @@ class VoiceInputManager(private val context: Context) {
             languageTag = getCurrentSpeechmaticsLanguage(),
             maxDelaySeconds = speechmaticsConfig.maxDelaySeconds,
             removeDisfluencies = speechmaticsConfig.removeDisfluencies,
-            endOfUtteranceSilenceTriggerSeconds = speechmaticsConfig.endOfUtteranceSilenceSeconds
+            endOfUtteranceSilenceTriggerSeconds = speechmaticsConfig.endOfUtteranceSilenceSeconds,
+            punctuationSensitivity = speechmaticsConfig.punctuationSensitivity
         )
         streamSessionId = sessionId
         isStreamingConnecting = true
@@ -382,9 +384,9 @@ class VoiceInputManager(private val context: Context) {
                     }
                 }
 
-                override fun onTranscriptionResult(text: String) {
+                override fun onTranscriptionResult(segment: TranscriptSegment) {
                     if (sessionId != activeSessionId) return
-                    enqueueTranscript(text, sessionId)
+                    enqueueTranscript(segment, sessionId)
                 }
 
                 override fun onStreamError(error: String) {
@@ -475,25 +477,41 @@ class VoiceInputManager(private val context: Context) {
         }
     }
 
-    private fun enqueueTranscript(text: String, sessionId: Long) {
+    private fun enqueueTranscript(segment: TranscriptSegment, sessionId: Long) {
         if (sessionId != activeSessionId) {
             Log.i(TAG, "Dropping transcript from stale session $sessionId")
             return
         }
-        val normalized = text.trim()
+        val normalized = segment.text.trim()
         if (normalized.isEmpty()) return
 
         while (pendingTranscripts.size >= MAX_PENDING_TRANSCRIPTS) {
             val oldest = pendingTranscripts.removeFirstOrNull()
             val secondOldest = pendingTranscripts.removeFirstOrNull()
-            val merged = mergeTranscriptText(oldest?.text, secondOldest?.text)
+            val merged = mergeTranscriptText(
+                first = oldest?.text,
+                second = secondOldest?.text,
+                secondAttachesToPrevious = secondOldest?.attachesToPrevious ?: false
+            )
             val mergedSessionId = secondOldest?.sessionId ?: oldest?.sessionId ?: sessionId
             if (merged.isNotEmpty()) {
-                pendingTranscripts.addFirst(PendingTranscript(mergedSessionId, merged))
+                pendingTranscripts.addFirst(
+                    PendingTranscript(
+                        sessionId = mergedSessionId,
+                        text = merged,
+                        attachesToPrevious = oldest?.attachesToPrevious ?: false
+                    )
+                )
             }
             Log.w(TAG, "Pending transcript queue full; coalesced oldest entries")
         }
-        pendingTranscripts.addLast(PendingTranscript(sessionId, normalized))
+        pendingTranscripts.addLast(
+            PendingTranscript(
+                sessionId = sessionId,
+                text = normalized,
+                attachesToPrevious = segment.attachesToPrevious
+            )
+        )
         processNextTranscript()
     }
 
@@ -512,7 +530,7 @@ class VoiceInputManager(private val context: Context) {
                     listener?.onProcessingStarted()
                     notifiedProcessingStarted = true
                 }
-                listener?.onTranscriptionResult(pending.text)
+                listener?.onTranscriptionResult(pending.text, pending.attachesToPrevious)
             }
         } finally {
             isDispatchingTranscripts = false
@@ -532,12 +550,18 @@ class VoiceInputManager(private val context: Context) {
         }
     }
 
-    private fun mergeTranscriptText(first: String?, second: String?): String {
+    private fun mergeTranscriptText(
+        first: String?,
+        second: String?,
+        secondAttachesToPrevious: Boolean
+    ): String {
         val left = first.orEmpty()
         val right = second.orEmpty()
         if (left.isEmpty()) return right
         if (right.isEmpty()) return left
-        val needsSpace = !left.last().isWhitespace() && !right.first().isWhitespace()
+        val needsSpace = !secondAttachesToPrevious &&
+            !left.last().isWhitespace() &&
+            !right.first().isWhitespace()
         return if (needsSpace) "$left $right" else left + right
     }
 
@@ -755,7 +779,8 @@ class VoiceInputManager(private val context: Context) {
                 "autoStopSilence=${autoStopSilenceMs}ms, " +
                 "speechmaticsMaxDelay=${speechmaticsConfig.maxDelaySeconds}s, " +
                 "speechmaticsEou=${speechmaticsConfig.endOfUtteranceSilenceSeconds}s, " +
-                "speechmaticsDisfluencies=${speechmaticsConfig.removeDisfluencies}"
+                "speechmaticsDisfluencies=${speechmaticsConfig.removeDisfluencies}, " +
+                "speechmaticsPunctuationSensitivity=${speechmaticsConfig.punctuationSensitivity}"
         )
     }
 

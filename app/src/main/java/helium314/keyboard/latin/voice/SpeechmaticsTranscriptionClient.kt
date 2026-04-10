@@ -23,12 +23,19 @@ internal sealed interface SpeechmaticsServerEvent {
     data class AudioAdded(val sequenceNumber: Int) : SpeechmaticsServerEvent
     data class FinalTranscript(
         val transcript: String,
+        val attachesToPrevious: Boolean,
         val startTime: Double,
         val endTime: Double
     ) : SpeechmaticsServerEvent
     data class Error(val description: String) : SpeechmaticsServerEvent
+    data object EndOfUtterance : SpeechmaticsServerEvent
     data object EndOfTranscript : SpeechmaticsServerEvent
 }
+
+data class TranscriptSegment(
+    val text: String,
+    val attachesToPrevious: Boolean
+)
 
 /**
  * Client for Speechmatics realtime transcription over WebSocket.
@@ -52,14 +59,22 @@ class SpeechmaticsTranscriptionClient {
             val outputLocale: String?,
             val maxDelaySeconds: Double,
             val removeDisfluencies: Boolean,
-            val endOfUtteranceSilenceTriggerSeconds: Double
+            val endOfUtteranceSilenceTriggerSeconds: Double,
+            val punctuationSensitivity: Double
+        )
+
+        private const val CONSERVATIVE_PUNCTUATION_SENSITIVITY = 0.25
+        private val ATTACHES_TO_PREVIOUS_VALUES = setOf("previous", "both")
+        private val PUNCTUATION_ATTACHING_TO_PREVIOUS = setOf(
+            '.', ',', '!', '?', ':', ';', ')', ']', '}', '%'
         )
 
         internal fun buildSessionConfig(
             languageTag: String?,
             maxDelaySeconds: Double,
             removeDisfluencies: Boolean,
-            endOfUtteranceSilenceTriggerSeconds: Double
+            endOfUtteranceSilenceTriggerSeconds: Double,
+            punctuationSensitivity: Double
         ): SessionConfig {
             val normalizedLanguage = normalizeLanguage(languageTag)
             val normalizedOutputLocale = normalizeOutputLocale(languageTag, normalizedLanguage)
@@ -68,7 +83,8 @@ class SpeechmaticsTranscriptionClient {
                 outputLocale = normalizedOutputLocale,
                 maxDelaySeconds = maxDelaySeconds,
                 removeDisfluencies = removeDisfluencies && normalizedLanguage == "en",
-                endOfUtteranceSilenceTriggerSeconds = endOfUtteranceSilenceTriggerSeconds
+                endOfUtteranceSilenceTriggerSeconds = endOfUtteranceSilenceTriggerSeconds,
+                punctuationSensitivity = punctuationSensitivity.coerceIn(0.0, 1.0)
             )
         }
 
@@ -89,6 +105,13 @@ class SpeechmaticsTranscriptionClient {
                         put("max_delay", config.maxDelaySeconds)
                         put("max_delay_mode", "flexible")
                         put("enable_partials", false)
+                        put("enable_entities", true)
+                        put(
+                            "punctuation_overrides",
+                            JSONObject()
+                                .put("permitted_marks", org.json.JSONArray().put("all"))
+                                .put("sensitivity", config.punctuationSensitivity)
+                        )
                         if (config.outputLocale != null) {
                             put("output_locale", config.outputLocale)
                         }
@@ -124,12 +147,17 @@ class SpeechmaticsTranscriptionClient {
 
                 "AddTranscript" -> {
                     val metadata = json.optJSONObject("metadata")
-                    val transcript = metadata?.optString("transcript", "").orEmpty()
+                    val transcriptSegment = buildTranscriptSegment(
+                        results = json.optJSONArray("results"),
+                        fallbackTranscript = metadata?.optString("transcript", "").orEmpty()
+                    )
+                    val transcript = transcriptSegment?.text.orEmpty()
                     if (transcript.isBlank()) {
                         null
                     } else {
                         SpeechmaticsServerEvent.FinalTranscript(
                             transcript = transcript,
+                            attachesToPrevious = transcriptSegment?.attachesToPrevious ?: false,
                             startTime = metadata?.optDouble("start_time", -1.0) ?: -1.0,
                             endTime = metadata?.optDouble("end_time", -1.0) ?: -1.0
                         )
@@ -137,10 +165,80 @@ class SpeechmaticsTranscriptionClient {
                 }
 
                 "Error" -> SpeechmaticsServerEvent.Error(buildServerErrorDescription(json))
-                "EndOfUtterance" -> null
+                "EndOfUtterance" -> SpeechmaticsServerEvent.EndOfUtterance
                 "EndOfTranscript" -> SpeechmaticsServerEvent.EndOfTranscript
                 else -> null
             }
+        }
+
+        private fun buildTranscriptSegment(
+            results: org.json.JSONArray?,
+            fallbackTranscript: String
+        ): TranscriptSegment? {
+            if (results == null || results.length() == 0) {
+                val normalizedFallback = fallbackTranscript.trim()
+                return if (normalizedFallback.isBlank()) {
+                    null
+                } else {
+                    TranscriptSegment(
+                        text = normalizedFallback,
+                        attachesToPrevious = startsWithAttachingPunctuation(normalizedFallback)
+                    )
+                }
+            }
+
+            val builder = StringBuilder()
+            var attachesToPrevious = false
+
+            for (index in 0 until results.length()) {
+                val result = results.optJSONObject(index) ?: continue
+                val token = result.optJSONArray("alternatives")
+                    ?.optJSONObject(0)
+                    ?.optString("content", "")
+                    .orEmpty()
+                if (token.isBlank()) continue
+
+                val attachesTo = result.optString("attaches_to", "none")
+                if (builder.isEmpty()) {
+                    attachesToPrevious = attachesTo in ATTACHES_TO_PREVIOUS_VALUES ||
+                        startsWithAttachingPunctuation(token)
+                    builder.append(token)
+                    continue
+                }
+
+                if (shouldInsertSpaceBeforeToken(builder, token, attachesTo)) {
+                    builder.append(' ')
+                }
+                builder.append(token)
+            }
+
+            val normalized = builder.toString().trim()
+            return if (normalized.isBlank()) {
+                null
+            } else {
+                TranscriptSegment(
+                    text = normalized,
+                    attachesToPrevious = attachesToPrevious
+                )
+            }
+        }
+
+        private fun shouldInsertSpaceBeforeToken(
+            builder: StringBuilder,
+            token: String,
+            attachesTo: String
+        ): Boolean {
+            if (builder.isEmpty()) return false
+            if (builder.last().isWhitespace()) return false
+            if (token.firstOrNull()?.isWhitespace() == true) return false
+            if (attachesTo in ATTACHES_TO_PREVIOUS_VALUES) return false
+            if (startsWithAttachingPunctuation(token)) return false
+            return true
+        }
+
+        private fun startsWithAttachingPunctuation(text: String): Boolean {
+            val first = text.firstOrNull() ?: return false
+            return first in PUNCTUATION_ATTACHING_TO_PREVIOUS
         }
 
         private fun buildServerErrorDescription(json: JSONObject): String {
@@ -205,7 +303,7 @@ class SpeechmaticsTranscriptionClient {
         fun onStreamReady()
 
         /** Finalized transcription text from Speechmatics AddTranscript events. */
-        fun onTranscriptionResult(text: String)
+        fun onTranscriptionResult(segment: TranscriptSegment)
 
         /** Streaming failed and this stream can no longer be used. */
         fun onStreamError(error: String)
@@ -460,7 +558,12 @@ class SpeechmaticsTranscriptionClient {
                     "VOICE_STEP_4 Speechmatics final transcript (${event.transcript.length} chars)"
                 )
                 postIfCurrent(connectionToken) {
-                    callback?.onTranscriptionResult(event.transcript)
+                    callback?.onTranscriptionResult(
+                        TranscriptSegment(
+                            text = event.transcript,
+                            attachesToPrevious = event.attachesToPrevious
+                        )
+                    )
                 }
             }
 
@@ -476,6 +579,10 @@ class SpeechmaticsTranscriptionClient {
                     clearFinalizeCloseTimer()
                     webSocket?.close(1000, "client_stop")
                 }
+            }
+
+            SpeechmaticsServerEvent.EndOfUtterance -> {
+                Log.i(TAG, "Speechmatics end-of-utterance received")
             }
         }
     }

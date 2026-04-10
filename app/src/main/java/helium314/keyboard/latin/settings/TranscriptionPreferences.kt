@@ -9,16 +9,21 @@ object TranscriptionPreferences {
     private const val MAX_SPEECHMATICS_MAX_DELAY_TENTHS = 40
     private const val MIN_SPEECHMATICS_END_OF_UTTERANCE_MS = 0
     private const val MAX_SPEECHMATICS_END_OF_UTTERANCE_MS = 2000
+    private const val MIN_PUNCTUATION_SENSITIVITY_PERCENT = 0
+    private const val MAX_PUNCTUATION_SENSITIVITY_PERCENT = 100
     const val DEFAULT_MAX_DELAY_SECONDS = Defaults.PREF_SPEECHMATICS_MAX_DELAY_MILLIS / 1000.0
     const val DEFAULT_END_OF_UTTERANCE_SILENCE_TRIGGER_SECONDS =
         Defaults.PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS / 1000.0
     const val DEFAULT_REMOVE_DISFLUENCIES = Defaults.PREF_SPEECHMATICS_REMOVE_DISFLUENCIES
+    const val DEFAULT_PUNCTUATION_SENSITIVITY =
+        Defaults.PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT / 100.0
 
     data class SpeechmaticsConfig(
         val apiKey: String,
         val maxDelaySeconds: Double,
         val endOfUtteranceSilenceSeconds: Double,
-        val removeDisfluencies: Boolean
+        val removeDisfluencies: Boolean,
+        val punctuationSensitivity: Double
     )
 
     fun readSpeechmaticsApiKey(prefs: SharedPreferences): String {
@@ -75,7 +80,14 @@ object TranscriptionPreferences {
             removeDisfluencies = prefs.getBoolean(
                 Settings.PREF_SPEECHMATICS_REMOVE_DISFLUENCIES,
                 Defaults.PREF_SPEECHMATICS_REMOVE_DISFLUENCIES
-            )
+            ),
+            punctuationSensitivity = prefs.getInt(
+                Settings.PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT,
+                Defaults.PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT
+            ).coerceIn(
+                MIN_PUNCTUATION_SENSITIVITY_PERCENT,
+                MAX_PUNCTUATION_SENSITIVITY_PERCENT
+            ) / 100.0
         )
     }
 
@@ -109,6 +121,18 @@ object TranscriptionPreferences {
         }
     }
 
+    fun writeSpeechmaticsPunctuationSensitivityPercent(prefs: SharedPreferences, value: Int) {
+        prefs.edit {
+            putInt(
+                Settings.PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT,
+                value.coerceIn(
+                    MIN_PUNCTUATION_SENSITIVITY_PERCENT,
+                    MAX_PUNCTUATION_SENSITIVITY_PERCENT
+                )
+            )
+        }
+    }
+
     fun readSpeechmaticsMaxDelaySeconds(prefs: SharedPreferences): Double {
         return readSpeechmaticsConfig(prefs).maxDelaySeconds
     }
@@ -119,6 +143,10 @@ object TranscriptionPreferences {
 
     fun readSpeechmaticsRemoveDisfluencies(prefs: SharedPreferences): Boolean {
         return readSpeechmaticsConfig(prefs).removeDisfluencies
+    }
+
+    fun readSpeechmaticsPunctuationSensitivity(prefs: SharedPreferences): Double {
+        return readSpeechmaticsConfig(prefs).punctuationSensitivity
     }
 
     fun sanitizeSpeechmaticsMaxDelaySeconds(value: Double): Double {

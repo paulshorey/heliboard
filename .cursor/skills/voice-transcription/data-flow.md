@@ -5,9 +5,9 @@ End-to-end voice transcription pipeline: local capture, Speechmatics realtime st
 ## Overview
 
 1. **VoiceRecorder** captures PCM16 audio locally; silence detection drives paragraph breaks and auto-stop.
-2. **SpeechmaticsTranscriptionClient** opens the realtime websocket, sends `StartRecognition`, streams binary PCM frames, tracks `AudioAdded` acknowledgements, can request `ForceEndOfUtterance`, and surfaces finalized `AddTranscript` text.
-3. **VoiceInputManager** buffers audio until the stream is ready, retries broken sessions, derives a provider config from preferences + current subtype locale, queues finalized transcript spans in FIFO order, and performs graceful `EndOfStream` shutdown.
-4. **LatinIME** inserts each finalized transcript immediately at the current caret position through `InputConnection`.
+2. **SpeechmaticsTranscriptionClient** opens the realtime websocket, sends `StartRecognition`, streams binary PCM frames, tracks `AudioAdded` acknowledgements, can request `ForceEndOfUtterance`, reconstructs finalized transcript text from tokenized `results`, and surfaces finalized transcript segments.
+3. **VoiceInputManager** buffers audio until the stream is ready, retries broken sessions, derives a provider config from preferences + current subtype locale, queues finalized transcript segments in FIFO order, and performs graceful `EndOfStream` shutdown.
+4. **LatinIME** inserts each finalized transcript immediately at the current caret position through `InputConnection`, restoring a leading space only when the new segment is a continuation of previous text rather than punctuation.
 
 ## Architecture
 
@@ -40,15 +40,15 @@ WebSocket client for Speechmatics realtime transcription.
 - **Transport**: Binary PCM frames over the socket
 - **Acks**: Tracks `AudioAdded.seq_no` so `EndOfStream(last_seq_no=...)` can be sent safely on stop
 - **Turn flush**: Sends `ForceEndOfUtterance` before `EndOfStream` during graceful stop to help flush the tail transcript
-- **Output**: Finalized `AddTranscript.metadata.transcript` spans delivered in stream order
+- **Output**: Rebuilds finalized spans from Speechmatics `results[]` tokens so spacing and punctuation attachment follow `attaches_to`
 
 ### VoiceInputManager.kt
 Orchestrates recording, Speechmatics streaming, and ordered transcript delivery.
 - **State machine**: IDLE → RECORDING ↔ PAUSED → IDLE
 - **Buffered audio**: Holds PCM chunks until `RecognitionStarted`
-- **Transcript queue**: Preserves FIFO delivery for finalized Speechmatics spans
+- **Transcript queue**: Preserves FIFO delivery for finalized Speechmatics segments, including whether a segment attaches to previous text
 - **Reconnects**: Retries transient websocket failures while the recording session remains active
-- **Session config**: Maps current subtype locale to Speechmatics `language` and optional `output_locale`; sanitizes max-delay, end-of-utterance, and disfluency settings from preferences
+- **Session config**: Maps current subtype locale to Speechmatics `language` and optional `output_locale`; sanitizes max-delay, conservative punctuation sensitivity, and disfluency settings from preferences
 - **New Paragraph Timer**: Requests a paragraph break after long silence
 - **Graceful stop**: Waits for pending acks, sends `ForceEndOfUtterance`, then `EndOfStream`, and lets the tail transcript drain
 
@@ -91,9 +91,10 @@ Current subtype locale + transcription preferences
 ### 3. Transcript → Immediate Insert
 ```
 Finalized transcript span arrives
-    → SpeechmaticsTranscriptionClient.onTranscriptionResult(text)
-    → VoiceInputManager queues and delivers the text to LatinIME in FIFO order
-    → LatinIME trims empty spans and commits the finalized text at the caret via InputConnection.commitText(...)
+    → SpeechmaticsTranscriptionClient rebuilds text from token results
+    → attaches_to metadata determines whether a leading space is needed
+    → VoiceInputManager queues and delivers the segment to LatinIME in FIFO order
+    → LatinIME trims empty spans, conditionally restores a leading space, and commits the finalized text at the caret via InputConnection.commitText(...)
 ```
 
 ### 4. New Paragraph
@@ -126,7 +127,8 @@ PAUSED     → User taps pause  → RECORDING (resume)
 ### Settings (TranscriptionScreen.kt)
 - **Speechmatics API Key**: Required for transcription
 - **Final transcript delay**: Upper bound for Speechmatics finalization latency
-- **End of utterance trigger**: Server-side silence duration before Speechmatics finalizes an utterance
+- **Punctuation sensitivity**: Lower values make Speechmatics more conservative about inserting punctuation
+- **End of utterance trigger**: Server-side silence duration before Speechmatics finalizes an utterance (disabled by default for dictation)
 - **Remove disfluencies**: Removes English hesitation sounds like “um” and “uh”
 - **Chunk Silence Duration**: Silence window before detecting a speech boundary
 - **Silence Threshold**: RMS threshold floor for silence/speech detection

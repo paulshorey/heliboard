@@ -37,14 +37,15 @@ All source files live under `app/src/main/java/helium314/keyboard/latin/voice/` 
 3. `VoiceInputManager` buffers chunks until Speechmatics sends `RecognitionStarted`
 4. Chunks stream as binary PCM16 frames; Speechmatics replies with `AudioAdded` sequence acks
 5. Final transcript spans arrive as `AddTranscript` messages
-6. `VoiceInputManager` delivers them in FIFO order to `LatinIME`
-7. `LatinIME` inserts each finalized span with `commitText(...)`
+6. `SpeechmaticsTranscriptionClient` rebuilds span text from token results so spacing and punctuation attachment stay correct across finalized chunks
+7. `VoiceInputManager` delivers them in FIFO order to `LatinIME`
+8. `LatinIME` inserts each finalized span with `commitText(...)`, restoring a leading space only when the provider marks the span as a continuation
 
 On graceful stop, the client waits for all sent audio to be acknowledged, sends `ForceEndOfUtterance`, then `EndOfStream(last_seq_no=...)`, and only closes after the tail transcript is flushed or a close timeout expires.
 
 ## Transcript Handling
 
-Speechmatics smart formatting is used for finalized transcript text. `output_locale` is supplied for English locales when available so spelling stays consistent, and optional English disfluency removal can be enabled from settings. HeliBoard does not run a second provider-specific normalization pass before insertion; it trims empty spans and commits the finalized text exactly once at the caret.
+Speechmatics smart formatting is used for finalized transcript text. `output_locale` is supplied for English locales when available so spelling stays consistent, optional English disfluency removal can be enabled from settings, and punctuation is configured conservatively for dictation. HeliBoard rebuilds finalized text from Speechmatics token results so word spacing and punctuation attachment survive chunk boundaries, then commits the finalized text exactly once at the caret.
 
 ## Paragraph Breaks
 

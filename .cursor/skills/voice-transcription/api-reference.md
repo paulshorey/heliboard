@@ -18,12 +18,13 @@ HeliBoard uses the Speechmatics **Realtime WebSocket** API (`wss://eu.rt.speechm
   "transcription_config": {
     "language": "en",
     "output_locale": "en-US",
-    "max_delay": 1.2,
+    "max_delay": 2.0,
     "max_delay_mode": "flexible",
     "enable_partials": false,
     "enable_entities": false,
-    "conversation_config": {
-      "end_of_utterance_silence_trigger": 0.9
+    "punctuation_overrides": {
+      "permitted_marks": ["all"],
+      "sensitivity": 0.2
     },
     "transcript_filtering_config": {
       "remove_disfluencies": true
@@ -57,7 +58,19 @@ HeliBoard uses the Speechmatics **Realtime WebSocket** API (`wss://eu.rt.speechm
     "start_time": 0.0,
     "end_time": 1.2,
     "transcript": "hello world"
-  }
+  },
+  "results": [
+    {
+      "type": "word",
+      "attaches_to": "none",
+      "alternatives": [{"content": "hello"}]
+    },
+    {
+      "type": "word",
+      "attaches_to": "previous",
+      "alternatives": [{"content": "."}]
+    }
+  ]
 }
 ```
 
@@ -96,6 +109,7 @@ HeliBoard uses the Speechmatics **Realtime WebSocket** API (`wss://eu.rt.speechm
 | `PREF_SPEECHMATICS_MAX_DELAY_MILLIS` | Int | Final transcript latency target in milliseconds |
 | `PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS` | Int | Speechmatics server-side end-of-utterance trigger in milliseconds |
 | `PREF_SPEECHMATICS_REMOVE_DISFLUENCIES` | Boolean | Removes English hesitation words like "um" and "uh" |
+| `PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT` | Int | Speechmatics punctuation sensitivity as a percentage |
 | `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Silence window before treating speech as paused |
 | `PREF_VOICE_SILENCE_THRESHOLD` | Int | RMS threshold used for silence detection |
 | `PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS` | Int | Silence duration before inserting a new paragraph |

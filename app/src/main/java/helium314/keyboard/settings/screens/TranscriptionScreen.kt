@@ -69,6 +69,9 @@ fun TranscriptionScreen(
     var speechmaticsRemoveDisfluencies by remember {
         mutableStateOf(TranscriptionPreferences.readSpeechmaticsRemoveDisfluencies(prefs))
     }
+    var speechmaticsPunctuationSensitivity by remember {
+        mutableStateOf(TranscriptionPreferences.readSpeechmaticsPunctuationSensitivity(prefs).toString())
+    }
     var chunkSilenceSeconds by remember {
         mutableStateOf(
             prefs.getInt(
@@ -181,6 +184,21 @@ fun TranscriptionScreen(
                         speechmaticsRemoveDisfluencies = checked
                         TranscriptionPreferences.writeSpeechmaticsRemoveDisfluencies(prefs, checked)
                     }
+                )
+                InlineTextField(
+                    label = stringResource(R.string.speechmatics_punctuation_sensitivity_title),
+                    value = speechmaticsPunctuationSensitivity,
+                    onValueChange = { newValue ->
+                        speechmaticsPunctuationSensitivity = newValue
+                        newValue.toDoubleOrNull()?.let { parsed ->
+                            TranscriptionPreferences.writeSpeechmaticsPunctuationSensitivityPercent(
+                                prefs,
+                                (parsed.coerceIn(0.0, 1.0) * 100).toInt()
+                            )
+                        }
+                    },
+                    minLines = 1,
+                    maxLines = 1
                 )
                 InlineTextField(
                     label = stringResource(R.string.voice_chunk_silence_seconds_title),
