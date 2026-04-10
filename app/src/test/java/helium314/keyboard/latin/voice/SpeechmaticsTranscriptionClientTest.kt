@@ -6,7 +6,10 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import org.json.JSONObject
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class SpeechmaticsTranscriptionClientTest {
 
     @Test
