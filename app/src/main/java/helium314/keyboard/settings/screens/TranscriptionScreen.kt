@@ -72,6 +72,9 @@ fun TranscriptionScreen(
     var speechmaticsPunctuationSensitivity by remember {
         mutableStateOf(TranscriptionPreferences.readSpeechmaticsPunctuationSensitivity(prefs).toString())
     }
+    var speechmaticsDiarization by remember {
+        mutableStateOf(TranscriptionPreferences.readSpeechmaticsDiarization(prefs))
+    }
     var chunkSilenceSeconds by remember {
         mutableStateOf(
             prefs.getInt(
@@ -199,6 +202,15 @@ fun TranscriptionScreen(
                     },
                     minLines = 1,
                     maxLines = 1
+                )
+                BooleanSettingRow(
+                    label = stringResource(R.string.speechmatics_diarization_title),
+                    summary = stringResource(R.string.speechmatics_diarization_summary),
+                    checked = speechmaticsDiarization,
+                    onCheckedChange = { checked ->
+                        speechmaticsDiarization = checked
+                        TranscriptionPreferences.writeSpeechmaticsDiarization(prefs, checked)
+                    }
                 )
                 InlineTextField(
                     label = stringResource(R.string.voice_chunk_silence_seconds_title),

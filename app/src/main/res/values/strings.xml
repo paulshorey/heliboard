@@ -256,6 +256,8 @@
     <string name="speechmatics_remove_disfluencies_title">Remove English disfluencies</string>
     <string name="speechmatics_remove_disfluencies_summary">Removes fillers like um and uh before text is inserted. Speechmatics only supports this in English.</string>
     <string name="speechmatics_punctuation_sensitivity_title">Punctuation sensitivity (0.0-1.0)</string>
+    <string name="speechmatics_diarization_title">Speaker diarization</string>
+    <string name="speechmatics_diarization_summary">Identifies speakers and only transcribes the primary speaker. Helps ignore background voices.</string>
     <string name="voice_chunk_silence_seconds_title">Chunk silence duration (seconds)</string>
     <string name="voice_silence_threshold_title">Silence threshold (RMS loudness)</string>
     <string name="voice_new_paragraph_silence_seconds_title">New paragraph silence duration (seconds)</string>

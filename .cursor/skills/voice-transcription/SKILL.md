@@ -45,7 +45,16 @@ On graceful stop, the client waits for all sent audio to be acknowledged, sends 
 
 ## Transcript Handling
 
-Speechmatics smart formatting is used for finalized transcript text. `output_locale` is supplied for English locales when available so spelling stays consistent, optional English disfluency removal can be enabled from settings, and punctuation is configured conservatively for dictation. HeliBoard rebuilds finalized text from Speechmatics token results so word spacing and punctuation attachment survive chunk boundaries, then commits the finalized text exactly once at the caret.
+Speechmatics smart formatting is used for finalized transcript text. Key Speechmatics config features:
+- **operating_point**: `"enhanced"` for best accuracy
+- **output_locale**: Defaults to `en-US` for English (supports `en-GB`, `en-AU` when detected)
+- **diarization**: Speaker diarization with `prefer_current_speaker: true` and `max_speakers: 2`. Only the primary speaker (S1) is transcribed; other speakers are filtered out.
+- **additional_vocab**: Custom dictionary for proper nouns, brand names, technical terms with optional `sounds_like` pronunciations
+- **replacements**: Post-transcription word and regex replacements (e.g. brand name corrections, voice assistant trigger normalization)
+- **punctuation**: All marks permitted, sensitivity defaults to 0.5
+- **disfluency removal**: Optional removal of English hesitation words (um, uh, hmm)
+
+HeliBoard rebuilds finalized text from Speechmatics token results so word spacing and punctuation attachment survive chunk boundaries, then commits the finalized text exactly once at the caret.
 
 ## Paragraph Breaks
 

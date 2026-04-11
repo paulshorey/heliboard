@@ -53,6 +53,7 @@ class SpeechmaticsTranscriptionClient {
         private const val STREAMING_BASE_URL = "wss://eu.rt.speechmatics.com/v2/"
         private const val FINALIZE_CLOSE_GRACE_MS = 8_000L
         private const val DEFAULT_LANGUAGE = "en"
+        private const val DEFAULT_OUTPUT_LOCALE = "en-US"
 
         internal data class SessionConfig(
             val language: String,
@@ -60,10 +61,23 @@ class SpeechmaticsTranscriptionClient {
             val maxDelaySeconds: Double,
             val removeDisfluencies: Boolean,
             val endOfUtteranceSilenceTriggerSeconds: Double,
-            val punctuationSensitivity: Double
+            val punctuationSensitivity: Double,
+            val diarizationEnabled: Boolean,
+            val additionalVocab: List<VocabEntry>,
+            val replacements: List<ReplacementRule>,
+            val operatingPoint: String
         )
 
-        private const val CONSERVATIVE_PUNCTUATION_SENSITIVITY = 0.25
+        data class VocabEntry(
+            val content: String,
+            val soundsLike: List<String> = emptyList()
+        )
+
+        data class ReplacementRule(
+            val from: String,
+            val to: String
+        )
+
         private val ATTACHES_TO_PREVIOUS_VALUES = setOf("previous", "both")
         private val PUNCTUATION_ATTACHING_TO_PREVIOUS = setOf(
             '.', ',', '!', '?', ':', ';', ')', ']', '}', '%'
@@ -74,7 +88,11 @@ class SpeechmaticsTranscriptionClient {
             maxDelaySeconds: Double,
             removeDisfluencies: Boolean,
             endOfUtteranceSilenceTriggerSeconds: Double,
-            punctuationSensitivity: Double
+            punctuationSensitivity: Double,
+            diarizationEnabled: Boolean = false,
+            additionalVocab: List<VocabEntry> = defaultAdditionalVocab(),
+            replacements: List<ReplacementRule> = defaultReplacements(),
+            operatingPoint: String = "enhanced"
         ): SessionConfig {
             val normalizedLanguage = normalizeLanguage(languageTag)
             val normalizedOutputLocale = normalizeOutputLocale(languageTag, normalizedLanguage)
@@ -84,9 +102,28 @@ class SpeechmaticsTranscriptionClient {
                 maxDelaySeconds = maxDelaySeconds,
                 removeDisfluencies = removeDisfluencies && normalizedLanguage == "en",
                 endOfUtteranceSilenceTriggerSeconds = endOfUtteranceSilenceTriggerSeconds,
-                punctuationSensitivity = punctuationSensitivity.coerceIn(0.0, 1.0)
+                punctuationSensitivity = punctuationSensitivity.coerceIn(0.0, 1.0),
+                diarizationEnabled = diarizationEnabled,
+                additionalVocab = additionalVocab,
+                replacements = replacements,
+                operatingPoint = operatingPoint
             )
         }
+
+        internal fun defaultAdditionalVocab(): List<VocabEntry> = listOf(
+            VocabEntry("HeliBoard"),
+            VocabEntry("Speechmatics"),
+            VocabEntry("gnocchi", listOf("nyohki", "nokey", "nochi")),
+            VocabEntry("Kubernetes", listOf("koo-ber-net-eez")),
+            VocabEntry("API"),
+        )
+
+        internal fun defaultReplacements(): List<ReplacementRule> = listOf(
+            ReplacementRule("heli board", "HeliBoard"),
+            ReplacementRule("speechmatics", "Speechmatics"),
+            ReplacementRule("/^[Oo]kay google$/", "OK Google"),
+            ReplacementRule("/^[Hh]ey [Ss]iri$/", "Hey Siri"),
+        )
 
         internal fun buildStartRecognitionMessage(config: SessionConfig): String {
             val message = JSONObject()
@@ -106,6 +143,7 @@ class SpeechmaticsTranscriptionClient {
                         put("max_delay_mode", "flexible")
                         put("enable_partials", false)
                         put("enable_entities", true)
+                        put("operating_point", config.operatingPoint)
                         put(
                             "punctuation_overrides",
                             JSONObject()
@@ -115,12 +153,27 @@ class SpeechmaticsTranscriptionClient {
                         if (config.outputLocale != null) {
                             put("output_locale", config.outputLocale)
                         }
-                        if (config.removeDisfluencies) {
+                        if (config.diarizationEnabled) {
+                            put("diarization", "speaker")
                             put(
-                                "transcript_filtering_config",
-                                JSONObject().put("remove_disfluencies", true)
+                                "speaker_diarization_config",
+                                JSONObject()
+                                    .put("max_speakers", 2)
+                                    .put("prefer_current_speaker", true)
                             )
                         }
+                        if (config.additionalVocab.isNotEmpty()) {
+                            put("additional_vocab", buildAdditionalVocabJson(config.additionalVocab))
+                        }
+
+                        val filterConfig = buildTranscriptFilteringConfig(
+                            config.removeDisfluencies,
+                            config.replacements
+                        )
+                        if (filterConfig.length() > 0) {
+                            put("transcript_filtering_config", filterConfig)
+                        }
+
                         if (config.endOfUtteranceSilenceTriggerSeconds > 0.0) {
                             put(
                                 "conversation_config",
@@ -135,7 +188,49 @@ class SpeechmaticsTranscriptionClient {
             return message.toString()
         }
 
-        internal fun parseServerEvent(message: String): SpeechmaticsServerEvent? {
+        private fun buildAdditionalVocabJson(vocab: List<VocabEntry>): org.json.JSONArray {
+            val arr = org.json.JSONArray()
+            for (entry in vocab) {
+                if (entry.soundsLike.isEmpty()) {
+                    arr.put(entry.content)
+                } else {
+                    val obj = JSONObject()
+                        .put("content", entry.content)
+                        .put("sounds_like", org.json.JSONArray().apply {
+                            entry.soundsLike.forEach { put(it) }
+                        })
+                    arr.put(obj)
+                }
+            }
+            return arr
+        }
+
+        private fun buildTranscriptFilteringConfig(
+            removeDisfluencies: Boolean,
+            replacements: List<ReplacementRule>
+        ): JSONObject {
+            val config = JSONObject()
+            if (removeDisfluencies) {
+                config.put("remove_disfluencies", true)
+            }
+            if (replacements.isNotEmpty()) {
+                val arr = org.json.JSONArray()
+                for (rule in replacements) {
+                    arr.put(
+                        JSONObject()
+                            .put("from", rule.from)
+                            .put("to", rule.to)
+                    )
+                }
+                config.put("replacements", arr)
+            }
+            return config
+        }
+
+        internal fun parseServerEvent(
+            message: String,
+            primarySpeaker: String? = null
+        ): SpeechmaticsServerEvent? {
             val json = JSONObject(message)
             return when (json.optString("message")) {
                 "RecognitionStarted" -> SpeechmaticsServerEvent.RecognitionStarted
@@ -149,7 +244,8 @@ class SpeechmaticsTranscriptionClient {
                     val metadata = json.optJSONObject("metadata")
                     val transcriptSegment = buildTranscriptSegment(
                         results = json.optJSONArray("results"),
-                        fallbackTranscript = metadata?.optString("transcript", "").orEmpty()
+                        fallbackTranscript = metadata?.optString("transcript", "").orEmpty(),
+                        primarySpeaker = primarySpeaker
                     )
                     val transcript = transcriptSegment?.text.orEmpty()
                     if (transcript.isBlank()) {
@@ -173,7 +269,8 @@ class SpeechmaticsTranscriptionClient {
 
         private fun buildTranscriptSegment(
             results: org.json.JSONArray?,
-            fallbackTranscript: String
+            fallbackTranscript: String,
+            primarySpeaker: String? = null
         ): TranscriptSegment? {
             if (results == null || results.length() == 0) {
                 val normalizedFallback = fallbackTranscript.trim()
@@ -192,11 +289,16 @@ class SpeechmaticsTranscriptionClient {
 
             for (index in 0 until results.length()) {
                 val result = results.optJSONObject(index) ?: continue
-                val token = result.optJSONArray("alternatives")
-                    ?.optJSONObject(0)
-                    ?.optString("content", "")
-                    .orEmpty()
+                val alt = result.optJSONArray("alternatives")?.optJSONObject(0) ?: continue
+                val token = alt.optString("content", "")
                 if (token.isBlank()) continue
+
+                if (primarySpeaker != null) {
+                    val speaker = alt.optString("speaker", "")
+                    if (speaker.isNotEmpty() && speaker != primarySpeaker && speaker != "UU") {
+                        continue
+                    }
+                }
 
                 val attachesTo = result.optString("attaches_to", "none")
                 if (builder.isEmpty()) {
@@ -281,19 +383,20 @@ class SpeechmaticsTranscriptionClient {
         }
 
         private fun normalizeOutputLocale(languageTag: String?, normalizedLanguage: String): String? {
+            if (normalizedLanguage != "en") {
+                return null
+            }
+
             val normalizedTag = languageTag
                 ?.trim()
                 ?.replace('_', '-')
                 .orEmpty()
-            if (normalizedLanguage != "en") {
-                return null
-            }
 
             val locale = Locale.forLanguageTag(normalizedTag)
             val region = locale.country.orEmpty().uppercase(Locale.US)
             return when (region) {
                 "GB", "US", "AU" -> "en-$region"
-                else -> null
+                else -> DEFAULT_OUTPUT_LOCALE
             }
         }
     }
@@ -357,6 +460,12 @@ class SpeechmaticsTranscriptionClient {
     @Volatile
     private var forceEndOfUtteranceSent = false
 
+    @Volatile
+    private var diarizationEnabled = false
+
+    @Volatile
+    private var primarySpeaker: String? = null
+
     internal fun startStreaming(
         apiKey: String,
         sessionConfig: SessionConfig,
@@ -375,6 +484,8 @@ class SpeechmaticsTranscriptionClient {
         pendingAudioAcknowledgements = 0
         lastAcknowledgedSequenceNumber = -1
         forceEndOfUtteranceSent = false
+        diarizationEnabled = sessionConfig.diarizationEnabled
+        primarySpeaker = if (sessionConfig.diarizationEnabled) "S1" else null
         clearFinalizeCloseTimer()
         val request = Request.Builder()
             .url(STREAMING_BASE_URL)
@@ -386,7 +497,11 @@ class SpeechmaticsTranscriptionClient {
             "VOICE_STEP_3 opening Speechmatics realtime socket " +
                 "(language=${sessionConfig.language}, outputLocale=${sessionConfig.outputLocale ?: "default"}, " +
                 "max_delay=${sessionConfig.maxDelaySeconds}s, removeDisfluencies=${sessionConfig.removeDisfluencies}, " +
-                "eou=${sessionConfig.endOfUtteranceSilenceTriggerSeconds}s)"
+                "eou=${sessionConfig.endOfUtteranceSilenceTriggerSeconds}s, " +
+                "diarization=${sessionConfig.diarizationEnabled}, " +
+                "operating_point=${sessionConfig.operatingPoint}, " +
+                "vocab=${sessionConfig.additionalVocab.size}, " +
+                "replacements=${sessionConfig.replacements.size})"
         )
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
@@ -505,6 +620,8 @@ class SpeechmaticsTranscriptionClient {
         pendingAudioAcknowledgements = 0
         lastAcknowledgedSequenceNumber = -1
         forceEndOfUtteranceSent = false
+        diarizationEnabled = false
+        primarySpeaker = null
         val socket = webSocket
         webSocket = null
         if (socket != null) {
@@ -521,7 +638,7 @@ class SpeechmaticsTranscriptionClient {
 
     private fun handleMessage(connectionToken: Long, message: String) {
         val event = try {
-            parseServerEvent(message)
+            parseServerEvent(message, primarySpeaker)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to parse Speechmatics event: ${e.message}")
             null
