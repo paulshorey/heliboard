@@ -6,15 +6,18 @@ import android.os.Handler
 import android.os.Looper
 import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
+import helium314.keyboard.latin.settings.TranscriptionPreferences
+import helium314.keyboard.latin.settings.TranscriptionPreferences.SpeechmaticsConfig
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.prefs
+import java.util.Locale
 
 /**
  * Manages the voice input workflow:
  *
  * 1. Record audio locally via [VoiceRecorder] (starts instantly).
- * 2. Stream raw PCM chunks to Deepgram over WebSocket.
- * 3. Receive finalized transcript updates from Deepgram in stream order.
+ * 2. Stream raw PCM chunks to Speechmatics over WebSocket.
+ * 3. Receive finalized transcript updates from Speechmatics in stream order.
  * 4. Deliver transcript text to [VoiceInputListener.onTranscriptionResult].
  */
 class VoiceInputManager(private val context: Context) {
@@ -52,7 +55,7 @@ class VoiceInputManager(private val context: Context) {
         fun onStateChanged(state: State)
 
         /** A transcript unit was finalized — process and insert this text. */
-        fun onTranscriptionResult(text: String)
+        fun onTranscriptionResult(text: String, attachesToPrevious: Boolean)
 
         /** Voice processing is actively running (transcripts are pending delivery). */
         fun onProcessingStarted()
@@ -77,11 +80,12 @@ class VoiceInputManager(private val context: Context) {
 
     private data class PendingTranscript(
         val sessionId: Long,
-        val text: String
+        val text: String,
+        val attachesToPrevious: Boolean
     )
 
     private val voiceRecorder = VoiceRecorder(context)
-    private val transcriptionClient = DeepgramTranscriptionClient()
+    private val transcriptionClient = SpeechmaticsTranscriptionClient()
     private var listener: VoiceInputListener? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -89,11 +93,12 @@ class VoiceInputManager(private val context: Context) {
     private var activeSessionId = 0L
 
     // Local speech-boundary detection window used by VoiceRecorder callbacks
-    // (paragraph/auto-stop behavior). Deepgram chunking/finalization is server-managed.
+    // (paragraph/auto-stop behavior). Speechmatics transcript segmentation is server-managed.
     private var chunkSilenceDurationMs = Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS * 1000L
     private var chunkSilenceThreshold = Defaults.PREF_VOICE_SILENCE_THRESHOLD.toDouble()
     private var newParagraphDelayMs = Defaults.PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS * 1000L
     private var autoStopSilenceMs = Defaults.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS * 1000L
+    private var speechmaticsConfig = TranscriptionPreferences.readSpeechmaticsConfig(context.prefs())
 
     // Streaming state
     private var streamSessionId = 0L
@@ -165,7 +170,7 @@ class VoiceInputManager(private val context: Context) {
     }
 
     /**
-     * Start recording. Microphone starts immediately; Deepgram stream connects in parallel.
+     * Start recording. Microphone starts immediately; Speechmatics connects in parallel.
      */
     fun startRecording(): Boolean {
         if (currentState != State.IDLE) {
@@ -180,7 +185,7 @@ class VoiceInputManager(private val context: Context) {
 
         val apiKey = getApiKey()
         if (apiKey.isBlank()) {
-            listener?.onError("Deepgram API key not configured. Please set it in Settings.")
+            listener?.onError("Speechmatics API key not configured. Please set it in Settings.")
             return false
         }
 
@@ -346,7 +351,13 @@ class VoiceInputManager(private val context: Context) {
 
     private fun startStreamingSession(sessionId: Long, apiKey: String, isReconnect: Boolean = false) {
         if (sessionId != activeSessionId) return
-        val language = getCurrentLanguage()
+        val sessionConfig = SpeechmaticsTranscriptionClient.buildSessionConfig(
+            languageTag = getCurrentSpeechmaticsLanguage(),
+            maxDelaySeconds = speechmaticsConfig.maxDelaySeconds,
+            removeDisfluencies = speechmaticsConfig.removeDisfluencies,
+            endOfUtteranceSilenceTriggerSeconds = speechmaticsConfig.endOfUtteranceSilenceSeconds,
+            punctuationSensitivity = speechmaticsConfig.punctuationSensitivity
+        )
         streamSessionId = sessionId
         isStreamingConnecting = true
         isStreamingReady = false
@@ -357,8 +368,8 @@ class VoiceInputManager(private val context: Context) {
 
         transcriptionClient.startStreaming(
             apiKey = apiKey,
-            language = language,
-            callback = object : DeepgramTranscriptionClient.StreamingCallback {
+            sessionConfig = sessionConfig,
+            callback = object : SpeechmaticsTranscriptionClient.StreamingCallback {
                 override fun onStreamReady() {
                     if (sessionId != activeSessionId) return
                     cancelPendingReconnect()
@@ -373,9 +384,9 @@ class VoiceInputManager(private val context: Context) {
                     }
                 }
 
-                override fun onTranscriptionResult(text: String) {
+                override fun onTranscriptionResult(segment: TranscriptSegment) {
                     if (sessionId != activeSessionId) return
-                    enqueueTranscript(text, sessionId)
+                    enqueueTranscript(segment, sessionId)
                 }
 
                 override fun onStreamError(error: String) {
@@ -466,25 +477,41 @@ class VoiceInputManager(private val context: Context) {
         }
     }
 
-    private fun enqueueTranscript(text: String, sessionId: Long) {
+    private fun enqueueTranscript(segment: TranscriptSegment, sessionId: Long) {
         if (sessionId != activeSessionId) {
             Log.i(TAG, "Dropping transcript from stale session $sessionId")
             return
         }
-        val normalized = text.trim()
+        val normalized = segment.text.trim()
         if (normalized.isEmpty()) return
 
         while (pendingTranscripts.size >= MAX_PENDING_TRANSCRIPTS) {
             val oldest = pendingTranscripts.removeFirstOrNull()
             val secondOldest = pendingTranscripts.removeFirstOrNull()
-            val merged = mergeTranscriptText(oldest?.text, secondOldest?.text)
+            val merged = mergeTranscriptText(
+                first = oldest?.text,
+                second = secondOldest?.text,
+                secondAttachesToPrevious = secondOldest?.attachesToPrevious ?: false
+            )
             val mergedSessionId = secondOldest?.sessionId ?: oldest?.sessionId ?: sessionId
             if (merged.isNotEmpty()) {
-                pendingTranscripts.addFirst(PendingTranscript(mergedSessionId, merged))
+                pendingTranscripts.addFirst(
+                    PendingTranscript(
+                        sessionId = mergedSessionId,
+                        text = merged,
+                        attachesToPrevious = oldest?.attachesToPrevious ?: false
+                    )
+                )
             }
             Log.w(TAG, "Pending transcript queue full; coalesced oldest entries")
         }
-        pendingTranscripts.addLast(PendingTranscript(sessionId, normalized))
+        pendingTranscripts.addLast(
+            PendingTranscript(
+                sessionId = sessionId,
+                text = normalized,
+                attachesToPrevious = segment.attachesToPrevious
+            )
+        )
         processNextTranscript()
     }
 
@@ -503,7 +530,7 @@ class VoiceInputManager(private val context: Context) {
                     listener?.onProcessingStarted()
                     notifiedProcessingStarted = true
                 }
-                listener?.onTranscriptionResult(pending.text)
+                listener?.onTranscriptionResult(pending.text, pending.attachesToPrevious)
             }
         } finally {
             isDispatchingTranscripts = false
@@ -523,12 +550,18 @@ class VoiceInputManager(private val context: Context) {
         }
     }
 
-    private fun mergeTranscriptText(first: String?, second: String?): String {
+    private fun mergeTranscriptText(
+        first: String?,
+        second: String?,
+        secondAttachesToPrevious: Boolean
+    ): String {
         val left = first.orEmpty()
         val right = second.orEmpty()
         if (left.isEmpty()) return right
         if (right.isEmpty()) return left
-        val needsSpace = !left.last().isWhitespace() && !right.first().isWhitespace()
+        val needsSpace = !secondAttachesToPrevious &&
+            !left.last().isWhitespace() &&
+            !right.first().isWhitespace()
         return if (needsSpace) "$left $right" else left + right
     }
 
@@ -543,7 +576,7 @@ class VoiceInputManager(private val context: Context) {
         isStreamingConnecting = false
 
         if (currentState == State.PAUSED) {
-            Log.i(TAG, "Deepgram stream disconnected while paused — waiting for resume")
+            Log.i(TAG, "Speechmatics stream disconnected while paused — waiting for resume")
             notifyProcessingIdleIfDrained()
             return
         }
@@ -568,7 +601,7 @@ class VoiceInputManager(private val context: Context) {
         // same invalid session repeatedly.
         if (isUnrecoverableError(error)) {
             pendingAudioChunks.clear()
-            val message = error ?: "Deepgram stream rejected"
+            val message = error ?: "Speechmatics stream rejected"
             Log.e(TAG, "Unrecoverable stream error — stopping recording: $message")
             listener?.onError(message)
             stopRecordingInternal(cancelPending = true)
@@ -583,7 +616,7 @@ class VoiceInputManager(private val context: Context) {
         }
 
         pendingAudioChunks.clear()
-        val message = error ?: "Deepgram stream closed"
+        val message = error ?: "Speechmatics stream closed"
         Log.e(TAG, "Stream disconnected unrecoverably: $message")
         listener?.onError(message)
         stopRecordingInternal(cancelPending = true)
@@ -593,6 +626,8 @@ class VoiceInputManager(private val context: Context) {
         if (error == null) return false
         val lower = error.lowercase()
         return (lower.contains("invalid") && lower.contains("api key")) ||
+            lower.contains("unauthorized") ||
+            lower.contains("quota_exceeded") ||
             lower.contains("connection rejected")
     }
 
@@ -606,7 +641,7 @@ class VoiceInputManager(private val context: Context) {
         val message = if (allowWhileStopping) {
             "Final voice segment could not be transcribed completely"
         } else {
-            "Deepgram stream unavailable: $reason"
+            "Speechmatics stream unavailable: $reason"
         }
         Log.e(TAG, message)
         listener?.onError(message)
@@ -628,7 +663,7 @@ class VoiceInputManager(private val context: Context) {
             return false
         }
         if (sessionApiKey.isBlank()) {
-            Log.e(TAG, "Cannot reconnect stream: missing Deepgram API key")
+            Log.e(TAG, "Cannot reconnect stream: missing Speechmatics API key")
             return false
         }
         cancelPendingReconnect()
@@ -637,7 +672,7 @@ class VoiceInputManager(private val context: Context) {
         isStreamingConnecting = true
         Log.w(
             TAG,
-            "Scheduling Deepgram reconnect in ${delayMs}ms " +
+            "Scheduling Speechmatics reconnect in ${delayMs}ms " +
                 "(attempt $streamReconnectAttempts/$MAX_STREAM_RECONNECT_ATTEMPTS, reason=$reason)"
         )
         val reconnectRunnable = Runnable {
@@ -680,7 +715,7 @@ class VoiceInputManager(private val context: Context) {
             pendingStreamConnectTimeoutRunnable = null
             if (sessionId != activeSessionId) return@Runnable
             if (!isStreamingConnecting || isStreamingReady || streamSessionId != sessionId) return@Runnable
-            val message = "Deepgram stream connection timed out"
+            val message = "Speechmatics stream connection timed out"
             Log.e(TAG, "$message after ${STREAM_CONNECT_TIMEOUT_MS}ms")
             // Ensure the stale socket lifecycle is torn down before reconnection handling.
             transcriptionClient.cancelAll()
@@ -729,6 +764,7 @@ class VoiceInputManager(private val context: Context) {
         newParagraphDelayMs = paragraphSilenceSeconds * 1000L
         autoStopSilenceMs = autoStopSilenceSeconds * 1000L
         chunkSilenceThreshold = silenceThreshold.toDouble()
+        speechmaticsConfig = TranscriptionPreferences.readSpeechmaticsConfig(prefs)
 
         voiceRecorder.updateSilenceConfig(
             silenceDurationMs = chunkSilenceDurationMs,
@@ -740,7 +776,11 @@ class VoiceInputManager(private val context: Context) {
             "Voice config loaded: localSpeechSilence=${chunkSilenceDurationMs}ms, " +
                 "silenceThreshold=${chunkSilenceThreshold}, " +
                 "newParagraphSilence=${newParagraphDelayMs}ms, " +
-                "autoStopSilence=${autoStopSilenceMs}ms"
+                "autoStopSilence=${autoStopSilenceMs}ms, " +
+                "speechmaticsMaxDelay=${speechmaticsConfig.maxDelaySeconds}s, " +
+                "speechmaticsEou=${speechmaticsConfig.endOfUtteranceSilenceSeconds}s, " +
+                "speechmaticsDisfluencies=${speechmaticsConfig.removeDisfluencies}, " +
+                "speechmaticsPunctuationSensitivity=${speechmaticsConfig.punctuationSensitivity}"
         )
     }
 
@@ -781,18 +821,39 @@ class VoiceInputManager(private val context: Context) {
 
     private fun getApiKey(): String {
         return try {
-            context.prefs().getString(Settings.PREF_DEEPGRAM_API_KEY, "") ?: ""
+            TranscriptionPreferences.readSpeechmaticsApiKey(context.prefs())
         } catch (e: Exception) {
             Log.e(TAG, "Error getting API key: ${e.message}")
             ""
         }
     }
 
-    private fun getCurrentLanguage(): String? {
+    private fun getCurrentSpeechmaticsLanguage(): String? {
         return try {
-            Settings.getValues()?.mLocale?.language
+            val locale = Settings.getValues()?.mLocale ?: return null
+            val language = locale.language
+            when {
+                language.isBlank() -> null
+                language == "und" -> null
+                else -> language.lowercase(Locale.US)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error getting language: ${e.message}")
+            null
+        }
+    }
+
+    private fun getCurrentSpeechmaticsOutputLocale(): String? {
+        return try {
+            val locale = Settings.getValues()?.mLocale ?: return null
+            val language = locale.language.lowercase(Locale.US)
+            val country = locale.country.uppercase(Locale.US)
+            if (language != "en" || country.isBlank()) {
+                return null
+            }
+            locale.toLanguageTag()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting output locale: ${e.message}")
             null
         }
     }

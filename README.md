@@ -27,7 +27,7 @@ Only one installable APK should exist in `./dist` at a time, and regenerating it
 
 ## Run in debug mode:
 ```
-./gradlew installDebug && adb logcat -c && adb logcat -v time | grep -E 'LatinIME|VoiceInputManager|DeepgramTranscription|VoiceRecorder|Deepgram|VOICE_'
+./gradlew installDebug && adb logcat -c && adb logcat -v time | grep -E 'LatinIME|VoiceInputManager|SpeechmaticsTranscription|VoiceRecorder|Speechmatics|VOICE_'
 ```
 or just install without logs:
 ```

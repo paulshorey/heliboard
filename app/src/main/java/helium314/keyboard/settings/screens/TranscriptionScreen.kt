@@ -31,6 +31,7 @@ import androidx.core.content.edit
 import helium314.keyboard.latin.R
 import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
+import helium314.keyboard.latin.settings.TranscriptionPreferences
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.getActivity
 import helium314.keyboard.latin.utils.prefs
@@ -52,8 +53,24 @@ fun TranscriptionScreen(
         Log.v("irrelevant", "stupid way to trigger recomposition on preference change")
 
     // API keys
-    var deepgramApiKey by remember {
-        mutableStateOf(prefs.getString(Settings.PREF_DEEPGRAM_API_KEY, Defaults.PREF_DEEPGRAM_API_KEY) ?: "")
+    var speechmaticsApiKey by remember {
+        mutableStateOf(TranscriptionPreferences.readSpeechmaticsApiKey(prefs))
+    }
+    var speechmaticsMaxDelay by remember {
+        mutableStateOf(
+            TranscriptionPreferences.readSpeechmaticsMaxDelaySeconds(prefs).toString()
+        )
+    }
+    var speechmaticsEndOfUtterance by remember {
+        mutableStateOf(
+            TranscriptionPreferences.readSpeechmaticsEndOfUtteranceSeconds(prefs).toString()
+        )
+    }
+    var speechmaticsRemoveDisfluencies by remember {
+        mutableStateOf(TranscriptionPreferences.readSpeechmaticsRemoveDisfluencies(prefs))
+    }
+    var speechmaticsPunctuationSensitivity by remember {
+        mutableStateOf(TranscriptionPreferences.readSpeechmaticsPunctuationSensitivity(prefs).toString())
     }
     var chunkSilenceSeconds by remember {
         mutableStateOf(
@@ -99,17 +116,89 @@ fun TranscriptionScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(innerPadding)
             ) {
-                // Deepgram API Key
+                // Speechmatics API Key
                 InlineTextField(
-                    label = stringResource(R.string.deepgram_api_key_title),
-                    value = deepgramApiKey,
+                    label = stringResource(R.string.speechmatics_api_key_title),
+                    value = speechmaticsApiKey,
                     onValueChange = { newValue ->
-                        val trimmedValue = newValue.trim()
-                        deepgramApiKey = trimmedValue
-                        prefs.edit { putString(Settings.PREF_DEEPGRAM_API_KEY, trimmedValue) }
+                        speechmaticsApiKey = newValue.trim()
+                        TranscriptionPreferences.writeSpeechmaticsApiKey(prefs, newValue)
                     },
                     minLines = 1,
                     maxLines = 2
+                )
+                InlineTextField(
+                    label = stringResource(R.string.speechmatics_max_delay_title),
+                    value = speechmaticsMaxDelay,
+                    onValueChange = { newValue ->
+                        speechmaticsMaxDelay = newValue
+                        newValue.toDoubleOrNull()?.let { parsed ->
+                            val sanitized = TranscriptionPreferences.sanitizeSpeechmaticsMaxDelaySeconds(parsed)
+                            TranscriptionPreferences.writeSpeechmaticsMaxDelayTenths(
+                                prefs,
+                                (sanitized * 10).toInt()
+                            )
+                            val currentEndOfUtterance =
+                                TranscriptionPreferences.readSpeechmaticsEndOfUtteranceSeconds(prefs)
+                            val adjustedEndOfUtterance = minOf(
+                                currentEndOfUtterance,
+                                TranscriptionPreferences.maxEndOfUtteranceForMaxDelay(sanitized)
+                            )
+                            if (adjustedEndOfUtterance != currentEndOfUtterance) {
+                                TranscriptionPreferences.writeSpeechmaticsEndOfUtteranceMs(
+                                    prefs,
+                                    (adjustedEndOfUtterance * 1000).toInt()
+                                )
+                                speechmaticsEndOfUtterance = adjustedEndOfUtterance.toString()
+                            }
+                        }
+                    },
+                    minLines = 1,
+                    maxLines = 1
+                )
+                InlineTextField(
+                    label = stringResource(R.string.speechmatics_end_of_utterance_title),
+                    value = speechmaticsEndOfUtterance,
+                    onValueChange = { newValue ->
+                        speechmaticsEndOfUtterance = newValue
+                        newValue.toDoubleOrNull()?.let { parsed ->
+                            val maxDelay = TranscriptionPreferences.readSpeechmaticsMaxDelaySeconds(prefs)
+                            val sanitized = TranscriptionPreferences.sanitizeSpeechmaticsEndOfUtteranceSeconds(
+                                value = parsed,
+                                maxDelaySeconds = maxDelay
+                            )
+                            TranscriptionPreferences.writeSpeechmaticsEndOfUtteranceMs(
+                                prefs,
+                                (sanitized * 1000).toInt()
+                            )
+                        }
+                    },
+                    minLines = 1,
+                    maxLines = 1
+                )
+                BooleanSettingRow(
+                    label = stringResource(R.string.speechmatics_remove_disfluencies_title),
+                    summary = stringResource(R.string.speechmatics_remove_disfluencies_summary),
+                    checked = speechmaticsRemoveDisfluencies,
+                    onCheckedChange = { checked ->
+                        speechmaticsRemoveDisfluencies = checked
+                        TranscriptionPreferences.writeSpeechmaticsRemoveDisfluencies(prefs, checked)
+                    }
+                )
+                InlineTextField(
+                    label = stringResource(R.string.speechmatics_punctuation_sensitivity_title),
+                    value = speechmaticsPunctuationSensitivity,
+                    onValueChange = { newValue ->
+                        speechmaticsPunctuationSensitivity = newValue
+                        newValue.toDoubleOrNull()?.let { parsed ->
+                            TranscriptionPreferences.writeSpeechmaticsPunctuationSensitivityPercent(
+                                prefs,
+                                (parsed.coerceIn(0.0, 1.0) * 100).toInt()
+                            )
+                        }
+                    },
+                    minLines = 1,
+                    maxLines = 1
                 )
                 InlineTextField(
                     label = stringResource(R.string.voice_chunk_silence_seconds_title),
@@ -186,6 +275,37 @@ fun TranscriptionScreen(
                 FullappDraftHistorySections()
             }
         }
+    }
+}
+
+@Composable
+private fun BooleanSettingRow(
+    label: String,
+    summary: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
+        )
+        Text(
+            text = summary,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
+        )
+        androidx.compose.material3.Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
+        )
     }
 }
 

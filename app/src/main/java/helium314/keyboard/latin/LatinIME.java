@@ -190,7 +190,7 @@ public class LatinIME extends InputMethodService implements
 
     private final ClipboardHistoryManager mClipboardHistoryManager = new ClipboardHistoryManager(this);
 
-    // Voice input manager (local recording + Deepgram transcription)
+    // Voice input manager (local recording + Speechmatics transcription)
     private VoiceInputManager mVoiceInputManager;
     // Wake lock to prevent CPU sleep during voice recording
     private PowerManager.WakeLock mVoiceWakeLock;
@@ -2027,7 +2027,7 @@ public class LatinIME extends InputMethodService implements
             }
 
             @Override
-            public void onTranscriptionResult(@NonNull String text) {
+            public void onTranscriptionResult(@NonNull String text, boolean attachesToPrevious) {
                 try {
                     Log.i(TAG, "VOICE raw transcript=[" + text + "]");
                     final String trimmed = text.trim();
@@ -2043,7 +2043,9 @@ public class LatinIME extends InputMethodService implements
                             "VOICE_STEP_4 transcription arrived in IME (" +
                                     trimmed.length() + " chars)"
                     );
-                    commitVoiceTranscriptionText(trimmed);
+                    commitVoiceTranscriptionText(
+                            prepareVoiceTranscriptionText(trimmed, attachesToPrevious)
+                    );
                 } catch (Exception e) {
                     Log.e(TAG, "Error processing transcription result: " + e.getMessage(), e);
                 }
@@ -2138,6 +2140,51 @@ public class LatinIME extends InputMethodService implements
             Log.e(TAG, "Error inserting transcription text: " + e.getMessage(), e);
             mKeyboardSwitcher.hideProcessingIndicator();
         }
+    }
+
+    @NonNull
+    private String prepareVoiceTranscriptionText(
+            @NonNull final String text,
+            final boolean attachesToPrevious) {
+        if (text.isEmpty() || attachesToPrevious || startsWithBackwardAttachingPunctuation(text)) {
+            return text;
+        }
+        final CharSequence beforeCursor = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
+        if (beforeCursor == null || beforeCursor.length() == 0) {
+            return text;
+        }
+        final char previousChar = beforeCursor.charAt(beforeCursor.length() - 1);
+        if (Character.isWhitespace(previousChar) || isOpeningDelimiter(previousChar)) {
+            return text;
+        }
+        return " " + text;
+    }
+
+    private boolean startsWithBackwardAttachingPunctuation(@NonNull final String text) {
+        if (text.isEmpty()) {
+            return false;
+        }
+        final char first = text.charAt(0);
+        return first == '.'
+                || first == ','
+                || first == '!'
+                || first == '?'
+                || first == ':'
+                || first == ';'
+                || first == ')'
+                || first == ']'
+                || first == '}'
+                || first == '%';
+    }
+
+    private boolean isOpeningDelimiter(final char c) {
+        return c == '('
+                || c == '['
+                || c == '{'
+                || c == '\n'
+                || c == '\t'
+                || c == '/'
+                || c == '\\';
     }
 
     /**

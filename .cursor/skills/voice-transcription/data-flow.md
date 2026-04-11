@@ -1,26 +1,26 @@
 # Voice Transcription Data Flow
 
-End-to-end voice transcription pipeline: local capture, Deepgram streaming, local post-transcription preparation on each finalized span, and immediate caret insertion.
+End-to-end voice transcription pipeline: local capture, Speechmatics realtime streaming, FIFO transcript delivery, and immediate caret insertion.
 
 ## Overview
 
 1. **VoiceRecorder** captures PCM16 audio locally; silence detection drives paragraph breaks and auto-stop.
-2. **DeepgramTranscriptionClient** streams audio to Deepgram and receives finalized transcript spans.
-3. **VoicePostTranscriptionFilter** converts spoken aliases, cleans up edge cases, sanitizes hidden characters, adjusts capitalization, and ensures final spacing.
-4. **LatinIME** inserts the prepared text immediately at the current caret position through `InputConnection`.
+2. **SpeechmaticsTranscriptionClient** opens the realtime websocket, sends `StartRecognition`, streams binary PCM frames, tracks `AudioAdded` acknowledgements, can request `ForceEndOfUtterance`, reconstructs finalized transcript text from tokenized `results`, and surfaces finalized transcript segments.
+3. **VoiceInputManager** buffers audio until the stream is ready, retries broken sessions, derives a provider config from preferences + current subtype locale, queues finalized transcript segments in FIFO order, and performs graceful `EndOfStream` shutdown.
+4. **LatinIME** inserts each finalized transcript immediately at the current caret position through `InputConnection`, restoring a leading space only when the new segment is a continuation of previous text rather than punctuation.
 
 ## Architecture
 
 ```
-┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
-│   Microphone    │────▶│   VoiceRecorder      │────▶│  Deepgram API   │
-│   (Hardware)    │     │   (PCM16 16kHz)      │     │  (WebSocket /v1/listen)
-└─────────────────┘     │   Silence detection  │     └────────┬────────┘
-                        │   Chunking/timers     │              ▼
-                        └──────────────────────┘     ┌─────────────────┐
-┌─────────────────┐     ┌──────────────────────┐◀────│  Transcription  │
-│   Text Field    │◀────│   LatinIME           │     │  Result (text)  │
-│   (App)         │     │   (Orchestrator)     │     └─────────────────┘
+┌─────────────────┐     ┌──────────────────────┐     ┌──────────────────────┐
+│   Microphone    │────▶│   VoiceRecorder      │────▶│  Speechmatics RT API │
+│   (Hardware)    │     │   (PCM16 16kHz)      │     │  (WebSocket /v2/)    │
+└─────────────────┘     │   Silence detection  │     └──────────┬───────────┘
+                        │   Chunking/timers     │                ▼
+                        └──────────────────────┘     ┌──────────────────────┐
+┌─────────────────┐     ┌──────────────────────┐◀────│  Finalized transcript │
+│   Text Field    │◀────│   LatinIME           │     │  spans (AddTranscript)│
+│   (App)         │     │   (Orchestrator)     │     └──────────────────────┘
 └─────────────────┘     └──────────────────────┘
 ```
 
@@ -32,29 +32,29 @@ Captures audio from the microphone with client-side silence detection.
 - **Silence detection**: Adaptive RMS threshold on each 100ms chunk
 - **Callbacks**: Supplies PCM chunks to `VoiceInputManager`; long silence can request a new paragraph or auto-stop
 
-### DeepgramTranscriptionClient.kt
-WebSocket client for Deepgram live transcription.
-- **URL**: `wss://api.deepgram.com/v1/listen`
-- **Transport**: Raw PCM frames over the socket
-- **Output**: Finalized transcript spans delivered in stream order
+### SpeechmaticsTranscriptionClient.kt
+WebSocket client for Speechmatics realtime transcription.
+- **URL**: `wss://eu.rt.speechmatics.com/v2/`
+- **Handshake**: `Authorization: Bearer <API_KEY>`
+- **Startup**: Sends `StartRecognition` with raw PCM16 audio settings plus a configurable `transcription_config`
+- **Transport**: Binary PCM frames over the socket
+- **Acks**: Tracks `AudioAdded.seq_no` so `EndOfStream(last_seq_no=...)` can be sent safely on stop
+- **Turn flush**: Sends `ForceEndOfUtterance` before `EndOfStream` during graceful stop to help flush the tail transcript
+- **Output**: Rebuilds finalized spans from Speechmatics `results[]` tokens so spacing and punctuation attachment follow `attaches_to`
 
 ### VoiceInputManager.kt
-Orchestrates recording, Deepgram streaming, and ordered transcript delivery.
+Orchestrates recording, Speechmatics streaming, and ordered transcript delivery.
 - **State machine**: IDLE → RECORDING ↔ PAUSED → IDLE
-- **Chunk Watchdog**: Forces a segment flush if silence detection misses a boundary
-- **Transcript queue**: Preserves FIFO delivery for finalized Deepgram spans
+- **Buffered audio**: Holds PCM chunks until `RecognitionStarted`
+- **Transcript queue**: Preserves FIFO delivery for finalized Speechmatics segments, including whether a segment attaches to previous text
+- **Reconnects**: Retries transient websocket failures while the recording session remains active
+- **Session config**: Maps current subtype locale to Speechmatics `language` and optional `output_locale`; sanitizes max-delay, conservative punctuation sensitivity, and disfluency settings from preferences
 - **New Paragraph Timer**: Requests a paragraph break after long silence
-
-### VoicePostTranscriptionFilter.java
-Local text preparation layer that runs on each finalized transcript span before insertion.
-- **Alias pass**: single longest-match token scan for spoken numbers (`zero`..`ninety nine`) and spoken symbols (`open parenthesis`, `slash`, `comma`, etc.)
-- **Cleanup pass**: fixes spacing between adjacent symbols/numbers and applies ordered edge-case rewrites such as `one hundred -> 100`, `negative five -> -5`, and delayed `dash` / `hyphen` / `minus` handling
-- **Insertion prep**: strips invisible Unicode control characters, adjusts capitalization from text before the caret, and as the final step prepends a space only when the finished chunk starts with an ASCII letter
+- **Graceful stop**: Waits for pending acks, sends `ForceEndOfUtterance`, then `EndOfStream`, and lets the tail transcript drain
 
 ### LatinIME.java
 Main orchestrator that coordinates all components and inserts text into the editor.
 - Uses `InputConnection.commitText(...)` at the caret
-- Calls `VoicePostTranscriptionFilter.prepareForInsertion(...)` on each finalized span
 - Calls `mInputLogic.finishInput()` first to keep composing state in sync
 - Defers paragraph insertion until manager processing is idle if needed
 
@@ -69,28 +69,32 @@ User taps mic button
     → State = RECORDING
 ```
 
-### 2. Speech → Deepgram
+### 2. Speech → Speechmatics
 ```
 User speaks
     → VoiceRecorder captures PCM chunks
-    → VoiceInputManager forwards them to DeepgramTranscriptionClient
-    → DeepgramTranscriptionClient streams them to Deepgram
-    → Deepgram emits finalized transcript text
+    → VoiceInputManager buffers/sends them to SpeechmaticsTranscriptionClient
+    → SpeechmaticsTranscriptionClient streams them to Speechmatics
+    → Speechmatics emits finalized AddTranscript messages
 ```
 
-### 3. Transcript → Local Processing → Immediate Insert
+### 2b. Speechmatics session config
+```
+Current subtype locale + transcription preferences
+    → VoiceInputManager.buildTranscriptionConfig()
+    → language = base language / supported provider language
+    → output_locale = locale-specific spelling when Speechmatics documents it
+    → max_delay / end_of_utterance_silence_trigger sanitized to provider-safe ranges
+    → remove_disfluencies enabled only for English when requested
+```
+
+### 3. Transcript → Immediate Insert
 ```
 Finalized transcript span arrives
-    → DeepgramTranscriptionClient.onTranscriptionResult(text)
-    → VoiceInputManager queues and delivers the text to LatinIME in FIFO order
-    → LatinIME calls VoicePostTranscriptionFilter.prepareForInsertion(text, textBeforeCursor)
-    → VoicePostTranscriptionFilter:
-        - replaces spoken numbers and symbols in one pass
-        - fixes deterministic edge cases
-        - strips invisible control characters
-        - adjusts capitalization
-        - prepends a leading space only when the finished chunk starts with an ASCII letter
-    → LatinIME commits the prepared text at the caret via InputConnection.commitText(...)
+    → SpeechmaticsTranscriptionClient rebuilds text from token results
+    → attaches_to metadata determines whether a leading space is needed
+    → VoiceInputManager queues and delivers the segment to LatinIME in FIFO order
+    → LatinIME trims empty spans, conditionally restores a leading space, and commits the finalized text at the caret via InputConnection.commitText(...)
 ```
 
 ### 4. New Paragraph
@@ -113,16 +117,19 @@ PAUSED     → User taps pause  → RECORDING (resume)
 ```
 
 ### Ordering Guarantees
-- Deepgram transcript spans are queued and delivered in FIFO order by `VoiceInputManager`.
-- `LatinIME` inserts each prepared transcript immediately when received.
-- Deterministic text shaping stays inside `VoicePostTranscriptionFilter`; `LatinIME` does not apply a separate second formatting layer after that.
+- Speechmatics transcript spans are queued and delivered in FIFO order by `VoiceInputManager`.
+- `LatinIME` inserts each finalized transcript immediately when received.
 - Paragraph breaks are deferred until manager processing drains, so they do not interleave in the middle of pending transcript insertion.
-- Cancelling voice input invalidates the active manager session so stale Deepgram callbacks are dropped before they reach the IME.
+- Cancelling voice input invalidates the active manager session so stale Speechmatics callbacks are dropped before they reach the IME.
 
 ## Configuration
 
 ### Settings (TranscriptionScreen.kt)
-- **Deepgram API Key**: Required for transcription
+- **Speechmatics API Key**: Required for transcription
+- **Final transcript delay**: Upper bound for Speechmatics finalization latency
+- **Punctuation sensitivity**: Lower values make Speechmatics more conservative about inserting punctuation
+- **End of utterance trigger**: Server-side silence duration before Speechmatics finalizes an utterance (disabled by default for dictation)
+- **Remove disfluencies**: Removes English hesitation sounds like “um” and “uh”
 - **Chunk Silence Duration**: Silence window before detecting a speech boundary
 - **Silence Threshold**: RMS threshold floor for silence/speech detection
 - **New Paragraph Silence Duration**: Delay before inserting a paragraph break
@@ -147,7 +154,7 @@ MAX_SILENCE_DURATION_MS = 30000L
 
 Callbacks are marshalled back to the main thread before UI/editor operations:
 - Audio recording runs on a background thread
-- Deepgram callbacks are forwarded onto the main thread
+- Speechmatics callbacks are forwarded onto the main thread
 - Timer callbacks run on the main thread
 
 This keeps text insertion sequential and avoids concurrent editor mutations.

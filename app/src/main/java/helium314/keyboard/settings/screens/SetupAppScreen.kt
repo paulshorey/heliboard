@@ -45,8 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
 import helium314.keyboard.latin.R
 import helium314.keyboard.latin.permissions.PermissionsUtil
-import helium314.keyboard.latin.settings.Defaults
-import helium314.keyboard.latin.settings.Settings
+import helium314.keyboard.latin.settings.TranscriptionPreferences
 import helium314.keyboard.latin.utils.UncachedInputMethodManagerUtils
 import helium314.keyboard.latin.utils.getActivity
 import helium314.keyboard.latin.utils.prefs
@@ -73,13 +72,13 @@ fun SetupAppScreen(
     var isImeEnabled by remember { mutableStateOf(false) }
     var isImeCurrent by remember { mutableStateOf(false) }
     var microphoneGranted by remember { mutableStateOf(false) }
-    var deepgramApiKey by remember { mutableStateOf("") }
+    var speechmaticsApiKey by remember { mutableStateOf("") }
 
     fun refreshStatus() {
         isImeEnabled = UncachedInputMethodManagerUtils.isThisImeEnabled(context, imm)
         isImeCurrent = UncachedInputMethodManagerUtils.isThisImeCurrent(context, imm)
         microphoneGranted = PermissionsUtil.checkAllPermissionsGranted(context, Manifest.permission.RECORD_AUDIO)
-        deepgramApiKey = prefs.getString(Settings.PREF_DEEPGRAM_API_KEY, Defaults.PREF_DEEPGRAM_API_KEY) ?: ""
+        speechmaticsApiKey = TranscriptionPreferences.readSpeechmaticsApiKey(prefs)
     }
 
     LaunchedEffect(prefChanged?.value) {
@@ -158,16 +157,15 @@ fun SetupAppScreen(
                     }
                 )
                 SetupRequirementItem(
-                    title = stringResource(R.string.deepgram_api_key_title),
-                    summary = stringResource(R.string.deepgram_api_key_summary),
-                    isComplete = deepgramApiKey.isNotBlank(),
+                    title = stringResource(R.string.speechmatics_api_key_title),
+                    summary = stringResource(R.string.speechmatics_api_key_summary),
+                    isComplete = speechmaticsApiKey.isNotBlank(),
                 ) {
                     SetupKeyField(
-                        value = deepgramApiKey,
+                        value = speechmaticsApiKey,
                         onValueChange = { newValue ->
-                            val trimmedValue = newValue.trim()
-                            deepgramApiKey = trimmedValue
-                            prefs.edit { putString(Settings.PREF_DEEPGRAM_API_KEY, trimmedValue) }
+                            speechmaticsApiKey = newValue.trim()
+                            TranscriptionPreferences.writeSpeechmaticsApiKey(prefs, newValue)
                         }
                     )
                 }

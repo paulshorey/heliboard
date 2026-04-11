@@ -4,7 +4,7 @@ HeliBoard is an Android app, open-source project based on AOSP / OpenBoard keybo
 
 ## This project rewrites HeliBoard with custom experimental features
 
-1. Voice to text (using Deepgram Nova-3 streaming transcription + local post-processing)
+1. Voice to text (using Speechmatics realtime transcription + direct finalized text insertion)
 2. Smart auto-capitalization
 3. Full-app keyboard mode (standalone full-screen editing)
 4. UI features
@@ -15,7 +15,7 @@ Each feature area has a dedicated skill with architecture docs, key files, and l
 
 | Skill | Description |
 |-------|-------------|
-| [voice-transcription](.cursor/skills/voice-transcription/SKILL.md) | Deepgram streaming pipeline, post-transcription filter, chunked audio flow |
+| [voice-transcription](.cursor/skills/voice-transcription/SKILL.md) | Speechmatics streaming pipeline, finalized transcript flow, chunked audio delivery |
 | [full-app-mode](.cursor/skills/full-app-mode/SKILL.md) | Activity-based fullapp editor, draft sync, extract-view pitfalls |
 | [build-apk](.cursor/skills/build-apk/SKILL.md) | Building distributable APKs, shared debug keystore, GitHub download URLs |
 | [android-workspace-setup](.cursor/skills/android-workspace-setup/SKILL.md) | Android SDK setup for cloud agents and CI |
@@ -24,7 +24,7 @@ Each feature area has a dedicated skill with architecture docs, key files, and l
 
 ## Quick orientation
 
-- **Voice transcription key files**: `VoiceInputManager.kt`, `DeepgramTranscriptionClient.kt`, `VoicePostTranscriptionFilter.java`, `VoiceRecorder.kt`, `LatinIME.java`
+- **Voice transcription key files**: `VoiceInputManager.kt`, `SpeechmaticsTranscriptionClient.kt`, `TranscriptionPreferences.kt`, `VoiceRecorder.kt`, `LatinIME.java`
 - **Fullapp key files**: `FullappEditorActivity.kt`, `FullappEditorResult`, `LatinIME.java`
 - **Main input pipeline**: `LatinIME.java` → `InputLogic.java` → `WordComposer.java` / `RichInputConnection.java`
 - **Current-word host sync**: `EditorWordMirror.java` mirrors keyboard-owned word edits into the host field

@@ -1,18 +1,18 @@
 ---
 name: voice-transcription
-description: Voice-to-text pipeline using Deepgram Nova-3 streaming transcription with local post-processing. Use when working on microphone recording, audio streaming, transcription results, silence detection, voice input UI, or the VoicePostTranscriptionFilter.
+description: Voice-to-text pipeline using Speechmatics realtime transcription with local audio capture and direct finalized-text insertion. Use when working on microphone recording, audio streaming, transcription results, silence detection, or voice input UI.
 ---
 
 # Voice Transcription
 
-Local recording + Deepgram streaming transcription + local post-processing + immediate caret insertion.
+Local recording + Speechmatics realtime streaming transcription + immediate caret insertion.
 
 ## Architecture
 
 ```
-Microphone → VoiceRecorder (PCM16 16kHz) → Deepgram WebSocket → finalized spans
-                                                                       ↓
-Text Field ← LatinIME (commitText) ← VoicePostTranscriptionFilter ← VoiceInputManager (FIFO)
+Microphone → VoiceRecorder (PCM16 16kHz) → Speechmatics WebSocket → finalized AddTranscript spans
+                                                                                ↓
+Text Field ← LatinIME (commitText) ← VoiceInputManager (FIFO queue + reconnect + graceful stop)
 ```
 
 Recording starts **instantly** on mic tap — no network round-trip delay.
@@ -22,30 +22,30 @@ Recording starts **instantly** on mic tap — no network round-trip delay.
 | File | Role |
 |------|------|
 | `VoiceRecorder.kt` | PCM16 capture, adaptive RMS silence detection |
-| `DeepgramTranscriptionClient.kt` | WebSocket client for `wss://api.deepgram.com/v1/listen` |
-| `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO transcript queue, paragraph timer |
-| `VoicePostTranscriptionFilter.java` | Alias pass (spoken numbers/symbols), cleanup pass, capitalization, leading-space logic |
-| `LatinIME.java` | Orchestrator — calls `prepareForInsertion()` then `commitText()` at caret |
-| `TranscriptionScreen.kt` | Settings UI for API key, silence thresholds, paragraph timing |
+| `SpeechmaticsTranscriptionClient.kt` | WebSocket client for `wss://eu.rt.speechmatics.com/v2/` with configurable `StartRecognition`, binary audio, `AudioAdded`, `ForceEndOfUtterance`, `AddTranscript`, and `EndOfStream` |
+| `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO transcript queue, reconnects, paragraph timer, Speechmatics locale/config assembly |
+| `TranscriptionPreferences.kt` | Reads/writes sanitized Speechmatics settings and drops the legacy provider key |
+| `LatinIME.java` | Orchestrator — finalizes composing state and commits transcript text at the caret |
+| `TranscriptionScreen.kt` / `SetupAppScreen.kt` | Settings UI for API key, Speechmatics latency/formatting controls, silence thresholds, paragraph timing |
 
-All source files live under `app/src/main/java/helium314/keyboard/latin/voice/` except `LatinIME.java` (parent package) and `TranscriptionScreen.kt` (settings package).
+All source files live under `app/src/main/java/helium314/keyboard/latin/voice/` except `LatinIME.java` (parent package) and the settings UI/preferences helpers in `latin/settings` and `settings/screens`.
 
 ## Chunked Audio Flow
 
-1. ChunkA audio → Deepgram
-2. ChunkB streams while ChunkA finalizes
-3. ChunkA transcript → `VoicePostTranscriptionFilter.prepareForInsertion(textA, textBeforeCursor)` → `commitText(textA)`
-4. ChunkB transcript arrives in FIFO order → same pipeline → `commitText(textB)`
+1. Mic chunks are captured locally in `VoiceRecorder`
+2. `VoiceInputManager` builds a provider config from settings + current subtype locale
+3. `VoiceInputManager` buffers chunks until Speechmatics sends `RecognitionStarted`
+4. Chunks stream as binary PCM16 frames; Speechmatics replies with `AudioAdded` sequence acks
+5. Final transcript spans arrive as `AddTranscript` messages
+6. `SpeechmaticsTranscriptionClient` rebuilds span text from token results so spacing and punctuation attachment stay correct across finalized chunks
+7. `VoiceInputManager` delivers them in FIFO order to `LatinIME`
+8. `LatinIME` inserts each finalized span with `commitText(...)`, restoring a leading space only when the provider marks the span as a continuation
 
-Each processed chunk is inserted once via `commitText`; no second pass over the field.
+On graceful stop, the client waits for all sent audio to be acknowledged, sends `ForceEndOfUtterance`, then `EndOfStream(last_seq_no=...)`, and only closes after the tail transcript is flushed or a close timeout expires.
 
-## Post-Transcription Filter Pipeline
+## Transcript Handling
 
-`VoicePostTranscriptionFilter.prepareForInsertion(text, textBeforeCursor)`:
-
-1. **Alias pass** — single longest-match scan: spoken numbers (`zero`..`ninety nine`), spoken symbols (`open parenthesis`, `slash`, `comma`, etc.)
-2. **Cleanup pass** — fixes spacing between adjacent symbols/numbers, ordered edge-case rewrites (`one hundred → 100`, `negative five → -5`, delayed `dash`/`hyphen`/`minus`)
-3. **Insertion prep** — strips invisible Unicode control characters, adjusts capitalization from text before caret, prepends space only when the finished chunk starts with an ASCII letter
+Speechmatics smart formatting is used for finalized transcript text. `output_locale` is supplied for English locales when available so spelling stays consistent, optional English disfluency removal can be enabled from settings, and punctuation is configured conservatively for dictation. HeliBoard rebuilds finalized text from Speechmatics token results so word spacing and punctuation attachment survive chunk boundaries, then commits the finalized text exactly once at the caret.
 
 ## Paragraph Breaks
 
@@ -54,14 +54,14 @@ After configured silence, `VoiceInputManager` fires `onNewParagraphRequested()` 
 ## Thread Safety
 
 - Audio recording: background thread
-- Deepgram callbacks: forwarded to main thread
+- Speechmatics callbacks: forwarded to main thread
 - Timer callbacks: main thread
 - Text insertion: always sequential on main thread
 
 ## Additional Resources
 
 - Detailed data flow: [data-flow.md](data-flow.md)
-- Deepgram API reference and settings keys: [api-reference.md](api-reference.md)
+- Speechmatics API reference and settings keys: [api-reference.md](api-reference.md)
 
 ## Update documentation
 
