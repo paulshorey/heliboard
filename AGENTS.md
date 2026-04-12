@@ -31,6 +31,24 @@ Each feature area has a dedicated skill with architecture docs, key files, and l
 - **Build**: `./tools/build-dist-apk.sh` (distributable APK), `./tools/setup-android-sdk.sh` (SDK setup)
 - **Keystore**: `keystore/debug.keystore` — shared across local and cloud builds for same-signature APKs
 
+## Speechmatics transcription features
+
+All Speechmatics session config is built in `SpeechmaticsTranscriptionClient.kt` (companion object). Key customization points:
+
+| Feature | Where to edit | Function/location |
+|---------|--------------|-------------------|
+| **Custom dictionary** | `SpeechmaticsTranscriptionClient.defaultAdditionalVocab()` | Returns `List<VocabEntry>` — add words, brand names, technical terms with optional `sounds_like` |
+| **Word replacement** | `SpeechmaticsTranscriptionClient.defaultReplacements()` | Returns `List<ReplacementRule>` — plain text `from`/`to` pairs |
+| **Regex replacement** | Same `defaultReplacements()` | Use `/pattern/` delimiters in `from` field (ECMAScript regex) |
+| **Speaker diarization** | `buildStartRecognitionMessage()` + `buildTranscriptSegment()` | Diarization JSON config; speaker filtering via `primarySpeaker` param |
+| **Punctuation sensitivity** | `Defaults.kt` → `PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT` | Default `50` (0–100, maps to 0.0–1.0) |
+| **Disfluency removal** | `Defaults.kt` → `PREF_SPEECHMATICS_REMOVE_DISFLUENCIES` | Boolean, default `true` (English only) |
+| **Output locale** | `SpeechmaticsTranscriptionClient.normalizeOutputLocale()` | Defaults to `en-US` for English; maps GB/AU when detected |
+| **Operating point** | `buildSessionConfig()` param `operatingPoint` | Default `"enhanced"` for best accuracy |
+| **Diarization toggle** | `Defaults.kt` → `PREF_SPEECHMATICS_DIARIZATION` | Boolean, default `true` |
+
+Settings pref keys: `Settings.java`. Defaults: `Defaults.kt`. Read/write: `TranscriptionPreferences.kt`. UI: `TranscriptionScreen.kt`.
+
 ## File structure overview
 
 - `app/src/main/java/helium314/keyboard/latin/`
