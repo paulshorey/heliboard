@@ -86,6 +86,7 @@ import helium314.keyboard.latin.utils.SubtypeLocaleUtils;
 import helium314.keyboard.latin.utils.SubtypeSettings;
 import helium314.keyboard.latin.utils.SubtypeState;
 import helium314.keyboard.latin.utils.ToolbarMode;
+import helium314.keyboard.latin.voice.TranscriptPostProcessor;
 import helium314.keyboard.latin.voice.VoiceInputManager;
 import helium314.keyboard.latin.suggestions.SuggestionStripView.VoiceState;
 import helium314.keyboard.settings.FullappEditorActivity;
@@ -2124,14 +2125,20 @@ public class LatinIME extends InputMethodService implements
             return;
         }
         try {
-            // Wrap finishInput + commitText in a single batch edit so the framework
-            // delivers only one onUpdateSelection after both operations complete.
-            // Without this, finishComposingText fires an intermediate onUpdateSelection
-            // that can desync mExpectedSelStart before commitText runs, causing the
-            // cursor to jump instead of inserting the text.
+            // Everything — finishInput, commitText, and optional post-processing
+            // replacement — is wrapped in a SINGLE batch edit.  This ensures the
+            // framework delivers only ONE onUpdateSelection whose newSelStart
+            // matches our final mExpectedSelStart.  Without this, the intermediate
+            // onUpdateSelection from the commit would arrive while mExpectedSelStart
+            // has already been shifted by the post-processing delete+re-commit,
+            // causing isBelatedExpectedUpdate to return false and the voice-cancel
+            // guard in onUpdateSelection to kill the recording session.
             mInputLogic.mConnection.beginBatchEdit();
             mInputLogic.finishInput();
             mInputLogic.mConnection.commitText(text, 1);
+
+            runTranscriptPostProcessing();
+
             mInputLogic.mConnection.endBatchEdit();
 
             // Text has been inserted — hide the processing spinner.
@@ -2140,6 +2147,42 @@ public class LatinIME extends InputMethodService implements
             Log.e(TAG, "Error inserting transcription text: " + e.getMessage(), e);
             mKeyboardSwitcher.hideProcessingIndicator();
         }
+    }
+
+    /**
+     * Read the current paragraph (text from the last line break to the cursor),
+     * run post-processing rules, and replace the paragraph if anything changed.
+     *
+     * MUST be called inside an already-open batch edit so that the replacement
+     * does not produce a separate onUpdateSelection that confuses the voice-input
+     * cursor guard.
+     */
+    private void runTranscriptPostProcessing() {
+        final int maxParagraphLen = Constants.EDITOR_CONTENTS_CACHE_SIZE;
+        final CharSequence beforeCursor =
+                mInputLogic.mConnection.getTextBeforeCursor(maxParagraphLen, 0);
+        if (beforeCursor == null || beforeCursor.length() == 0) {
+            return;
+        }
+
+        final String before = beforeCursor.toString();
+        final int newlinePos = before.lastIndexOf('\n');
+        final String paragraph = (newlinePos >= 0) ? before.substring(newlinePos + 1) : before;
+        if (paragraph.isEmpty()) {
+            return;
+        }
+
+        final String corrected =
+                TranscriptPostProcessor.INSTANCE.processCurrentParagraph(paragraph);
+        if (corrected == null) {
+            return;
+        }
+
+        Log.i(TAG, "VOICE post-processing: replacing paragraph ("
+                + paragraph.length() + " → " + corrected.length() + " chars)");
+
+        mInputLogic.mConnection.deleteTextBeforeCursor(paragraph.length());
+        mInputLogic.mConnection.commitText(corrected, 1);
     }
 
     @NonNull
