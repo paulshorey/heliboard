@@ -17,13 +17,15 @@ object TranscriptionPreferences {
     const val DEFAULT_REMOVE_DISFLUENCIES = Defaults.PREF_SPEECHMATICS_REMOVE_DISFLUENCIES
     const val DEFAULT_PUNCTUATION_SENSITIVITY =
         Defaults.PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT / 100.0
+    const val DEFAULT_DIARIZATION = Defaults.PREF_SPEECHMATICS_DIARIZATION
 
     data class SpeechmaticsConfig(
         val apiKey: String,
         val maxDelaySeconds: Double,
         val endOfUtteranceSilenceSeconds: Double,
         val removeDisfluencies: Boolean,
-        val punctuationSensitivity: Double
+        val punctuationSensitivity: Double,
+        val diarizationEnabled: Boolean
     )
 
     fun readSpeechmaticsApiKey(prefs: SharedPreferences): String {
@@ -87,7 +89,11 @@ object TranscriptionPreferences {
             ).coerceIn(
                 MIN_PUNCTUATION_SENSITIVITY_PERCENT,
                 MAX_PUNCTUATION_SENSITIVITY_PERCENT
-            ) / 100.0
+            ) / 100.0,
+            diarizationEnabled = prefs.getBoolean(
+                Settings.PREF_SPEECHMATICS_DIARIZATION,
+                Defaults.PREF_SPEECHMATICS_DIARIZATION
+            )
         )
     }
 
@@ -147,6 +153,16 @@ object TranscriptionPreferences {
 
     fun readSpeechmaticsPunctuationSensitivity(prefs: SharedPreferences): Double {
         return readSpeechmaticsConfig(prefs).punctuationSensitivity
+    }
+
+    fun readSpeechmaticsDiarization(prefs: SharedPreferences): Boolean {
+        return readSpeechmaticsConfig(prefs).diarizationEnabled
+    }
+
+    fun writeSpeechmaticsDiarization(prefs: SharedPreferences, enabled: Boolean) {
+        prefs.edit {
+            putBoolean(Settings.PREF_SPEECHMATICS_DIARIZATION, enabled)
+        }
     }
 
     fun sanitizeSpeechmaticsMaxDelaySeconds(value: Double): Double {

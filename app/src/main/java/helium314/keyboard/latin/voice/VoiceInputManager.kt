@@ -356,7 +356,8 @@ class VoiceInputManager(private val context: Context) {
             maxDelaySeconds = speechmaticsConfig.maxDelaySeconds,
             removeDisfluencies = speechmaticsConfig.removeDisfluencies,
             endOfUtteranceSilenceTriggerSeconds = speechmaticsConfig.endOfUtteranceSilenceSeconds,
-            punctuationSensitivity = speechmaticsConfig.punctuationSensitivity
+            punctuationSensitivity = speechmaticsConfig.punctuationSensitivity,
+            diarizationEnabled = speechmaticsConfig.diarizationEnabled
         )
         streamSessionId = sessionId
         isStreamingConnecting = true
@@ -780,7 +781,8 @@ class VoiceInputManager(private val context: Context) {
                 "speechmaticsMaxDelay=${speechmaticsConfig.maxDelaySeconds}s, " +
                 "speechmaticsEou=${speechmaticsConfig.endOfUtteranceSilenceSeconds}s, " +
                 "speechmaticsDisfluencies=${speechmaticsConfig.removeDisfluencies}, " +
-                "speechmaticsPunctuationSensitivity=${speechmaticsConfig.punctuationSensitivity}"
+                "speechmaticsPunctuationSensitivity=${speechmaticsConfig.punctuationSensitivity}, " +
+                "speechmaticsDiarization=${speechmaticsConfig.diarizationEnabled}"
         )
     }
 
