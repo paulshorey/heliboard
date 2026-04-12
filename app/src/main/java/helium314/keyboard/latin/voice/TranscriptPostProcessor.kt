@@ -35,54 +35,66 @@ object TranscriptPostProcessor {
     private fun buildRules(): List<Rule> {
         val raw = mutableListOf<Rule>()
 
-        // --- Exclamation point / exclamation mark → ! -----------------
-        for (name in listOf("exclamation point", "exclamation mark")) {
-            for (trailing in listOf(".", "!")) {
-                for (leading in listOf(". ", "? ", "! ", ", ")) {
-                    raw += Rule("$leading$name$trailing", "!")
+        // Helper: for a given punctuation name, add rules with every combination
+        // of leading context (previous punctuation or a plain space) and trailing
+        // punctuation variant.  Rules with leading punctuation context are the
+        // longest; the space-prefixed standalone variant is shorter; the bare
+        // variant (for paragraph start) is shortest.
+        fun addPuncRules(
+            names: List<String>,
+            replacement: String,
+            trailingVariants: List<String>,
+            leadingContexts: List<String> = listOf(". ", "? ", "! ", ", ")
+        ) {
+            for (name in names) {
+                for (trailing in trailingVariants) {
+                    for (leading in leadingContexts) {
+                        raw += Rule("$leading$name$trailing", replacement)
+                    }
+                    raw += Rule(" $name$trailing", replacement)
+                    raw += Rule("$name$trailing", replacement)
                 }
-                raw += Rule("$name$trailing", "!")
             }
         }
 
-        // --- Question mark → ? ----------------------------------------
-        for (trailing in listOf("?", ".")) {
-            for (leading in listOf(". ", "? ", "! ", ", ")) {
-                raw += Rule("${leading}question mark$trailing", "?")
-            }
-            raw += Rule("question mark$trailing", "?")
-        }
+        addPuncRules(
+            names = listOf("exclamation point", "exclamation mark"),
+            replacement = "!",
+            trailingVariants = listOf(".", "!")
+        )
 
-        // --- Period / full stop → . -----------------------------------
-        for (name in listOf("period", "full stop")) {
-            for (leading in listOf("? ", "! ", ", ")) {
-                raw += Rule("$leading$name.", ".")
-            }
-            raw += Rule("$name.", ".")
-        }
+        addPuncRules(
+            names = listOf("question mark"),
+            replacement = "?",
+            trailingVariants = listOf("?", ".")
+        )
 
-        // --- Comma → , ------------------------------------------------
+        addPuncRules(
+            names = listOf("period", "full stop"),
+            replacement = ".",
+            trailingVariants = listOf(".")
+        )
+
+        addPuncRules(
+            names = listOf("colon"),
+            replacement = ":",
+            trailingVariants = listOf(":", ".")
+        )
+
+        addPuncRules(
+            names = listOf("semicolon"),
+            replacement = ";",
+            trailingVariants = listOf(";", ".")
+        )
+
+        // Comma is special — trailing can be the comma itself, or absent.
         for (leading in listOf(". ", "? ", "! ", ", ")) {
             raw += Rule("${leading}comma,", ",")
             raw += Rule("${leading}comma", ",")
         }
+        raw += Rule(" comma,", ",")
+        raw += Rule(" comma", ",")
         raw += Rule("comma,", ",")
-
-        // --- Colon → : ------------------------------------------------
-        for (trailing in listOf(":", ".")) {
-            for (leading in listOf(". ", "? ", "! ", ", ")) {
-                raw += Rule("${leading}colon$trailing", ":")
-            }
-            raw += Rule("colon$trailing", ":")
-        }
-
-        // --- Semicolon → ; --------------------------------------------
-        for (trailing in listOf(";", ".")) {
-            for (leading in listOf(". ", "? ", "! ", ", ")) {
-                raw += Rule("${leading}semicolon$trailing", ";")
-            }
-            raw += Rule("semicolon$trailing", ";")
-        }
 
         return raw.sortedByDescending { it.find.length }
     }

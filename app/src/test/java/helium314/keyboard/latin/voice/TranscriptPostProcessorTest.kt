@@ -60,6 +60,14 @@ class TranscriptPostProcessorTest {
     }
 
     @Test
+    fun `exclamation point at very start of paragraph`() {
+        assertEquals(
+            "!",
+            process("exclamation point.")
+        )
+    }
+
+    @Test
     fun `case insensitive match`() {
         assertEquals(
             "Wow!",
@@ -93,6 +101,14 @@ class TranscriptPostProcessorTest {
         )
     }
 
+    @Test
+    fun `comma at very start`() {
+        assertEquals(
+            ", world",
+            process("comma, world")
+        )
+    }
+
     // --- Question mark ---
 
     @Test
@@ -116,6 +132,14 @@ class TranscriptPostProcessorTest {
         assertEquals(
             "Are you sure?",
             process("Are you sure question mark.")
+        )
+    }
+
+    @Test
+    fun `question mark at very start`() {
+        assertEquals(
+            "?",
+            process("question mark.")
         )
     }
 
@@ -145,6 +169,14 @@ class TranscriptPostProcessorTest {
         )
     }
 
+    @Test
+    fun `period at very start`() {
+        assertEquals(
+            ".",
+            process("period.")
+        )
+    }
+
     // --- Colon ---
 
     @Test
@@ -163,6 +195,14 @@ class TranscriptPostProcessorTest {
         )
     }
 
+    @Test
+    fun `colon at very start`() {
+        assertEquals(
+            ":",
+            process("colon.")
+        )
+    }
+
     // --- Semicolon ---
 
     @Test
@@ -178,6 +218,14 @@ class TranscriptPostProcessorTest {
         assertEquals(
             "However;",
             process("However semicolon.")
+        )
+    }
+
+    @Test
+    fun `semicolon at very start`() {
+        assertEquals(
+            ";",
+            process("semicolon.")
         )
     }
 
