@@ -86,6 +86,7 @@ import helium314.keyboard.latin.utils.SubtypeLocaleUtils;
 import helium314.keyboard.latin.utils.SubtypeSettings;
 import helium314.keyboard.latin.utils.SubtypeState;
 import helium314.keyboard.latin.utils.ToolbarMode;
+import helium314.keyboard.latin.voice.TranscriptPostProcessor;
 import helium314.keyboard.latin.voice.VoiceInputManager;
 import helium314.keyboard.latin.suggestions.SuggestionStripView.VoiceState;
 import helium314.keyboard.settings.FullappEditorActivity;
@@ -2134,12 +2135,48 @@ public class LatinIME extends InputMethodService implements
             mInputLogic.mConnection.commitText(text, 1);
             mInputLogic.mConnection.endBatchEdit();
 
+            runTranscriptPostProcessing();
+
             // Text has been inserted — hide the processing spinner.
             mKeyboardSwitcher.hideProcessingIndicator();
         } catch (Exception e) {
             Log.e(TAG, "Error inserting transcription text: " + e.getMessage(), e);
             mKeyboardSwitcher.hideProcessingIndicator();
         }
+    }
+
+    /**
+     * Read the current paragraph (text from the last line break to the cursor),
+     * run post-processing rules, and replace the paragraph if anything changed.
+     */
+    private void runTranscriptPostProcessing() {
+        final int maxParagraphLen = Constants.EDITOR_CONTENTS_CACHE_SIZE;
+        final CharSequence beforeCursor =
+                mInputLogic.mConnection.getTextBeforeCursor(maxParagraphLen, 0);
+        if (beforeCursor == null || beforeCursor.length() == 0) {
+            return;
+        }
+
+        final String before = beforeCursor.toString();
+        final int newlinePos = before.lastIndexOf('\n');
+        final String paragraph = (newlinePos >= 0) ? before.substring(newlinePos + 1) : before;
+        if (paragraph.isEmpty()) {
+            return;
+        }
+
+        final String corrected =
+                TranscriptPostProcessor.INSTANCE.processCurrentParagraph(paragraph);
+        if (corrected == null) {
+            return;
+        }
+
+        Log.i(TAG, "VOICE post-processing: replacing paragraph ("
+                + paragraph.length() + " → " + corrected.length() + " chars)");
+
+        mInputLogic.mConnection.beginBatchEdit();
+        mInputLogic.mConnection.deleteTextBeforeCursor(paragraph.length());
+        mInputLogic.mConnection.commitText(corrected, 1);
+        mInputLogic.mConnection.endBatchEdit();
     }
 
     @NonNull
