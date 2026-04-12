@@ -1,5 +1,5 @@
 ---
-name: build-apk
+name: android-build-apk
 description: Only if in a cloud workspace - always build the .apk file after done making changes. If working locally in the desktop IDE, ignore this. If user asks you to "build the app" or to "build the APK", use this skill.
 ---
 
