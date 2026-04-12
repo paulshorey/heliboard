@@ -26,7 +26,7 @@ Each feature area has a dedicated skill with architecture docs, key files, and l
 
 ## Quick orientation
 
-- **Voice transcription key files**: `VoiceInputManager.kt`, `SpeechmaticsTranscriptionClient.kt`, `TranscriptionPreferences.kt`, `VoiceRecorder.kt`, `LatinIME.java`
+- **Voice transcription key files**: `VoiceInputManager.kt`, `SpeechmaticsTranscriptionClient.kt`, `TranscriptPostProcessor.kt`, `TranscriptionPreferences.kt`, `VoiceRecorder.kt`, `LatinIME.java`
 - **Fullapp key files**: `FullappEditorActivity.kt`, `FullappEditorResult`, `LatinIME.java`
 - **Main input pipeline**: `LatinIME.java` → `InputLogic.java` → `WordComposer.java` / `RichInputConnection.java`
 - **Current-word host sync**: `EditorWordMirror.java` mirrors keyboard-owned word edits into the host field

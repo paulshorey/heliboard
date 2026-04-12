@@ -25,7 +25,8 @@ Recording starts **instantly** on mic tap — no network round-trip delay.
 | `SpeechmaticsTranscriptionClient.kt` | WebSocket client for `wss://eu.rt.speechmatics.com/v2/` with configurable `StartRecognition`, binary audio, `AudioAdded`, `ForceEndOfUtterance`, `AddTranscript`, and `EndOfStream` |
 | `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO transcript queue, reconnects, paragraph timer, Speechmatics locale/config assembly |
 | `TranscriptionPreferences.kt` | Reads/writes sanitized Speechmatics settings and drops the legacy provider key |
-| `LatinIME.java` | Orchestrator — finalizes composing state and commits transcript text at the caret |
+| `TranscriptPostProcessor.kt` | Paragraph-level post-processing of committed text (spelled-out punctuation replacement, etc.) |
+| `LatinIME.java` | Orchestrator — finalizes composing state, commits transcript text at the caret, and triggers post-processing |
 | `TranscriptionScreen.kt` / `SetupAppScreen.kt` | Settings UI for API key, Speechmatics latency/formatting controls, silence thresholds, paragraph timing |
 
 All source files live under `app/src/main/java/helium314/keyboard/latin/voice/` except `LatinIME.java` (parent package) and the settings UI/preferences helpers in `latin/settings` and `settings/screens`.
@@ -55,6 +56,14 @@ Speechmatics smart formatting is used for finalized transcript text. Key Speechm
 - **disfluency removal**: Optional removal of English hesitation words (um, uh, hmm)
 
 HeliBoard rebuilds finalized text from Speechmatics token results so word spacing and punctuation attachment survive chunk boundaries, then commits the finalized text exactly once at the caret.
+
+## Post-Processing (TranscriptPostProcessor)
+
+After each transcript chunk is committed to the text field, `LatinIME.runTranscriptPostProcessing()` reads the current paragraph (text from the last newline to the cursor, up to 1024 chars) and runs it through `TranscriptPostProcessor.processCurrentParagraph()`. If any rules match, the paragraph text is replaced in-place via `deleteTextBeforeCursor` + `commitText`.
+
+Current rules handle **spelled-out punctuation** (e.g. "exclamation point.", "comma", "question mark.", "period.", "colon.", "semicolon."). Rules are case-insensitive and sorted longest-first so that patterns with surrounding punctuation context (like ". Exclamation point.") are consumed before shorter ambiguous ones. The processor only fires when a rule actually modifies the paragraph — no-op paragraphs are skipped.
+
+To add new post-processing rules, edit `TranscriptPostProcessor.buildRules()` in `voice/TranscriptPostProcessor.kt`. Unit tests are in `TranscriptPostProcessorTest.kt`.
 
 ## Paragraph Breaks
 
