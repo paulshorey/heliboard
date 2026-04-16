@@ -49,7 +49,7 @@ On graceful stop, the client waits for all sent audio to be acknowledged, sends 
 Speechmatics smart formatting is used for finalized transcript text. Key Speechmatics config features:
 - **operating_point**: `"enhanced"` for best accuracy
 - **output_locale**: Defaults to `en-US` for English (supports `en-GB`, `en-AU` when detected)
-- **diarization**: Speaker diarization with `prefer_current_speaker: true` and `max_speakers: 2`. Only the primary speaker (S1) is transcribed; other speakers are filtered out.
+- **diarization**: Speaker diarization with `prefer_current_speaker: true`, `max_speakers: 2` (Speechmatics requires at least 2), and reduced `speaker_sensitivity` to limit spurious speaker splits. Only the primary speaker (S1) is transcribed; other speakers are filtered out from token results (metadata transcript is not used when diarization is on, so aggregation cannot bypass filtering).
 - **additional_vocab**: Custom dictionary for proper nouns, brand names, technical terms with optional `sounds_like` pronunciations
 - **replacements**: Post-transcription word and regex replacements (e.g. brand name corrections, voice assistant trigger normalization)
 - **punctuation**: All marks permitted, sensitivity defaults to 0.5
