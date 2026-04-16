@@ -127,6 +127,7 @@ class SpeechmaticsTranscriptionClientTest {
         val diarConfig = config.getJSONObject("speaker_diarization_config")
         assertEquals(2, diarConfig.getInt("max_speakers"))
         assertTrue(diarConfig.getBoolean("prefer_current_speaker"))
+        assertEquals(0.35, diarConfig.getDouble("speaker_sensitivity"), 1e-9)
     }
 
     @Test
@@ -408,6 +409,26 @@ class SpeechmaticsTranscriptionClientTest {
                   "alternatives":[{"content":"goodbye","speaker":"S2"}]
                 }
               ]
+            }
+            """.trimIndent(),
+            primarySpeaker = "S1"
+        )
+
+        assertNull(event)
+    }
+
+    @Test
+    fun parseServerEvent_diarizationDoesNotUseMetadataTranscriptWhenResultsEmpty() {
+        val event = SpeechmaticsTranscriptionClient.parseServerEvent(
+            """
+            {
+              "message":"AddTranscript",
+              "metadata":{
+                "start_time":0.0,
+                "end_time":1.0,
+                "transcript":"hello from everyone"
+              },
+              "results":[]
             }
             """.trimIndent(),
             primarySpeaker = "S1"

@@ -54,6 +54,12 @@ class SpeechmaticsTranscriptionClient {
         private const val FINALIZE_CLOSE_GRACE_MS = 8_000L
         private const val DEFAULT_LANGUAGE = "en"
         private const val DEFAULT_OUTPUT_LOCALE = "en-US"
+        /**
+         * Speechmatics requires `max_speakers` >= 2; we still only insert tokens for the
+         * primary speaker (S1). Lower sensitivity reduces spurious extra-speaker splits.
+         */
+        private const val SPEAKER_DIARIZATION_MAX_SPEAKERS = 2
+        private const val SPEAKER_DIARIZATION_SENSITIVITY = 0.35
 
         internal data class SessionConfig(
             val language: String,
@@ -158,8 +164,9 @@ class SpeechmaticsTranscriptionClient {
                             put(
                                 "speaker_diarization_config",
                                 JSONObject()
-                                    .put("max_speakers", 2)
+                                    .put("max_speakers", SPEAKER_DIARIZATION_MAX_SPEAKERS)
                                     .put("prefer_current_speaker", true)
+                                    .put("speaker_sensitivity", SPEAKER_DIARIZATION_SENSITIVITY)
                             )
                         }
                         if (config.additionalVocab.isNotEmpty()) {
@@ -242,9 +249,14 @@ class SpeechmaticsTranscriptionClient {
 
                 "AddTranscript" -> {
                     val metadata = json.optJSONObject("metadata")
+                    val fallbackTranscript = if (primarySpeaker != null) {
+                        ""
+                    } else {
+                        metadata?.optString("transcript", "").orEmpty()
+                    }
                     val transcriptSegment = buildTranscriptSegment(
                         results = json.optJSONArray("results"),
-                        fallbackTranscript = metadata?.optString("transcript", "").orEmpty(),
+                        fallbackTranscript = fallbackTranscript,
                         primarySpeaker = primarySpeaker
                     )
                     val transcript = transcriptSegment?.text.orEmpty()
@@ -273,6 +285,9 @@ class SpeechmaticsTranscriptionClient {
             primarySpeaker: String? = null
         ): TranscriptSegment? {
             if (results == null || results.length() == 0) {
+                if (primarySpeaker != null) {
+                    return null
+                }
                 val normalizedFallback = fallbackTranscript.trim()
                 return if (normalizedFallback.isBlank()) {
                     null

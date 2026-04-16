@@ -30,7 +30,8 @@ HeliBoard uses the Speechmatics **Realtime WebSocket** API (`wss://eu.rt.speechm
     "diarization": "speaker",
     "speaker_diarization_config": {
       "max_speakers": 2,
-      "prefer_current_speaker": true
+      "prefer_current_speaker": true,
+      "speaker_sensitivity": 0.35
     },
     "additional_vocab": [
       "HeliBoard",
@@ -50,7 +51,7 @@ HeliBoard uses the Speechmatics **Realtime WebSocket** API (`wss://eu.rt.speechm
 ### Key config features
 - **operating_point**: Set to `"enhanced"` for best accuracy
 - **output_locale**: Defaults to `en-US` for English (also supports `en-GB`, `en-AU`)
-- **diarization**: When enabled, speaker labels (`S1`, `S2`, `UU`) appear in each token's `alternatives[].speaker` field. We filter to only the primary speaker (S1) to ignore background voices.
+- **diarization**: When enabled, speaker labels (`S1`, `S2`, `UU`) appear in each token's `alternatives[].speaker` field. We filter to only the primary speaker (S1) to ignore background voices. Speechmatics does not allow `max_speakers` below 2; a third distinct voice may still be lumped into S1/S2 rather than dropped. `speaker_sensitivity` is set below the API default to reduce false multi-speaker splits. With diarization on, `metadata.transcript` is ignored so mixed-speaker summaries cannot leak past client-side filtering.
 - **additional_vocab**: Custom dictionary for proper nouns, brand names, technical terms. Supports optional `sounds_like` pronunciations.
 - **replacements**: Post-transcription word/regex replacements in `transcript_filtering_config`. Regex patterns use ECMAScript format with `/pattern/` delimiters.
 - **punctuation_overrides**: `permitted_marks: ["all"]` enables all punctuation; `sensitivity` (0.0–1.0) controls how aggressively punctuation is inserted (default 0.5).
