@@ -129,10 +129,38 @@ public final class RichInputConnection implements PrivateCommandPerformer {
      */
     private long mLastSlowInputConnectionTime = -SLOW_INPUTCONNECTION_PERSIST_MS;
 
+    /**
+     * The uptime-millis timestamp of the last keyboard-initiated text-change operation
+     * (commit, delete, set composing, or injected key event).
+     * Used by the backward-caret guard in {@code LatinIME.onUpdateSelection} to decide
+     * whether a host-driven cursor move happened while the user was actively typing.
+     * Initialized to a very old time so early/idle selection changes are never considered
+     * "immediately after a keystroke".
+     */
+    private long mLastKeyboardTextChangeUptimeMs = Long.MIN_VALUE / 2;
+
     public RichInputConnection(final InputMethodService parent) {
         mParent = parent;
         mIC = null;
         mNestLevel = 0;
+    }
+
+    /**
+     * Record that the keyboard just changed the host text (commit, delete, set composing,
+     * or injected key event). Called internally by every text-changing entry point.
+     */
+    private void markKeyboardTextChange() {
+        mLastKeyboardTextChangeUptimeMs = SystemClock.uptimeMillis();
+    }
+
+    /**
+     * Returns uptime-millis since the most recent keyboard-initiated text change, or
+     * {@link Long#MAX_VALUE} if the keyboard has not changed any text yet.
+     */
+    public long millisSinceLastKeyboardTextChange() {
+        final long last = mLastKeyboardTextChangeUptimeMs;
+        if (last == Long.MIN_VALUE / 2) return Long.MAX_VALUE;
+        return SystemClock.uptimeMillis() - last;
     }
 
     public boolean isConnected() {
@@ -150,6 +178,9 @@ public final class RichInputConnection implements PrivateCommandPerformer {
 
     public void onStartInput() {
         mLastSlowInputConnectionTime = -SLOW_INPUTCONNECTION_PERSIST_MS;
+        // Treat a new/restarted input field as "no keyboard text change observed yet"
+        // so the backward-caret guard does not carry over across editors.
+        mLastKeyboardTextChangeUptimeMs = Long.MIN_VALUE / 2;
     }
 
     private void checkConsistencyForDebug() {
@@ -322,6 +353,7 @@ public final class RichInputConnection implements PrivateCommandPerformer {
         if (DEBUG_PREVIOUS_TEXT) checkConsistencyForDebug();
         if (DebugFlags.DEBUG_ENABLED)
             Log.d(TAG, "committing "+text.length()+" characters");
+        markKeyboardTextChange();
         mCommittedTextBeforeComposingText.append(text);
         // TODO: the following is exceedingly error-prone. Right now when the cursor is in the
         //  middle of the composing word mComposingText only holds the part of the composing text
@@ -565,6 +597,7 @@ public final class RichInputConnection implements PrivateCommandPerformer {
         //  come here in this case, but we need to fix this.
         if (DebugFlags.DEBUG_ENABLED)
             Log.d(TAG, "deleting "+beforeLength+" characters before cursor");
+        markKeyboardTextChange();
         final int remainingChars = mComposingText.length() - beforeLength;
         if (remainingChars >= 0) {
             mComposingText.setLength(remainingChars);
@@ -602,6 +635,7 @@ public final class RichInputConnection implements PrivateCommandPerformer {
         if (DebugFlags.DEBUG_ENABLED) // no details, might be too sensitive
             Log.d(TAG, "key event with action "+keyEvent.getAction()+", is control: "+Character.isISOControl(keyEvent.getUnicodeChar()));
         if (keyEvent.getAction() == KeyEvent.ACTION_DOWN) {
+            markKeyboardTextChange();
             if (DEBUG_PREVIOUS_TEXT) checkConsistencyForDebug();
             // This method is only called for enter or backspace when speaking to old applications
             // (target SDK <= 15 (Build.VERSION_CODES.ICE_CREAM_SANDWICH_MR1)), or for digits.
@@ -685,6 +719,7 @@ public final class RichInputConnection implements PrivateCommandPerformer {
     public boolean setComposingText(final CharSequence text, final int newCursorPosition) {
         if (DEBUG_BATCH_NESTING) checkBatchEdit();
         if (DEBUG_PREVIOUS_TEXT) checkConsistencyForDebug();
+        markKeyboardTextChange();
         mExpectedSelStart += text.length() - mComposingText.length();
         mExpectedSelEnd = mExpectedSelStart;
         mComposingText.setLength(0);
@@ -807,6 +842,7 @@ public final class RichInputConnection implements PrivateCommandPerformer {
             Log.d(TAG, "committing completion of length "+text.length()); // don't log actual text
         // text should never be null, but just in case, it's better to insert nothing than to crash
         if (null == text) text = "";
+        markKeyboardTextChange();
         mCommittedTextBeforeComposingText.append(text);
         mExpectedSelStart += text.length() - mComposingText.length();
         mExpectedSelEnd = mExpectedSelStart;
