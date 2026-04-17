@@ -189,6 +189,70 @@ class InputLogicTest {
         assertEquals("hello. a", textBeforeCursor)
     }
 
+    /**
+     * Simulates the Turo-style bug: host app reformats in a TextWatcher right after a
+     * keystroke and lands the caret one character before the expected position. The
+     * "protect cursor while typing" guard should revert that jump and the next keystroke
+     * should land at the correct (expected) position.
+     */
+    @Test fun protectCursorWhileTypingRevertsHostBackwardJumpAfterPunctuation() {
+        reset()
+        latinIME.prefs().edit { putBoolean(Settings.PREF_PROTECT_CURSOR_DURING_TYPING, true) }
+        chainInput("hello")
+        input('.')
+        // The commit of '.' puts us at position 6 ("hello.").
+        // Simulate a host app that reformats and kicks the caret back to before the period.
+        simulateHostCaretJump(newPosition = 5)
+        assertEquals(6, connection.expectedSelectionStart) // guard restored caret
+        assertEquals(6, selectionStart)
+        input('a')
+        assertEquals("hello.a", text)
+    }
+
+    /** Same setup but guard disabled — the jump is accepted and the letter lands early. */
+    @Test fun protectCursorWhileTypingCanBeDisabled() {
+        reset()
+        latinIME.prefs().edit { putBoolean(Settings.PREF_PROTECT_CURSOR_DURING_TYPING, false) }
+        chainInput("hello")
+        input('.')
+        simulateHostCaretJump(newPosition = 5)
+        // Guard is off — the host-driven move is accepted.
+        assertEquals(5, connection.expectedSelectionStart)
+        input('a')
+        assertEquals("helloa.", text)
+    }
+
+    /**
+     * A user tap that lands far from the last commit (more than the small-delta cap)
+     * must still be respected even if it happens shortly after a keystroke — we do not
+     * want the guard to fight deliberate user cursor moves.
+     */
+    @Test fun protectCursorWhileTypingAllowsLargeBackwardUserTaps() {
+        reset()
+        latinIME.prefs().edit { putBoolean(Settings.PREF_PROTECT_CURSOR_DURING_TYPING, true) }
+        chainInput("hello there.")
+        // Simulate a user tap jumping from position 12 back to position 3 — well beyond
+        // the small-delta cap — right after the final period.
+        simulateHostCaretJump(newPosition = 3)
+        assertEquals(3, connection.expectedSelectionStart)
+    }
+
+    /** Host app moves cursor *forward* (auto-inserts format chars). Guard must pass through. */
+    @Test fun protectCursorWhileTypingDoesNotInterfereWithForwardHostMoves() {
+        reset()
+        latinIME.prefs().edit { putBoolean(Settings.PREF_PROTECT_CURSOR_DURING_TYPING, true) }
+        chainInput("hi")
+        // Simulate an app that auto-inserts a " " and moves caret forward.
+        text = "hi "
+        val oldStart = selectionStart
+        val oldEnd = selectionEnd
+        selectionStart = 3
+        selectionEnd = 3
+        latinIME.onUpdateSelection(oldStart, oldEnd, 3, 3, -1, -1)
+        handleMessages()
+        assertEquals(3, connection.expectedSelectionStart)
+    }
+
     @Test fun autospaceButWithTextAfter() {
         reset()
         setText("hello there")
@@ -845,6 +909,20 @@ class InputLogicTest {
         assertEquals(cursor, connection.expectedSelectionStart)
         assertEquals(cursor, connection.expectedSelectionEnd)
         return cursor
+    }
+
+    /**
+     * Simulate a host app moving the caret to [newPosition] and notifying the IME via
+     * {@code onUpdateSelection}. Does NOT change the text itself — this mimics a
+     * TextWatcher that reformats/repositions without adding or removing characters.
+     */
+    private fun simulateHostCaretJump(newPosition: Int) {
+        val oldStart = selectionStart
+        val oldEnd = selectionEnd
+        selectionStart = newPosition
+        selectionEnd = newPosition
+        latinIME.onUpdateSelection(oldStart, oldEnd, newPosition, newPosition, composingStart, composingEnd)
+        handleMessages()
     }
 
     // just sets the text and starts input so connection it set up correctly

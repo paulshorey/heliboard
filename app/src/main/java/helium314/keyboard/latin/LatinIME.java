@@ -1101,6 +1101,20 @@ public class LatinIME extends InputMethodService implements
                     + ", cs=" + composingSpanStart + ", ce=" + composingSpanEnd);
         }
 
+        final SettingsValues settingsValues = mSettings.getCurrent();
+
+        // Fix A: protect the caret from host-app backward jumps that happen immediately
+        // after a keyboard-initiated text change. Some apps attach TextWatchers that
+        // reformat the buffer and either forget to reposition the caret or compute it
+        // wrongly, leaving it BEFORE the character we just typed (observed in Turo and
+        // other formatter-heavy apps). We only fight clearly-abusive backward moves
+        // within a short post-commit window — forward moves and real user taps pass
+        // through untouched.
+        if (maybeRestoreCaretAfterHostBackwardJump(oldSelStart, oldSelEnd, newSelStart, newSelEnd,
+                composingSpanStart, composingSpanEnd, settingsValues)) {
+            return;
+        }
+
         // Abruptly cancel voice recording when the user moves the cursor away from the end
         // of the text, or when the text field is cleared. We use isBelatedExpectedUpdate to
         // distinguish user-initiated cursor changes from cursor changes caused by the
@@ -1142,7 +1156,6 @@ public class LatinIME extends InputMethodService implements
         // not attempt recorrection. This is true even with a hardware keyboard connected: if the
         // view is not displayed we have no means of showing suggestions anyway, and if it is then
         // we want to show suggestions anyway.
-        final SettingsValues settingsValues = mSettings.getCurrent();
         if (isInputViewShown()
                 && mInputLogic.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd,
                 composingSpanStart, composingSpanEnd, settingsValues)) {
@@ -1154,6 +1167,105 @@ public class LatinIME extends InputMethodService implements
                 return;
             mKeyboardSwitcher.requestUpdatingShiftState(getCurrentAutoCapsState(), getCurrentRecapitalizeState());
         }
+    }
+
+    /**
+     * Duration in milliseconds after a keyboard-initiated text change during which a
+     * host-app backward caret jump is treated as "interference during active typing" and
+     * reverted. Tuned to be long enough to cover a {@link android.text.TextWatcher} re-format
+     * on a slow device, but short enough to never interfere with a deliberate user tap that
+     * happens to land close in time to the last keystroke.
+     */
+    private static final long BACKWARD_CARET_GUARD_WINDOW_MS = 750L;
+
+    /**
+     * Maximum backward distance (in characters, from the expected caret position) that
+     * the guard will override. Auto-formatting TextWatchers usually nudge the caret by
+     * just 1–2 characters (e.g. "after period, caret lands before the period"). Real
+     * user taps are almost always farther away than this — a user who wants to land
+     * exactly one character earlier would normally just press backspace. Limiting the
+     * override to small jumps keeps the guard out of the way of legitimate user taps
+     * that happen to land close in time to the last keystroke.
+     */
+    private static final int BACKWARD_CARET_GUARD_MAX_DELTA = 3;
+
+    /**
+     * Implements Fix A (see {@code docs/input-simplified.md} analysis):
+     * detect and undo host-initiated backward cursor jumps that happen within
+     * {@link #BACKWARD_CARET_GUARD_WINDOW_MS} of our last text change.
+     *
+     * <p>Rules:
+     * <ul>
+     *     <li>The update must NOT be a belated expected update from our own edits.</li>
+     *     <li>The new caret must have moved strictly backward relative to where we
+     *     expected it ({@code newSelStart < mExpectedSelStart}).</li>
+     *     <li>No selection may be active on either end of the update.</li>
+     *     <li>The jump must happen within the post-commit window.</li>
+     *     <li>The setting {@link Settings#PREF_PROTECT_CURSOR_DURING_TYPING} must be on.</li>
+     * </ul>
+     *
+     * <p>Forward jumps (apps auto-inserting format characters like {@code "$"}, {@code "("},
+     * spaces, etc.) pass through unchanged. Real user taps are almost never in the
+     * sub-second post-commit window, and if they are, the next keystroke will resync the
+     * caches via the normal non-belated-update path.
+     *
+     * <p>Also implements Fix C: when the guard fires we suppress the voice-cancel guard
+     * and the usual InputLogic cursor-moved handling, because the caret has been restored
+     * to the expected position — nothing downstream needs to react.
+     *
+     * @return {@code true} if the backward jump was detected and overridden (caller should
+     *         skip the rest of {@code onUpdateSelection} processing); {@code false} otherwise.
+     */
+    private boolean maybeRestoreCaretAfterHostBackwardJump(
+            final int oldSelStart, final int oldSelEnd,
+            final int newSelStart, final int newSelEnd,
+            final int composingSpanStart, final int composingSpanEnd,
+            final SettingsValues settingsValues) {
+        if (!settingsValues.mProtectCursorDuringTyping) return false;
+        // Only defend the active input view — never mess with a field we can't see.
+        if (!isInputViewShown()) return false;
+        // Ignore selection changes; only defend a plain caret.
+        if (newSelStart != newSelEnd || oldSelStart != oldSelEnd) return false;
+
+        final RichInputConnection connection = mInputLogic.mConnection;
+        final int expectedSelStart = connection.getExpectedSelectionStart();
+        final int expectedSelEnd = connection.getExpectedSelectionEnd();
+
+        // Don't engage when we don't yet know where the caret should be. Without a known
+        // expected position we have nothing to restore to.
+        if (expectedSelStart < 0 || expectedSelEnd < 0) return false;
+        // Don't engage if we were not expecting a plain caret.
+        if (expectedSelStart != expectedSelEnd) return false;
+        // Don't engage if the host didn't actually move backward from what we expected.
+        if (newSelStart >= expectedSelStart) return false;
+        // Only override short backward jumps (see BACKWARD_CARET_GUARD_MAX_DELTA comment).
+        // Longer backward jumps are assumed to be intentional user taps.
+        if (expectedSelStart - newSelStart > BACKWARD_CARET_GUARD_MAX_DELTA) return false;
+
+        // Must be outside the normal belated-update path — i.e., the move we're seeing
+        // is NOT a delayed echo of our own edits.
+        if (connection.isBelatedExpectedUpdate(oldSelStart, newSelStart, oldSelEnd, newSelEnd,
+                composingSpanStart, composingSpanEnd)) {
+            return false;
+        }
+
+        // Must have happened within the post-commit window.
+        final long sinceLastChange = connection.millisSinceLastKeyboardTextChange();
+        if (sinceLastChange > BACKWARD_CARET_GUARD_WINDOW_MS) return false;
+
+        Log.w(TAG, "Host moved caret backward (" + oldSelStart + "→" + newSelStart
+                + ") " + sinceLastChange + " ms after last keyboard text change; restoring to "
+                + expectedSelStart + " (expected)");
+
+        // Restore the caret. This will itself cause another onUpdateSelection, which will
+        // arrive as a belated expected update and be ignored by the normal path.
+        try {
+            connection.setSelection(expectedSelStart, expectedSelStart);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to restore caret after host backward jump: " + e.getMessage());
+            return false;
+        }
+        return true;
     }
 
     /**

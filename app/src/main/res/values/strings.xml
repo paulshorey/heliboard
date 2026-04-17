@@ -321,6 +321,10 @@
     <string name="url_detection_title">URL detection</string>
     <!-- Description for "url_detection_title" option. -->
     <string name="url_detection_summary">Try to detect URLs and similar as a single word</string>
+    <!-- Preferences item for protecting the caret from host-app backward jumps while typing -->
+    <string name="protect_cursor_during_typing_title">Protect cursor while typing</string>
+    <!-- Description for "protect_cursor_during_typing_title" option. -->
+    <string name="protect_cursor_during_typing_summary">Prevent apps from moving the caret backward immediately after a keystroke. Helps in apps that auto-format text (for example Turo, payment or phone-number fields).</string>
     <!-- Preferences item for disabling word learning -->
     <string name="incognito">Force incognito mode</string>
     <!-- Description for "prefs_force_incognito_mode" option. -->
