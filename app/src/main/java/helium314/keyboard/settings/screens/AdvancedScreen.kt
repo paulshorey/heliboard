@@ -88,6 +88,7 @@ fun AdvancedSettingsScreen(
         R.string.settings_category_experimental,
         Settings.PREF_EMOJI_MAX_SDK,
         Settings.PREF_URL_DETECTION,
+        Settings.PREF_PROTECT_CURSOR_DURING_TYPING,
         if (BuildConfig.BUILD_TYPE != "nouserlib") SettingsWithoutKey.LOAD_GESTURE_LIB else null
     )
     SearchSettingsScreen(
@@ -251,6 +252,11 @@ fun createAdvancedSettings(context: Context) = listOf(
     },
     Setting(context, Settings.PREF_URL_DETECTION, R.string.url_detection_title, R.string.url_detection_summary) {
         SwitchPreference(it, Defaults.PREF_URL_DETECTION)
+    },
+    Setting(context, Settings.PREF_PROTECT_CURSOR_DURING_TYPING,
+        R.string.protect_cursor_during_typing_title, R.string.protect_cursor_during_typing_summary)
+    {
+        SwitchPreference(it, Defaults.PREF_PROTECT_CURSOR_DURING_TYPING)
     },
     Setting(context, SettingsWithoutKey.LOAD_GESTURE_LIB, R.string.load_gesture_library, R.string.load_gesture_library_summary) {
         LoadGestureLibPreference(it)
