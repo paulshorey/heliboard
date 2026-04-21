@@ -1270,7 +1270,11 @@ public class LatinIME extends InputMethodService implements
             return;
         }
         final int stripHeight = mKeyboardSwitcher.isShowingStripContainer() ? mKeyboardSwitcher.getStripContainer().getHeight() : 0;
-        final int visibleTopY = inputHeight - visibleKeyboardView.getHeight() - stripHeight;
+        // The Secondary Toolbar (pinned keys) sits between the primary strip and the
+        // keyboard view. Its height must be counted here so the touchable region
+        // starts at the very top of the primary strip, not inside it.
+        final int secondaryToolbarHeight = mKeyboardSwitcher.getSecondaryToolbarHeight();
+        final int visibleTopY = inputHeight - visibleKeyboardView.getHeight() - stripHeight - secondaryToolbarHeight;
 
         if (hasSuggestionStripView()) {
             mSuggestionStripView.setMoreSuggestionsHeight(visibleTopY);

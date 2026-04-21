@@ -715,6 +715,18 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
 
     public FrameLayout getStripContainer() { return mStripContainer; }
 
+    /**
+     * Height of the Secondary Toolbar (pinned-keys row) when it is currently shown,
+     * otherwise 0. Used by {@link LatinIME#onComputeInsets} so the touchable /
+     * visible region extends up past the secondary toolbar to cover the primary
+     * suggestion strip as well.
+     */
+    public int getSecondaryToolbarHeight() {
+        if (mSecondaryToolbarContainer == null) return 0;
+        return mSecondaryToolbarContainer.getVisibility() == View.VISIBLE
+                ? mSecondaryToolbarContainer.getHeight() : 0;
+    }
+
     public void deallocateMemory() {
         if (mKeyboardView != null) {
             mKeyboardView.cancelAllOngoingEvents();
