@@ -564,6 +564,7 @@ public class LatinIME extends InputMethodService implements
         mStatsUtilsManager.onCreate(this, mDictionaryFacilitator);
         mDisplayContext = KtxKt.getDisplayContext(this);
         KeyboardSwitcher.init(this);
+        helium314.keyboard.latin.personalization.EmailsDictionary.INSTANCE.init(this);
         super.onCreate();
 
         loadSettings();

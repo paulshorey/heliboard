@@ -109,6 +109,16 @@
     <string name="auto_cap_summary">Capitalize the first word of each sentence</string>
     <!-- Option to edit personal dictionary.-->
     <string name="edit_personal_dictionary">Personal dictionary</string>
+    <!-- Option to edit the saved emails dictionary, used for prioritized email suggestions. -->
+    <string name="edit_emails_dictionary">Emails dictionary</string>
+    <!-- Short description shown below the "Emails dictionary" title. -->
+    <string name="edit_emails_dictionary_summary">Saved email addresses suggested above other words</string>
+    <!-- Label for an email's saved usage count, shown alongside the address. -->
+    <string name="emails_dictionary_usage_count">Times used: %1$d</string>
+    <!-- Label placed next to the email usage count input field in the edit dialog. -->
+    <string name="emails_dictionary_usage_count_label">Times used</string>
+    <!-- Placeholder shown inside the email input field in the edit dialog. -->
+    <string name="emails_dictionary_email_hint">Email address</string>
     <!-- Name of the main dictionary, as opposed to auxiliary dictionaries (medical/entertainment/sports...) -->
     <string name="main_dictionary">Main dictionary</string>
     <!-- Option to enable showing suggestions -->

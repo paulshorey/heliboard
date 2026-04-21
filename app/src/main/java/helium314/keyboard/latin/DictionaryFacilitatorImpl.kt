@@ -547,6 +547,23 @@ class DictionaryFacilitatorImpl : DictionaryFacilitator {
                 if (word.length == 1 && info.mSourceDict.mDictType == Dictionary.TYPE_EMOJI && !StringUtils.mightBeEmoji(word[0].code))
                     continue
 
+                // Prefer the user's personal dictionary and user history over built-in dictionaries
+                // so that words the user has added / learned show up higher in the suggestion strip.
+                val sourceType = info.mSourceDict.mDictType
+                if (sourceType == Dictionary.TYPE_USER || sourceType == Dictionary.TYPE_USER_HISTORY) {
+                    val boostedScore = (info.mScore.toLong() + PERSONAL_DICT_SCORE_BOOST)
+                        .coerceAtMost(SuggestedWordInfo.MAX_SCORE.toLong()).toInt()
+                    if (boostedScore != info.mScore) {
+                        suggestions.add(
+                            SuggestedWordInfo(
+                                info.mWord, info.mPrevWordsContext, boostedScore, info.mKindAndFlags,
+                                info.mSourceDict, info.mIndexOfTouchPointOfSecondWord,
+                                info.mAutoCommitFirstWordConfidence
+                            )
+                        )
+                        continue
+                    }
+                }
                 suggestions.add(info)
             }
         }
@@ -614,6 +631,12 @@ class DictionaryFacilitatorImpl : DictionaryFacilitator {
 
         // HACK: This threshold is being used when adding a capitalized entry in the User History dictionary.
         private const val CAPITALIZED_FORM_MAX_PROBABILITY_FOR_INSERT = 140
+
+        // Amount added to the raw dictionary score for words coming from the user's personal
+        // dictionary or user history. This nudges these words above comparable built-in main
+        // dictionary matches without overwhelming exact-match or whitelist scores, so that a
+        // freshly-learned or personally-added word wins over a common language-model word.
+        private const val PERSONAL_DICT_SCORE_BOOST = 50_000
 
         private fun createSubDict(
             dictType: String, context: Context, locale: Locale, dictFile: File?, dictNamePrefix: String

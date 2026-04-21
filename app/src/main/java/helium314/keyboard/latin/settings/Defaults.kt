@@ -141,7 +141,7 @@ object Defaults {
     const val PREF_ENABLE_CLIPBOARD_HISTORY = true
     const val PREF_CLIPBOARD_HISTORY_RETENTION_TIME = 10 // minutes
     const val PREF_CLIPBOARD_HISTORY_PINNED_FIRST = true
-    const val PREF_ADD_TO_PERSONAL_DICTIONARY = false
+    const val PREF_ADD_TO_PERSONAL_DICTIONARY = true
     @JvmField
     val PREF_NAVBAR_COLOR = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
     const val PREF_NARROW_KEY_GAPS = false
