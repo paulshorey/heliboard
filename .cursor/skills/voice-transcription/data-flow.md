@@ -127,8 +127,8 @@ PAUSED     → User taps pause  → RECORDING (resume)
 ### Settings (TranscriptionScreen.kt)
 - **Speechmatics API Key**: Required for transcription
 - **Final transcript delay**: Upper bound for Speechmatics finalization latency
-- **Punctuation sensitivity**: Lower values make Speechmatics more conservative about inserting punctuation
-- **End of utterance trigger**: Server-side silence duration before Speechmatics finalizes an utterance (disabled by default for dictation)
+- **Punctuation sensitivity**: Higher values make Speechmatics insert more punctuation; in practice this mostly affects commas at short pauses (sentence-end periods come from prosodic utterance ends and are less sensitive to this setting). Default `0.55`.
+- **End of utterance trigger**: Server-side silence duration before Speechmatics force-finalizes an utterance. Disabled by default (`0`) because any non-zero value forces a sentence-end mark (a period in English) at every pause past the threshold, regardless of punctuation sensitivity — that is what would otherwise suppress commas and overproduce periods during dictation.
 - **Remove disfluencies**: Removes English hesitation sounds like “um” and “uh”
 - **Chunk Silence Duration**: Silence window before detecting a speech boundary
 - **Silence Threshold**: RMS threshold floor for silence/speech detection

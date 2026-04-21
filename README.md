@@ -78,13 +78,15 @@ Identifies speakers and filters to only the primary speaker, ignoring background
 
 #### Punctuation
 
-All marks are permitted. Sensitivity (0.0–1.0) controls how aggressively punctuation is inserted.
+All marks permitted (`permitted_marks: ["all"]`, covering commas, periods, `?`, `!` for English and locale-specific marks for other languages). Sensitivity (0.0–1.0) controls how aggressively punctuation is inserted — higher values produce more commas at short pauses.
 
 **Where to edit:**
-- Default sensitivity: `Defaults.kt` → `PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT` (currently `50`, meaning 0.5)
+- Default sensitivity: `Defaults.kt` → `PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT` (currently `55`, meaning 0.55, just above Speechmatics' own default of 0.5)
 - Users can adjust via Settings → Transcription → Punctuation sensitivity
 
-**Docs:** https://docs.speechmatics.com/speech-to-text/formatting#punctuation
+**Server end-of-utterance note:** `PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS` defaults to `0` (disabled). A non-zero value forces a final transcript at every pause past the threshold and terminates it with a sentence-end mark (a period in English) regardless of sensitivity, so enabling it causes "period-after-every-pause" output. Keep it at 0 to let Speechmatics choose punctuation from prosody; HeliBoard's local silence timers still handle paragraph breaks and auto-stop.
+
+**Docs:** https://docs.speechmatics.com/features/punctuation-settings
 
 #### Disfluency removal
 
@@ -115,10 +117,10 @@ These are adjustable at runtime via the Transcription settings screen:
 | Setting | Pref key | Default | Description |
 |---------|----------|---------|-------------|
 | API key | `PREF_SPEECHMATICS_API_KEY` | `""` | Speechmatics API key |
-| Final transcript delay | `PREF_SPEECHMATICS_MAX_DELAY_MILLIS` | `1250` | Latency target (ms) |
-| End-of-utterance silence | `PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS` | `750` | Server-side silence trigger (ms) |
+| Final transcript delay | `PREF_SPEECHMATICS_MAX_DELAY_MILLIS` | `2500` | Latency target (ms) |
+| End-of-utterance silence | `PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS` | `0` | Server-side silence trigger (ms). `0` disables it — recommended, because non-zero forces a period at every pause |
 | Remove disfluencies | `PREF_SPEECHMATICS_REMOVE_DISFLUENCIES` | `true` | Remove um/uh/hmm |
-| Punctuation sensitivity | `PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT` | `50` | 0–100 (maps to 0.0–1.0) |
+| Punctuation sensitivity | `PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT` | `55` | 0–100 (maps to 0.0–1.0). Higher = more commas at short pauses |
 | Speaker diarization | `PREF_SPEECHMATICS_DIARIZATION` | `true` | Filter to primary speaker |
 
 Preference keys are in `Settings.java`, defaults in `Defaults.kt`, read/write logic in `TranscriptionPreferences.kt`.

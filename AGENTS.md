@@ -44,7 +44,8 @@ All Speechmatics session config is built in `SpeechmaticsTranscriptionClient.kt`
 | **Word replacement**        | `SpeechmaticsTranscriptionClient.defaultReplacements()`             | Returns `List<ReplacementRule>` — plain text `from`/`to` pairs                                   |
 | **Regex replacement**       | Same `defaultReplacements()`                                        | Use `/pattern/` delimiters in `from` field (ECMAScript regex)                                    |
 | **Speaker diarization**     | `buildStartRecognitionMessage()` + `buildTranscriptSegment()`       | Diarization JSON config; speaker filtering via `primarySpeaker` param                            |
-| **Punctuation sensitivity** | `Defaults.kt` → `PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT` | Default `50` (0–100, maps to 0.0–1.0)                                                            |
+| **Punctuation sensitivity** | `Defaults.kt` → `PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT` | Default `55` (0–100, maps to 0.0–1.0); higher = more commas at short pauses                      |
+| **End-of-utterance trigger**| `Defaults.kt` → `PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS`         | Default `0` (disabled). Non-zero forces a sentence-end period after that much silence            |
 | **Disfluency removal**      | `Defaults.kt` → `PREF_SPEECHMATICS_REMOVE_DISFLUENCIES`             | Boolean, default `true` (English only)                                                           |
 | **Output locale**           | `SpeechmaticsTranscriptionClient.normalizeOutputLocale()`           | Defaults to `en-US` for English; maps GB/AU when detected                                        |
 | **Operating point**         | `buildSessionConfig()` param `operatingPoint`                       | Default `"enhanced"` for best accuracy                                                           |
