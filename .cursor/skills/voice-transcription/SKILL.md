@@ -65,6 +65,20 @@ Current rules handle **spelled-out punctuation** (e.g. "exclamation point.", "co
 
 To add new post-processing rules, edit `TranscriptPostProcessor.buildRules()` in `voice/TranscriptPostProcessor.kt`. Unit tests are in `TranscriptPostProcessorTest.kt`.
 
+## Leading-Casing Correction
+
+Speechmatics always capitalizes the first letter of a new `AddTranscript` span (it treats each span as a sentence start). When the user dictates mid-sentence — caret placed inside existing text, or resumed after deleting a trailing period — that capitalization is wrong.
+
+`TranscriptPostProcessor.adjustLeadingCasing(chunk, previousContext)` handles this **before commit**. It is called from `LatinIME.prepareVoiceTranscriptionText`, which reads `VOICE_CASING_LOOKBACK` (16) characters before the cursor and passes them in alongside the chunk.
+
+The first character is lowercased only when all of these hold:
+- the chunk is not `attachesToPrevious` (continuation spans are already correctly cased by Speechmatics and are short-circuited earlier in `prepareVoiceTranscriptionText`)
+- the first character is an uppercase letter
+- the previous visible character (ignoring trailing whitespace and closing `"`, `'`, `“”`, `‘’`, `)`, `]`, `}`, `»`) is **not** `.`, `!`, `?`, or a newline — and the context is not empty/whitespace
+- the first word is **not** `I`/`I'm`/`I'll`/`I've`/`I'd`, an all-uppercase acronym (`NASA`), or a camel/Pascal-case word with internal uppercase (`iPhone`, `McDonald's`)
+
+Known tradeoff: proper nouns dictated as the first word of a mid-sentence chunk (e.g. `Amazon`, `Paris`) are lowercased. Mitigated by the `additional_vocab` dictionary for known brands.
+
 ## Paragraph Breaks
 
 After configured silence, `VoiceInputManager` fires `onNewParagraphRequested()` → LatinIME inserts `"\n\n"` when processing is idle (deferred so it doesn't interleave with pending transcript spans).
