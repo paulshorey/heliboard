@@ -398,14 +398,10 @@ final class SuggestionStripLayoutHelper {
     private TextView layoutWord(final Context context, final int positionInStrip, final int width) {
         final TextView wordView = mWordViews.get(positionInStrip);
         final CharSequence word = wordView.getText();
-        if (positionInStrip == mCenterPositionInStrip && mMoreSuggestionsAvailable) {
-            // TODO: This "more suggestions hint" should have a nicely designed icon.
-            wordView.setCompoundDrawablesWithIntrinsicBounds(null, null, null, mMoreSuggestionsHint);
-            // HACK: Align with other TextViews that have no compound drawables.
-            wordView.setCompoundDrawablePadding(-mMoreSuggestionsHint.getIntrinsicHeight());
-        } else {
-            wordView.setCompoundDrawablesWithIntrinsicBounds(null, null, null, null);
-        }
+        // The "more suggestions available" triple-dot hint used to be drawn under the
+        // center (most-relevant) suggestion. It was purely decorative and visually
+        // added vertical weight to the strip, so it is intentionally not drawn.
+        wordView.setCompoundDrawablesWithIntrinsicBounds(null, null, null, null);
         // {@link StyleSpan} in a content description may cause an issue of TTS/TalkBack.
         // Use a simple {@link String} to avoid the issue.
         wordView.setContentDescription(
