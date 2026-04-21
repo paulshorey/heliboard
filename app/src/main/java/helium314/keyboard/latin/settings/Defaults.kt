@@ -166,9 +166,19 @@ object Defaults {
     const val PREF_TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss"
     const val PREF_SPEECHMATICS_API_KEY = ""
     const val PREF_SPEECHMATICS_MAX_DELAY_MILLIS = 2500
-    const val PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS = 1800
+    // 0 disables the server-side end-of-utterance detector. Leaving it enabled
+    // forces a final transcript after every short pause, and Speechmatics always
+    // terminates that forced final with a sentence-end mark (a period in
+    // English) regardless of punctuation sensitivity. Disabling it lets
+    // Speechmatics insert commas at short pauses and periods only at natural
+    // sentence boundaries.
+    const val PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS = 0
     const val PREF_SPEECHMATICS_REMOVE_DISFLUENCIES = true
-    const val PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT = 10
+    // Speechmatics' native default is 0.5 (50). A small bump above that biases
+    // the model toward inserting more punctuation, which mostly manifests as
+    // commas at short pauses — the punctuation type users miss when server EOU
+    // forces periods instead. Range 0–100 (maps to 0.0–1.0).
+    const val PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT = 55
     const val PREF_SPEECHMATICS_DIARIZATION = true
     const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 1
     const val PREF_VOICE_SILENCE_THRESHOLD = 220

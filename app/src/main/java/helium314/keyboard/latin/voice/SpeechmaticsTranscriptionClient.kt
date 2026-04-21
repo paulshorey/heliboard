@@ -150,6 +150,12 @@ class SpeechmaticsTranscriptionClient {
                         put("enable_partials", false)
                         put("enable_entities", true)
                         put("operating_point", config.operatingPoint)
+                        // permitted_marks = ["all"] permits every punctuation mark the
+                        // active language pack supports (including commas for English,
+                        // 、 for Japanese, ． for Hindi, etc.). Sensitivity (0–1) then
+                        // controls how readily the model inserts them: higher values
+                        // produce more commas at short pauses and more periods / ? / !
+                        // at sentence boundaries.
                         put(
                             "punctuation_overrides",
                             JSONObject()
