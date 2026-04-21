@@ -209,6 +209,45 @@ class SpeechmaticsTranscriptionClientTest {
     }
 
     @Test
+    fun buildStartRecognitionMessage_permitsAllPunctuationMarks() {
+        val sessionConfig = SpeechmaticsTranscriptionClient.buildSessionConfig(
+            languageTag = "en",
+            maxDelaySeconds = 2.0,
+            removeDisfluencies = false,
+            endOfUtteranceSilenceTriggerSeconds = 0.0,
+            punctuationSensitivity = 0.55
+        )
+        val payload = JSONObject(
+            SpeechmaticsTranscriptionClient.buildStartRecognitionMessage(sessionConfig)
+        )
+        val overrides = payload
+            .getJSONObject("transcription_config")
+            .getJSONObject("punctuation_overrides")
+        val permitted = overrides.getJSONArray("permitted_marks")
+
+        assertEquals(1, permitted.length())
+        assertEquals("all", permitted.getString(0))
+        assertEquals(0.55, overrides.getDouble("sensitivity"), 1e-9)
+    }
+
+    @Test
+    fun buildStartRecognitionMessage_omitsConversationConfigWhenEouDisabled() {
+        val sessionConfig = SpeechmaticsTranscriptionClient.buildSessionConfig(
+            languageTag = "en",
+            maxDelaySeconds = 2.0,
+            removeDisfluencies = false,
+            endOfUtteranceSilenceTriggerSeconds = 0.0,
+            punctuationSensitivity = 0.55
+        )
+        val payload = JSONObject(
+            SpeechmaticsTranscriptionClient.buildStartRecognitionMessage(sessionConfig)
+        )
+        val config = payload.getJSONObject("transcription_config")
+
+        assertFalse(config.has("conversation_config"))
+    }
+
+    @Test
     fun buildStartRecognitionMessage_includesConversationConfig() {
         val sessionConfig = SpeechmaticsTranscriptionClient.buildSessionConfig(
             languageTag = "en",
