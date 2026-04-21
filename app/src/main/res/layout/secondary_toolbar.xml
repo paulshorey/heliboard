@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    SPDX-License-Identifier: GPL-3.0-only
+
+    Secondary toolbar: a horizontally scrollable row of "Pinned" toolbar buttons
+    shown just below the main suggestion / toolbar strip.
+-->
+<HorizontalScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/secondary_toolbar_container"
+    android:layout_width="match_parent"
+    android:layout_height="@dimen/config_secondary_toolbar_height"
+    android:scrollbars="none"
+    android:overScrollMode="never"
+    android:fillViewport="true"
+    style="?attr/suggestionStripViewStyle">
+
+    <LinearLayout
+        android:id="@+id/pinned_keys"
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:orientation="horizontal"
+        android:minWidth="0dp"
+        style="?attr/suggestionWordStyle" />
+
+</HorizontalScrollView>
