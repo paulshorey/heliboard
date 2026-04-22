@@ -395,4 +395,70 @@ class TranscriptPostProcessorTest {
     fun `casing preserved at document start with no context`() {
         assertEquals("The quick brown fox", adjust("The quick brown fox", ""))
     }
+
+    // --- Trailing punctuation stripping (mid-sentence insertion) ---
+
+    private fun strip(chunk: String, after: String): String =
+        TranscriptPostProcessor.stripTrailingPunctuationIfMidSentence(chunk, after)
+
+    @Test
+    fun `strips trailing period when followed by lowercase word`() {
+        assertEquals("some extra words", strip("some extra words.", "and more text"))
+    }
+
+    @Test
+    fun `strips trailing period when followed by space then lowercase`() {
+        assertEquals("some extra words", strip("some extra words.", " and more text"))
+    }
+
+    @Test
+    fun `strips trailing exclamation when followed by lowercase`() {
+        assertEquals("more words", strip("more words!", "continue here"))
+    }
+
+    @Test
+    fun `strips trailing question mark when followed by lowercase`() {
+        assertEquals("some text", strip("some text?", "follows on"))
+    }
+
+    @Test
+    fun `preserves trailing period when followed by uppercase (new sentence)`() {
+        assertEquals("first sentence.", strip("first sentence.", "Second sentence."))
+    }
+
+    @Test
+    fun `preserves trailing period when nothing follows (end of text)`() {
+        assertEquals("last sentence.", strip("last sentence.", ""))
+    }
+
+    @Test
+    fun `preserves trailing period when followed only by whitespace`() {
+        assertEquals("last sentence.", strip("last sentence.", "   "))
+    }
+
+    @Test
+    fun `preserves trailing period when followed by newline`() {
+        assertEquals("end of paragraph.", strip("end of paragraph.", "\nnew paragraph"))
+    }
+
+    @Test
+    fun `preserves trailing comma (not sentence-ending punctuation)`() {
+        assertEquals("word,", strip("word,", "continues here"))
+    }
+
+    @Test
+    fun `preserves trailing colon`() {
+        assertEquals("items:", strip("items:", "first item"))
+    }
+
+    @Test
+    fun `handles empty chunk`() {
+        assertEquals("", strip("", "anything"))
+    }
+
+    @Test
+    fun `strips period when followed by digit (not a letter so preserves)`() {
+        // Digit is not a lowercase letter — do not strip
+        assertEquals("some text.", strip("some text.", "42 more"))
+    }
 }
