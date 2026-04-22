@@ -31,6 +31,8 @@
     <dimen name="config_key_hysteresis_distance_for_sliding_modifier">8.0dp</dimen>
 
     <dimen name="config_language_on_spacebar_horizontal_margin">3dp</dimen>
+    <!-- Non-hit strip above the space key on main alphabet/symbol layouts: keeps a gap from the letter row while using almost the full row height for tap targets. -->
+    <dimen name="config_spacebar_visual_inset_top">4dp</dimen>
 
     <integer name="config_gesture_trail_fadeout_start_delay">100</integer>
     <integer name="config_gesture_trail_update_interval">20</integer>

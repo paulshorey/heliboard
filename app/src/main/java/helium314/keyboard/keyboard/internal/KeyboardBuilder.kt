@@ -23,7 +23,6 @@ import helium314.keyboard.latin.define.DebugFlags
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.sumOf
-import kotlin.math.roundToInt
 import org.xmlpull.v1.XmlPullParser
 
 // TODO: Write unit tests for this class.
@@ -136,8 +135,9 @@ open class KeyboardBuilder<KP : KeyboardParams>(protected val mContext: Context,
     }
 
     /**
-     * Shrinks the main space key(s) to the bottom half of the bottom row slot: same row height and
-     * bottom alignment, but hit-testing and visuals only in the lower portion (see [Key.KeyParams.mSpaceVisualInsetTop]).
+     * Nudges the main space key(s) down slightly inside the bottom row slot: same row height and
+     * bottom alignment, with a small non-hit strip at the top (letter-row padding) while using most
+     * of the slot for drawing and hit-testing (see [Key.KeyParams.mSpaceVisualInsetTop]).
      */
     private fun applyMainKeyboardSpaceInset() {
         if (!mParams.mId.isAlphaOrSymbolKeyboard) return
@@ -148,10 +148,11 @@ open class KeyboardBuilder<KP : KeyboardParams>(protected val mContext: Context,
             !it.isSpacer && it.mCode == Constants.CODE_SPACE && it.mWidth > normalKeyWidth * 1.5f
         }
         if (spaceKeys.isEmpty()) return
+        val paddingPx = mResources.getDimensionPixelSize(R.dimen.config_spacebar_visual_inset_top)
         for (space in spaceKeys) {
             val fullAbsH = space.mAbsoluteHeight
             val maxInset = (fullAbsH - 1).toInt().coerceAtLeast(1)
-            val insetTop = (fullAbsH / 2.0).roundToInt().coerceIn(1, maxInset)
+            val insetTop = paddingPx.coerceIn(1, maxInset)
             space.mSpaceVisualInsetTop = insetTop
         }
     }
