@@ -83,9 +83,11 @@ public final class ResourceUtils {
             minKeyboardHeight = -res.getFraction(
                     R.fraction.config_min_keyboard_height, dm.widthPixels, dm.widthPixels);
         }
-        // Keyboard height will not exceed maxKeyboardHeight and will not be less than
-        // minKeyboardHeight.
-        return (int)Math.max(Math.min(keyboardHeight, maxKeyboardHeight), minKeyboardHeight);
+        // Clamp to [minKeyboardHeight, maxKeyboardHeight]. Note: minKeyboardHeight often comes
+        // from a width-based fraction (negative config_min_keyboard_height); if that floor is
+        // larger than keyboardHeight, the default dp height has no effect until the floor is
+        // lowered or the user reduces height in settings.
+        return (int) Math.max(Math.min(keyboardHeight, maxKeyboardHeight), minKeyboardHeight);
     }
 
     public static boolean isValidFraction(final float fraction) {

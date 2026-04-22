@@ -18,7 +18,10 @@
     <!-- This config_default_keyboard_height value should match with keyboard-heights.xml -->
     <dimen name="config_default_keyboard_height">198.0dp</dimen>
     <fraction name="config_max_keyboard_height">46%p</fraction>
-    <fraction name="config_min_keyboard_height">-61.8%p</fraction>
+    <!-- Negative = fraction of display width (see ResourceUtils.getDefaultKeyboardHeight). Keep
+         this comfortably below config_default_keyboard_height so lowering the default dp value
+         actually shrinks keys; a wide floor here clamps the whole keyboard model back up. -->
+    <fraction name="config_min_keyboard_height">-47%p</fraction>
 
     <dimen name="config_popup_keys_keyboard_key_height">50.0dp</dimen>
     <!-- Amount of allowance for selecting keys in a mini popup keyboard by sliding finger. -->
