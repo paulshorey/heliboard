@@ -266,4 +266,133 @@ class TranscriptPostProcessorTest {
         val lengths = TranscriptPostProcessor.rules.map { it.find.length }
         assertEquals(lengths, lengths.sortedDescending())
     }
+
+    // --- Leading casing (sentence-start detection) ---
+
+    private fun adjust(chunk: String, context: String): String =
+        TranscriptPostProcessor.adjustLeadingCasing(chunk, context)
+
+    @Test
+    fun `casing lowercased when cursor sits after a word`() {
+        assertEquals("bought some milk", adjust("Bought some milk", "I went to the store and "))
+    }
+
+    @Test
+    fun `casing lowercased when cursor is directly after a letter`() {
+        assertEquals("bought", adjust("Bought", "I went to the store and"))
+    }
+
+    @Test
+    fun `casing preserved after period and space`() {
+        assertEquals("Bought some milk", adjust("Bought some milk", "I went to the store. "))
+    }
+
+    @Test
+    fun `casing preserved after exclamation and space`() {
+        assertEquals("Bought some milk", adjust("Bought some milk", "Wow! "))
+    }
+
+    @Test
+    fun `casing preserved after question mark and space`() {
+        assertEquals("Really", adjust("Really", "Are you sure? "))
+    }
+
+    @Test
+    fun `casing preserved after newline`() {
+        assertEquals("Hello", adjust("Hello", "first line\n"))
+    }
+
+    @Test
+    fun `casing preserved when context is empty`() {
+        assertEquals("Hello world", adjust("Hello world", ""))
+    }
+
+    @Test
+    fun `casing preserved when context is whitespace only`() {
+        assertEquals("Hello world", adjust("Hello world", "   \n  "))
+    }
+
+    @Test
+    fun `casing preserved after period with closing quote`() {
+        assertEquals("Then he left", adjust("Then he left", "\"That was weird.\" "))
+    }
+
+    @Test
+    fun `casing preserved after period with closing parenthesis`() {
+        assertEquals("The next day", adjust("The next day", "(see footnote.) "))
+    }
+
+    @Test
+    fun `casing preserved for standalone pronoun I`() {
+        assertEquals("I went home", adjust("I went home", "so "))
+    }
+
+    @Test
+    fun `casing preserved for I'm contraction`() {
+        assertEquals("I'm going", adjust("I'm going", "so "))
+    }
+
+    @Test
+    fun `casing preserved for I'll contraction`() {
+        assertEquals("I'll be there", adjust("I'll be there", "so "))
+    }
+
+    @Test
+    fun `casing preserved for curly apostrophe I contraction`() {
+        assertEquals("I’ve tried", adjust("I’ve tried", "so "))
+    }
+
+    @Test
+    fun `casing preserved for acronyms`() {
+        assertEquals("NASA launched", adjust("NASA launched", "yesterday "))
+    }
+
+    @Test
+    fun `casing preserved for camelCase first word`() {
+        assertEquals("iPhone updates", adjust("iPhone updates", "the "))
+    }
+
+    @Test
+    fun `casing preserved for Pascal case with internal caps`() {
+        assertEquals("McDonald's opened", adjust("McDonald's opened", "then "))
+    }
+
+    @Test
+    fun `casing preserved for non-letter first char`() {
+        assertEquals("42 things", adjust("42 things", "and "))
+    }
+
+    @Test
+    fun `casing preserved when already lowercase`() {
+        assertEquals("bought milk", adjust("bought milk", "and "))
+    }
+
+    @Test
+    fun `casing preserved for empty chunk`() {
+        assertEquals("", adjust("", "and "))
+    }
+
+    @Test
+    fun `casing preserved after comma (treated as mid-sentence)`() {
+        // Comma ends a clause but not a sentence — lowercase is correct.
+        assertEquals("then we went", adjust("Then we went", "First we ate, "))
+    }
+
+    @Test
+    fun `casing preserved after semicolon (treated as mid-sentence)`() {
+        assertEquals("however", adjust("However", "I was tired; "))
+    }
+
+    @Test
+    fun `casing lowercased with multi-word chunk mid-sentence`() {
+        assertEquals(
+            "bought some milk and eggs",
+            adjust("Bought some milk and eggs", "I went to the store and ")
+        )
+    }
+
+    @Test
+    fun `casing preserved at document start with no context`() {
+        assertEquals("The quick brown fox", adjust("The quick brown fox", ""))
+    }
 }
