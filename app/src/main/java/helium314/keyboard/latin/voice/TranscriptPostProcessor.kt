@@ -28,6 +28,30 @@ object TranscriptPostProcessor {
     }
 
     /**
+     * Strip trailing sentence-ending punctuation from [chunk] if [followingContext]
+     * shows the cursor is mid-sentence (next visible character is a lowercase letter).
+     *
+     * Speechmatics appends end-of-sentence punctuation to every transcript span.
+     * When the caret is positioned inside existing text, that trailing mark is wrong
+     * because the text that follows is a continuation of the same sentence.
+     */
+    fun stripTrailingPunctuationIfMidSentence(chunk: String, followingContext: CharSequence): String {
+        if (chunk.isEmpty()) return chunk
+        val last = chunk[chunk.length - 1]
+        if (last != '.' && last != '!' && last != '?') return chunk
+        if (!isSentenceContinuation(followingContext)) return chunk
+        return chunk.substring(0, chunk.length - 1)
+    }
+
+    private fun isSentenceContinuation(context: CharSequence): Boolean {
+        for (c in context) {
+            if (c.isWhitespace()) continue
+            return c.isLetter() && c.isLowerCase()
+        }
+        return false
+    }
+
+    /**
      * Adjust the first character's casing of a freshly arrived transcription [chunk].
      *
      * Speechmatics always capitalizes the first letter of a new transcript span

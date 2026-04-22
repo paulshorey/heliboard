@@ -2196,6 +2196,12 @@ public class LatinIME extends InputMethodService implements
      */
     private static final int VOICE_CASING_LOOKBACK = 16;
 
+    /**
+     * Characters of editor context after the cursor used to detect mid-sentence
+     * insertion. Enough to see the first word of the following text.
+     */
+    private static final int VOICE_PUNCTUATION_LOOKAHEAD = 16;
+
     @NonNull
     private String prepareVoiceTranscriptionText(
             @NonNull final String text,
@@ -2206,8 +2212,13 @@ public class LatinIME extends InputMethodService implements
         final CharSequence rawBefore =
                 mInputLogic.mConnection.getTextBeforeCursor(VOICE_CASING_LOOKBACK, 0);
         final CharSequence beforeCursor = (rawBefore != null) ? rawBefore : "";
-        final String cased =
+        String cased =
                 TranscriptPostProcessor.INSTANCE.adjustLeadingCasing(text, beforeCursor);
+        final CharSequence rawAfter =
+                mInputLogic.mConnection.getTextAfterCursor(VOICE_PUNCTUATION_LOOKAHEAD, 0);
+        final CharSequence afterCursor = (rawAfter != null) ? rawAfter : "";
+        cased = TranscriptPostProcessor.INSTANCE
+                .stripTrailingPunctuationIfMidSentence(cased, afterCursor);
         if (beforeCursor.length() == 0) {
             return cased;
         }
