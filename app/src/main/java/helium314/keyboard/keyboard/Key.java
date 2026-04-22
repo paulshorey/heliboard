@@ -984,7 +984,7 @@ public class Key implements Comparable<Key> {
         public float yPos;
         /**
          * When positive on a space key, the key keeps the full row slot for layout but draws and
-         * hit-tests only in the bottom portion (this many pixels skipped from the top of the slot).
+         * hit-tests below a strip at the top of the slot (this many pixels skipped).
          * Set from {@link helium314.keyboard.keyboard.internal.KeyboardBuilder}.
          */
         public int mSpaceVisualInsetTop;
