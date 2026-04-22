@@ -175,11 +175,13 @@ object Defaults {
     // sentence boundaries.
     const val PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS = 0
     const val PREF_SPEECHMATICS_REMOVE_DISFLUENCIES = true
-    // Speechmatics' native default is 0.5 (50). A small bump above that biases
-    // the model toward inserting more punctuation, which mostly manifests as
-    // commas at short pauses — the punctuation type users miss when server EOU
-    // forces periods instead. Range 0–100 (maps to 0.0–1.0).
-    const val PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT = 55
+    // Speechmatics' native default is 0.5 (50). Setting below the native default
+    // reduces how readily the model inserts sentence-ending periods, which is the
+    // main source of over-eager sentence splitting in dictation. 0.4 is the value
+    // Speechmatics' own docs use as the "reduce punctuation" example. Commas at
+    // natural speech pauses are still emitted at this level. Range 0–100 (maps to
+    // 0.0–1.0).
+    const val PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT = 40
     const val PREF_SPEECHMATICS_DIARIZATION = true
     const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 1
     const val PREF_VOICE_SILENCE_THRESHOLD = 220
