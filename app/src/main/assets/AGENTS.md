@@ -12,6 +12,11 @@ Runtime data loaded from assets rather than compiled resource values.
 - `layouts/` - keyboard layout definitions loaded at runtime.
 - `locale_key_texts/` - locale-specific popup/hint text files.
 
+## `dicts/` cheat sheet
+- `main_*.dict` - bundled binary dictionaries by locale.
+- These files are consumed by `DictionaryInfoUtils.getAssetsDictionaryList()`, which enumerates the folder directly.
+- Do not add `AGENTS.md` or any other non-dictionary files inside `dicts/`, because they can be mistaken for shipped dictionary assets.
+
 ## Non-obvious notes
 - `khipro-mappings.json` is effectively part of the input-method logic for that layout family, not just passive data.
 - `dictionaries_in_dict_repo.csv` is maintained by tooling and should not drift from `tools/release.py` expectations.
