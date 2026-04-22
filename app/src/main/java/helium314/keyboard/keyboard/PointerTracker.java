@@ -1263,8 +1263,9 @@ public final class PointerTracker implements PointerTrackerQueue.Element,
 
     private boolean isClearlyInsideKey(final Key key, final int x, final int y) {
         // less than 15% of width from edge
+        final float yMarginFrac = key.getCode() == Constants.CODE_SPACE ? 0.35f : 0.15f;
         return x > key.getX() + key.getWidth() * 0.15 && x < key.getX() + key.getWidth() * 0.85
-                && y > key.getY() + key.getHeight() * 0.15 && y < key.getY() + key.getHeight() * 0.85;
+                && y > key.getY() + key.getHeight() * yMarginFrac && y < key.getY() + key.getHeight() * 0.85;
     }
 
     private void detectAndSendKey(final Key key, final int x, final int y, final long eventTime) {

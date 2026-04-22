@@ -311,15 +311,27 @@ public class Key implements Comparable<Key> {
         mVerticalGap = Math.round(keyParams.mKeyboardParams.mRelativeVerticalGap * keyParams.mKeyboardParams.mOccupiedHeight);
         mWidth = Math.round(keyParams.mAbsoluteWidth - horizontalGapFloat);
         // height is always rounded down, because rounding up may make the keyboard too high to fit, leading to issues
-        mHeight = (int) (keyParams.mAbsoluteHeight - keyParams.mKeyboardParams.mVerticalGap);
+        final int fullSlotHeight = (int) (keyParams.mAbsoluteHeight - keyParams.mKeyboardParams.mVerticalGap);
+        final int spaceInset = (!isSpacer() && mCode == Constants.CODE_SPACE && keyParams.mSpaceVisualInsetTop > 0)
+                ? keyParams.mSpaceVisualInsetTop : 0;
+        if (spaceInset > 0 && spaceInset < fullSlotHeight) {
+            mHeight = fullSlotHeight - spaceInset;
+            mY = Math.round(keyParams.yPos + spaceInset);
+            mHitBox.set(Math.round(keyParams.xPos), Math.round(keyParams.yPos + spaceInset),
+                    Math.round(keyParams.xPos + keyParams.mAbsoluteWidth) + 1,
+                    Math.round(keyParams.yPos + keyParams.mAbsoluteHeight));
+        } else {
+            mHeight = fullSlotHeight;
+            // Horizontal gap is divided equally to both sides of the key.
+            mY = Math.round(keyParams.yPos);
+            mHitBox.set(Math.round(keyParams.xPos), Math.round(keyParams.yPos), Math.round(keyParams.xPos + keyParams.mAbsoluteWidth) + 1,
+                    Math.round(keyParams.yPos + keyParams.mAbsoluteHeight));
+        }
         if (!isSpacer() && (mWidth == 0 || mHeight == 0)) {
             throw new IllegalStateException("key needs positive width and height");
         }
         // Horizontal gap is divided equally to both sides of the key.
         mX = Math.round(keyParams.xPos + horizontalGapFloat / 2);
-        mY = Math.round(keyParams.yPos);
-        mHitBox.set(Math.round(keyParams.xPos), Math.round(keyParams.yPos), Math.round(keyParams.xPos + keyParams.mAbsoluteWidth) + 1,
-                Math.round(keyParams.yPos + keyParams.mAbsoluteHeight));
         mHashCode = computeHashCode(this);
     }
 
@@ -970,6 +982,12 @@ public class Key implements Comparable<Key> {
         public float mAbsoluteHeight;
         public float xPos;
         public float yPos;
+        /**
+         * When positive on a space key, the key keeps the full row slot for layout but draws and
+         * hit-tests only in the bottom portion (this many pixels skipped from the top of the slot).
+         * Set from {@link helium314.keyboard.keyboard.internal.KeyboardBuilder}.
+         */
+        public int mSpaceVisualInsetTop;
 
         // params that remains constant
         public final int mCode;
@@ -1267,6 +1285,7 @@ public class Key implements Comparable<Key> {
             mIconName = keyParams.mIconName;
             mAbsoluteWidth = keyParams.mAbsoluteWidth;
             mAbsoluteHeight = keyParams.mAbsoluteHeight;
+            mSpaceVisualInsetTop = keyParams.mSpaceVisualInsetTop;
             mPopupKeys = keyParams.mPopupKeys;
             mPopupKeysColumnAndFlags = keyParams.mPopupKeysColumnAndFlags;
             mBackgroundType = keyParams.mBackgroundType;

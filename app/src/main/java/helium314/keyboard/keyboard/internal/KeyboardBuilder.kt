@@ -23,6 +23,7 @@ import helium314.keyboard.latin.define.DebugFlags
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.sumOf
+import kotlin.math.roundToInt
 import org.xmlpull.v1.XmlPullParser
 
 // TODO: Write unit tests for this class.
@@ -105,12 +106,21 @@ open class KeyboardBuilder<KP : KeyboardParams>(protected val mContext: Context,
                 && mParams.mId.mElementId in KeyboardId.ELEMENT_ALPHABET..KeyboardId.ELEMENT_SYMBOLS_SHIFTED) {
             addSplit()
         }
+        applyMainKeyboardSpaceInset()
         addKeysToParams()
         return Keyboard(mParams)
     }
 
     // determine key size and positions using relative width and height
     private fun determineAbsoluteValues() {
+        val sv = Settings.getValues()
+        if (mParams.mId.isAlphaOrSymbolKeyboard && mParams.mId.mNumberRowEnabled && sv.mShowsNumberRow) {
+            val extra = mResources.getDimensionPixelSize(R.dimen.config_number_row_top_extra_gap)
+            if (extra > 0) {
+                mParams.mTopPadding += extra
+                mParams.mBaseHeight -= extra
+            }
+        }
         var currentY = mParams.mTopPadding.toFloat()
         for (row in keysInRows) {
             if (row.isEmpty()) continue
@@ -122,6 +132,27 @@ open class KeyboardBuilder<KP : KeyboardParams>(protected val mContext: Context,
                 currentX += it.mAbsoluteWidth
             }
             currentY += row.first().mAbsoluteHeight
+        }
+    }
+
+    /**
+     * Shrinks the main space key(s) to the bottom half of the bottom row slot: same row height and
+     * bottom alignment, but hit-testing and visuals only in the lower portion (see [Key.KeyParams.mSpaceVisualInsetTop]).
+     */
+    private fun applyMainKeyboardSpaceInset() {
+        if (!mParams.mId.isAlphaOrSymbolKeyboard) return
+        val bottomRow = keysInRows.lastOrNull() ?: return
+        val normalKeyWidth = bottomRow.firstOrNull { !it.isSpacer && it.mCode != Constants.CODE_SPACE }?.mWidth
+            ?: return
+        val spaceKeys = bottomRow.filter {
+            !it.isSpacer && it.mCode == Constants.CODE_SPACE && it.mWidth > normalKeyWidth * 1.5f
+        }
+        if (spaceKeys.isEmpty()) return
+        for (space in spaceKeys) {
+            val fullAbsH = space.mAbsoluteHeight
+            val maxInset = (fullAbsH - 1).toInt().coerceAtLeast(1)
+            val insetTop = (fullAbsH / 2.0).roundToInt().coerceIn(1, maxInset)
+            space.mSpaceVisualInsetTop = insetTop
         }
     }
 
