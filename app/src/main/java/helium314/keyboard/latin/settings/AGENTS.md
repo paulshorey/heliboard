@@ -16,6 +16,7 @@ Preference keys, defaults, runtime snapshots, and transcription-specific prefere
 ## Non-obvious notes
 - This is not the settings UI package; Compose screens live in `helium314.keyboard.settings`.
 - New user-visible settings usually require work in four places: `Settings.java`, `Defaults.kt`, the UI screen, and any runtime snapshot class that consumes them.
+- `Defaults.PREF_KEYBOARD_HEIGHT_SCALE` is indexed by `findIndexOfDefaultSetting(landscape)` (portrait = 0, landscape = 1); the portrait default is intentionally slightly below 1.0 so new installs start a bit shorter until the user changes Appearance sliders.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.
