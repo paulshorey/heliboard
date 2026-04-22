@@ -82,8 +82,9 @@ object Defaults {
     const val PREF_ENABLE_SPLIT_KEYBOARD_LANDSCAPE = false
     @JvmField
     val PREF_SPLIT_SPACER_SCALE = Array(2) { DEFAULT_SIZE_SCALE }
+    /** Portrait (index 0) slightly shorter by default; landscape (index 1) stays 100%. */
     @JvmField
-    val PREF_KEYBOARD_HEIGHT_SCALE = Array(2) { DEFAULT_SIZE_SCALE }
+    val PREF_KEYBOARD_HEIGHT_SCALE = arrayOf(0.9f, DEFAULT_SIZE_SCALE)
     @JvmField
     val PREF_BOTTOM_PADDING_SCALE = arrayOf(DEFAULT_SIZE_SCALE, 0f)
     @JvmField
@@ -141,7 +142,7 @@ object Defaults {
     const val PREF_ENABLE_CLIPBOARD_HISTORY = true
     const val PREF_CLIPBOARD_HISTORY_RETENTION_TIME = 10 // minutes
     const val PREF_CLIPBOARD_HISTORY_PINNED_FIRST = true
-    const val PREF_ADD_TO_PERSONAL_DICTIONARY = false
+    const val PREF_ADD_TO_PERSONAL_DICTIONARY = true
     @JvmField
     val PREF_NAVBAR_COLOR = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
     const val PREF_NARROW_KEY_GAPS = false

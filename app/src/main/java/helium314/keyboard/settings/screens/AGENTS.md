@@ -5,7 +5,7 @@ Feature-specific Compose screens for the settings app.
 ## Direct files
 - `AboutScreen.kt` - app/about information screen.
 - `AdvancedScreen.kt` - advanced settings screen.
-- `AppearanceScreen.kt` - appearance/theme settings screen.
+- `AppearanceScreen.kt` - appearance/theme settings screen (keyboard height appears first under a **Size and layout** heading).
 - `ColorsScreen.kt` - color customization screen.
 - `DebugScreen.kt` - debug/developer settings screen.
 - `DictionaryScreen.kt` - dictionary management screen.

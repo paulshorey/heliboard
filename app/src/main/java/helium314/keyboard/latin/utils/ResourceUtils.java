@@ -64,6 +64,22 @@ public final class ResourceUtils {
         return keyboardHeight;
     }
 
+    /**
+     * Vertical space used for laying out emoji/clipboard panels and their bottom functional row.
+     * When the dual strip (suggestion + pinned) is shown, the pinned toolbar sits above the typing
+     * area but is not part of {@link #getKeyboardHeight}; add its nominal height so geometry matches
+     * the main keyboard frame.
+     */
+    public static int getKeyboardLayoutHeightForPanel(final Resources res, final SettingsValues settingsValues) {
+        return getSecondaryKeyboardHeight(res, settingsValues)
+                + secondaryToolbarLayoutReservePx(res, settingsValues);
+    }
+
+    private static int secondaryToolbarLayoutReservePx(final Resources res, final SettingsValues settingsValues) {
+        if (!settingsValues.mSecondaryStripVisible) return 0;
+        return (int) res.getDimension(R.dimen.config_secondary_toolbar_height);
+    }
+
     public static int getKeyboardHeight(final Resources res, final SettingsValues settingsValues) {
         final int defaultKeyboardHeight = getDefaultKeyboardHeight(res, settingsValues.mShowsNumberRow);
         // mKeyboardHeightScale Ranges from [.5,1.5], from xml/prefs_screen_appearance.xml
@@ -83,9 +99,11 @@ public final class ResourceUtils {
             minKeyboardHeight = -res.getFraction(
                     R.fraction.config_min_keyboard_height, dm.widthPixels, dm.widthPixels);
         }
-        // Keyboard height will not exceed maxKeyboardHeight and will not be less than
-        // minKeyboardHeight.
-        return (int)Math.max(Math.min(keyboardHeight, maxKeyboardHeight), minKeyboardHeight);
+        // Clamp to [minKeyboardHeight, maxKeyboardHeight]. Note: minKeyboardHeight often comes
+        // from a width-based fraction (negative config_min_keyboard_height); if that floor is
+        // larger than keyboardHeight, the default dp height has no effect until the floor is
+        // lowered or the user reduces height in settings.
+        return (int) Math.max(Math.min(keyboardHeight, maxKeyboardHeight), minKeyboardHeight);
     }
 
     public static boolean isValidFraction(final float fraction) {

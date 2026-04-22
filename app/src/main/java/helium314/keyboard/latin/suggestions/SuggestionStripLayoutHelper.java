@@ -334,22 +334,49 @@ final class SuggestionStripLayoutHelper {
         }
 
         final int wordCountToShow = suggestedWords.getWordCountToShow();
-        setupWordViewsAndReturnStartIndexOfMoreSuggestions(
+        final int startIndexOfMoreSuggestions = setupWordViewsAndReturnStartIndexOfMoreSuggestions(
                 suggestedWords, mSuggestionsCountInStrip);
         final TextView centerWordView = mWordViews.get(mCenterPositionInStrip);
         final int stripWidth = stripView.getWidth();
-        if (wordCountToShow > 0) {
-            // Keep the strip focused on the single most relevant candidate instead of showing
-            // alternates or opening an overflow panel.
-            mMoreSuggestionsAvailable = false;
+        final int centerWidth = getSuggestionWidth(mCenterPositionInStrip, stripWidth);
+        if (wordCountToShow == 1 || getTextScaleX(centerWordView.getText(), centerWidth,
+                centerWordView.getPaint()) < MIN_TEXT_XSCALE) {
+            // Layout only the most relevant suggested word at the center of the suggestion strip
+            // by consolidating all slots in the strip.
+            final int countInStrip = 1;
+            mMoreSuggestionsAvailable = (wordCountToShow > countInStrip);
             layoutWord(context, mCenterPositionInStrip, stripWidth - mPadding);
             stripView.addView(centerWordView);
             setLayoutWeight(centerWordView, 1.0f, ViewGroup.LayoutParams.MATCH_PARENT);
             if (SuggestionStripView.DEBUG_SUGGESTIONS) {
                 layoutDebugInfo(mCenterPositionInStrip, placerView, stripWidth);
             }
+            final Integer lastIndex = (Integer)centerWordView.getTag();
+            return (lastIndex == null ? 0 : lastIndex) + 1;
         }
-        return suggestedWords.size();
+
+        final int countInStrip = mSuggestionsCountInStrip;
+        mMoreSuggestionsAvailable = (wordCountToShow > countInStrip);
+        int x = 0;
+        for (int positionInStrip = 0; positionInStrip < countInStrip; positionInStrip++) {
+            if (positionInStrip != 0) {
+                final View divider = mDividerViews.get(positionInStrip);
+                // Add divider if this isn't the left most suggestion in suggestions strip.
+                addDivider(stripView, divider);
+                x += divider.getMeasuredWidth();
+            }
+
+            final int width = getSuggestionWidth(positionInStrip, stripWidth);
+            final TextView wordView = layoutWord(context, positionInStrip, width);
+            stripView.addView(wordView);
+            setLayoutWeight(wordView, getSuggestionWeight(positionInStrip), ViewGroup.LayoutParams.MATCH_PARENT);
+            x += wordView.getMeasuredWidth();
+
+            if (SuggestionStripView.DEBUG_SUGGESTIONS) {
+                layoutDebugInfo(positionInStrip, placerView, (int) stripView.getX() + x);
+            }
+        }
+        return startIndexOfMoreSuggestions;
     }
 
     /**
@@ -371,14 +398,10 @@ final class SuggestionStripLayoutHelper {
     private TextView layoutWord(final Context context, final int positionInStrip, final int width) {
         final TextView wordView = mWordViews.get(positionInStrip);
         final CharSequence word = wordView.getText();
-        if (positionInStrip == mCenterPositionInStrip && mMoreSuggestionsAvailable) {
-            // TODO: This "more suggestions hint" should have a nicely designed icon.
-            wordView.setCompoundDrawablesWithIntrinsicBounds(null, null, null, mMoreSuggestionsHint);
-            // HACK: Align with other TextViews that have no compound drawables.
-            wordView.setCompoundDrawablePadding(-mMoreSuggestionsHint.getIntrinsicHeight());
-        } else {
-            wordView.setCompoundDrawablesWithIntrinsicBounds(null, null, null, null);
-        }
+        // The "more suggestions available" triple-dot hint used to be drawn under the
+        // center (most-relevant) suggestion. It was purely decorative and visually
+        // added vertical weight to the strip, so it is intentionally not drawn.
+        wordView.setCompoundDrawablesWithIntrinsicBounds(null, null, null, null);
         // {@link StyleSpan} in a content description may cause an issue of TTS/TalkBack.
         // Use a simple {@link String} to avoid the issue.
         wordView.setContentDescription(

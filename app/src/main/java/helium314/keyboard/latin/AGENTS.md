@@ -58,6 +58,7 @@ This is the main IME engine. It owns the InputMethodService lifecycle, the curre
 - `EditorWordMirror` in `inputlogic/` mirrors that current word into the host app using committed-text operations; bypassing it tends to break deletion, suggestions, and revert logic.
 - Fullapp/extract UI should be treated as a view of host text, not the source of truth.
 - Voice insertion ultimately still has to honor the same `InputConnection` contract as typed text.
+- When the **Secondary Toolbar** (pinned keys) is visible, `LatinIME` includes its height in visible-strip / inset calculations so the primary strip stays tappable and more-suggestions positioning stays correct.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

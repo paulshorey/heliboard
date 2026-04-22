@@ -68,6 +68,7 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
     private HorizontalScrollView mClipboardStripScrollView;
     private SuggestionStripView mSuggestionStripView;
     private FrameLayout mStripContainer;
+    private View mSecondaryToolbarContainer;
     private ClipboardHistoryView mClipboardHistoryView;
     private TextView mFakeToastView;
     private ProgressBar mProcessingIndicator;
@@ -322,6 +323,7 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         final int visibility = isImeSuppressedByHardwareKeyboard(settingsValues, toggleState) ? View.GONE : View.VISIBLE;
         final int stripVisibility = settingsValues.mToolbarMode == ToolbarMode.HIDDEN ? View.GONE : View.VISIBLE;
         mStripContainer.setVisibility(stripVisibility);
+        updateSecondaryToolbarVisibility(stripVisibility);
         PointerTracker.switchTo(mKeyboardView);
         mKeyboardView.setVisibility(visibility);
         // The visibility of {@link #mKeyboardView} must be aligned with {@link #MainKeyboardFrame}.
@@ -337,6 +339,19 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         mClipboardHistoryView.stopClipboardHistory();
     }
 
+    private void updateSecondaryToolbarVisibility(final int stripVisibility) {
+        if (mSecondaryToolbarContainer == null) return;
+        // The Secondary Toolbar is only meaningful next to the main suggestion strip.
+        // Hide it whenever the strip is hidden (e.g. hidden toolbar mode, emoji /
+        // clipboard panels). Otherwise the SuggestionStripView controls its visibility
+        // based on whether any pinned keys are configured.
+        if (stripVisibility != View.VISIBLE) {
+            mSecondaryToolbarContainer.setVisibility(View.GONE);
+        } else if (mSuggestionStripView != null) {
+            mSuggestionStripView.refreshSecondaryToolbarVisibility();
+        }
+    }
+
     // Implements {@link KeyboardState.SwitchActions}.
     @Override
     public void setEmojiKeyboard() {
@@ -350,6 +365,7 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         mKeyboardView.setVisibility(View.GONE);
         mSuggestionStripView.setVisibility(View.GONE);
         mStripContainer.setVisibility(getSecondaryStripVisibility());
+        if (mSecondaryToolbarContainer != null) mSecondaryToolbarContainer.setVisibility(View.GONE);
         mClipboardStripScrollView.setVisibility(View.GONE);
         mEmojiTabStripView.setVisibility(View.VISIBLE);
         mClipboardHistoryView.setVisibility(View.GONE);
@@ -372,6 +388,7 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         mEmojiTabStripView.setVisibility(View.GONE);
         mSuggestionStripView.setVisibility(View.GONE);
         mStripContainer.setVisibility(getSecondaryStripVisibility());
+        if (mSecondaryToolbarContainer != null) mSecondaryToolbarContainer.setVisibility(View.GONE);
         mClipboardStripScrollView.post(() -> mClipboardStripScrollView.fullScroll(HorizontalScrollView.FOCUS_RIGHT));
         mClipboardStripScrollView.setVisibility(View.VISIBLE);
         mEmojiPalettesView.setVisibility(View.GONE);
@@ -698,6 +715,18 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
 
     public FrameLayout getStripContainer() { return mStripContainer; }
 
+    /**
+     * Height of the Secondary Toolbar (pinned-keys row) when it is currently shown,
+     * otherwise 0. Used by {@link LatinIME#onComputeInsets} so the touchable /
+     * visible region extends up past the secondary toolbar to cover the primary
+     * suggestion strip as well.
+     */
+    public int getSecondaryToolbarHeight() {
+        if (mSecondaryToolbarContainer == null) return 0;
+        return mSecondaryToolbarContainer.getVisibility() == View.VISIBLE
+                ? mSecondaryToolbarContainer.getHeight() : 0;
+    }
+
     public void deallocateMemory() {
         if (mKeyboardView != null) {
             mKeyboardView.cancelAllOngoingEvents();
@@ -753,6 +782,12 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         mClipboardStripScrollView = mCurrentInputView.findViewById(R.id.clipboard_strip_scroll_view);
         mSuggestionStripView = mCurrentInputView.findViewById(R.id.suggestion_strip_view);
         mStripContainer = mCurrentInputView.findViewById(R.id.strip_container);
+        mSecondaryToolbarContainer = mCurrentInputView.findViewById(R.id.secondary_toolbar_container);
+
+        // Populate the Secondary Toolbar's pinned keys now that the whole input view
+        // (which contains both the primary strip and the secondary toolbar) has been
+        // inflated and looked up.
+        mSuggestionStripView.populatePinnedKeys();
 
         prefs.registerOnSharedPreferenceChangeListener(mSuggestionStripView);
         prefs.registerOnSharedPreferenceChangeListener(mClipboardHistoryView);

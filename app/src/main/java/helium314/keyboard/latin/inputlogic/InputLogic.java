@@ -1674,6 +1674,11 @@ public final class InputLogic {
         final String word = isEmailAddress
                 ? StringUtils.normalizeEmailAddress(strippedWord)
                 : strippedWord;
+        if (isEmailAddress) {
+            // Record every email the user commits so it can be offered as a prioritized
+            // suggestion next time. We rank by how many times it has been typed.
+            helium314.keyboard.latin.personalization.EmailsDictionary.INSTANCE.recordEmail(word);
+        }
         if (settingsValues.mIncognitoModeEnabled) {
             // still adjust confidences, otherwise incognito input fields can be very annoying when wrong language is active
             mDictionaryFacilitator.adjustConfidences(word, wasAutoCapitalized);

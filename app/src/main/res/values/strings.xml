@@ -41,6 +41,8 @@
     <string name="settings_screen_advanced">Advanced</string>
     <!-- Settings screen title for keyboard theme settings -->
     <string name="settings_screen_theme">Theme</string>
+    <!-- Appearance screen: category for keyboard sizing (shown above theme options) -->
+    <string name="settings_category_size_and_layout">Size and layout</string>
     <!-- Settings category title for Preference/Input settings -->
     <string name="settings_category_input">Input</string>
     <!-- Settings category title for Preference/Additional keys settings -->
@@ -109,6 +111,16 @@
     <string name="auto_cap_summary">Capitalize the first word of each sentence</string>
     <!-- Option to edit personal dictionary.-->
     <string name="edit_personal_dictionary">Personal dictionary</string>
+    <!-- Option to edit the saved emails dictionary, used for prioritized email suggestions. -->
+    <string name="edit_emails_dictionary">Emails dictionary</string>
+    <!-- Short description shown below the "Emails dictionary" title. -->
+    <string name="edit_emails_dictionary_summary">Saved email addresses suggested above other words</string>
+    <!-- Label for an email's saved usage count, shown alongside the address. -->
+    <string name="emails_dictionary_usage_count">Times used: %1$d</string>
+    <!-- Label placed next to the email usage count input field in the edit dialog. -->
+    <string name="emails_dictionary_usage_count_label">Times used</string>
+    <!-- Placeholder shown inside the email input field in the edit dialog. -->
+    <string name="emails_dictionary_email_hint">Email address</string>
     <!-- Name of the main dictionary, as opposed to auxiliary dictionaries (medical/entertainment/sports...) -->
     <string name="main_dictionary">Main dictionary</string>
     <!-- Option to enable showing suggestions -->
@@ -433,7 +445,9 @@
     <!-- Title of the setting for reduced distance between keys -->
     <string name="prefs_narrow_key_gaps">Narrow key gaps</string>
     <!-- Title of the setting for setting keyboard height -->
-    <string name="prefs_keyboard_height_scale">Keyboard height scale</string>
+    <string name="prefs_keyboard_height_scale">Keyboard height</string>
+    <!-- Description for keyboard height scale (portrait and landscape sliders) -->
+    <string name="prefs_keyboard_height_scale_summary">Make the typing area taller or shorter. Set separately for portrait and landscape.</string>
     <!-- Title of the setting for setting bottom padding height -->
     <string name="prefs_bottom_padding_scale">Bottom padding scale</string>
     <!-- Title of the setting for setting side padding -->

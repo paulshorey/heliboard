@@ -59,6 +59,7 @@ fun TextCorrectionScreen(
     val gestureEnabled = JniUtils.sHaveGestureLib && prefs.getBoolean(Settings.PREF_GESTURE_INPUT, Defaults.PREF_GESTURE_INPUT)
     val items = listOf(
         SettingsWithoutKey.EDIT_PERSONAL_DICTIONARY,
+        SettingsWithoutKey.EDIT_EMAILS_DICTIONARY,
         R.string.settings_category_correction,
         Settings.PREF_BLOCK_POTENTIALLY_OFFENSIVE,
         Settings.PREF_AUTO_CORRECTION,
@@ -101,6 +102,15 @@ fun createCorrectionSettings(context: Context) = listOf(
         Preference(
             name = stringResource(R.string.edit_personal_dictionary),
             onClick = { SettingsDestination.navigateTo(SettingsDestination.PersonalDictionaries) },
+        ) { NextScreenIcon() }
+    },
+    Setting(context, SettingsWithoutKey.EDIT_EMAILS_DICTIONARY, R.string.edit_emails_dictionary,
+        R.string.edit_emails_dictionary_summary
+    ) {
+        Preference(
+            name = stringResource(R.string.edit_emails_dictionary),
+            description = stringResource(R.string.edit_emails_dictionary_summary),
+            onClick = { SettingsDestination.navigateTo(SettingsDestination.EmailsDictionary) },
         ) { NextScreenIcon() }
     },
     Setting(context, Settings.PREF_BLOCK_POTENTIALLY_OFFENSIVE,

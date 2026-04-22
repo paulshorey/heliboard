@@ -16,24 +16,30 @@
 
     <!-- Preferable keyboard height in absolute scale: 1.285in -->
     <!-- This config_default_keyboard_height value should match with keyboard-heights.xml -->
-    <dimen name="config_default_keyboard_height">205.6dp</dimen>
+    <dimen name="config_default_keyboard_height">198.0dp</dimen>
     <fraction name="config_max_keyboard_height">46%p</fraction>
-    <fraction name="config_min_keyboard_height">-61.8%p</fraction>
+    <!-- Negative = fraction of display width (see ResourceUtils.getDefaultKeyboardHeight). Keep
+         this comfortably below config_default_keyboard_height so lowering the default dp value
+         actually shrinks keys; a wide floor here clamps the whole keyboard model back up. -->
+    <fraction name="config_min_keyboard_height">-47%p</fraction>
 
-    <dimen name="config_popup_keys_keyboard_key_height">52.8dp</dimen>
+    <dimen name="config_popup_keys_keyboard_key_height">50.0dp</dimen>
     <!-- Amount of allowance for selecting keys in a mini popup keyboard by sliding finger. -->
     <!-- config_popup_keys_keyboard_key_height x 1.2 -->
-    <dimen name="config_popup_keys_keyboard_slide_allowance">63.36dp</dimen>
+    <dimen name="config_popup_keys_keyboard_slide_allowance">60.0dp</dimen>
     <dimen name="config_popup_keys_keyboard_key_horizontal_padding">8dp</dimen>
 
-    <fraction name="config_keyboard_top_padding_holo">2.335%p</fraction>
-    <fraction name="config_keyboard_bottom_padding_holo">4.669%p</fraction>
-    <fraction name="config_key_vertical_gap_holo">6.127%p</fraction>
+    <!-- Tightened for the dual-toolbar layout: smaller top/bottom padding and
+         vertical gaps so the keyboard doesn't grow unnecessarily tall after the
+         secondary toolbar is inserted above it. -->
+    <fraction name="config_keyboard_top_padding_holo">0.25%p</fraction>
+    <fraction name="config_keyboard_bottom_padding_holo">0%p</fraction>
+    <fraction name="config_key_vertical_gap_holo">2.85%p</fraction>
     <fraction name="config_key_horizontal_gap_holo">1.739%p</fraction>
-    <fraction name="config_key_vertical_gap_holo_narrow">3.527%p</fraction>
+    <fraction name="config_key_vertical_gap_holo_narrow">1.75%p</fraction>
     <fraction name="config_key_horizontal_gap_holo_narrow">1.089%p</fraction>
     <!-- config_popup_keys_keyboard_key_height x -0.5 -->
-    <dimen name="config_popup_keys_keyboard_vertical_correction_holo">-26.4dp</dimen>
+    <dimen name="config_popup_keys_keyboard_vertical_correction_holo">-25.0dp</dimen>
     <dimen name="config_key_preview_offset_holo">40.0dp</dimen>
     <dimen name="config_key_preview_offset_lxx">0dp</dimen>
     <fraction name="config_key_preview_text_ratio">82%</fraction>
@@ -53,9 +59,10 @@
     <dimen name="config_key_hint_letter_padding">1dp</dimen>
     <dimen name="config_key_shifted_letter_hint_padding">2dp</dimen>
 
-    <dimen name="config_suggestions_strip_height">40dp</dimen>
+    <dimen name="config_suggestions_strip_height">36dp</dimen>
+    <dimen name="config_secondary_toolbar_height">30dp</dimen>
     <dimen name="config_suggestions_strip_edge_key_width">36dp</dimen>
-    <dimen name="config_more_suggestions_row_height">40dp</dimen>
+    <dimen name="config_more_suggestions_row_height">36dp</dimen>
     <integer name="config_max_more_suggestions_row">6</integer>
     <fraction name="config_min_more_suggestions_width">90%</fraction>
     <dimen name="config_suggestion_min_width">44dp</dimen>

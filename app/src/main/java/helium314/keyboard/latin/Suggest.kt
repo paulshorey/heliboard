@@ -17,6 +17,7 @@ import helium314.keyboard.latin.define.DebugFlags
 import helium314.keyboard.latin.define.DecoderSpecificConstants.SHOULD_AUTO_CORRECT_USING_NON_WHITE_LISTED_SUGGESTION
 import helium314.keyboard.latin.define.DecoderSpecificConstants.SHOULD_REMOVE_PREVIOUSLY_REJECTED_SUGGESTION
 import helium314.keyboard.latin.dictionary.Dictionary
+import helium314.keyboard.latin.personalization.EmailsDictionary
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.settings.SettingsValuesForSuggestion
 import helium314.keyboard.latin.suggestions.SuggestionStripView
@@ -110,6 +111,13 @@ class Suggest(private val mDictionaryFacilitator: DictionaryFacilitator) {
         if (!TextUtils.isEmpty(capitalizedTypedWord)) {
             suggestionsContainer.add(0, typedWordInfo)
         }
+        // Prepend saved emails matching the currently-typed prefix, so the strip will
+        // show matching emails above regular dictionary suggestions. Ranked by
+        // how many times the user has typed each email. If emails match, we do NOT
+        // auto-correct (otherwise pressing space would commit an unrelated dictionary
+        // word); the user picks an email explicitly from the strip.
+        val emailSuppressAutoCorrect = prependMatchingEmails(suggestionsContainer, typedWordString)
+        val effectiveHasAutoCorrection = hasAutoCorrection && !emailSuppressAutoCorrect
         val suggestionsList = if (SuggestionStripView.DEBUG_SUGGESTIONS && suggestionsContainer.isNotEmpty())
                 getSuggestionsInfoListWithDebugInfo(capitalizedTypedWord, suggestionsContainer)
             else suggestionsContainer
@@ -123,8 +131,8 @@ class Suggest(private val mDictionaryFacilitator: DictionaryFacilitator) {
 
         // If there is an incoming autocorrection, make sure typed word is shown, so user is able to override it.
         // Otherwise, if the relevant setting is enabled, show the typed word in the middle.
-        val indexOfTypedWord = if (hasAutoCorrection) 2 else 1
-        if ((hasAutoCorrection || (Settings.getValues().mCenterSuggestionTextToEnter && !wordComposer.isResumed)
+        val indexOfTypedWord = if (effectiveHasAutoCorrection) 2 else 1
+        if ((effectiveHasAutoCorrection || (Settings.getValues().mCenterSuggestionTextToEnter && !wordComposer.isResumed)
                 || capitalizedTypedWord != wordComposer.typedWord)
             && suggestionsList.size >= indexOfTypedWord && !TextUtils.isEmpty(capitalizedTypedWord)) {
             if (typedWordFirstOccurrenceWordInfo != null) {
@@ -139,7 +147,7 @@ class Suggest(private val mDictionaryFacilitator: DictionaryFacilitator) {
         }
         val isTypedWordValid = firstOccurrenceOfTypedWordInSuggestions > -1 || (!resultsArePredictions && !allowsToBeAutoCorrected)
         return SuggestedWords(suggestionsList, suggestionResults.mRawSuggestions,
-            typedWordInfo, isTypedWordValid, hasAutoCorrection, false, inputStyle, sequenceNumber)
+            typedWordInfo, isTypedWordValid, effectiveHasAutoCorrection, false, inputStyle, sequenceNumber)
     }
 
     // returns [allowsToBeAutoCorrected, hasAutoCorrection]
@@ -361,6 +369,11 @@ class Suggest(private val mDictionaryFacilitator: DictionaryFacilitator) {
         // Close to -2**31
         private const val SUPPRESS_SUGGEST_THRESHOLD = -2000000000
 
+        // How many email-dictionary matches we are willing to show for a typed prefix.
+        // Matches the number of slots in the primary toolbar suggestion strip so that
+        // emails can, in the best case, fully fill the strip.
+        private const val MAX_EMAIL_SUGGESTIONS = 3
+
         private const val MAXIMUM_AUTO_CORRECT_LENGTH_FOR_GERMAN = 12
         // TODO: should we add Finnish here?
         private val sLanguageToMaximumAutoCorrectionWithSpaceLength = hashMapOf(Locale.GERMAN.language to MAXIMUM_AUTO_CORRECT_LENGTH_FOR_GERMAN)
@@ -476,6 +489,53 @@ class Suggest(private val mDictionaryFacilitator: DictionaryFacilitator) {
             } else {
                 word
             }
+
+        /**
+         * Insert email-dictionary matches for the current [typedWord] at the front of
+         * [suggestionsContainer], just after the user's in-progress typed word (if
+         * any). Emails are ranked by usage count, so the most frequently typed email
+         * appears first. Only triggered once the user has typed at least two
+         * characters (see [EmailsDictionary.topMatches]).
+         */
+        /** @return true if any email suggestion was prepended, in which case callers
+         *  should suppress autocorrect to avoid committing a dictionary word on space. */
+        private fun prependMatchingEmails(
+            suggestionsContainer: ArrayList<SuggestedWordInfo>,
+            typedWord: String
+        ): Boolean {
+            if (typedWord.isEmpty()) return false
+            val matches = EmailsDictionary.topMatches(typedWord, MAX_EMAIL_SUGGESTIONS)
+            if (matches.isEmpty()) return false
+            // Find the first index past the typed word (slot 0 is always the typed word
+            // when one exists).
+            var insertIndex = 0
+            if (suggestionsContainer.isNotEmpty()
+                && suggestionsContainer[0].isKindOf(SuggestedWordInfo.KIND_TYPED)) {
+                insertIndex = 1
+            }
+            val existing = HashSet<String>(suggestionsContainer.size)
+            for (info in suggestionsContainer) existing.add(info.mWord.lowercase())
+            // Build a KIND_WHITELIST email entry with a very high score so it naturally
+            // outranks main-dict matches and isn't reordered by downstream logic.
+            val baseScore = SuggestedWordInfo.MAX_SCORE - 10_000
+            var idx = insertIndex
+            var added = false
+            for ((offset, entry) in matches.withIndex()) {
+                if (existing.contains(entry.email.lowercase())) continue
+                val score = baseScore - offset
+                val info = SuggestedWordInfo(
+                    entry.email, "", score,
+                    SuggestedWordInfo.KIND_WHITELIST or SuggestedWordInfo.KIND_FLAG_EXACT_MATCH,
+                    Dictionary.DICTIONARY_USER_TYPED,
+                    SuggestedWordInfo.NOT_AN_INDEX,
+                    SuggestedWordInfo.NOT_A_CONFIDENCE
+                )
+                suggestionsContainer.add(idx, info)
+                idx++
+                added = true
+            }
+            return added
+        }
 
         private fun makeFirstTwoSuggestionsNonEmoji(words: MutableList<SuggestedWordInfo>) {
             for (i in 0..1) {

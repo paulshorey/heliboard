@@ -16,6 +16,10 @@
         android:id="@+id/strip_container"
         layout="@layout/strip_container" />
 
+    <include
+        android:id="@+id/secondary_toolbar_container"
+        layout="@layout/secondary_toolbar" />
+
     <!-- To ensure that key preview popup is correctly placed when the current system locale is
          one of RTL locales, layoutDirection="ltr" is needed in the SDK version 17+. -->
     <helium314.keyboard.latin.KeyboardWrapperView
