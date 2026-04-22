@@ -57,6 +57,9 @@ class InputLogicTest {
     private val settingsValues get() = Settings.getValues()
     private val inputLogic get() = latinIME.mInputLogic
     private val connection: RichInputConnection get() = inputLogic.mConnection
+    private val commitVoiceTranscriptionTextMethod = LatinIME::class.java
+        .getDeclaredMethod("commitVoiceTranscriptionText", String::class.java)
+        .apply { isAccessible = true }
     private val composerReader = InputLogic::class.java.getDeclaredField("mWordComposer").apply { isAccessible = true }
     private val composer get() = composerReader.get(inputLogic) as WordComposer
     private val spaceStateReader = InputLogic::class.java.getDeclaredField("mSpaceState").apply { isAccessible = true }
@@ -100,6 +103,20 @@ class InputLogicTest {
         functionalKeyPress(KeyCode.DELETE)
         assertEquals("hello yu there", text)
         assertEquals("", composingText)
+    }
+
+    @Test fun voiceTranscriptionReplacesSelectedText() {
+        reset()
+        setText("hello cruel world")
+        setCursorPosition(6, 11)
+
+        commitVoiceTranscriptionTextMethod.invoke(latinIME, "kind")
+
+        assertEquals("hello kind world", getText())
+        assertEquals("hello kind", textBeforeCursor)
+        assertEquals(" world", textAfterCursor)
+        assertEquals(10, cursor)
+        checkConnectionConsistency()
     }
 
     @Test fun insertLetterIntoWord() {

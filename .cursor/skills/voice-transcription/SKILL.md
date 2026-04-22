@@ -40,7 +40,7 @@ All source files live under `app/src/main/java/helium314/keyboard/latin/voice/` 
 5. Final transcript spans arrive as `AddTranscript` messages
 6. `SpeechmaticsTranscriptionClient` rebuilds span text from token results so spacing and punctuation attachment stay correct across finalized chunks
 7. `VoiceInputManager` delivers them in FIFO order to `LatinIME`
-8. `LatinIME` inserts each finalized span with `commitText(...)`, restoring a leading space only when the provider marks the span as a continuation
+8. `LatinIME` inserts each finalized span with `commitText(...)`, replacing any active selection range and restoring a leading space only when the provider marks the span as a continuation
 
 On graceful stop, the client waits for all sent audio to be acknowledged, sends `ForceEndOfUtterance`, then `EndOfStream(last_seq_no=...)`, and only closes after the tail transcript is flushed or a close timeout expires.
 
@@ -56,7 +56,7 @@ Speechmatics smart formatting is used for finalized transcript text. Key Speechm
 - **end_of_utterance_silence_trigger**: Disabled by default (`0`). When enabled, Speechmatics forces a final transcript at every pause exceeding the threshold and terminates that final with a sentence-end mark (a period in English) **regardless of punctuation sensitivity**. That is the root cause of "period-after-every-pause" behavior, so by default we let Speechmatics choose punctuation from prosody alone — commas land at short pauses, periods at natural sentence boundaries. HeliBoard's own local silence timers (`PREF_VOICE_CHUNK_SILENCE_SECONDS`, `PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS`, `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS`) still drive paragraph breaks and auto-stop from the local mic stream.
 - **disfluency removal**: Optional removal of English hesitation words (um, uh, hmm)
 
-HeliBoard rebuilds finalized text from Speechmatics token results so word spacing and punctuation attachment survive chunk boundaries, then commits the finalized text exactly once at the caret.
+HeliBoard rebuilds finalized text from Speechmatics token results so word spacing and punctuation attachment survive chunk boundaries, then commits the finalized text exactly once at the current insertion point. If the editor currently has selected text, that selection is overwritten via `commitText(...)`, matching normal typing behavior.
 
 ## Post-Processing (TranscriptPostProcessor)
 
