@@ -64,6 +64,22 @@ public final class ResourceUtils {
         return keyboardHeight;
     }
 
+    /**
+     * Vertical space used for laying out emoji/clipboard panels and their bottom functional row.
+     * When the dual strip (suggestion + pinned) is shown, the pinned toolbar sits above the typing
+     * area but is not part of {@link #getKeyboardHeight}; add its nominal height so geometry matches
+     * the main keyboard frame.
+     */
+    public static int getKeyboardLayoutHeightForPanel(final Resources res, final SettingsValues settingsValues) {
+        return getSecondaryKeyboardHeight(res, settingsValues)
+                + secondaryToolbarLayoutReservePx(res, settingsValues);
+    }
+
+    private static int secondaryToolbarLayoutReservePx(final Resources res, final SettingsValues settingsValues) {
+        if (!settingsValues.mSecondaryStripVisible) return 0;
+        return (int) res.getDimension(R.dimen.config_secondary_toolbar_height);
+    }
+
     public static int getKeyboardHeight(final Resources res, final SettingsValues settingsValues) {
         final int defaultKeyboardHeight = getDefaultKeyboardHeight(res, settingsValues.mShowsNumberRow);
         // mKeyboardHeightScale Ranges from [.5,1.5], from xml/prefs_screen_appearance.xml

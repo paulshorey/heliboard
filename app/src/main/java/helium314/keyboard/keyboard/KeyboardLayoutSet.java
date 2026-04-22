@@ -223,7 +223,8 @@ public final class KeyboardLayoutSet {
             builder.mParams.mMode = KeyboardId.MODE_TEXT;
             final int width = ResourceUtils.getKeyboardWidth(context, Settings.getValues());
             // actually the keyboard does not have full height, but at this point we use it to get correct key heights
-            final int height = ResourceUtils.getKeyboardHeight(context.getResources(), Settings.getValues());
+            final int height = ResourceUtils.getKeyboardLayoutHeightForPanel(
+                    context.getResources(), Settings.getValues());
             builder.setKeyboardGeometry(width, height);
             builder.setSubtype(RichInputMethodManager.getInstance().getCurrentSubtype());
             return builder.build();

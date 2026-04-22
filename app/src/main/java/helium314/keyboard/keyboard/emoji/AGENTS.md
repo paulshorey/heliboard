@@ -16,6 +16,7 @@ Emoji palette pages, categories, and supporting UI widgets.
 ## Non-obvious notes
 - The UI here depends on asset data under `app/src/main/assets/emoji/` and generated emoji resources.
 - Check API gating when updating emoji data so older Android versions do not show unsupported glyphs.
+- `EmojiLayoutParams` and `EmojiPalettesView#onMeasure` use `ResourceUtils.getKeyboardLayoutHeightForPanel` so the emoji grid and bottom functional row stay aligned when a second (pinned) toolbar sits above the typing area.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

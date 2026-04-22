@@ -33,7 +33,7 @@ Cross-cutting helpers used across the IME. Search here before adding another gen
 - `RecapitalizeMode.java` - recapitalization mode enum/model.
 - `RecapitalizeStatus.java` - recapitalization state holder.
 - `ReorderSwitchPreferenceUtils.kt` - reorderable preference normalization helpers.
-- `ResourceUtils.java` - resource lookup helpers (keyboard width/height; note `getDefaultKeyboardHeight` clamps `config_default_keyboard_height` against `config_min/max_keyboard_height`, where a negative min is interpreted as a fraction of **display width**).
+- `ResourceUtils.java` - resource lookup helpers (keyboard width/height; note `getDefaultKeyboardHeight` clamps `config_default_keyboard_height` against `config_min/max_keyboard_height`, where a negative min is interpreted as a fraction of **display width**). `getKeyboardLayoutHeightForPanel` adds the pinned secondary toolbar reserve when strips are visible so emoji/clipboard bottom rows match the main keyboard frame.
 - `RunInLocale.kt` - temporarily-run-in-locale helper.
 - `ScriptUtils.kt` - script/language family helpers.
 - `SmartAutoCapsUtils.java` - smart auto-capitalization logic helpers.
