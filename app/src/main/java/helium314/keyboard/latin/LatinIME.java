@@ -2190,6 +2190,13 @@ public class LatinIME extends InputMethodService implements
         mInputLogic.mConnection.commitText(corrected, 1);
     }
 
+    /**
+     * Characters of editor context needed for the voice-transcription casing
+     * decision. Must be enough to walk past trailing whitespace and one or two
+     * closing quotes/brackets before reaching the sentence-ending mark.
+     */
+    private static final int VOICE_CASING_LOOKBACK = 16;
+
     @NonNull
     private String prepareVoiceTranscriptionText(
             @NonNull final String text,
@@ -2197,15 +2204,19 @@ public class LatinIME extends InputMethodService implements
         if (text.isEmpty() || attachesToPrevious || startsWithBackwardAttachingPunctuation(text)) {
             return text;
         }
-        final CharSequence beforeCursor = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
-        if (beforeCursor == null || beforeCursor.length() == 0) {
-            return text;
+        final CharSequence rawBefore =
+                mInputLogic.mConnection.getTextBeforeCursor(VOICE_CASING_LOOKBACK, 0);
+        final CharSequence beforeCursor = (rawBefore != null) ? rawBefore : "";
+        final String cased =
+                TranscriptPostProcessor.INSTANCE.adjustLeadingCasing(text, beforeCursor);
+        if (beforeCursor.length() == 0) {
+            return cased;
         }
         final char previousChar = beforeCursor.charAt(beforeCursor.length() - 1);
         if (Character.isWhitespace(previousChar) || isOpeningDelimiter(previousChar)) {
-            return text;
+            return cased;
         }
-        return " " + text;
+        return " " + cased;
     }
 
     private boolean startsWithBackwardAttachingPunctuation(@NonNull final String text) {
