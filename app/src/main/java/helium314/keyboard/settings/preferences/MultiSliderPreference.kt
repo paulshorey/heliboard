@@ -58,6 +58,7 @@ fun MultiSliderPreference(
     defaults: Array<Float>,
     range:  ClosedFloatingPointRange<Float>,
     description: (Float) -> String,
+    summary: String? = null,
     onDone: () -> Unit
 ) {
     if (defaults.size != 1.shl(dimensions.size))
@@ -68,6 +69,7 @@ fun MultiSliderPreference(
     Preference(
         name = name,
         onClick = { showDialog = true },
+        description = summary,
         //description = keys.mapIndexed { i, it -> description(prefs.getFloat(it, defaults[i])) }.joinToString(" $SPLIT ")
     )
     if (showDialog)

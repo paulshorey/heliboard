@@ -41,6 +41,8 @@
     <string name="settings_screen_advanced">Advanced</string>
     <!-- Settings screen title for keyboard theme settings -->
     <string name="settings_screen_theme">Theme</string>
+    <!-- Appearance screen: category for keyboard sizing (shown above theme options) -->
+    <string name="settings_category_size_and_layout">Size and layout</string>
     <!-- Settings category title for Preference/Input settings -->
     <string name="settings_category_input">Input</string>
     <!-- Settings category title for Preference/Additional keys settings -->
@@ -443,7 +445,9 @@
     <!-- Title of the setting for reduced distance between keys -->
     <string name="prefs_narrow_key_gaps">Narrow key gaps</string>
     <!-- Title of the setting for setting keyboard height -->
-    <string name="prefs_keyboard_height_scale">Keyboard height scale</string>
+    <string name="prefs_keyboard_height_scale">Keyboard height</string>
+    <!-- Description for keyboard height scale (portrait and landscape sliders) -->
+    <string name="prefs_keyboard_height_scale_summary">Make the typing area taller or shorter. Set separately for portrait and landscape.</string>
     <!-- Title of the setting for setting bottom padding height -->
     <string name="prefs_bottom_padding_scale">Bottom padding scale</string>
     <!-- Title of the setting for setting side padding -->
