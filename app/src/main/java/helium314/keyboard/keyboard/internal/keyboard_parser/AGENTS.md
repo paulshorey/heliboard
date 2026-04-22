@@ -20,6 +20,7 @@ Converts layout assets and XML metadata into typed keyboard models.
 ## Non-obvious notes
 - `res/xml/method.xml` and `assets/layouts/` are the external inputs most likely to break parser assumptions.
 - Treat parser model changes as schema changes for the layout assets, not as isolated refactors.
+- When `KeyboardParser` inserts an extra row (for example the number row) it rescales row heights; it also rescales `mVerticalGap` so the visible gap between rows matches the four-row baseline instead of leaving a tall “dead” band under the new row.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

@@ -80,6 +80,14 @@ class KeyboardParser(private val params: KeyboardParams, private val context: Co
         }
         if (heightRescale != 1f) {
             keysInRows.forEach { row -> row.forEach { it.mHeight *= heightRescale } }
+            // Row slot heights shrink with mHeight, but mVerticalGap was computed from the full
+            // keyboard height in readAttributes(); scale it too so extra rows (e.g. number row)
+            // do not leave oversized inter-row gaps.
+            val scaledGap = (params.mVerticalGap * heightRescale).roundToInt().coerceAtLeast(0)
+            params.mVerticalGap = scaledGap
+            if (params.mOccupiedHeight > 0) {
+                params.mRelativeVerticalGap = scaledGap.toFloat() / params.mOccupiedHeight
+            }
         }
 
         return keysInRows
