@@ -12,6 +12,7 @@ Suggestion strip UI and the expanded more-suggestions panel.
 ## Non-obvious notes
 - UI refresh timing matters here; sluggish updates often come from upstream suggestion scheduling rather than this package alone.
 - Keep this folder aligned with `SuggestedWords.java` and `InputLogic.java` contracts.
+- Pinned toolbar keys render in the **Secondary Toolbar** (`R.id.pinned_keys`), a sibling strip below `SuggestionStripView` in `main_keyboard_frame.xml`; `SuggestionStripView` resolves that container from the root view for pin/unpin and visibility.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

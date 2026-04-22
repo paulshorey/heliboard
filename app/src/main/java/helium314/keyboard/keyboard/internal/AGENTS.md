@@ -49,6 +49,7 @@ Internal mechanics behind keyboard rendering, previews, gesture trails, parser p
 ## Non-obvious notes
 - This folder is mostly plumbing beneath `MainKeyboardView`; many classes are hot-path and allocation-sensitive.
 - Parser output, icon resolution, and draw params must stay consistent with resource and asset naming conventions.
+- `KeyboardBuilder` may adjust row geometry after parsing; for example, when a separate number row is enabled it pulls letter rows up so adjacent rows do not stack two full vertical gaps between them.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

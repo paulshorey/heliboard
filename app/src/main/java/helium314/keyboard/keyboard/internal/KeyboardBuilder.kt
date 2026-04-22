@@ -56,6 +56,7 @@ open class KeyboardBuilder<KP : KeyboardParams>(protected val mContext: Context,
                 if (keysInRows.size != 4) // that was effectively the default for OpenBoard
                     mParams.mTouchPositionCorrection.load(mContext.resources.getStringArray(R.array.touch_position_correction_data_default))
                 determineAbsoluteValues()
+                collapseNumberRowToLettersGap()
             } catch (e: Exception) {
                 Log.e(TAG, "error parsing layout $id ${id.mElementId}", e)
                 throw e
@@ -122,6 +123,23 @@ open class KeyboardBuilder<KP : KeyboardParams>(protected val mContext: Context,
                 currentX += it.mAbsoluteWidth
             }
             currentY += row.first().mAbsoluteHeight
+        }
+    }
+
+    /**
+     * Row Y positions advance by each row's absolute height while each key reserves
+     * [mVerticalGap] at the bottom of its slot. That yields a visible gap of 2× vertical gap
+     * between adjacent letter rows, which is especially noticeable under an extra number row.
+     * Pull subsequent rows up by one vertical gap so the drawn keys sit flush (no doubled gap)
+     * between the number row and the first letter row.
+     */
+    private fun collapseNumberRowToLettersGap() {
+        if (!mParams.mId.isAlphaOrSymbolKeyboard || !mParams.mId.mNumberRowEnabled) return
+        if (keysInRows.size < 2) return
+        val shift = mParams.mVerticalGap.toFloat()
+        if (shift <= 0f) return
+        for (i in 1 until keysInRows.size) {
+            keysInRows[i].forEach { it.yPos -= shift }
         }
     }
 

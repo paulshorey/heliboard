@@ -14,24 +14,24 @@
 
     <!-- Preferable keyboard height in absolute scale: 48.0mm -->
     <!-- This config_default_keyboard_height value should match with keyboard-heights.xml -->
-    <dimen name="config_default_keyboard_height">302.4dp</dimen>
+    <dimen name="config_default_keyboard_height">292.0dp</dimen>
     <fraction name="config_max_keyboard_height">46%p</fraction>
     <fraction name="config_min_keyboard_height">-35.0%p</fraction>
 
-    <dimen name="config_popup_keys_keyboard_key_height">63.0dp</dimen>
+    <dimen name="config_popup_keys_keyboard_key_height">60.5dp</dimen>
     <dimen name="config_popup_keys_keyboard_key_horizontal_padding">6dp</dimen>
     <!-- Amount of allowance for selecting keys in a mini popup keyboard by sliding finger. -->
     <!-- config_more_keys_keyboard_key_height x 1.2 -->
-    <dimen name="config_popup_keys_keyboard_slide_allowance">98.3dp</dimen>
+    <dimen name="config_popup_keys_keyboard_slide_allowance">72.6dp</dimen>
 
-    <fraction name="config_keyboard_top_padding_holo">2.335%p</fraction>
-    <fraction name="config_keyboard_bottom_padding_holo">4.0%p</fraction>
-    <fraction name="config_key_vertical_gap_holo">4.5%p</fraction>
+    <fraction name="config_keyboard_top_padding_holo">1.85%p</fraction>
+    <fraction name="config_keyboard_bottom_padding_holo">0%p</fraction>
+    <fraction name="config_key_vertical_gap_holo">3.2%p</fraction>
     <fraction name="config_key_horizontal_gap_holo">1.565%p</fraction>
-    <fraction name="config_key_vertical_gap_holo_narrow">4.5%p</fraction>
+    <fraction name="config_key_vertical_gap_holo_narrow">2.0%p</fraction>
     <fraction name="config_key_horizontal_gap_holo_narrow">1.565%p</fraction>
     <!-- config_more_keys_keyboard_key_height x -0.5 -->
-    <dimen name="config_popup_keys_keyboard_vertical_correction_holo">-31.5dp</dimen>
+    <dimen name="config_popup_keys_keyboard_vertical_correction_holo">-30.25dp</dimen>
 
     <fraction name="config_key_preview_text_ratio">50%</fraction>
     <fraction name="config_key_letter_ratio_holo">42%</fraction>
@@ -50,10 +50,10 @@
     <dimen name="config_key_hint_letter_padding">3dp</dimen>
     <dimen name="config_key_shifted_letter_hint_padding">3dp</dimen>
 
-    <dimen name="config_suggestions_strip_height">38dp</dimen>
-    <dimen name="config_secondary_toolbar_height">34dp</dimen>
+    <dimen name="config_suggestions_strip_height">32dp</dimen>
+    <dimen name="config_secondary_toolbar_height">28dp</dimen>
     <dimen name="config_suggestions_strip_edge_key_width">54dp</dimen>
-    <dimen name="config_more_suggestions_row_height">44dp</dimen>
+    <dimen name="config_more_suggestions_row_height">40dp</dimen>
     <integer name="config_max_more_suggestions_row">6</integer>
     <fraction name="config_min_more_suggestions_width">90%</fraction>
     <dimen name="config_suggestion_min_width">48.0dp</dimen>
