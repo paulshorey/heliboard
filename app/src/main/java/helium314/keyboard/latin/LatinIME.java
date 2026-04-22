@@ -2118,15 +2118,14 @@ public class LatinIME extends InputMethodService implements
      * by commitText(). This desync causes subsequent backspace presses to modify
      * a phantom composing buffer instead of actually deleting text in the editor.
      *
+     * When the editor currently has a selection, commitText() replaces the selected
+     * range. Voice dictation should match normal typing behavior here instead of
+     * rejecting the transcript chunk.
+     *
      * @param text The prepared transcription text to insert
      */
     private void commitVoiceTranscriptionText(@NonNull final String text) {
         if (text.isEmpty()) {
-            return;
-        }
-        if (mInputLogic.mConnection.hasSelection()) {
-            Log.w(TAG, "Skipping voice insertion because the editor selection changed");
-            mKeyboardSwitcher.hideProcessingIndicator();
             return;
         }
         try {
