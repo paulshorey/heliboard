@@ -1,0 +1,33 @@
+# settings/screens
+
+Feature-specific Compose screens for the settings app.
+
+## Direct files
+- `AboutScreen.kt` - app/about information screen.
+- `AdvancedScreen.kt` - advanced settings screen.
+- `AppearanceScreen.kt` - appearance/theme settings screen.
+- `ColorsScreen.kt` - color customization screen.
+- `DebugScreen.kt` - debug/developer settings screen.
+- `DictionaryScreen.kt` - dictionary management screen.
+- `FullappDraftsScreen.kt` - saved fullapp drafts screen.
+- `GestureTypingScreen.kt` - gesture typing settings screen.
+- `LanguageScreen.kt` - language/subtype entry screen.
+- `MainSettingsScreen.kt` - top-level settings home screen.
+- `PersonalDictionariesScreen.kt` - list of personal dictionaries.
+- `PersonalDictionaryScreen.kt` - one personal dictionary editor/view.
+- `PreferencesScreen.kt` - general preference settings screen.
+- `SecondaryLayoutScreen.kt` - secondary layout settings screen.
+- `SetupAppScreen.kt` - app setup/onboarding utility screen.
+- `SubtypeScreen.kt` - subtype detail/configuration screen.
+- `TextCorrectionScreen.kt` - text correction/autocorrect settings screen.
+- `ToolbarScreen.kt` - toolbar customization screen.
+- `TranscriptionScreen.kt` - voice transcription settings screen.
+
+## Non-obvious notes
+- These screens are UI only; the actual preference keys/defaults live in `latin/settings/`.
+- When adding a screen, also update navigation wiring in `SettingsNavHost.kt` and search/discoverability if appropriate.
+
+## Keep this file current
+- Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.
+- If a change here affects neighboring folders or a cross-folder contract, update those AGENTS.md files in the same PR.
+- Treat stale agent documentation as a bug.
