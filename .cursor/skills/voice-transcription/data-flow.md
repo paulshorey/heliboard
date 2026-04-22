@@ -54,7 +54,7 @@ Orchestrates recording, Speechmatics streaming, and ordered transcript delivery.
 
 ### LatinIME.java
 Main orchestrator that coordinates all components and inserts text into the editor.
-- Uses `InputConnection.commitText(...)` at the caret
+- Uses `InputConnection.commitText(...)` at the caret, or to replace the active selection when text is highlighted
 - Calls `mInputLogic.finishInput()` first to keep composing state in sync
 - Defers paragraph insertion until manager processing is idle if needed
 
@@ -94,7 +94,7 @@ Finalized transcript span arrives
     → SpeechmaticsTranscriptionClient rebuilds text from token results
     → attaches_to metadata determines whether a leading space is needed
     → VoiceInputManager queues and delivers the segment to LatinIME in FIFO order
-    → LatinIME trims empty spans, conditionally restores a leading space, and commits the finalized text at the caret via InputConnection.commitText(...)
+    → LatinIME trims empty spans, conditionally restores a leading space, and commits the finalized text via InputConnection.commitText(...), replacing any active selection
 ```
 
 ### 4. New Paragraph
