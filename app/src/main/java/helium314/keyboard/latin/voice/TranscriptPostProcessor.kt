@@ -13,8 +13,14 @@ package helium314.keyboard.latin.voice
 object TranscriptPostProcessor {
 
     data class Rule(val find: String, val replace: String)
+    data class ShortPauseRewriteResult(
+        val previousText: String,
+        val currentText: String
+    )
 
     val rules: List<Rule> = buildRules()
+
+    private const val SHORT_PAUSE_COMMA_MAX_SECONDS = 1.2
 
     /**
      * Analyze [paragraph] and return the corrected text, or `null` if no rules matched.
@@ -43,13 +49,82 @@ object TranscriptPostProcessor {
         return chunk.substring(0, chunk.length - 1)
     }
 
+    /**
+     * Speechmatics may finalize two adjacent dictation spans as separate
+     * sentences even when the audio gap is only a brief thinking pause. In that
+     * case, replace the previous span's period with a comma and lowercase the
+     * new span's leading word before insertion.
+     */
+    fun rewriteShortPauseBoundary(
+        previousText: String,
+        currentText: String,
+        pauseSeconds: Double
+    ): ShortPauseRewriteResult? {
+        if (pauseSeconds < 0.0 || pauseSeconds > SHORT_PAUSE_COMMA_MAX_SECONDS) return null
+        val periodIndex = trailingPeriodIndex(previousText)
+        if (periodIndex < 0) return null
+        if (isLikelyAbbreviationBeforePeriod(previousText, periodIndex)) return null
+
+        val firstLetterIndex = currentText.indexOfFirst { it.isLetter() }
+        if (firstLetterIndex < 0) return null
+        val firstLetter = currentText[firstLetterIndex]
+        if (!firstLetter.isUpperCase()) return null
+
+        val firstWord = extractFirstWord(currentText.substring(firstLetterIndex))
+        if (shouldPreserveWordCasing(firstWord)) return null
+
+        return ShortPauseRewriteResult(
+            previousText = previousText.replaceRange(periodIndex, periodIndex + 1, ","),
+            currentText = currentText.replaceRange(
+                firstLetterIndex,
+                firstLetterIndex + 1,
+                firstLetter.lowercaseChar().toString()
+            )
+        )
+    }
+
+    private fun trailingPeriodIndex(text: String): Int {
+        var i = text.length - 1
+        while (i >= 0) {
+            val c = text[i]
+            when {
+                c == '.' -> return i
+                c.isWhitespace() ||
+                    c == '"' || c == '\'' || c == ')' || c == ']' || c == '}' ||
+                    c == '“' || c == '”' ||
+                    c == '‘' || c == '’' ||
+                    c == '»' -> i--
+                else -> return -1
+            }
+        }
+        return -1
+    }
+
+    private fun isLikelyAbbreviationBeforePeriod(text: String, periodIndex: Int): Boolean {
+        var end = periodIndex - 1
+        while (end >= 0 && text[end].isWhitespace()) end--
+        if (end < 0 || !text[end].isLetter()) return false
+
+        var start = end
+        while (start >= 0 && text[start].isLetter()) start--
+        val word = text.substring(start + 1, end + 1)
+        if (word.length == 1 && word[0].isUpperCase()) return true
+        return word in commonAbbreviations
+    }
+
     private fun isSentenceContinuation(context: CharSequence): Boolean {
         for (c in context) {
+            if (c == '\n' || c == '\r') return false
             if (c.isWhitespace()) continue
             return c.isLetter() && c.isLowerCase()
         }
         return false
     }
+
+    private val commonAbbreviations = setOf(
+        "Mr", "Mrs", "Ms", "Mx", "Dr", "Prof", "Sr", "Jr",
+        "St", "Mt", "vs", "etc", "e.g", "i.e"
+    )
 
     /**
      * Adjust the first character's casing of a freshly arrived transcription [chunk].

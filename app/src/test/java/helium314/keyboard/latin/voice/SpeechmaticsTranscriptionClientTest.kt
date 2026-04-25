@@ -326,6 +326,27 @@ class SpeechmaticsTranscriptionClientTest {
     }
 
     @Test
+    fun parseServerEvent_exposesTranscriptSegmentTiming() {
+        val event = SpeechmaticsTranscriptionClient.parseServerEvent(
+            """
+            {
+              "message":"AddTranscript",
+              "metadata":{
+                "start_time":4.0,
+                "end_time":5.5,
+                "transcript":"this arrived quickly"
+              }
+            }
+            """.trimIndent()
+        )
+
+        val transcript = assertIs<SpeechmaticsServerEvent.FinalTranscript>(event)
+        assertEquals("this arrived quickly", transcript.transcript)
+        assertEquals(4.0, transcript.startTime)
+        assertEquals(5.5, transcript.endTime)
+    }
+
+    @Test
     fun parseServerEvent_reconstructsSpacingFromTokenAttachments() {
         val event = SpeechmaticsTranscriptionClient.parseServerEvent(
             """

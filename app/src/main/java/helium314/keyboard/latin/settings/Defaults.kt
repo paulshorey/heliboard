@@ -166,7 +166,9 @@ object Defaults {
     const val PREF_SPACE_BAR_TEXT = ""
     const val PREF_TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss"
     const val PREF_SPEECHMATICS_API_KEY = ""
-    const val PREF_SPEECHMATICS_MAX_DELAY_MILLIS = 2500
+    // Allow Speechmatics more context before finalizing realtime spans. A longer
+    // delay reduces premature sentence breaks from slight dictation pauses.
+    const val PREF_SPEECHMATICS_MAX_DELAY_MILLIS = 4000
     // 0 disables the server-side end-of-utterance detector. Leaving it enabled
     // forces a final transcript after every short pause, and Speechmatics always
     // terminates that forced final with a sentence-end mark (a period in
