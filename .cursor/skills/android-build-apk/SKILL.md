@@ -52,5 +52,5 @@ Include a link to that URL in your final response so the user can download and s
 
 Format as markdown, like this:
 ```
-[Direct download APK](https://github.com/paulshorey/REPO_PATH/raw/refs/heads/BRANCH_NAME/dist/HeliBoard.apk)
+[Direct download APK](https://github.com/REPO_PATH/raw/refs/heads/BRANCH_NAME/dist/HeliBoard.apk)
 ```
