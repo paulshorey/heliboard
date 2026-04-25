@@ -3,8 +3,9 @@ package helium314.keyboard.latin.voice
 
 /**
  * Post-processes transcribed text at the paragraph level to fix patterns that
- * Speechmatics cannot handle — primarily spelled-out punctuation names that the
- * speaker dictates as voice commands (e.g. "exclamation point", "comma").
+ * the realtime STT provider cannot handle — primarily spelled-out punctuation
+ * names that the speaker dictates as voice commands (e.g. "exclamation point",
+ * "comma").
  *
  * Rules are applied case-insensitively, longest match first, so that patterns
  * with surrounding punctuation context (like ". Exclamation point.") are consumed
@@ -31,9 +32,10 @@ object TranscriptPostProcessor {
      * Strip trailing sentence-ending punctuation from [chunk] if [followingContext]
      * shows the cursor is mid-sentence (next visible character is a lowercase letter).
      *
-     * Speechmatics appends end-of-sentence punctuation to every transcript span.
-     * When the caret is positioned inside existing text, that trailing mark is wrong
-     * because the text that follows is a continuation of the same sentence.
+     * Realtime STT providers tend to append end-of-sentence punctuation to every
+     * transcript span. When the caret is positioned inside existing text, that
+     * trailing mark is wrong because the text that follows is a continuation of
+     * the same sentence.
      */
     fun stripTrailingPunctuationIfMidSentence(chunk: String, followingContext: CharSequence): String {
         if (chunk.isEmpty()) return chunk
@@ -54,13 +56,13 @@ object TranscriptPostProcessor {
     /**
      * Adjust the first character's casing of a freshly arrived transcription [chunk].
      *
-     * Speechmatics always capitalizes the first letter of a new transcript span
-     * because it treats each span as the start of a new sentence. When the user
-     * dictates mid-sentence (caret placed inside existing text, or continuing
-     * after deleting the preceding punctuation), that sentence-start
-     * capitalization is wrong. This helper lowercases the first letter only
-     * when the editor [previousContext] clearly shows we are NOT at a sentence
-     * boundary.
+     * Realtime STT providers typically capitalize the first letter of a new
+     * transcript span because they treat each span as the start of a new
+     * sentence. When the user dictates mid-sentence (caret placed inside
+     * existing text, or continuing after deleting the preceding punctuation),
+     * that sentence-start capitalization is wrong. This helper lowercases the
+     * first letter only when the editor [previousContext] clearly shows we are
+     * NOT at a sentence boundary.
      *
      * Capitalization is preserved when any of the following is true:
      *  - the chunk is empty or its first letter is not an uppercase letter

@@ -7,7 +7,7 @@ import android.os.Looper
 import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.settings.TranscriptionPreferences
-import helium314.keyboard.latin.settings.TranscriptionPreferences.SpeechmaticsConfig
+import helium314.keyboard.latin.settings.TranscriptionPreferences.SonioxConfig
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.prefs
 import java.util.Locale
@@ -16,8 +16,8 @@ import java.util.Locale
  * Manages the voice input workflow:
  *
  * 1. Record audio locally via [VoiceRecorder] (starts instantly).
- * 2. Stream raw PCM chunks to Speechmatics over WebSocket.
- * 3. Receive finalized transcript updates from Speechmatics in stream order.
+ * 2. Stream raw PCM chunks to Soniox over WebSocket.
+ * 3. Receive finalized transcript updates from Soniox in stream order.
  * 4. Deliver transcript text to [VoiceInputListener.onTranscriptionResult].
  */
 class VoiceInputManager(private val context: Context) {
@@ -85,7 +85,7 @@ class VoiceInputManager(private val context: Context) {
     )
 
     private val voiceRecorder = VoiceRecorder(context)
-    private val transcriptionClient = SpeechmaticsTranscriptionClient()
+    private val transcriptionClient = SonioxTranscriptionClient()
     private var listener: VoiceInputListener? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -93,12 +93,12 @@ class VoiceInputManager(private val context: Context) {
     private var activeSessionId = 0L
 
     // Local speech-boundary detection window used by VoiceRecorder callbacks
-    // (paragraph/auto-stop behavior). Speechmatics transcript segmentation is server-managed.
+    // (paragraph/auto-stop behavior). Soniox transcript segmentation is server-managed.
     private var chunkSilenceDurationMs = Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS * 1000L
     private var chunkSilenceThreshold = Defaults.PREF_VOICE_SILENCE_THRESHOLD.toDouble()
     private var newParagraphDelayMs = Defaults.PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS * 1000L
     private var autoStopSilenceMs = Defaults.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS * 1000L
-    private var speechmaticsConfig = TranscriptionPreferences.readSpeechmaticsConfig(context.prefs())
+    private var sonioxConfig: SonioxConfig = TranscriptionPreferences.readSonioxConfig(context.prefs())
 
     // Streaming state
     private var streamSessionId = 0L
@@ -170,7 +170,7 @@ class VoiceInputManager(private val context: Context) {
     }
 
     /**
-     * Start recording. Microphone starts immediately; Speechmatics connects in parallel.
+     * Start recording. Microphone starts immediately; Soniox connects in parallel.
      */
     fun startRecording(): Boolean {
         if (currentState != State.IDLE) {
@@ -185,7 +185,7 @@ class VoiceInputManager(private val context: Context) {
 
         val apiKey = getApiKey()
         if (apiKey.isBlank()) {
-            listener?.onError("Speechmatics API key not configured. Please set it in Settings.")
+            listener?.onError("Soniox API key not configured. Please set it in Settings.")
             return false
         }
 
@@ -351,13 +351,11 @@ class VoiceInputManager(private val context: Context) {
 
     private fun startStreamingSession(sessionId: Long, apiKey: String, isReconnect: Boolean = false) {
         if (sessionId != activeSessionId) return
-        val sessionConfig = SpeechmaticsTranscriptionClient.buildSessionConfig(
-            languageTag = getCurrentSpeechmaticsLanguage(),
-            maxDelaySeconds = speechmaticsConfig.maxDelaySeconds,
-            removeDisfluencies = speechmaticsConfig.removeDisfluencies,
-            endOfUtteranceSilenceTriggerSeconds = speechmaticsConfig.endOfUtteranceSilenceSeconds,
-            punctuationSensitivity = speechmaticsConfig.punctuationSensitivity,
-            diarizationEnabled = speechmaticsConfig.diarizationEnabled
+        val sessionConfig = SonioxTranscriptionClient.buildSessionConfig(
+            languageTag = getCurrentLanguageHint(),
+            enableEndpointDetection = sonioxConfig.enableEndpointDetection,
+            maxEndpointDelayMs = sonioxConfig.maxEndpointDelayMs,
+            diarizationEnabled = sonioxConfig.diarizationEnabled
         )
         streamSessionId = sessionId
         isStreamingConnecting = true
@@ -370,7 +368,7 @@ class VoiceInputManager(private val context: Context) {
         transcriptionClient.startStreaming(
             apiKey = apiKey,
             sessionConfig = sessionConfig,
-            callback = object : SpeechmaticsTranscriptionClient.StreamingCallback {
+            callback = object : SonioxTranscriptionClient.StreamingCallback {
                 override fun onStreamReady() {
                     if (sessionId != activeSessionId) return
                     cancelPendingReconnect()
@@ -577,7 +575,7 @@ class VoiceInputManager(private val context: Context) {
         isStreamingConnecting = false
 
         if (currentState == State.PAUSED) {
-            Log.i(TAG, "Speechmatics stream disconnected while paused — waiting for resume")
+            Log.i(TAG, "Soniox stream disconnected while paused — waiting for resume")
             notifyProcessingIdleIfDrained()
             return
         }
@@ -602,7 +600,7 @@ class VoiceInputManager(private val context: Context) {
         // same invalid session repeatedly.
         if (isUnrecoverableError(error)) {
             pendingAudioChunks.clear()
-            val message = error ?: "Speechmatics stream rejected"
+            val message = error ?: "Soniox stream rejected"
             Log.e(TAG, "Unrecoverable stream error — stopping recording: $message")
             listener?.onError(message)
             stopRecordingInternal(cancelPending = true)
@@ -617,7 +615,7 @@ class VoiceInputManager(private val context: Context) {
         }
 
         pendingAudioChunks.clear()
-        val message = error ?: "Speechmatics stream closed"
+        val message = error ?: "Soniox stream closed"
         Log.e(TAG, "Stream disconnected unrecoverably: $message")
         listener?.onError(message)
         stopRecordingInternal(cancelPending = true)
@@ -628,7 +626,7 @@ class VoiceInputManager(private val context: Context) {
         val lower = error.lowercase()
         return (lower.contains("invalid") && lower.contains("api key")) ||
             lower.contains("unauthorized") ||
-            lower.contains("quota_exceeded") ||
+            lower.contains("authentication failed") ||
             lower.contains("connection rejected")
     }
 
@@ -642,7 +640,7 @@ class VoiceInputManager(private val context: Context) {
         val message = if (allowWhileStopping) {
             "Final voice segment could not be transcribed completely"
         } else {
-            "Speechmatics stream unavailable: $reason"
+            "Soniox stream unavailable: $reason"
         }
         Log.e(TAG, message)
         listener?.onError(message)
@@ -664,7 +662,7 @@ class VoiceInputManager(private val context: Context) {
             return false
         }
         if (sessionApiKey.isBlank()) {
-            Log.e(TAG, "Cannot reconnect stream: missing Speechmatics API key")
+            Log.e(TAG, "Cannot reconnect stream: missing Soniox API key")
             return false
         }
         cancelPendingReconnect()
@@ -673,7 +671,7 @@ class VoiceInputManager(private val context: Context) {
         isStreamingConnecting = true
         Log.w(
             TAG,
-            "Scheduling Speechmatics reconnect in ${delayMs}ms " +
+            "Scheduling Soniox reconnect in ${delayMs}ms " +
                 "(attempt $streamReconnectAttempts/$MAX_STREAM_RECONNECT_ATTEMPTS, reason=$reason)"
         )
         val reconnectRunnable = Runnable {
@@ -716,7 +714,7 @@ class VoiceInputManager(private val context: Context) {
             pendingStreamConnectTimeoutRunnable = null
             if (sessionId != activeSessionId) return@Runnable
             if (!isStreamingConnecting || isStreamingReady || streamSessionId != sessionId) return@Runnable
-            val message = "Speechmatics stream connection timed out"
+            val message = "Soniox stream connection timed out"
             Log.e(TAG, "$message after ${STREAM_CONNECT_TIMEOUT_MS}ms")
             // Ensure the stale socket lifecycle is torn down before reconnection handling.
             transcriptionClient.cancelAll()
@@ -765,7 +763,7 @@ class VoiceInputManager(private val context: Context) {
         newParagraphDelayMs = paragraphSilenceSeconds * 1000L
         autoStopSilenceMs = autoStopSilenceSeconds * 1000L
         chunkSilenceThreshold = silenceThreshold.toDouble()
-        speechmaticsConfig = TranscriptionPreferences.readSpeechmaticsConfig(prefs)
+        sonioxConfig = TranscriptionPreferences.readSonioxConfig(prefs)
 
         voiceRecorder.updateSilenceConfig(
             silenceDurationMs = chunkSilenceDurationMs,
@@ -778,11 +776,9 @@ class VoiceInputManager(private val context: Context) {
                 "silenceThreshold=${chunkSilenceThreshold}, " +
                 "newParagraphSilence=${newParagraphDelayMs}ms, " +
                 "autoStopSilence=${autoStopSilenceMs}ms, " +
-                "speechmaticsMaxDelay=${speechmaticsConfig.maxDelaySeconds}s, " +
-                "speechmaticsEou=${speechmaticsConfig.endOfUtteranceSilenceSeconds}s, " +
-                "speechmaticsDisfluencies=${speechmaticsConfig.removeDisfluencies}, " +
-                "speechmaticsPunctuationSensitivity=${speechmaticsConfig.punctuationSensitivity}, " +
-                "speechmaticsDiarization=${speechmaticsConfig.diarizationEnabled}"
+                "sonioxEnableEndpointDetection=${sonioxConfig.enableEndpointDetection}, " +
+                "sonioxMaxEndpointDelayMs=${sonioxConfig.maxEndpointDelayMs}, " +
+                "sonioxDiarization=${sonioxConfig.diarizationEnabled}"
         )
     }
 
@@ -823,14 +819,14 @@ class VoiceInputManager(private val context: Context) {
 
     private fun getApiKey(): String {
         return try {
-            TranscriptionPreferences.readSpeechmaticsApiKey(context.prefs())
+            TranscriptionPreferences.readSonioxApiKey(context.prefs())
         } catch (e: Exception) {
             Log.e(TAG, "Error getting API key: ${e.message}")
             ""
         }
     }
 
-    private fun getCurrentSpeechmaticsLanguage(): String? {
+    private fun getCurrentLanguageHint(): String? {
         return try {
             val locale = Settings.getValues()?.mLocale ?: return null
             val language = locale.language
@@ -841,21 +837,6 @@ class VoiceInputManager(private val context: Context) {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error getting language: ${e.message}")
-            null
-        }
-    }
-
-    private fun getCurrentSpeechmaticsOutputLocale(): String? {
-        return try {
-            val locale = Settings.getValues()?.mLocale ?: return null
-            val language = locale.language.lowercase(Locale.US)
-            val country = locale.country.uppercase(Locale.US)
-            if (language != "en" || country.isBlank()) {
-                return null
-            }
-            locale.toLanguageTag()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error getting output locale: ${e.message}")
             null
         }
     }

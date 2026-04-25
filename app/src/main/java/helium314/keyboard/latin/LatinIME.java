@@ -191,7 +191,7 @@ public class LatinIME extends InputMethodService implements
 
     private final ClipboardHistoryManager mClipboardHistoryManager = new ClipboardHistoryManager(this);
 
-    // Voice input manager (local recording + Speechmatics transcription)
+    // Voice input manager (local recording + Soniox transcription)
     private VoiceInputManager mVoiceInputManager;
     // Wake lock to prevent CPU sleep during voice recording
     private PowerManager.WakeLock mVoiceWakeLock;
