@@ -178,13 +178,11 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
     public static final String PREF_TOOLBAR_MODE = "toolbar_mode";
     public static final String PREF_TOOLBAR_HIDING_GLOBAL = "toolbar_hiding_global";
 
-    // Voice Input (Speechmatics transcription)
-    public static final String PREF_SPEECHMATICS_API_KEY = "speechmatics_api_key";
-    public static final String PREF_SPEECHMATICS_MAX_DELAY_MILLIS = "speechmatics_max_delay_millis";
-    public static final String PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS = "speechmatics_end_of_utterance_millis";
-    public static final String PREF_SPEECHMATICS_REMOVE_DISFLUENCIES = "speechmatics_remove_disfluencies";
-    public static final String PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT = "speechmatics_punctuation_sensitivity_percent";
-    public static final String PREF_SPEECHMATICS_DIARIZATION = "speechmatics_diarization";
+    // Voice Input (Soniox transcription)
+    public static final String PREF_SONIOX_API_KEY = "soniox_api_key";
+    public static final String PREF_SONIOX_ENABLE_ENDPOINT_DETECTION = "soniox_enable_endpoint_detection";
+    public static final String PREF_SONIOX_MAX_ENDPOINT_DELAY_MS = "soniox_max_endpoint_delay_ms";
+    public static final String PREF_SONIOX_DIARIZATION = "soniox_diarization";
     public static final String PREF_VOICE_CHUNK_SILENCE_SECONDS = "voice_chunk_silence_seconds";
     public static final String PREF_VOICE_SILENCE_THRESHOLD = "voice_silence_threshold";
     public static final String PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS = "voice_new_paragraph_silence_seconds";

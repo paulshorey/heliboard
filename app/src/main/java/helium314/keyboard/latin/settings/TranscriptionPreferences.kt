@@ -3,197 +3,124 @@ package helium314.keyboard.latin.settings
 import android.content.SharedPreferences
 import androidx.core.content.edit
 
+/**
+ * Typed access to Soniox transcription preferences with one-time migration of
+ * legacy provider keys (Speechmatics, Deepgram).
+ */
 object TranscriptionPreferences {
-    private const val LEGACY_PROVIDER_API_KEY_PREF = "deepgram_api_key"
-    private const val MIN_SPEECHMATICS_MAX_DELAY_TENTHS = 7
-    private const val MAX_SPEECHMATICS_MAX_DELAY_TENTHS = 40
-    private const val MIN_SPEECHMATICS_END_OF_UTTERANCE_MS = 0
-    private const val MAX_SPEECHMATICS_END_OF_UTTERANCE_MS = 2000
-    private const val MIN_PUNCTUATION_SENSITIVITY_PERCENT = 0
-    private const val MAX_PUNCTUATION_SENSITIVITY_PERCENT = 100
-    const val DEFAULT_MAX_DELAY_SECONDS = Defaults.PREF_SPEECHMATICS_MAX_DELAY_MILLIS / 1000.0
-    const val DEFAULT_END_OF_UTTERANCE_SILENCE_TRIGGER_SECONDS =
-        Defaults.PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS / 1000.0
-    const val DEFAULT_REMOVE_DISFLUENCIES = Defaults.PREF_SPEECHMATICS_REMOVE_DISFLUENCIES
-    const val DEFAULT_PUNCTUATION_SENSITIVITY =
-        Defaults.PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT / 100.0
-    const val DEFAULT_DIARIZATION = Defaults.PREF_SPEECHMATICS_DIARIZATION
+    private const val LEGACY_SPEECHMATICS_API_KEY_PREF = "speechmatics_api_key"
+    private const val LEGACY_DEEPGRAM_API_KEY_PREF = "deepgram_api_key"
 
-    data class SpeechmaticsConfig(
+    // Soniox documents max_endpoint_delay_ms must be between 500 and 3000.
+    private const val MIN_MAX_ENDPOINT_DELAY_MS = 500
+    private const val MAX_MAX_ENDPOINT_DELAY_MS = 3000
+
+    const val DEFAULT_ENABLE_ENDPOINT_DETECTION = Defaults.PREF_SONIOX_ENABLE_ENDPOINT_DETECTION
+    const val DEFAULT_MAX_ENDPOINT_DELAY_MS = Defaults.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS
+    const val DEFAULT_DIARIZATION = Defaults.PREF_SONIOX_DIARIZATION
+
+    data class SonioxConfig(
         val apiKey: String,
-        val maxDelaySeconds: Double,
-        val endOfUtteranceSilenceSeconds: Double,
-        val removeDisfluencies: Boolean,
-        val punctuationSensitivity: Double,
+        val enableEndpointDetection: Boolean,
+        val maxEndpointDelayMs: Int,
         val diarizationEnabled: Boolean
     )
 
-    fun readSpeechmaticsApiKey(prefs: SharedPreferences): String {
-        clearLegacyProviderKey(prefs)
+    fun readSonioxApiKey(prefs: SharedPreferences): String {
+        migrateLegacyApiKey(prefs)
         return prefs.getString(
-            Settings.PREF_SPEECHMATICS_API_KEY,
-            Defaults.PREF_SPEECHMATICS_API_KEY
+            Settings.PREF_SONIOX_API_KEY,
+            Defaults.PREF_SONIOX_API_KEY
         )?.trim().orEmpty()
     }
 
-    fun writeSpeechmaticsApiKey(prefs: SharedPreferences, value: String) {
+    fun writeSonioxApiKey(prefs: SharedPreferences, value: String) {
         val trimmedValue = value.trim()
         prefs.edit {
-            putString(Settings.PREF_SPEECHMATICS_API_KEY, trimmedValue)
-            remove(LEGACY_PROVIDER_API_KEY_PREF)
+            putString(Settings.PREF_SONIOX_API_KEY, trimmedValue)
+            remove(LEGACY_SPEECHMATICS_API_KEY_PREF)
+            remove(LEGACY_DEEPGRAM_API_KEY_PREF)
         }
     }
 
-    fun readSpeechmaticsConfig(prefs: SharedPreferences): SpeechmaticsConfig {
-        val maxDelayTenths = prefs.getInt(
-            Settings.PREF_SPEECHMATICS_MAX_DELAY_MILLIS,
-            Defaults.PREF_SPEECHMATICS_MAX_DELAY_MILLIS
-        ) / 100
-        val sanitizedMaxDelayTenths = maxDelayTenths.coerceIn(
-            MIN_SPEECHMATICS_MAX_DELAY_TENTHS,
-            MAX_SPEECHMATICS_MAX_DELAY_TENTHS
-        ).coerceIn(
-            MIN_SPEECHMATICS_MAX_DELAY_TENTHS,
-            MAX_SPEECHMATICS_MAX_DELAY_TENTHS
-        )
-
-        val endOfUtteranceMs = prefs.getInt(
-            Settings.PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS,
-            Defaults.PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS
-        ).coerceIn(
-            MIN_SPEECHMATICS_END_OF_UTTERANCE_MS,
-            MAX_SPEECHMATICS_END_OF_UTTERANCE_MS
-        )
-
-        val maxDelaySeconds = sanitizedMaxDelayTenths / 10.0
-        val sanitizedEndOfUtteranceMs = when {
-            endOfUtteranceMs <= 0 -> 0
-            endOfUtteranceMs >= sanitizedMaxDelayTenths * 100 -> (sanitizedMaxDelayTenths * 100) - 100
-            else -> endOfUtteranceMs
-        }.coerceIn(
-            MIN_SPEECHMATICS_END_OF_UTTERANCE_MS,
-            MAX_SPEECHMATICS_END_OF_UTTERANCE_MS
-        )
-
-        return SpeechmaticsConfig(
-            apiKey = readSpeechmaticsApiKey(prefs),
-            maxDelaySeconds = maxDelaySeconds,
-            endOfUtteranceSilenceSeconds = sanitizedEndOfUtteranceMs / 1000.0,
-            removeDisfluencies = prefs.getBoolean(
-                Settings.PREF_SPEECHMATICS_REMOVE_DISFLUENCIES,
-                Defaults.PREF_SPEECHMATICS_REMOVE_DISFLUENCIES
+    fun readSonioxConfig(prefs: SharedPreferences): SonioxConfig {
+        return SonioxConfig(
+            apiKey = readSonioxApiKey(prefs),
+            enableEndpointDetection = prefs.getBoolean(
+                Settings.PREF_SONIOX_ENABLE_ENDPOINT_DETECTION,
+                Defaults.PREF_SONIOX_ENABLE_ENDPOINT_DETECTION
             ),
-            punctuationSensitivity = prefs.getInt(
-                Settings.PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT,
-                Defaults.PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT
-            ).coerceIn(
-                MIN_PUNCTUATION_SENSITIVITY_PERCENT,
-                MAX_PUNCTUATION_SENSITIVITY_PERCENT
-            ) / 100.0,
+            maxEndpointDelayMs = sanitizeMaxEndpointDelayMs(
+                prefs.getInt(
+                    Settings.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS,
+                    Defaults.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS
+                )
+            ),
             diarizationEnabled = prefs.getBoolean(
-                Settings.PREF_SPEECHMATICS_DIARIZATION,
-                Defaults.PREF_SPEECHMATICS_DIARIZATION
+                Settings.PREF_SONIOX_DIARIZATION,
+                Defaults.PREF_SONIOX_DIARIZATION
             )
         )
     }
 
-    fun writeSpeechmaticsMaxDelayTenths(prefs: SharedPreferences, value: Int) {
+    fun writeSonioxEnableEndpointDetection(prefs: SharedPreferences, enabled: Boolean) {
+        prefs.edit {
+            putBoolean(Settings.PREF_SONIOX_ENABLE_ENDPOINT_DETECTION, enabled)
+        }
+    }
+
+    fun writeSonioxMaxEndpointDelayMs(prefs: SharedPreferences, value: Int) {
         prefs.edit {
             putInt(
-                Settings.PREF_SPEECHMATICS_MAX_DELAY_MILLIS,
-                value.coerceIn(
-                    MIN_SPEECHMATICS_MAX_DELAY_TENTHS,
-                    MAX_SPEECHMATICS_MAX_DELAY_TENTHS
-                ) * 100
+                Settings.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS,
+                sanitizeMaxEndpointDelayMs(value)
             )
         }
     }
 
-    fun writeSpeechmaticsEndOfUtteranceMs(prefs: SharedPreferences, value: Int) {
+    fun writeSonioxDiarization(prefs: SharedPreferences, enabled: Boolean) {
         prefs.edit {
-            putInt(
-                Settings.PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS,
-                value.coerceIn(
-                    MIN_SPEECHMATICS_END_OF_UTTERANCE_MS,
-                    MAX_SPEECHMATICS_END_OF_UTTERANCE_MS
-                )
-            )
+            putBoolean(Settings.PREF_SONIOX_DIARIZATION, enabled)
         }
     }
 
-    fun writeSpeechmaticsRemoveDisfluencies(prefs: SharedPreferences, enabled: Boolean) {
-        prefs.edit {
-            putBoolean(Settings.PREF_SPEECHMATICS_REMOVE_DISFLUENCIES, enabled)
-        }
+    fun readSonioxEnableEndpointDetection(prefs: SharedPreferences): Boolean {
+        return readSonioxConfig(prefs).enableEndpointDetection
     }
 
-    fun writeSpeechmaticsPunctuationSensitivityPercent(prefs: SharedPreferences, value: Int) {
-        prefs.edit {
-            putInt(
-                Settings.PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT,
-                value.coerceIn(
-                    MIN_PUNCTUATION_SENSITIVITY_PERCENT,
-                    MAX_PUNCTUATION_SENSITIVITY_PERCENT
-                )
-            )
-        }
+    fun readSonioxMaxEndpointDelayMs(prefs: SharedPreferences): Int {
+        return readSonioxConfig(prefs).maxEndpointDelayMs
     }
 
-    fun readSpeechmaticsMaxDelaySeconds(prefs: SharedPreferences): Double {
-        return readSpeechmaticsConfig(prefs).maxDelaySeconds
+    fun readSonioxDiarization(prefs: SharedPreferences): Boolean {
+        return readSonioxConfig(prefs).diarizationEnabled
     }
 
-    fun readSpeechmaticsEndOfUtteranceSeconds(prefs: SharedPreferences): Double {
-        return readSpeechmaticsConfig(prefs).endOfUtteranceSilenceSeconds
+    fun sanitizeMaxEndpointDelayMs(value: Int): Int {
+        return value.coerceIn(MIN_MAX_ENDPOINT_DELAY_MS, MAX_MAX_ENDPOINT_DELAY_MS)
     }
 
-    fun readSpeechmaticsRemoveDisfluencies(prefs: SharedPreferences): Boolean {
-        return readSpeechmaticsConfig(prefs).removeDisfluencies
-    }
+    /**
+     * Copies a legacy Speechmatics API key into the new Soniox preference once
+     * (if the new key isn't already set), then deletes legacy provider keys.
+     */
+    private fun migrateLegacyApiKey(prefs: SharedPreferences) {
+        val hasLegacySpeechmatics = prefs.contains(LEGACY_SPEECHMATICS_API_KEY_PREF)
+        val hasLegacyDeepgram = prefs.contains(LEGACY_DEEPGRAM_API_KEY_PREF)
+        if (!hasLegacySpeechmatics && !hasLegacyDeepgram) return
 
-    fun readSpeechmaticsPunctuationSensitivity(prefs: SharedPreferences): Double {
-        return readSpeechmaticsConfig(prefs).punctuationSensitivity
-    }
-
-    fun readSpeechmaticsDiarization(prefs: SharedPreferences): Boolean {
-        return readSpeechmaticsConfig(prefs).diarizationEnabled
-    }
-
-    fun writeSpeechmaticsDiarization(prefs: SharedPreferences, enabled: Boolean) {
-        prefs.edit {
-            putBoolean(Settings.PREF_SPEECHMATICS_DIARIZATION, enabled)
-        }
-    }
-
-    fun sanitizeSpeechmaticsMaxDelaySeconds(value: Double): Double {
-        val sanitizedTenths = (value * 10).toInt().coerceIn(
-            MIN_SPEECHMATICS_MAX_DELAY_TENTHS,
-            MAX_SPEECHMATICS_MAX_DELAY_TENTHS
-        )
-        return sanitizedTenths / 10.0
-    }
-
-    fun sanitizeSpeechmaticsEndOfUtteranceSeconds(value: Double, maxDelaySeconds: Double): Double {
-        val maxAllowedMs = maxEndOfUtteranceForMaxDelay(maxDelaySeconds) * 1000
-        val requestedMs = (value * 1000).toInt()
-        return requestedMs.coerceIn(
-            MIN_SPEECHMATICS_END_OF_UTTERANCE_MS,
-            maxAllowedMs.toInt()
-        ) / 1000.0
-    }
-
-    fun maxEndOfUtteranceForMaxDelay(maxDelaySeconds: Double): Double {
-        return (sanitizeSpeechmaticsMaxDelaySeconds(maxDelaySeconds) - 0.1)
-            .coerceAtLeast(0.0)
-            .coerceAtMost(MAX_SPEECHMATICS_END_OF_UTTERANCE_MS / 1000.0)
-    }
-
-    private fun clearLegacyProviderKey(prefs: SharedPreferences) {
-        if (!prefs.contains(LEGACY_PROVIDER_API_KEY_PREF)) {
-            return
+        val hasNewKey = prefs.contains(Settings.PREF_SONIOX_API_KEY)
+        val legacy = if (hasLegacySpeechmatics) {
+            prefs.getString(LEGACY_SPEECHMATICS_API_KEY_PREF, null)?.trim().orEmpty()
+        } else {
+            ""
         }
         prefs.edit {
-            remove(LEGACY_PROVIDER_API_KEY_PREF)
+            if (!hasNewKey && legacy.isNotEmpty()) {
+                putString(Settings.PREF_SONIOX_API_KEY, legacy)
+            }
+            remove(LEGACY_SPEECHMATICS_API_KEY_PREF)
+            remove(LEGACY_DEEPGRAM_API_KEY_PREF)
         }
     }
 }

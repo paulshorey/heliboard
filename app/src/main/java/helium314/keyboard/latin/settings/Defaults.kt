@@ -165,24 +165,13 @@ object Defaults {
     const val PREF_REMOVE_REDUNDANT_POPUPS = false
     const val PREF_SPACE_BAR_TEXT = ""
     const val PREF_TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss"
-    const val PREF_SPEECHMATICS_API_KEY = ""
-    const val PREF_SPEECHMATICS_MAX_DELAY_MILLIS = 2500
-    // 0 disables the server-side end-of-utterance detector. Leaving it enabled
-    // forces a final transcript after every short pause, and Speechmatics always
-    // terminates that forced final with a sentence-end mark (a period in
-    // English) regardless of punctuation sensitivity. Disabling it lets
-    // Speechmatics insert commas at short pauses and periods only at natural
-    // sentence boundaries.
-    const val PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS = 0
-    const val PREF_SPEECHMATICS_REMOVE_DISFLUENCIES = true
-    // Speechmatics' native default is 0.5 (50). Setting below the native default
-    // reduces how readily the model inserts sentence-ending periods, which is the
-    // main source of over-eager sentence splitting in dictation. 0.4 is the value
-    // Speechmatics' own docs use as the "reduce punctuation" example. Commas at
-    // natural speech pauses are still emitted at this level. Range 0–100 (maps to
-    // 0.0–1.0).
-    const val PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT = 40
-    const val PREF_SPEECHMATICS_DIARIZATION = true
+    const val PREF_SONIOX_API_KEY = ""
+    // Soniox finalizes tokens immediately when the model detects the speaker
+    // has stopped talking. Enabled by default to keep dictation latency low.
+    const val PREF_SONIOX_ENABLE_ENDPOINT_DETECTION = true
+    // Soniox accepts values between 500 and 3000 ms. 2000 ms is the API default.
+    const val PREF_SONIOX_MAX_ENDPOINT_DELAY_MS = 2000
+    const val PREF_SONIOX_DIARIZATION = true
     const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 1
     const val PREF_VOICE_SILENCE_THRESHOLD = 220
     const val PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS = 10
