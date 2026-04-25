@@ -1,23 +1,24 @@
-# Speechmatics Transcription Architecture
+# Soniox Transcription Architecture
 
-HeliBoard uses Speechmatics realtime transcription for voice input.
+HeliBoard uses Soniox real-time transcription for voice input.
 
 ## Runtime flow
 
 1. `VoiceRecorder` captures 16 kHz mono PCM16 audio immediately when the mic button is tapped.
-2. `VoiceInputManager` starts `SpeechmaticsTranscriptionClient` in parallel and buffers audio until the provider acknowledges `RecognitionStarted`.
-3. `SpeechmaticsTranscriptionClient` sends:
-   - `StartRecognition` JSON
-   - binary PCM audio chunks
-   - `ForceEndOfUtterance` and `EndOfStream(last_seq_no=...)` on graceful stop after all audio acks arrive
-4. Finalized transcript text arrives as `AddTranscript` messages.
-5. The client rebuilds finalized text from Speechmatics token results so spacing and punctuation attachments are preserved across chunk boundaries.
-6. `VoiceInputManager` queues transcript spans in FIFO order and tracks whether the next segment should attach to previous text.
-7. `LatinIME` calls `finishInput()` and then `commitText(...)` to insert the finalized text at the caret, restoring a leading space only when the provider segment is a continuation rather than punctuation.
+2. `VoiceInputManager` starts `SonioxTranscriptionClient` in parallel and buffers audio until the WebSocket has accepted the start config message.
+3. `SonioxTranscriptionClient` sends:
+   - A single JSON config text frame as the first message (containing `api_key`, `model`, `audio_format`, `sample_rate`, `num_channels`, optional `language_hints`, plus the endpoint-detection and diarization flags from preferences).
+   - Binary PCM audio chunks as the user speaks.
+   - An empty WebSocket frame on graceful stop, then waits for `{"finished": true}` and closes with code 1000. An 8 second grace timer guards against the server never emitting `finished`.
+4. Each Soniox response includes a `tokens` array. Tokens with `is_final: true` are confirmed and never repeated; non-final tokens are partials we drop. The IME only commits text that won't change.
+5. The client concatenates final-token `text` directly (Soniox already encodes inter-word whitespace inside the token text), trims whitespace, and emits a `TranscriptSegment` with `attachesToPrevious=true` whenever the segment starts with attaching punctuation (`. , ! ? : ; ) ] } %`).
+6. `VoiceInputManager` queues transcript segments in FIFO order and tracks whether the next segment should attach to previous text.
+7. `LatinIME` calls `finishInput()` and then `commitText(...)` to insert the finalized text at the caret, restoring a leading space only when the segment is a continuation rather than punctuation.
 
 ## Important files
 
-- `app/src/main/java/helium314/keyboard/latin/voice/SpeechmaticsTranscriptionClient.kt`
+- `app/src/main/java/helium314/keyboard/latin/voice/SonioxTranscriptionClient.kt`
+- `app/src/main/java/helium314/keyboard/latin/voice/TranscriptSegment.kt`
 - `app/src/main/java/helium314/keyboard/latin/voice/VoiceInputManager.kt`
 - `app/src/main/java/helium314/keyboard/latin/voice/VoiceRecorder.kt`
 - `app/src/main/java/helium314/keyboard/latin/settings/TranscriptionPreferences.kt`
@@ -27,12 +28,11 @@ HeliBoard uses Speechmatics realtime transcription for voice input.
 
 ## Configuration
 
-- Provider key preference: `Settings.PREF_SPEECHMATICS_API_KEY`
-- Speechmatics session settings:
-  - `Settings.PREF_SPEECHMATICS_MAX_DELAY_MILLIS`
-  - `Settings.PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS`
-  - `Settings.PREF_SPEECHMATICS_REMOVE_DISFLUENCIES`
-  - `Settings.PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY`
+- API key preference: `Settings.PREF_SONIOX_API_KEY` (legacy `speechmatics_api_key` and `deepgram_api_key` keys are migrated/cleared automatically the first time `TranscriptionPreferences.readSonioxApiKey` is called).
+- Soniox session settings:
+  - `Settings.PREF_SONIOX_ENABLE_ENDPOINT_DETECTION` (boolean, default `true`)
+  - `Settings.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS` (int, range 500–3000, default 2000)
+  - `Settings.PREF_SONIOX_DIARIZATION` (boolean, default `true`)
 - Local silence settings remain unchanged:
   - chunk silence duration
   - silence threshold
@@ -41,9 +41,9 @@ HeliBoard uses Speechmatics realtime transcription for voice input.
 
 ## Notes
 
-- The app no longer uses the previous provider websocket client or its API key preference.
-- A stale legacy provider key is cleared from shared preferences so setup reflects the new backend accurately.
-- Speechmatics formatting is optimized by sending a base language (`language`) plus a locale-specific `output_locale` when the active subtype provides one.
-- English sessions can remove disfluencies server-side so dictation inserts cleaner finalized text without extra client-side cleanup.
-- Final transcript text is reconstructed from `results[].alternatives[].content` plus `attaches_to`, rather than trusting each finalized segment string to be self-contained for spacing.
-- Punctuation balance for dictation: server end-of-utterance detection is disabled by default (`PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS = 0`) and punctuation sensitivity defaults to `0.40` (below Speechmatics' native default of 0.5). The below-default value was chosen because higher sensitivity causes the model to end sentences with a period too aggressively in dictation — `0.4` is the value Speechmatics' own documentation uses as the "reduce punctuation" example and still preserves commas at natural speech pauses. Enabling server end-of-utterance forces a sentence-end mark (period in English) at every pause past the threshold regardless of sensitivity, which produces runaway periods and suppresses commas. Leaving it at `0` lets Speechmatics insert commas at short pauses and periods at natural sentence boundaries based on prosody, while HeliBoard's local paragraph-silence timer still handles paragraph breaks from the mic stream.
+- Authentication is in the start config JSON body (`api_key`), not in HTTP headers. The WebSocket itself is opened anonymously.
+- The client pins `model = "stt-rt-preview"`. There is a TODO to revisit when Soniox marks `stt-rt-v4` as the recommended default.
+- Soniox returns tokens continuously; there is no separate "recognition started" event. The client treats the stream as ready as soon as the start config frame is queued. Authentication failures still surface via `error_code` JSON responses, which are routed to `onStreamError`.
+- Soniox does not expose punctuation sensitivity, disfluency removal, or output locale. Punctuation is decided automatically. The only latency lever is endpoint detection.
+- When diarization is enabled, the client locks onto the first non-empty `speaker` label it sees and drops tokens from any other speaker. Soniox uses string speaker IDs (`"1"`, `"2"`, …); the locked label is not guaranteed to be the local speaker.
+- The empty-frame end-of-stream handshake is the documented graceful-shutdown mechanism. Manual finalize (`{"type": "finalize"}`) is a separate Soniox feature for mid-stream finalization that HeliBoard does not currently use; the client defensively skips the resulting `<fin>` marker token if it ever appears.

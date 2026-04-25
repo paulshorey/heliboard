@@ -4,7 +4,7 @@ Longer-form architecture notes that complement the shorter folder-local AGENTS f
 
 ## Direct files
 - `input-simplified.md` - explains the mirror-based current-word architecture and why the host editor is treated as a committed-text sink.
-- `speechmatics-transcription.md` - end-to-end Speechmatics voice pipeline and configuration notes.
+- `soniox-transcription.md` - end-to-end Soniox voice pipeline and configuration notes.
 
 ## Non-obvious notes
 - These docs overlap intentionally with root guidance and skills; use them when you need design rationale rather than just file lookup.

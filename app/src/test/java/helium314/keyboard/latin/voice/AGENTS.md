@@ -1,9 +1,9 @@
 # app/src/test/java/helium314/keyboard/latin/voice
 
-Tests for the Speechmatics voice pipeline.
+Tests for the Soniox voice pipeline.
 
 ## Direct files
-- `SpeechmaticsTranscriptionClientTest.kt` - session config and transcript-assembly tests.
+- `SonioxTranscriptionClientTest.kt` - session config and transcript-assembly tests.
 - `TranscriptPostProcessorTest.kt` - finalized-text cleanup tests.
 
 ## Non-obvious notes

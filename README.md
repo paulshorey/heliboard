@@ -20,120 +20,52 @@ This script:
 
 Only one installable APK should exist in `./dist` at a time, and regenerating it should overwrite the previous artifact.
 
-## Speechmatics voice transcription
+## Soniox voice transcription
 
-HeliBoard uses [Speechmatics realtime transcription](https://docs.speechmatics.com/api-ref/realtime-transcription-websocket) for voice-to-text. The session configuration is assembled in `SpeechmaticsTranscriptionClient.kt` and sent as a `StartRecognition` message over WebSocket.
+HeliBoard uses [Soniox real-time transcription](https://soniox.com/docs/stt/api-reference/websocket-api) for voice-to-text. The session configuration is assembled in `SonioxTranscriptionClient.kt` and sent as a single JSON config text frame at the start of the WebSocket session (Soniox authenticates via the JSON `api_key` field, not HTTP headers).
 
-### Customizable features
+### Where the integration lives
 
-All Speechmatics session config lives in:
-`app/src/main/java/helium314/keyboard/latin/voice/SpeechmaticsTranscriptionClient.kt`
+`app/src/main/java/helium314/keyboard/latin/voice/SonioxTranscriptionClient.kt`
 
-#### Custom dictionary (`additional_vocab`)
+The client:
 
-Improves recognition of specific words, brand names, or technical terms. Supports optional `sounds_like` pronunciations.
+- pins `model = "stt-rt-preview"` (TODO: revisit when `stt-rt-v4` becomes the recommended default)
+- sends raw PCM (`audio_format = "pcm_s16le"`, `sample_rate = 16000`, `num_channels = 1`) to match `VoiceRecorder` output
+- maps the active keyboard subtype's base language to a single-element `language_hints` array (omitting it when the subtype has no usable language so Soniox auto-detects)
+- forwards the user's endpoint-detection and diarization preferences
+- streams binary PCM frames immediately after queuing the start config
+- ends the session by sending an empty WebSocket frame and waiting for `{"finished": true}` (with an 8 s grace timeout)
 
-**Where to edit:** `SpeechmaticsTranscriptionClient.defaultAdditionalVocab()` — returns a `List<VocabEntry>`.
+### Speaker diarization
 
-```kotlin
-VocabEntry("HeliBoard"),                                    // just the word
-VocabEntry("gnocchi", listOf("nyohki", "nokey", "nochi")),  // word + pronunciations
-```
+When enabled, Soniox tags every token with a `speaker` string ID (`"1"`, `"2"`, …). The client locks onto the first non-empty `speaker` it observes and drops tokens from any other speaker. Soniox's documented IDs aren't guaranteed to correspond to the local speaker; if the locked ID drifts, the user can briefly stop and restart recording.
 
-**Docs:** https://docs.speechmatics.com/speech-to-text/features/custom-dictionary
+### What Soniox does **not** expose
 
-#### Word replacement
-
-Substitutes specific words in the transcript after processing. Case-sensitive, applied post-transcription.
-
-**Where to edit:** `SpeechmaticsTranscriptionClient.defaultReplacements()` — returns a `List<ReplacementRule>`.
-
-```kotlin
-ReplacementRule("heli board", "HeliBoard"),       // plain text replacement
-ReplacementRule("speechmatics", "Speechmatics"),
-```
-
-**Docs:** https://docs.speechmatics.com/speech-to-text/formatting#word-replacement
-
-#### Regex replacement
-
-Uses ECMAScript regex in the `from` field (wrapped in `/` delimiters). Processed after plain-text replacements.
-
-**Where to edit:** Same `defaultReplacements()` function.
-
-```kotlin
-ReplacementRule("/^[Oo]kay google$/", "OK Google"),  // regex with capture
-ReplacementRule("/^[Hh]ey [Ss]iri$/", "Hey Siri"),
-```
-
-**Docs:** https://docs.speechmatics.com/speech-to-text/formatting#regex
-
-#### Speaker diarization
-
-Identifies speakers and filters to only the primary speaker, ignoring background voices. Configured with `max_speakers: 2` and `prefer_current_speaker: true`.
-
-**Where to edit:** Enabled/disabled via `PREF_SPEECHMATICS_DIARIZATION` in user settings (defaults to `true`). The diarization config itself is in `buildStartRecognitionMessage()`. Speaker filtering logic is in `buildTranscriptSegment()` (the `primarySpeaker` parameter).
-
-**Docs:** https://docs.speechmatics.com/speech-to-text/features/diarization
-
-#### Punctuation
-
-All marks permitted (`permitted_marks: ["all"]`, covering commas, periods, `?`, `!` for English and locale-specific marks for other languages). Sensitivity (0.0–1.0) controls how aggressively punctuation is inserted — higher values produce more commas at short pauses.
-
-**Where to edit:**
-- Default sensitivity: `Defaults.kt` → `PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT` (currently `55`, meaning 0.55, just above Speechmatics' own default of 0.5)
-- Users can adjust via Settings → Transcription → Punctuation sensitivity
-
-**Server end-of-utterance note:** `PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS` defaults to `0` (disabled). A non-zero value forces a final transcript at every pause past the threshold and terminates it with a sentence-end mark (a period in English) regardless of sensitivity, so enabling it causes "period-after-every-pause" output. Keep it at 0 to let Speechmatics choose punctuation from prosody; HeliBoard's local silence timers still handle paragraph breaks and auto-stop.
-
-**Docs:** https://docs.speechmatics.com/features/punctuation-settings
-
-#### Disfluency removal
-
-Removes English hesitation words (um, uh, hmm) from transcripts.
-
-**Where to edit:** `Defaults.kt` → `PREF_SPEECHMATICS_REMOVE_DISFLUENCIES` (defaults to `true`). Toggled in Settings → Transcription.
-
-**Docs:** https://docs.speechmatics.com/speech-to-text/formatting#disfluencies
-
-#### Output locale
-
-Controls region-specific spelling (e.g. "colour" vs "color"). Defaults to `en-US` for English.
-
-**Where to edit:** `SpeechmaticsTranscriptionClient.normalizeOutputLocale()` — maps the keyboard's active locale to a Speechmatics locale. Falls back to `en-US` when no specific region is detected.
-
-**Docs:** https://docs.speechmatics.com/speech-to-text/formatting#output-locale
-
-#### Operating point
-
-Controls the transcription model quality. Set to `"enhanced"` for best accuracy.
-
-**Where to edit:** `buildSessionConfig()` parameter `operatingPoint` (default `"enhanced"`).
+The Soniox real-time API does not expose a custom-vocabulary list, post-transcription replacements, output locale, disfluency removal flag, or a punctuation-sensitivity knob. Punctuation is decided automatically by the model. None of those toggles exist in HeliBoard's settings.
 
 ### User-facing settings (Settings → Transcription)
 
-These are adjustable at runtime via the Transcription settings screen:
-
 | Setting | Pref key | Default | Description |
 |---------|----------|---------|-------------|
-| API key | `PREF_SPEECHMATICS_API_KEY` | `""` | Speechmatics API key |
-| Final transcript delay | `PREF_SPEECHMATICS_MAX_DELAY_MILLIS` | `2500` | Latency target (ms) |
-| End-of-utterance silence | `PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS` | `0` | Server-side silence trigger (ms). `0` disables it — recommended, because non-zero forces a period at every pause |
-| Remove disfluencies | `PREF_SPEECHMATICS_REMOVE_DISFLUENCIES` | `true` | Remove um/uh/hmm |
-| Punctuation sensitivity | `PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT` | `55` | 0–100 (maps to 0.0–1.0). Higher = more commas at short pauses |
-| Speaker diarization | `PREF_SPEECHMATICS_DIARIZATION` | `true` | Filter to primary speaker |
+| API key | `PREF_SONIOX_API_KEY` | `""` | Soniox API key |
+| Speaker diarization | `PREF_SONIOX_DIARIZATION` | `true` | Filter to primary speaker |
+| Enable endpoint detection | `PREF_SONIOX_ENABLE_ENDPOINT_DETECTION` | `true` | Finalize tokens immediately when Soniox detects the speaker has stopped talking |
+| Max endpoint delay (ms) | `PREF_SONIOX_MAX_ENDPOINT_DELAY_MS` | `2000` | Soniox-documented bounds: 500–3000 |
 
-Preference keys are in `Settings.java`, defaults in `Defaults.kt`, read/write logic in `TranscriptionPreferences.kt`.
+Preference keys are in `Settings.java`, defaults in `Defaults.kt`, read/write logic in `TranscriptionPreferences.kt`. `TranscriptionPreferences.readSonioxApiKey` migrates legacy `speechmatics_api_key` and `deepgram_api_key` entries to the new pref the first time it runs.
 
 ## Related docs
 
 - Fullapp architecture: `docs/fullapp-keyboard.md`
+- Soniox transcription pipeline: `docs/soniox-transcription.md`
 - Agent instructions: `AGENTS.md`
-- Speechmatics API: `.cursor/skills/voice-transcription/api-reference.md`
+- Soniox API reference: `.cursor/skills/voice-transcription/api-reference.md`
 
 ## Run in debug mode:
 ```
-./gradlew installDebug && adb logcat -c && adb logcat -v time | grep -E 'LatinIME|VoiceInputManager|SpeechmaticsTranscription|VoiceRecorder|Speechmatics|VOICE_'
+./gradlew installDebug && adb logcat -c && adb logcat -v time | grep -E 'LatinIME|VoiceInputManager|SonioxTranscription|VoiceRecorder|Soniox|VOICE_'
 ```
 or just install without logs:
 ```
