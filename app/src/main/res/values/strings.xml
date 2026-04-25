@@ -231,7 +231,7 @@
     <string name="backup_restored">Backup restored</string>
     <!-- Preferences item for format for timestamp keycode -->
     <string name="timestamp_format_title">Format for timestamp key</string>
-    <!-- Voice Input (Speechmatics transcription) settings -->
+    <!-- Voice Input (AssemblyAI Universal-Streaming transcription) settings -->
     <string name="settings_screen_setup_app">Setup this app</string>
     <string name="settings_screen_transcription">Transcription</string>
     <!-- Settings screen showing saved standalone fullapp edits and archived history -->
@@ -261,15 +261,22 @@
     <string name="fullapp_drafts_ime_options">IME options: 0x%s</string>
     <!-- Private IME options label in the fullapp drafts screen -->
     <string name="fullapp_drafts_private_ime_options">Private IME options: %s</string>
-    <string name="speechmatics_api_key_title">Speechmatics API Key</string>
-    <string name="speechmatics_api_key_summary">API key for voice transcription. Get from portal.speechmatics.com</string>
-    <string name="speechmatics_max_delay_title">Final transcript delay (seconds)</string>
-    <string name="speechmatics_end_of_utterance_title">End-of-utterance silence (seconds)</string>
-    <string name="speechmatics_remove_disfluencies_title">Remove English disfluencies</string>
-    <string name="speechmatics_remove_disfluencies_summary">Removes fillers like um and uh before text is inserted. Speechmatics only supports this in English.</string>
-    <string name="speechmatics_punctuation_sensitivity_title">Punctuation sensitivity (0.0-1.0)</string>
-    <string name="speechmatics_diarization_title">Speaker diarization</string>
-    <string name="speechmatics_diarization_summary">Only the first detected speaker (S1) is inserted; other labeled speakers are dropped. The service still tracks up to two voices internally.</string>
+    <string name="assemblyai_api_key_title">AssemblyAI API Key</string>
+    <string name="assemblyai_api_key_summary">API key for voice transcription. Get from www.assemblyai.com</string>
+    <string name="assemblyai_speech_model_title">Speech model</string>
+    <string name="assemblyai_speech_model_summary">universal-streaming-english (fastest), universal-streaming-multilingual, u3-rt-pro (highest accuracy), or whisper-rt (multilingual Whisper).</string>
+    <string name="assemblyai_format_turns_title">Formatted final transcripts</string>
+    <string name="assemblyai_format_turns_summary">Insert punctuation, casing, and inverse text normalization (dates, times, currency, phone numbers) on each completed turn. Recommended.</string>
+    <string name="assemblyai_end_of_turn_confidence_title">End-of-turn confidence (0–100)</string>
+    <string name="assemblyai_end_of_turn_confidence_summary">Higher values make the model wait for the speaker to actually finish a thought before ending a turn. The default of 70 works well for dictation. Lower if turns feel too long.</string>
+    <string name="assemblyai_min_turn_silence_title">Minimum turn silence (ms)</string>
+    <string name="assemblyai_min_turn_silence_summary">Minimum silence before a semantic end-of-turn check can fire. Lower values produce faster turn endings.</string>
+    <string name="assemblyai_max_turn_silence_title">Maximum turn silence (ms)</string>
+    <string name="assemblyai_max_turn_silence_summary">Hard ceiling on silence before the turn is forced to end regardless of semantic confidence.</string>
+    <string name="assemblyai_use_eu_endpoint_title">Use EU streaming endpoint</string>
+    <string name="assemblyai_use_eu_endpoint_summary">Connect to streaming.eu.assemblyai.com for lower latency in Europe.</string>
+    <string name="assemblyai_keyterms_title">Custom keyterms (one per line)</string>
+    <string name="assemblyai_keyterms_summary">Up to 100 entries (each ≤ 50 chars). Boost recognition of names, brands, technical terms — applied at connection time and re-used across turns.</string>
     <string name="voice_chunk_silence_seconds_title">Chunk silence duration (seconds)</string>
     <string name="voice_silence_threshold_title">Silence threshold (RMS loudness)</string>
     <string name="voice_new_paragraph_silence_seconds_title">New paragraph silence duration (seconds)</string>

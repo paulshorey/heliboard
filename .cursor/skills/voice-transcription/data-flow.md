@@ -1,25 +1,25 @@
 # Voice Transcription Data Flow
 
-End-to-end voice transcription pipeline: local capture, Speechmatics realtime streaming, FIFO transcript delivery, and immediate caret insertion.
+End-to-end voice transcription pipeline: local capture, AssemblyAI Universal-Streaming, FIFO transcript delivery, and immediate caret insertion.
 
 ## Overview
 
 1. **VoiceRecorder** captures PCM16 audio locally; silence detection drives paragraph breaks and auto-stop.
-2. **SpeechmaticsTranscriptionClient** opens the realtime websocket, sends `StartRecognition`, streams binary PCM frames, tracks `AudioAdded` acknowledgements, can request `ForceEndOfUtterance`, reconstructs finalized transcript text from tokenized `results`, and surfaces finalized transcript segments.
-3. **VoiceInputManager** buffers audio until the stream is ready, retries broken sessions, derives a provider config from preferences + current subtype locale, queues finalized transcript segments in FIFO order, and performs graceful `EndOfStream` shutdown.
-4. **LatinIME** inserts each finalized transcript immediately at the current caret position through `InputConnection`, restoring a leading space only when the new segment is a continuation of previous text rather than punctuation.
+2. **AssemblyAITranscriptionClient** opens the realtime WebSocket with all session parameters in the URL, sends raw PCM binary frames once `Begin` is received, only forwards `Turn` messages where `end_of_turn: true` (and `turn_is_formatted: true` when `format_turns=true`), and gracefully terminates with `{"type":"Terminate"}` on stop.
+3. **VoiceInputManager** buffers audio until the stream is ready, retries broken sessions, derives a session config from preferences, queues finalized turns in FIFO order, and performs graceful shutdown.
+4. **LatinIME** inserts each finalized transcript immediately at the current caret through `InputConnection`, restoring a leading space only when the new segment is a continuation rather than starting punctuation.
 
 ## Architecture
 
 ```
 ┌─────────────────┐     ┌──────────────────────┐     ┌──────────────────────┐
-│   Microphone    │────▶│   VoiceRecorder      │────▶│  Speechmatics RT API │
-│   (Hardware)    │     │   (PCM16 16kHz)      │     │  (WebSocket /v2/)    │
+│   Microphone    │────▶│   VoiceRecorder      │────▶│ AssemblyAI Universal │
+│   (Hardware)    │     │   (PCM16 16kHz)      │     │ Streaming (wss /v3/) │
 └─────────────────┘     │   Silence detection  │     └──────────┬───────────┘
-                        │   Chunking/timers     │                ▼
+                        │   Chunking/timers    │                ▼
                         └──────────────────────┘     ┌──────────────────────┐
-┌─────────────────┐     ┌──────────────────────┐◀────│  Finalized transcript │
-│   Text Field    │◀────│   LatinIME           │     │  spans (AddTranscript)│
+┌─────────────────┐     ┌──────────────────────┐◀────│ end_of_turn Turn     │
+│   Text Field    │◀────│   LatinIME           │     │ messages (formatted)  │
 │   (App)         │     │   (Orchestrator)     │     └──────────────────────┘
 └─────────────────┘     └──────────────────────┘
 ```
@@ -28,34 +28,33 @@ End-to-end voice transcription pipeline: local capture, Speechmatics realtime st
 
 ### VoiceRecorder.kt
 Captures audio from the microphone with client-side silence detection.
-- **Format**: PCM16, 16kHz, mono
-- **Silence detection**: Adaptive RMS threshold on each 100ms chunk
+- **Format**: PCM16, 16 kHz, mono
+- **Silence detection**: Adaptive RMS threshold on each 100 ms chunk
 - **Callbacks**: Supplies PCM chunks to `VoiceInputManager`; long silence can request a new paragraph or auto-stop
 
-### SpeechmaticsTranscriptionClient.kt
-WebSocket client for Speechmatics realtime transcription.
-- **URL**: `wss://eu.rt.speechmatics.com/v2/`
-- **Handshake**: `Authorization: Bearer <API_KEY>`
-- **Startup**: Sends `StartRecognition` with raw PCM16 audio settings plus a configurable `transcription_config`
+### AssemblyAITranscriptionClient.kt
+WebSocket client for AssemblyAI Universal-Streaming.
+- **URL**: `wss://streaming.assemblyai.com/v3/ws` (or EU equivalent), with all session config as query parameters
+- **Handshake**: `Authorization: <API_KEY>` header (no `Bearer` prefix). The server replies with a `Begin` message once the session is open.
 - **Transport**: Binary PCM frames over the socket
-- **Acks**: Tracks `AudioAdded.seq_no` so `EndOfStream(last_seq_no=...)` can be sent safely on stop
-- **Turn flush**: Sends `ForceEndOfUtterance` before `EndOfStream` during graceful stop to help flush the tail transcript
-- **Output**: Rebuilds finalized spans from Speechmatics `results[]` tokens so spacing and punctuation attachment follow `attaches_to`
+- **Output**: Forwards only the formatted, end-of-turn `Turn` messages so the editor never receives draft text
+- **Graceful stop**: Sends `{"type":"Terminate"}` and closes after the server replies with the final `Turn` and `Termination`
 
 ### VoiceInputManager.kt
-Orchestrates recording, Speechmatics streaming, and ordered transcript delivery.
+Orchestrates recording, AssemblyAI streaming, and ordered transcript delivery.
 - **State machine**: IDLE → RECORDING ↔ PAUSED → IDLE
-- **Buffered audio**: Holds PCM chunks until `RecognitionStarted`
-- **Transcript queue**: Preserves FIFO delivery for finalized Speechmatics segments, including whether a segment attaches to previous text
-- **Reconnects**: Retries transient websocket failures while the recording session remains active
-- **Session config**: Maps current subtype locale to Speechmatics `language` and optional `output_locale`; sanitizes max-delay, conservative punctuation sensitivity, and disfluency settings from preferences
+- **Buffered audio**: Holds PCM chunks until `Begin`
+- **Transcript queue**: Preserves FIFO delivery of finalized AssemblyAI turns, including whether a segment attaches to previous text
+- **Reconnects**: Retries transient WebSocket failures while the recording session remains active
+- **Session config**: Maps preferences (speech model, format toggle, end-of-turn confidence/silence, keyterms, EU endpoint) to AssemblyAI URL parameters
 - **New Paragraph Timer**: Requests a paragraph break after long silence
-- **Graceful stop**: Waits for pending acks, sends `ForceEndOfUtterance`, then `EndOfStream`, and lets the tail transcript drain
+- **Graceful stop**: Lets the tail turn drain before closing the socket
 
 ### LatinIME.java
 Main orchestrator that coordinates all components and inserts text into the editor.
 - Uses `InputConnection.commitText(...)` at the caret, or to replace the active selection when text is highlighted
 - Calls `mInputLogic.finishInput()` first to keep composing state in sync
+- Runs `TranscriptPostProcessor` for spelled-out punctuation and mid-sentence casing/punctuation correction
 - Defers paragraph insertion until manager processing is idle if needed
 
 ## Data Flow Steps
@@ -69,37 +68,38 @@ User taps mic button
     → State = RECORDING
 ```
 
-### 2. Speech → Speechmatics
+### 2. Speech → AssemblyAI
 ```
 User speaks
     → VoiceRecorder captures PCM chunks
-    → VoiceInputManager buffers/sends them to SpeechmaticsTranscriptionClient
-    → SpeechmaticsTranscriptionClient streams them to Speechmatics
-    → Speechmatics emits finalized AddTranscript messages
+    → VoiceInputManager buffers/sends them to AssemblyAITranscriptionClient
+    → AssemblyAITranscriptionClient streams them to AssemblyAI
+    → AssemblyAI emits running Turn messages and ultimately end_of_turn=true
 ```
 
-### 2b. Speechmatics session config
+### 2b. AssemblyAI session config
 ```
-Current subtype locale + transcription preferences
-    → VoiceInputManager.buildTranscriptionConfig()
-    → language = base language / supported provider language
-    → output_locale = locale-specific spelling when Speechmatics documents it
-    → max_delay / end_of_utterance_silence_trigger sanitized to provider-safe ranges
-    → remove_disfluencies enabled only for English when requested
+Transcription preferences
+    → VoiceInputManager.startStreamingSession()
+    → speech_model = configured model (defaults to universal-streaming-english)
+    → format_turns = true
+    → end_of_turn_confidence_threshold = sanitized 0–1 value
+    → min_turn_silence / max_turn_silence sanitized to documented ranges
+    → keyterms_prompt = default keyterms ∪ user keyterms (≤ 100 entries, ≤ 50 chars each)
+    → use EU endpoint if configured
 ```
 
 ### 3. Transcript → Immediate Insert
 ```
-Finalized transcript span arrives
-    → SpeechmaticsTranscriptionClient rebuilds text from token results
-    → attaches_to metadata determines whether a leading space is needed
-    → VoiceInputManager queues and delivers the segment to LatinIME in FIFO order
-    → LatinIME trims empty spans, conditionally restores a leading space, and commits the finalized text via InputConnection.commitText(...), replacing any active selection
+end_of_turn=true (and turn_is_formatted=true when format_turns=true) arrives
+    → AssemblyAITranscriptionClient surfaces TranscriptSegment(text, attachesToPrevious)
+    → VoiceInputManager queues and delivers it in FIFO order
+    → LatinIME trims empty turns, conditionally restores a leading space, runs casing/punctuation post-processing, and commits via InputConnection.commitText(...) (replacing any active selection)
 ```
 
 ### 4. New Paragraph
 ```
-Speech stops
+Speech stops locally
     → VoiceInputManager starts new paragraph timer
     → Delay elapses with no speech
     → LatinIME.onNewParagraphRequested()
@@ -117,23 +117,23 @@ PAUSED     → User taps pause  → RECORDING (resume)
 ```
 
 ### Ordering Guarantees
-- Speechmatics transcript spans are queued and delivered in FIFO order by `VoiceInputManager`.
+- AssemblyAI end-of-turn results are queued and delivered in FIFO order by `VoiceInputManager`.
 - `LatinIME` inserts each finalized transcript immediately when received.
 - Paragraph breaks are deferred until manager processing drains, so they do not interleave in the middle of pending transcript insertion.
-- Cancelling voice input invalidates the active manager session so stale Speechmatics callbacks are dropped before they reach the IME.
+- Cancelling voice input invalidates the active manager session so stale AssemblyAI callbacks are dropped before they reach the IME.
 
 ## Configuration
 
 ### Settings (TranscriptionScreen.kt)
-- **Speechmatics API Key**: Required for transcription
-- **Final transcript delay**: Upper bound for Speechmatics finalization latency
-- **Punctuation sensitivity**: Higher values make Speechmatics insert more punctuation; in practice this mostly affects commas at short pauses (sentence-end periods come from prosodic utterance ends and are less sensitive to this setting). Default `0.55`.
-- **End of utterance trigger**: Server-side silence duration before Speechmatics force-finalizes an utterance. Disabled by default (`0`) because any non-zero value forces a sentence-end mark (a period in English) at every pause past the threshold, regardless of punctuation sensitivity — that is what would otherwise suppress commas and overproduce periods during dictation.
-- **Remove disfluencies**: Removes English hesitation sounds like “um” and “uh”
-- **Chunk Silence Duration**: Silence window before detecting a speech boundary
-- **Silence Threshold**: RMS threshold floor for silence/speech detection
-- **New Paragraph Silence Duration**: Delay before inserting a paragraph break
-- **Auto-stop Silence Duration**: Delay before automatically stopping voice recording
+- **AssemblyAI API key**: Required for transcription.
+- **Speech model**: AssemblyAI requires this on every connection. Default `universal-streaming-english`.
+- **Formatted final transcripts**: `format_turns=true`. Recommended on for dictation; provides punctuation, casing, and inverse text normalization.
+- **End-of-turn confidence (0–100)**: Higher values make the model wait for the speaker to actually finish a thought. Default 70 (above AssemblyAI's API default of 40).
+- **Min turn silence (ms)**: Floor before a semantic end-of-turn check fires.
+- **Max turn silence (ms)**: Hard ceiling beyond which a turn is forced closed.
+- **EU endpoint**: switch to `streaming.eu.assemblyai.com`.
+- **Custom keyterms**: newline-separated list of brand names, technical terms, contacts to boost.
+- **Chunk silence / silence threshold / new paragraph silence / auto-stop silence**: local-only mic timing knobs unrelated to AssemblyAI.
 
 ### Silence Detection (VoiceRecorder.kt)
 ```kotlin
@@ -145,16 +145,16 @@ MAX_SILENCE_DURATION_MS = 30000L
 
 ## Error Handling
 
-- **Network/transcription failures**: surfaced to the user; recording may continue or stop depending on stream state
-- **Empty transcriptions**: ignored
-- **Session cancellation**: pending stream/transcript work is invalidated through the manager session ID
-- **Insertion failures**: logged and the processing indicator is cleared
+- **Network/transcription failures**: surfaced to the user; recording may continue or stop depending on stream state.
+- **Empty transcriptions**: ignored.
+- **Session cancellation**: pending stream/transcript work is invalidated through the manager session ID.
+- **Insertion failures**: logged and the processing indicator is cleared.
 
 ## Thread Safety
 
 Callbacks are marshalled back to the main thread before UI/editor operations:
-- Audio recording runs on a background thread
-- Speechmatics callbacks are forwarded onto the main thread
-- Timer callbacks run on the main thread
+- Audio recording runs on a background thread.
+- AssemblyAI callbacks are forwarded onto the main thread.
+- Timer callbacks run on the main thread.
 
 This keeps text insertion sequential and avoids concurrent editor mutations.

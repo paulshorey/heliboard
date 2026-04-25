@@ -127,7 +127,7 @@ android {
 }
 
 dependencies {
-    // OkHttp for Speechmatics realtime WebSocket streaming
+    // OkHttp for AssemblyAI Universal-Streaming WebSocket transport
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     // androidx

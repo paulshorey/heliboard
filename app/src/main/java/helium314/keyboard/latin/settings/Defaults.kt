@@ -165,24 +165,36 @@ object Defaults {
     const val PREF_REMOVE_REDUNDANT_POPUPS = false
     const val PREF_SPACE_BAR_TEXT = ""
     const val PREF_TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss"
-    const val PREF_SPEECHMATICS_API_KEY = ""
-    const val PREF_SPEECHMATICS_MAX_DELAY_MILLIS = 2500
-    // 0 disables the server-side end-of-utterance detector. Leaving it enabled
-    // forces a final transcript after every short pause, and Speechmatics always
-    // terminates that forced final with a sentence-end mark (a period in
-    // English) regardless of punctuation sensitivity. Disabling it lets
-    // Speechmatics insert commas at short pauses and periods only at natural
-    // sentence boundaries.
-    const val PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS = 0
-    const val PREF_SPEECHMATICS_REMOVE_DISFLUENCIES = true
-    // Speechmatics' native default is 0.5 (50). Setting below the native default
-    // reduces how readily the model inserts sentence-ending periods, which is the
-    // main source of over-eager sentence splitting in dictation. 0.4 is the value
-    // Speechmatics' own docs use as the "reduce punctuation" example. Commas at
-    // natural speech pauses are still emitted at this level. Range 0–100 (maps to
-    // 0.0–1.0).
-    const val PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT = 40
-    const val PREF_SPEECHMATICS_DIARIZATION = true
+    const val PREF_ASSEMBLYAI_API_KEY = ""
+    // AssemblyAI Universal-Streaming requires `speech_model` on every connection;
+    // there is no default. `universal-streaming-english` is the fastest and most
+    // cost-effective English option and is what we ship by default. Users can
+    // change this in Settings to "u3-rt-pro" (Universal-3 Pro, slower but
+    // best-in-class accuracy and a built-in turn-detection prompt) or
+    // "universal-streaming-multilingual" (English/Spanish/German/French/
+    // Portuguese/Italian).
+    const val PREF_ASSEMBLYAI_SPEECH_MODEL = "universal-streaming-english"
+    // `format_turns=true` returns each finalized turn with punctuation, casing,
+    // and inverse text normalization applied. We always want this on for
+    // dictation; it is the entire reason we switched to AssemblyAI.
+    const val PREF_ASSEMBLYAI_FORMAT_TURNS = true
+    // 70% (0.70) — well above AssemblyAI's default of 0.4 to bias toward
+    // semantic completion and away from naive silence-based turn endings. The
+    // user can complain about "fragmented sentences" only when this is too
+    // low; raising it makes the server hold the turn open until it actually
+    // believes the speaker is done.
+    const val PREF_ASSEMBLYAI_END_OF_TURN_CONFIDENCE_PERCENT = 70
+    // 600 ms minimum silence before an end-of-turn check fires (balanced
+    // recommendation). Higher than AssemblyAI's default of 400 ms because
+    // dictation users frequently pause briefly mid-thought.
+    const val PREF_ASSEMBLYAI_MIN_TURN_SILENCE_MILLIS = 600
+    // 2400 ms hard ceiling on silence before the turn is forced closed
+    // regardless of semantic confidence. Default 1280 ms in the docs is too
+    // aggressive for keyboard dictation.
+    const val PREF_ASSEMBLYAI_MAX_TURN_SILENCE_MILLIS = 2400
+    const val PREF_ASSEMBLYAI_USE_EU_ENDPOINT = false
+    /** Newline-separated user keyterms (max 100 entries, each <= 50 chars). */
+    const val PREF_ASSEMBLYAI_KEYTERMS = ""
     const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 1
     const val PREF_VOICE_SILENCE_THRESHOLD = 220
     const val PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS = 10
