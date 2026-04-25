@@ -55,7 +55,11 @@ class VoiceInputManager(private val context: Context) {
         fun onStateChanged(state: State)
 
         /** A transcript unit was finalized — process and insert this text. */
-        fun onTranscriptionResult(text: String, attachesToPrevious: Boolean)
+        fun onTranscriptionResult(
+            text: String,
+            attachesToPrevious: Boolean,
+            pauseBeforeSeconds: Double
+        )
 
         /** Voice processing is actively running (transcripts are pending delivery). */
         fun onProcessingStarted()
@@ -81,7 +85,9 @@ class VoiceInputManager(private val context: Context) {
     private data class PendingTranscript(
         val sessionId: Long,
         val text: String,
-        val attachesToPrevious: Boolean
+        val attachesToPrevious: Boolean,
+        val startTimeSeconds: Double,
+        val endTimeSeconds: Double
     )
 
     private val voiceRecorder = VoiceRecorder(context)
@@ -117,6 +123,7 @@ class VoiceInputManager(private val context: Context) {
     // Finalized transcript delivery queue (strict FIFO)
     private val pendingTranscripts = ArrayDeque<PendingTranscript>()
     private var isDispatchingTranscripts = false
+    private var lastDeliveredTranscriptEndTimeSeconds = -1.0
 
     // New paragraph timer — insert paragraph break after long silence
     private val newParagraphTimerRunnable = Runnable {
@@ -315,6 +322,7 @@ class VoiceInputManager(private val context: Context) {
         pendingAudioChunks.clear()
         pendingTranscripts.clear()
         isDispatchingTranscripts = false
+        lastDeliveredTranscriptEndTimeSeconds = -1.0
         transcriptionClient.cancelAll()
         if (hadPendingWork) {
             listener?.onPendingProcessingCancelled()
@@ -500,7 +508,11 @@ class VoiceInputManager(private val context: Context) {
                     PendingTranscript(
                         sessionId = mergedSessionId,
                         text = merged,
-                        attachesToPrevious = oldest?.attachesToPrevious ?: false
+                        attachesToPrevious = oldest?.attachesToPrevious ?: false,
+                        startTimeSeconds = oldest?.startTimeSeconds ?: -1.0,
+                        endTimeSeconds = secondOldest?.endTimeSeconds
+                            ?: oldest?.endTimeSeconds
+                            ?: -1.0
                     )
                 )
             }
@@ -510,7 +522,9 @@ class VoiceInputManager(private val context: Context) {
             PendingTranscript(
                 sessionId = sessionId,
                 text = normalized,
-                attachesToPrevious = segment.attachesToPrevious
+                attachesToPrevious = segment.attachesToPrevious,
+                startTimeSeconds = segment.startTime,
+                endTimeSeconds = segment.endTime
             )
         )
         processNextTranscript()
@@ -531,7 +545,20 @@ class VoiceInputManager(private val context: Context) {
                     listener?.onProcessingStarted()
                     notifiedProcessingStarted = true
                 }
-                listener?.onTranscriptionResult(pending.text, pending.attachesToPrevious)
+                val pauseBeforeSeconds =
+                    if (pending.startTimeSeconds >= 0.0 && lastDeliveredTranscriptEndTimeSeconds >= 0.0) {
+                        pending.startTimeSeconds - lastDeliveredTranscriptEndTimeSeconds
+                    } else {
+                        -1.0
+                    }
+                listener?.onTranscriptionResult(
+                    pending.text,
+                    pending.attachesToPrevious,
+                    pauseBeforeSeconds
+                )
+                if (pending.endTimeSeconds >= 0.0) {
+                    lastDeliveredTranscriptEndTimeSeconds = pending.endTimeSeconds
+                }
             }
         } finally {
             isDispatchingTranscripts = false

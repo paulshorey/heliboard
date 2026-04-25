@@ -34,7 +34,9 @@ internal sealed interface SpeechmaticsServerEvent {
 
 data class TranscriptSegment(
     val text: String,
-    val attachesToPrevious: Boolean
+    val attachesToPrevious: Boolean,
+    val startTime: Double = -1.0,
+    val endTime: Double = -1.0
 )
 
 /**

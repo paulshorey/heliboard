@@ -2033,7 +2033,10 @@ public class LatinIME extends InputMethodService implements
             }
 
             @Override
-            public void onTranscriptionResult(@NonNull String text, boolean attachesToPrevious) {
+            public void onTranscriptionResult(
+                    @NonNull String text,
+                    boolean attachesToPrevious,
+                    double pauseBeforeSeconds) {
                 try {
                     Log.i(TAG, "VOICE raw transcript=[" + text + "]");
                     final String trimmed = text.trim();
@@ -2050,7 +2053,8 @@ public class LatinIME extends InputMethodService implements
                                     trimmed.length() + " chars)"
                     );
                     commitVoiceTranscriptionText(
-                            prepareVoiceTranscriptionText(trimmed, attachesToPrevious)
+                            prepareVoiceTranscriptionText(trimmed, attachesToPrevious),
+                            pauseBeforeSeconds
                     );
                 } catch (Exception e) {
                     Log.e(TAG, "Error processing transcription result: " + e.getMessage(), e);
@@ -2124,7 +2128,9 @@ public class LatinIME extends InputMethodService implements
      *
      * @param text The prepared transcription text to insert
      */
-    private void commitVoiceTranscriptionText(@NonNull final String text) {
+    private void commitVoiceTranscriptionText(
+            @NonNull final String text,
+            final double pauseBeforeSeconds) {
         if (text.isEmpty()) {
             return;
         }
@@ -2139,7 +2145,9 @@ public class LatinIME extends InputMethodService implements
             // guard in onUpdateSelection to kill the recording session.
             mInputLogic.mConnection.beginBatchEdit();
             mInputLogic.finishInput();
-            mInputLogic.mConnection.commitText(text, 1);
+            final String textToCommit =
+                    rewriteShortPauseBoundaryIfNeeded(text, pauseBeforeSeconds);
+            mInputLogic.mConnection.commitText(textToCommit, 1);
 
             runTranscriptPostProcessing();
 
@@ -2151,6 +2159,33 @@ public class LatinIME extends InputMethodService implements
             Log.e(TAG, "Error inserting transcription text: " + e.getMessage(), e);
             mKeyboardSwitcher.hideProcessingIndicator();
         }
+    }
+
+    @NonNull
+    private String rewriteShortPauseBoundaryIfNeeded(
+            @NonNull final String currentText,
+            final double pauseSeconds) {
+        if (pauseSeconds < 0.0) {
+            return currentText;
+        }
+        final CharSequence selectedText = mInputLogic.mConnection.getSelectedText(0);
+        if (selectedText != null && selectedText.length() > 0) {
+            return currentText;
+        }
+        final CharSequence beforeCursor = mInputLogic.mConnection.getTextBeforeCursor(
+                VOICE_CASING_LOOKBACK, 0);
+        if (beforeCursor == null || beforeCursor.length() == 0) {
+            return currentText;
+        }
+        final TranscriptPostProcessor.ShortPauseRewriteResult rewrite =
+                TranscriptPostProcessor.INSTANCE.rewriteShortPauseBoundary(
+                        beforeCursor.toString(), currentText, pauseSeconds);
+        if (rewrite == null) {
+            return currentText;
+        }
+        mInputLogic.mConnection.deleteTextBeforeCursor(beforeCursor.length());
+        mInputLogic.mConnection.commitText(rewrite.getPreviousText(), 1);
+        return rewrite.getCurrentText();
     }
 
     /**

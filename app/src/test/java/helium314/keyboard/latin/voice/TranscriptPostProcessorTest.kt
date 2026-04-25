@@ -461,4 +461,42 @@ class TranscriptPostProcessorTest {
         // Digit is not a lowercase letter — do not strip
         assertEquals("some text.", strip("some text.", "42 more"))
     }
+
+    // --- Short-pause period softening ---
+
+    private fun soften(
+        previous: String,
+        current: String = "This continues",
+        pauseSeconds: Double
+    ): TranscriptPostProcessor.ShortPauseRewriteResult? =
+        TranscriptPostProcessor.rewriteShortPauseBoundary(previous, current, pauseSeconds)
+
+    @Test
+    fun `rewrites trailing period to comma after short pause`() {
+        val result = soften("This is still.", pauseSeconds = 0.7)
+        assertEquals("This is still,", result?.previousText)
+        assertEquals("this continues", result?.currentText)
+    }
+
+    @Test
+    fun `preserves trailing period after long pause`() {
+        assertNull(soften("This is done.", pauseSeconds = 1.6))
+    }
+
+    @Test
+    fun `preserves trailing question mark after short pause`() {
+        assertNull(soften("Are you sure?", pauseSeconds = 0.6))
+    }
+
+    @Test
+    fun `preserves abbreviation periods after short pause`() {
+        assertNull(soften("I met Dr.", pauseSeconds = 0.6))
+    }
+
+    @Test
+    fun `rewrites period before closing quote`() {
+        val result = soften("He said \"this works.\"", pauseSeconds = 0.6)
+        assertEquals("He said \"this works,\"", result?.previousText)
+        assertEquals("this continues", result?.currentText)
+    }
 }
