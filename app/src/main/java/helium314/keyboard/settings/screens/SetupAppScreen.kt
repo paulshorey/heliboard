@@ -72,13 +72,13 @@ fun SetupAppScreen(
     var isImeEnabled by remember { mutableStateOf(false) }
     var isImeCurrent by remember { mutableStateOf(false) }
     var microphoneGranted by remember { mutableStateOf(false) }
-    var speechmaticsApiKey by remember { mutableStateOf("") }
+    var assemblyAIApiKey by remember { mutableStateOf("") }
 
     fun refreshStatus() {
         isImeEnabled = UncachedInputMethodManagerUtils.isThisImeEnabled(context, imm)
         isImeCurrent = UncachedInputMethodManagerUtils.isThisImeCurrent(context, imm)
         microphoneGranted = PermissionsUtil.checkAllPermissionsGranted(context, Manifest.permission.RECORD_AUDIO)
-        speechmaticsApiKey = TranscriptionPreferences.readSpeechmaticsApiKey(prefs)
+        assemblyAIApiKey = TranscriptionPreferences.readAssemblyAIApiKey(prefs)
     }
 
     LaunchedEffect(prefChanged?.value) {
@@ -157,15 +157,15 @@ fun SetupAppScreen(
                     }
                 )
                 SetupRequirementItem(
-                    title = stringResource(R.string.speechmatics_api_key_title),
-                    summary = stringResource(R.string.speechmatics_api_key_summary),
-                    isComplete = speechmaticsApiKey.isNotBlank(),
+                    title = stringResource(R.string.assemblyai_api_key_title),
+                    summary = stringResource(R.string.assemblyai_api_key_summary),
+                    isComplete = assemblyAIApiKey.isNotBlank(),
                 ) {
                     SetupKeyField(
-                        value = speechmaticsApiKey,
+                        value = assemblyAIApiKey,
                         onValueChange = { newValue ->
-                            speechmaticsApiKey = newValue.trim()
-                            TranscriptionPreferences.writeSpeechmaticsApiKey(prefs, newValue)
+                            assemblyAIApiKey = newValue.trim()
+                            TranscriptionPreferences.writeAssemblyAIApiKey(prefs, newValue)
                         }
                     )
                 }

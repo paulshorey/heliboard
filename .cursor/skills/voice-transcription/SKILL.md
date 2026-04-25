@@ -1,100 +1,95 @@
 ---
 name: voice-transcription
-description: Voice-to-text pipeline using Speechmatics realtime transcription with local audio capture and direct finalized-text insertion. Use when working on microphone recording, audio streaming, transcription results, silence detection, or voice input UI.
+description: Voice-to-text pipeline using AssemblyAI Universal-Streaming with semantic end-of-turn detection, immutable transcripts, formatted finals, and direct caret insertion. Use when working on microphone recording, audio streaming, transcription results, end-of-turn handling, or voice input UI.
 ---
 
 # Voice Transcription
 
-Local recording + Speechmatics realtime streaming transcription + immediate caret insertion.
+Local recording + AssemblyAI Universal-Streaming + immediate caret insertion of formatted, immutable end-of-turn results.
 
 ## Architecture
 
 ```
-Microphone → VoiceRecorder (PCM16 16kHz) → Speechmatics WebSocket → finalized AddTranscript spans
-                                                                                ↓
-Text Field ← LatinIME (commitText) ← VoiceInputManager (FIFO queue + reconnect + graceful stop)
+Microphone → VoiceRecorder (PCM16 16kHz) → AssemblyAI Universal-Streaming WebSocket → end_of_turn Turn messages
+                                                                                              ↓
+Text Field ← LatinIME (commitText) ← VoiceInputManager (FIFO queue + reconnect + Terminate)
 ```
 
 Recording starts **instantly** on mic tap — no network round-trip delay.
+
+## Why Universal-Streaming
+
+The previous Speechmatics integration used silence-based punctuation, which fragmented dictation: a brief mid-sentence pause was treated as a sentence boundary, producing a period and a capitalized next word. AssemblyAI Universal-Streaming combines a neural turn-detection model (semantic) with VAD (acoustic). It only emits `end_of_turn: true` when the speaker has actually finished a thought, not on every short silence. With `format_turns=true`, the final turn arrives punctuated, cased, and ITN-formatted (dates, times, currency, phone numbers).
 
 ## Key Files
 
 | File | Role |
 |------|------|
-| `VoiceRecorder.kt` | PCM16 capture, adaptive RMS silence detection |
-| `SpeechmaticsTranscriptionClient.kt` | WebSocket client for `wss://eu.rt.speechmatics.com/v2/` with configurable `StartRecognition`, binary audio, `AudioAdded`, `ForceEndOfUtterance`, `AddTranscript`, and `EndOfStream` |
-| `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO transcript queue, reconnects, paragraph timer, Speechmatics locale/config assembly |
-| `TranscriptionPreferences.kt` | Reads/writes sanitized Speechmatics settings and drops the legacy provider key |
-| `TranscriptPostProcessor.kt` | Paragraph-level post-processing of committed text (spelled-out punctuation replacement, etc.) |
-| `LatinIME.java` | Orchestrator — finalizes composing state, commits transcript text at the caret, and triggers post-processing |
-| `TranscriptionScreen.kt` / `SetupAppScreen.kt` | Settings UI for API key, Speechmatics latency/formatting controls, silence thresholds, paragraph timing |
+| `VoiceRecorder.kt` | PCM16 capture, adaptive RMS silence detection (drives paragraph/auto-stop, not transcription). |
+| `AssemblyAITranscriptionClient.kt` | WebSocket client for `wss://streaming.assemblyai.com/v3/ws` (or EU). All session config goes in connection-URL query params. Handles `Begin` / `Turn` / `Termination` / `Error`. Forwards only end-of-turn results, and waits for `turn_is_formatted: true` when formatting is on. |
+| `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO transcript queue, reconnects, paragraph timer, AssemblyAI session config assembly from prefs. |
+| `TranscriptionPreferences.kt` | Reads/writes sanitized AssemblyAI settings; deletes legacy Speechmatics keys on first read so prefs reflect the new backend. |
+| `TranscriptPostProcessor.kt` | Paragraph-level post-processing (spelled-out punctuation replacement, mid-sentence casing and trailing-punctuation fixes). |
+| `LatinIME.java` | Orchestrator — finalizes composing state, commits transcript text at the caret, and triggers post-processing. |
+| `TranscriptionScreen.kt` / `SetupAppScreen.kt` | Settings UI for API key, speech model, formatted-finals toggle, end-of-turn confidence/silence settings, EU endpoint, custom keyterms, and local silence/auto-stop. |
 
 All source files live under `app/src/main/java/helium314/keyboard/latin/voice/` except `LatinIME.java` (parent package) and the settings UI/preferences helpers in `latin/settings` and `settings/screens`.
 
 ## Chunked Audio Flow
 
-1. Mic chunks are captured locally in `VoiceRecorder`
-2. `VoiceInputManager` builds a provider config from settings + current subtype locale
-3. `VoiceInputManager` buffers chunks until Speechmatics sends `RecognitionStarted`
-4. Chunks stream as binary PCM16 frames; Speechmatics replies with `AudioAdded` sequence acks
-5. Final transcript spans arrive as `AddTranscript` messages
-6. `SpeechmaticsTranscriptionClient` rebuilds span text from token results so spacing and punctuation attachment stay correct across finalized chunks
-7. `VoiceInputManager` delivers them in FIFO order to `LatinIME`
-8. `LatinIME` inserts each finalized span with `commitText(...)`, replacing any active selection range and restoring a leading space only when the provider marks the span as a continuation
+1. Mic chunks are captured locally in `VoiceRecorder`.
+2. `VoiceInputManager` builds an AssemblyAI session config from prefs.
+3. `AssemblyAITranscriptionClient` opens the WebSocket with all parameters as query args; auth via `Authorization` request header (no `Bearer` prefix).
+4. Once `Begin` arrives, buffered PCM16 frames stream as binary websocket messages.
+5. `Turn` messages arrive continuously; we ignore non-end-of-turn turns. When `format_turns=true`, we also ignore the unformatted end-of-turn message and wait for the `turn_is_formatted: true` companion.
+6. The finalized transcript is forwarded to `VoiceInputManager` as a `TranscriptSegment`.
+7. `VoiceInputManager` delivers segments in FIFO order to `LatinIME`.
+8. `LatinIME` inserts each finalized text with `commitText(...)` (replacing any active selection) and runs paragraph-level post-processing.
 
-On graceful stop, the client waits for all sent audio to be acknowledged, sends `ForceEndOfUtterance`, then `EndOfStream(last_seq_no=...)`, and only closes after the tail transcript is flushed or a close timeout expires.
+On graceful stop, the client sends `{"type":"Terminate"}`, awaits the final formatted `Turn` plus `Termination`, and then closes.
 
 ## Transcript Handling
 
-Speechmatics smart formatting is used for finalized transcript text. Key Speechmatics config features:
-- **operating_point**: `"enhanced"` for best accuracy
-- **output_locale**: Defaults to `en-US` for English (supports `en-GB`, `en-AU` when detected)
-- **diarization**: Speaker diarization with `prefer_current_speaker: true`, `max_speakers: 2` (Speechmatics requires at least 2), and reduced `speaker_sensitivity` to limit spurious speaker splits. Only the primary speaker (S1) is transcribed; other speakers are filtered out from token results (metadata transcript is not used when diarization is on, so aggregation cannot bypass filtering).
-- **additional_vocab**: Custom dictionary for proper nouns, brand names, technical terms with optional `sounds_like` pronunciations
-- **replacements**: Post-transcription word and regex replacements (e.g. brand name corrections, voice assistant trigger normalization)
-- **punctuation**: All marks permitted (`permitted_marks: ["all"]`, which includes commas, periods, `?`, `!` for English, plus locale-specific marks like `、` for Japanese). Sensitivity defaults to 0.55 — slightly above Speechmatics' own default of 0.5, biased toward inserting commas at short pauses.
-- **end_of_utterance_silence_trigger**: Disabled by default (`0`). When enabled, Speechmatics forces a final transcript at every pause exceeding the threshold and terminates that final with a sentence-end mark (a period in English) **regardless of punctuation sensitivity**. That is the root cause of "period-after-every-pause" behavior, so by default we let Speechmatics choose punctuation from prosody alone — commas land at short pauses, periods at natural sentence boundaries. HeliBoard's own local silence timers (`PREF_VOICE_CHUNK_SILENCE_SECONDS`, `PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS`, `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS`) still drive paragraph breaks and auto-stop from the local mic stream.
-- **disfluency removal**: Optional removal of English hesitation words (um, uh, hmm)
+Universal-Streaming guarantees immutability of finalized words — once `word_is_final: true`, that word is never revised in a later message. So the end-of-turn `transcript` field is final and can be committed directly without manual token reassembly. Notable session config:
 
-HeliBoard rebuilds finalized text from Speechmatics token results so word spacing and punctuation attachment survive chunk boundaries, then commits the finalized text exactly once at the current insertion point. If the editor currently has selected text, that selection is overwritten via `commitText(...)`, matching normal typing behavior.
+- **`speech_model`** (required by AssemblyAI on every connection): defaults to `universal-streaming-english`. Other supported: `universal-streaming-multilingual` (English/Spanish/German/French/Portuguese/Italian), `u3-rt-pro` (Universal-3 Pro, highest accuracy with built-in turn-detection prompt), `whisper-rt`.
+- **`format_turns`** (default true): inserts punctuation, casing, and inverse text normalization on every completed turn.
+- **`end_of_turn_confidence_threshold`** (default 0.7 in HeliBoard, AssemblyAI API default 0.4): semantic confidence required for the model to end a turn. Higher values bias toward holding the turn open through brief mid-sentence pauses. Setting to 0 is the legacy silence-only failure mode and is intentionally not surfaced as a recommendation.
+- **`min_turn_silence` / `max_turn_silence`** (defaults 600 ms / 2400 ms in HeliBoard): silence floor for triggering an end-of-turn check, and the hard ceiling beyond which a turn is forced closed regardless of semantic confidence.
+- **`keyterms_prompt`**: up to 100 entries (≤ 50 chars each), boosting recognition of brand names, technical jargon, contacts, etc. HeliBoard ships a default list (`HeliBoard`, `AssemblyAI`, `Universal-Streaming`, etc.) and merges any user-provided keyterms on top.
+- **EU endpoint**: switch to `streaming.eu.assemblyai.com` for lower latency in Europe.
 
-## Post-Processing (TranscriptPostProcessor)
-
-After each transcript chunk is committed to the text field, `LatinIME.runTranscriptPostProcessing()` reads the current paragraph (text from the last newline to the cursor, up to 1024 chars) and runs it through `TranscriptPostProcessor.processCurrentParagraph()`. If any rules match, the paragraph text is replaced in-place via `deleteTextBeforeCursor` + `commitText`.
-
-Current rules handle **spelled-out punctuation** (e.g. "exclamation point.", "comma", "question mark.", "period.", "colon.", "semicolon."). Rules are case-insensitive and sorted longest-first so that patterns with surrounding punctuation context (like ". Exclamation point.") are consumed before shorter ambiguous ones. The processor only fires when a rule actually modifies the paragraph — no-op paragraphs are skipped.
-
-To add new post-processing rules, edit `TranscriptPostProcessor.buildRules()` in `voice/TranscriptPostProcessor.kt`. Unit tests are in `TranscriptPostProcessorTest.kt`.
+After commit, `LatinIME.runTranscriptPostProcessing()` runs through `TranscriptPostProcessor` to handle spelled-out punctuation names like "exclamation point" (case-insensitive, longest-first).
 
 ## Leading-Casing Correction
 
-Speechmatics always capitalizes the first letter of a new `AddTranscript` span (it treats each span as a sentence start). When the user dictates mid-sentence — caret placed inside existing text, or resumed after deleting a trailing period — that capitalization is wrong.
+Universal-Streaming with `format_turns=true` capitalizes the first letter of each turn (it treats each turn as a new sentence). When the user dictates mid-sentence — caret placed inside existing text, or resumed after deleting a trailing period — that capitalization is wrong.
 
 `TranscriptPostProcessor.adjustLeadingCasing(chunk, previousContext)` handles this **before commit**. It is called from `LatinIME.prepareVoiceTranscriptionText`, which reads `VOICE_CASING_LOOKBACK` (16) characters before the cursor and passes them in alongside the chunk.
 
 The first character is lowercased only when all of these hold:
-- the chunk is not `attachesToPrevious` (continuation spans are already correctly cased by Speechmatics and are short-circuited earlier in `prepareVoiceTranscriptionText`)
+- the chunk is not `attachesToPrevious` (continuation segments are already correctly cased)
 - the first character is an uppercase letter
 - the previous visible character (ignoring trailing whitespace and closing `"`, `'`, `“”`, `‘’`, `)`, `]`, `}`, `»`) is **not** `.`, `!`, `?`, or a newline — and the context is not empty/whitespace
 - the first word is **not** `I`/`I'm`/`I'll`/`I've`/`I'd`, an all-uppercase acronym (`NASA`), or a camel/Pascal-case word with internal uppercase (`iPhone`, `McDonald's`)
 
-Known tradeoff: proper nouns dictated as the first word of a mid-sentence chunk (e.g. `Amazon`, `Paris`) are lowercased. Mitigated by the `additional_vocab` dictionary for known brands.
+Known tradeoff: proper nouns dictated as the first word of a mid-sentence chunk (e.g. `Amazon`, `Paris`) are lowercased. Mitigated by `keyterms_prompt` for known brands.
 
 ## Paragraph Breaks
 
-After configured silence, `VoiceInputManager` fires `onNewParagraphRequested()` → LatinIME inserts `"\n\n"` when processing is idle (deferred so it doesn't interleave with pending transcript spans).
+After configured silence, `VoiceInputManager` fires `onNewParagraphRequested()` → LatinIME inserts `"\n\n"` when processing is idle. This is independent of how AssemblyAI segments turns — it is driven by HeliBoard's local mic silence timer.
 
 ## Thread Safety
 
 - Audio recording: background thread
-- Speechmatics callbacks: forwarded to main thread
+- AssemblyAI callbacks: forwarded to main thread
 - Timer callbacks: main thread
 - Text insertion: always sequential on main thread
 
 ## Additional Resources
 
 - Detailed data flow: [data-flow.md](data-flow.md)
-- Speechmatics API reference and settings keys: [api-reference.md](api-reference.md)
+- AssemblyAI API reference and settings keys: [api-reference.md](api-reference.md)
 
 ## Update documentation
 

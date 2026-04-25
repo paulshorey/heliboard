@@ -178,13 +178,15 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
     public static final String PREF_TOOLBAR_MODE = "toolbar_mode";
     public static final String PREF_TOOLBAR_HIDING_GLOBAL = "toolbar_hiding_global";
 
-    // Voice Input (Speechmatics transcription)
-    public static final String PREF_SPEECHMATICS_API_KEY = "speechmatics_api_key";
-    public static final String PREF_SPEECHMATICS_MAX_DELAY_MILLIS = "speechmatics_max_delay_millis";
-    public static final String PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS = "speechmatics_end_of_utterance_millis";
-    public static final String PREF_SPEECHMATICS_REMOVE_DISFLUENCIES = "speechmatics_remove_disfluencies";
-    public static final String PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT = "speechmatics_punctuation_sensitivity_percent";
-    public static final String PREF_SPEECHMATICS_DIARIZATION = "speechmatics_diarization";
+    // Voice Input (AssemblyAI Universal-Streaming transcription)
+    public static final String PREF_ASSEMBLYAI_API_KEY = "assemblyai_api_key";
+    public static final String PREF_ASSEMBLYAI_SPEECH_MODEL = "assemblyai_speech_model";
+    public static final String PREF_ASSEMBLYAI_FORMAT_TURNS = "assemblyai_format_turns";
+    public static final String PREF_ASSEMBLYAI_END_OF_TURN_CONFIDENCE_PERCENT = "assemblyai_end_of_turn_confidence_percent";
+    public static final String PREF_ASSEMBLYAI_MIN_TURN_SILENCE_MILLIS = "assemblyai_min_turn_silence_millis";
+    public static final String PREF_ASSEMBLYAI_MAX_TURN_SILENCE_MILLIS = "assemblyai_max_turn_silence_millis";
+    public static final String PREF_ASSEMBLYAI_USE_EU_ENDPOINT = "assemblyai_use_eu_endpoint";
+    public static final String PREF_ASSEMBLYAI_KEYTERMS = "assemblyai_keyterms";
     public static final String PREF_VOICE_CHUNK_SILENCE_SECONDS = "voice_chunk_silence_seconds";
     public static final String PREF_VOICE_SILENCE_THRESHOLD = "voice_silence_threshold";
     public static final String PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS = "voice_new_paragraph_silence_seconds";

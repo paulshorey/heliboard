@@ -3,8 +3,11 @@ package helium314.keyboard.latin.voice
 
 /**
  * Post-processes transcribed text at the paragraph level to fix patterns that
- * Speechmatics cannot handle — primarily spelled-out punctuation names that the
- * speaker dictates as voice commands (e.g. "exclamation point", "comma").
+ * the upstream transcription provider cannot handle — primarily spelled-out
+ * punctuation names that the speaker dictates as voice commands (e.g.
+ * "exclamation point", "comma"). AssemblyAI's `format_turns` already inserts
+ * sentence-final punctuation, casing, and ITN, so this pass focuses on the
+ * residual cases where the speaker explicitly *says* the punctuation name.
  *
  * Rules are applied case-insensitively, longest match first, so that patterns
  * with surrounding punctuation context (like ". Exclamation point.") are consumed
@@ -31,9 +34,10 @@ object TranscriptPostProcessor {
      * Strip trailing sentence-ending punctuation from [chunk] if [followingContext]
      * shows the cursor is mid-sentence (next visible character is a lowercase letter).
      *
-     * Speechmatics appends end-of-sentence punctuation to every transcript span.
-     * When the caret is positioned inside existing text, that trailing mark is wrong
-     * because the text that follows is a continuation of the same sentence.
+     * AssemblyAI's `format_turns=true` appends end-of-sentence punctuation to
+     * every finalized turn. When the caret is positioned inside existing text,
+     * that trailing mark is wrong because the text that follows is a continuation
+     * of the same sentence.
      */
     fun stripTrailingPunctuationIfMidSentence(chunk: String, followingContext: CharSequence): String {
         if (chunk.isEmpty()) return chunk
@@ -54,11 +58,11 @@ object TranscriptPostProcessor {
     /**
      * Adjust the first character's casing of a freshly arrived transcription [chunk].
      *
-     * Speechmatics always capitalizes the first letter of a new transcript span
-     * because it treats each span as the start of a new sentence. When the user
-     * dictates mid-sentence (caret placed inside existing text, or continuing
-     * after deleting the preceding punctuation), that sentence-start
-     * capitalization is wrong. This helper lowercases the first letter only
+     * Universal-Streaming with `format_turns=true` always capitalizes the
+     * first letter of each finalized turn because it treats each turn as the
+     * start of a new sentence. When the user dictates mid-sentence (caret
+     * placed inside existing text, or continuing after deleting the preceding
+     * punctuation), that sentence-start capitalization is wrong. This helper lowercases the first letter only
      * when the editor [previousContext] clearly shows we are NOT at a sentence
      * boundary.
      *

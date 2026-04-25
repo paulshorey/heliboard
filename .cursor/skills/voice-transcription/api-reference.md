@@ -1,128 +1,91 @@
 # API Reference
 
-Quick reference for the external APIs and settings used in voice transcription.
+Quick reference for AssemblyAI Universal-Streaming, the settings keys we ship, and the local IME data-flow handshake.
 
-## Speechmatics Realtime API (Transcription)
+## AssemblyAI Universal-Streaming
 
-HeliBoard uses the Speechmatics **Realtime WebSocket** API (`wss://eu.rt.speechmatics.com/v2/`) with raw PCM16 frames. The websocket is authenticated with `Authorization: Bearer <API_KEY>`, then initialized with a `StartRecognition` JSON message.
+HeliBoard uses AssemblyAI's [Universal-Streaming](https://www.assemblyai.com/docs/streaming/universal-streaming) WebSocket endpoint at:
 
-### StartRecognition payload
-```json
-{
-  "message": "StartRecognition",
-  "audio_format": {
-    "type": "raw",
-    "encoding": "pcm_s16le",
-    "sample_rate": 16000
-  },
-  "transcription_config": {
-    "language": "en",
-    "output_locale": "en-US",
-    "max_delay": 1.25,
-    "max_delay_mode": "flexible",
-    "enable_partials": false,
-    "enable_entities": true,
-    "operating_point": "enhanced",
-    "punctuation_overrides": {
-      "permitted_marks": ["all"],
-      "sensitivity": 0.5
-    },
-    "diarization": "speaker",
-    "speaker_diarization_config": {
-      "max_speakers": 2,
-      "prefer_current_speaker": true,
-      "speaker_sensitivity": 0.35
-    },
-    "additional_vocab": [
-      "HeliBoard",
-      {"content": "gnocchi", "sounds_like": ["nyohki", "nokey", "nochi"]}
-    ],
-    "transcript_filtering_config": {
-      "remove_disfluencies": true,
-      "replacements": [
-        {"from": "heli board", "to": "HeliBoard"},
-        {"from": "/^[Oo]kay google$/", "to": "OK Google"}
-      ]
-    }
-  }
-}
-```
+- Default: `wss://streaming.assemblyai.com/v3/ws`
+- EU: `wss://streaming.eu.assemblyai.com/v3/ws`
 
-### Key config features
-- **operating_point**: Set to `"enhanced"` for best accuracy
-- **output_locale**: Defaults to `en-US` for English (also supports `en-GB`, `en-AU`)
-- **diarization**: When enabled, speaker labels (`S1`, `S2`, `UU`) appear in each token's `alternatives[].speaker` field. We filter to only the primary speaker (S1) to ignore background voices. Speechmatics does not allow `max_speakers` below 2; a third distinct voice may still be lumped into S1/S2 rather than dropped. `speaker_sensitivity` is set below the API default to reduce false multi-speaker splits. With diarization on, `metadata.transcript` is ignored so mixed-speaker summaries cannot leak past client-side filtering.
-- **additional_vocab**: Custom dictionary for proper nouns, brand names, technical terms. Supports optional `sounds_like` pronunciations.
-- **replacements**: Post-transcription word/regex replacements in `transcript_filtering_config`. Regex patterns use ECMAScript format with `/pattern/` delimiters.
-- **punctuation_overrides**: `permitted_marks: ["all"]` enables every mark the active language pack supports (for English: `. , ! ?`; other languages also include locale-specific marks like Japanese `、 。`). `sensitivity` (0.0–1.0) controls how aggressively punctuation is inserted — higher values bias toward more commas at short pauses. Speechmatics' native default is `0.5`; HeliBoard defaults to `0.55`.
-- **end_of_utterance_silence_trigger**: Kept at `0` (disabled) by default because a non-zero value forces a final transcript at every pause past that threshold, and Speechmatics always terminates a forced final with a sentence-end mark (a period in English). That makes HeliBoard print a period after every short pause rather than a comma. Leave it at 0 and let Speechmatics pick punctuation from prosody; use HeliBoard's local paragraph-silence timer for paragraph breaks instead.
-- **remove_disfluencies**: Removes English hesitation words (um, uh, hmm, etc.)
+The session is authenticated via the `Authorization` request header (raw API key, no `Bearer` prefix). Session configuration is carried in **WebSocket connection URL query parameters**, not a JSON request body.
+
+### Connection parameters
+
+| Parameter | Type | Default (HeliBoard) | Description |
+|-----------|------|---------------------|-------------|
+| `speech_model` | string | `universal-streaming-english` | Required by AssemblyAI on every connection. Options: `universal-streaming-english`, `universal-streaming-multilingual`, `u3-rt-pro`, `whisper-rt`. |
+| `sample_rate` | integer | `16000` | Must match the audio we send. |
+| `format_turns` | boolean | `true` | Returns punctuated/cased/ITN-formatted text on each completed turn. |
+| `end_of_turn_confidence_threshold` | number 0–1 | `0.7` | Semantic end-of-turn threshold. AssemblyAI's API default is `0.4`; we bias higher so dictation pauses don't fragment sentences. |
+| `min_turn_silence` | integer ms | `600` | Silence floor before a semantic end-of-turn check fires. |
+| `max_turn_silence` | integer ms | `2400` | Hard ceiling on silence before forcing the turn to end. |
+| `keyterms_prompt` | JSON array of strings | seeded list | Up to 100 entries, each ≤ 50 chars. Boosts recognition of names/brands/jargon. |
+
+We do not currently set `vad_threshold`, `inactivity_timeout`, `language_detection`, or `speaker_labels`; these can be added in `AssemblyAITranscriptionClient.SessionConfig` when needed.
 
 ### Audio format
-- **Encoding**: PCM16 (16-bit signed, little-endian), mono, 16 kHz
-- **Transport**: Binary websocket frames after `RecognitionStarted`
 
-### Important received messages
+- **Encoding**: PCM 16-bit little-endian, mono, 16 kHz
+- **Transport**: Binary WebSocket frames, sent immediately once `Begin` is received
+- **Headers / framing**: none — raw PCM bytes
+
+### Server messages
+
 ```json
-{
-  "message": "RecognitionStarted"
-}
+{ "type": "Begin", "id": "session-uuid", "expires_at": 1700000000 }
 ```
 
 ```json
 {
-  "message": "AudioAdded",
-  "seq_no": 42
+  "type": "Turn",
+  "turn_order": 1,
+  "end_of_turn": true,
+  "turn_is_formatted": true,
+  "transcript": "Hello, my name is Sonny.",
+  "end_of_turn_confidence": 0.92,
+  "words": [ { "text": "Hello,", "word_is_final": true, "start": 0, "end": 480 }, ... ]
 }
 ```
 
 ```json
-{
-  "message": "AddTranscript",
-  "metadata": {
-    "start_time": 0.0,
-    "end_time": 1.2,
-    "transcript": "hello world"
-  },
-  "results": [
-    {
-      "type": "word",
-      "attaches_to": "none",
-      "alternatives": [{"content": "hello", "speaker": "S1"}]
-    },
-    {
-      "type": "punctuation",
-      "attaches_to": "previous",
-      "alternatives": [{"content": ".", "speaker": "S1"}]
-    }
-  ]
-}
+{ "type": "Termination", "audio_duration_seconds": 12.4, "session_duration_seconds": 12.7 }
 ```
 
 ```json
-{
-  "message": "EndOfTranscript"
-}
+{ "type": "Error", "error": "<reason>" }
 ```
 
-### Graceful stop
-- Client can send `ForceEndOfUtterance` before ending the stream to flush the tail of an utterance sooner
-- Client keeps track of `AudioAdded.seq_no`
-- On stop, once all sent audio chunks are acknowledged, client sends:
+We forward to the IME only `Turn` messages where `end_of_turn: true` AND (when `format_turns=true`) `turn_is_formatted: true`. This guarantees the editor never sees the unformatted draft of a turn before its formatted final version.
 
-```json
-{
-  "message": "EndOfStream",
-  "last_seq_no": 42
-}
-```
+### Client messages
+
+- **Audio**: raw PCM binary frames.
+- **Update mid-stream** (not currently used by HeliBoard):
+  ```json
+  { "type": "UpdateConfiguration", "keyterms_prompt": ["account number"], "min_turn_silence": 1000 }
+  ```
+- **Force end-of-turn** (not currently used; AssemblyAI's semantic detector handles this for us):
+  ```json
+  { "type": "ForceEndpoint" }
+  ```
+- **Terminate** (sent on graceful stop):
+  ```json
+  { "type": "Terminate" }
+  ```
 
 ### Common HTTP / connection errors
+
 | Code | Meaning |
 |------|---------|
-| 401/403 | Invalid API key |
+| 401/403 | Invalid AssemblyAI API key |
 | 429 | Rate limited |
-| 5xx | Speechmatics service failure |
+| 5xx | AssemblyAI service failure |
+
+### Temporary tokens
+
+For browser-side use, AssemblyAI supports [temporary tokens](https://www.assemblyai.com/docs/streaming/authenticate-with-a-temporary-token) generated via a server POST. HeliBoard runs entirely on-device and uses the API key directly; the client preserves the option to plumb a `token` query parameter through `AssemblyAITranscriptionClient.buildConnectionUrl` if that ever becomes desirable.
 
 ---
 
@@ -130,13 +93,17 @@ HeliBoard uses the Speechmatics **Realtime WebSocket** API (`wss://eu.rt.speechm
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `PREF_SPEECHMATICS_API_KEY` | String | Speechmatics API key for transcription |
-| `PREF_SPEECHMATICS_MAX_DELAY_MILLIS` | Int | Final transcript latency target in milliseconds |
-| `PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS` | Int | Speechmatics server-side end-of-utterance trigger in milliseconds |
-| `PREF_SPEECHMATICS_REMOVE_DISFLUENCIES` | Boolean | Removes English hesitation words like "um" and "uh" |
-| `PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT` | Int | Speechmatics punctuation sensitivity as a percentage (default 50) |
-| `PREF_SPEECHMATICS_DIARIZATION` | Boolean | Enable speaker diarization to filter to primary speaker only |
-| `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Silence window before treating speech as paused |
-| `PREF_VOICE_SILENCE_THRESHOLD` | Int | RMS threshold used for silence detection |
-| `PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS` | Int | Silence duration before inserting a new paragraph |
-| `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` | Int | Silence duration before auto-stopping recording |
+| `PREF_ASSEMBLYAI_API_KEY` | String | AssemblyAI API key for transcription. |
+| `PREF_ASSEMBLYAI_SPEECH_MODEL` | String | Speech model name passed to AssemblyAI (`universal-streaming-english`, `u3-rt-pro`, etc.). |
+| `PREF_ASSEMBLYAI_FORMAT_TURNS` | Boolean | Request formatted final transcripts. |
+| `PREF_ASSEMBLYAI_END_OF_TURN_CONFIDENCE_PERCENT` | Int | Semantic end-of-turn confidence as a 0–100 percentage. |
+| `PREF_ASSEMBLYAI_MIN_TURN_SILENCE_MILLIS` | Int | `min_turn_silence` (ms). |
+| `PREF_ASSEMBLYAI_MAX_TURN_SILENCE_MILLIS` | Int | `max_turn_silence` (ms). |
+| `PREF_ASSEMBLYAI_USE_EU_ENDPOINT` | Boolean | Connect to the EU streaming endpoint. |
+| `PREF_ASSEMBLYAI_KEYTERMS` | String | Newline (or comma) separated list of custom keyterms. |
+| `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Local silence window before treating speech as paused. |
+| `PREF_VOICE_SILENCE_THRESHOLD` | Int | RMS threshold used for local silence detection. |
+| `PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS` | Int | Local silence duration before inserting a new paragraph. |
+| `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` | Int | Local silence duration before auto-stopping recording. |
+
+Legacy Speechmatics preference keys (`speechmatics_*`, `deepgram_api_key`) are unconditionally cleared from `SharedPreferences` the first time `TranscriptionPreferences.readAssemblyAIApiKey` runs after upgrade.

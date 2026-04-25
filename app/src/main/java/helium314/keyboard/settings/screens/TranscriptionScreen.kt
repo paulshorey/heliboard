@@ -15,6 +15,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -52,28 +53,19 @@ fun TranscriptionScreen(
     if ((b?.value ?: 0) < 0)
         Log.v("irrelevant", "stupid way to trigger recomposition on preference change")
 
-    // API keys
-    var speechmaticsApiKey by remember {
-        mutableStateOf(TranscriptionPreferences.readSpeechmaticsApiKey(prefs))
+    val initialConfig = TranscriptionPreferences.readAssemblyAIConfig(prefs)
+
+    var apiKey by remember { mutableStateOf(initialConfig.apiKey) }
+    var speechModel by remember { mutableStateOf(initialConfig.speechModel) }
+    var formatTurns by remember { mutableStateOf(initialConfig.formatTurns) }
+    var endOfTurnConfidence by remember {
+        mutableStateOf((initialConfig.endOfTurnConfidence * 100).toInt().toString())
     }
-    var speechmaticsMaxDelay by remember {
-        mutableStateOf(
-            TranscriptionPreferences.readSpeechmaticsMaxDelaySeconds(prefs).toString()
-        )
-    }
-    var speechmaticsEndOfUtterance by remember {
-        mutableStateOf(
-            TranscriptionPreferences.readSpeechmaticsEndOfUtteranceSeconds(prefs).toString()
-        )
-    }
-    var speechmaticsRemoveDisfluencies by remember {
-        mutableStateOf(TranscriptionPreferences.readSpeechmaticsRemoveDisfluencies(prefs))
-    }
-    var speechmaticsPunctuationSensitivity by remember {
-        mutableStateOf(TranscriptionPreferences.readSpeechmaticsPunctuationSensitivity(prefs).toString())
-    }
-    var speechmaticsDiarization by remember {
-        mutableStateOf(TranscriptionPreferences.readSpeechmaticsDiarization(prefs))
+    var minTurnSilenceMs by remember { mutableStateOf(initialConfig.minTurnSilenceMs.toString()) }
+    var maxTurnSilenceMs by remember { mutableStateOf(initialConfig.maxTurnSilenceMs.toString()) }
+    var useEuEndpoint by remember { mutableStateOf(initialConfig.useEuEndpoint) }
+    var keytermsText by remember {
+        mutableStateOf(TranscriptionPreferences.readAssemblyAIKeytermsRaw(prefs))
     }
     var chunkSilenceSeconds by remember {
         mutableStateOf(
@@ -119,98 +111,98 @@ fun TranscriptionScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(innerPadding)
             ) {
-                // Speechmatics API Key
                 InlineTextField(
-                    label = stringResource(R.string.speechmatics_api_key_title),
-                    value = speechmaticsApiKey,
+                    label = stringResource(R.string.assemblyai_api_key_title),
+                    summary = stringResource(R.string.assemblyai_api_key_summary),
+                    value = apiKey,
                     onValueChange = { newValue ->
-                        speechmaticsApiKey = newValue.trim()
-                        TranscriptionPreferences.writeSpeechmaticsApiKey(prefs, newValue)
+                        apiKey = newValue
+                        TranscriptionPreferences.writeAssemblyAIApiKey(prefs, newValue)
                     },
                     minLines = 1,
                     maxLines = 2
                 )
                 InlineTextField(
-                    label = stringResource(R.string.speechmatics_max_delay_title),
-                    value = speechmaticsMaxDelay,
+                    label = stringResource(R.string.assemblyai_speech_model_title),
+                    summary = stringResource(R.string.assemblyai_speech_model_summary),
+                    value = speechModel,
                     onValueChange = { newValue ->
-                        speechmaticsMaxDelay = newValue
-                        newValue.toDoubleOrNull()?.let { parsed ->
-                            val sanitized = TranscriptionPreferences.sanitizeSpeechmaticsMaxDelaySeconds(parsed)
-                            TranscriptionPreferences.writeSpeechmaticsMaxDelayTenths(
+                        speechModel = newValue
+                        TranscriptionPreferences.writeAssemblyAISpeechModel(prefs, newValue)
+                    },
+                    minLines = 1,
+                    maxLines = 1
+                )
+                BooleanSettingRow(
+                    label = stringResource(R.string.assemblyai_format_turns_title),
+                    summary = stringResource(R.string.assemblyai_format_turns_summary),
+                    checked = formatTurns,
+                    onCheckedChange = { checked ->
+                        formatTurns = checked
+                        TranscriptionPreferences.writeAssemblyAIFormatTurns(prefs, checked)
+                    }
+                )
+                InlineTextField(
+                    label = stringResource(R.string.assemblyai_end_of_turn_confidence_title),
+                    summary = stringResource(R.string.assemblyai_end_of_turn_confidence_summary),
+                    value = endOfTurnConfidence,
+                    onValueChange = { newValue ->
+                        endOfTurnConfidence = newValue
+                        newValue.toIntOrNull()?.let { parsed ->
+                            TranscriptionPreferences.writeAssemblyAIEndOfTurnConfidencePercent(
                                 prefs,
-                                (sanitized * 10).toInt()
+                                parsed.coerceIn(0, 100)
                             )
-                            val currentEndOfUtterance =
-                                TranscriptionPreferences.readSpeechmaticsEndOfUtteranceSeconds(prefs)
-                            val adjustedEndOfUtterance = minOf(
-                                currentEndOfUtterance,
-                                TranscriptionPreferences.maxEndOfUtteranceForMaxDelay(sanitized)
-                            )
-                            if (adjustedEndOfUtterance != currentEndOfUtterance) {
-                                TranscriptionPreferences.writeSpeechmaticsEndOfUtteranceMs(
-                                    prefs,
-                                    (adjustedEndOfUtterance * 1000).toInt()
-                                )
-                                speechmaticsEndOfUtterance = adjustedEndOfUtterance.toString()
-                            }
                         }
                     },
                     minLines = 1,
                     maxLines = 1
                 )
                 InlineTextField(
-                    label = stringResource(R.string.speechmatics_end_of_utterance_title),
-                    value = speechmaticsEndOfUtterance,
+                    label = stringResource(R.string.assemblyai_min_turn_silence_title),
+                    summary = stringResource(R.string.assemblyai_min_turn_silence_summary),
+                    value = minTurnSilenceMs,
                     onValueChange = { newValue ->
-                        speechmaticsEndOfUtterance = newValue
-                        newValue.toDoubleOrNull()?.let { parsed ->
-                            val maxDelay = TranscriptionPreferences.readSpeechmaticsMaxDelaySeconds(prefs)
-                            val sanitized = TranscriptionPreferences.sanitizeSpeechmaticsEndOfUtteranceSeconds(
-                                value = parsed,
-                                maxDelaySeconds = maxDelay
-                            )
-                            TranscriptionPreferences.writeSpeechmaticsEndOfUtteranceMs(
-                                prefs,
-                                (sanitized * 1000).toInt()
-                            )
+                        minTurnSilenceMs = newValue
+                        newValue.toIntOrNull()?.let { parsed ->
+                            TranscriptionPreferences.writeAssemblyAIMinTurnSilenceMs(prefs, parsed)
+                        }
+                    },
+                    minLines = 1,
+                    maxLines = 1
+                )
+                InlineTextField(
+                    label = stringResource(R.string.assemblyai_max_turn_silence_title),
+                    summary = stringResource(R.string.assemblyai_max_turn_silence_summary),
+                    value = maxTurnSilenceMs,
+                    onValueChange = { newValue ->
+                        maxTurnSilenceMs = newValue
+                        newValue.toIntOrNull()?.let { parsed ->
+                            TranscriptionPreferences.writeAssemblyAIMaxTurnSilenceMs(prefs, parsed)
                         }
                     },
                     minLines = 1,
                     maxLines = 1
                 )
                 BooleanSettingRow(
-                    label = stringResource(R.string.speechmatics_remove_disfluencies_title),
-                    summary = stringResource(R.string.speechmatics_remove_disfluencies_summary),
-                    checked = speechmaticsRemoveDisfluencies,
+                    label = stringResource(R.string.assemblyai_use_eu_endpoint_title),
+                    summary = stringResource(R.string.assemblyai_use_eu_endpoint_summary),
+                    checked = useEuEndpoint,
                     onCheckedChange = { checked ->
-                        speechmaticsRemoveDisfluencies = checked
-                        TranscriptionPreferences.writeSpeechmaticsRemoveDisfluencies(prefs, checked)
+                        useEuEndpoint = checked
+                        TranscriptionPreferences.writeAssemblyAIUseEuEndpoint(prefs, checked)
                     }
                 )
                 InlineTextField(
-                    label = stringResource(R.string.speechmatics_punctuation_sensitivity_title),
-                    value = speechmaticsPunctuationSensitivity,
+                    label = stringResource(R.string.assemblyai_keyterms_title),
+                    summary = stringResource(R.string.assemblyai_keyterms_summary),
+                    value = keytermsText,
                     onValueChange = { newValue ->
-                        speechmaticsPunctuationSensitivity = newValue
-                        newValue.toDoubleOrNull()?.let { parsed ->
-                            TranscriptionPreferences.writeSpeechmaticsPunctuationSensitivityPercent(
-                                prefs,
-                                (parsed.coerceIn(0.0, 1.0) * 100).toInt()
-                            )
-                        }
+                        keytermsText = newValue
+                        TranscriptionPreferences.writeAssemblyAIKeyterms(prefs, newValue)
                     },
-                    minLines = 1,
-                    maxLines = 1
-                )
-                BooleanSettingRow(
-                    label = stringResource(R.string.speechmatics_diarization_title),
-                    summary = stringResource(R.string.speechmatics_diarization_summary),
-                    checked = speechmaticsDiarization,
-                    onCheckedChange = { checked ->
-                        speechmaticsDiarization = checked
-                        TranscriptionPreferences.writeSpeechmaticsDiarization(prefs, checked)
-                    }
+                    minLines = 3,
+                    maxLines = 8
                 )
                 InlineTextField(
                     label = stringResource(R.string.voice_chunk_silence_seconds_title),
@@ -314,7 +306,7 @@ private fun BooleanSettingRow(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
         )
-        androidx.compose.material3.Switch(
+        Switch(
             checked = checked,
             onCheckedChange = onCheckedChange
         )
@@ -329,6 +321,7 @@ private fun InlineTextField(
     label: String,
     value: String,
     onValueChange: (String) -> Unit,
+    summary: String? = null,
     minLines: Int = 1,
     maxLines: Int = 3
 ) {
@@ -343,6 +336,14 @@ private fun InlineTextField(
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
         )
+        if (summary != null) {
+            Text(
+                text = summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
+            )
+        }
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
