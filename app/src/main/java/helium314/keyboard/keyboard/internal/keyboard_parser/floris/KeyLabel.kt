@@ -97,7 +97,7 @@ object KeyLabel {
             PERIOD -> getPeriodLabel(params)
             SPACE -> getSpaceLabel(params)
             ACTION -> "${getActionKeyLabel(params)}|${getActionKeyCode(params)}"
-            DELETE -> "!icon/delete_key|!code/key_delete"
+            DELETE -> getDeleteLabel(params)
             SHIFT -> "${getShiftLabel(params)}|!code/key_shift"
             COM -> params.mLocaleKeyboardInfos.tlds.first()
             LANGUAGE_SWITCH -> "!icon/language_switch_key|!code/key_language_switch"
@@ -160,14 +160,14 @@ object KeyLabel {
     // todo (later): should this be handled with metaState? but metaState shift would require LOTS of changes...
     private fun getActionKeyCode(params: KeyboardParams): String {
         params.mId.mInternalAction?.let { return "${KeyboardCodesSet.PREFIX_CODE}${it.code()}" }
-        return if (params.mId.isMultiLine && (params.mId.mElementId == KeyboardId.ELEMENT_ALPHABET_MANUAL_SHIFTED || params.mId.mElementId == KeyboardId.ELEMENT_ALPHABET_SHIFT_LOCK_SHIFTED))
+        return if (params.mId.mElementId == KeyboardId.ELEMENT_ALPHABET_MANUAL_SHIFTED || params.mId.mElementId == KeyboardId.ELEMENT_ALPHABET_SHIFT_LOCK_SHIFTED)
             "!code/key_shift_enter"
         else "!code/key_enter"
     }
 
     private fun getActionKeyLabel(params: KeyboardParams): String {
         params.mId.mInternalAction?.let { return it.label() }
-        if (params.mId.isMultiLine && (params.mId.mElementId == KeyboardId.ELEMENT_ALPHABET_MANUAL_SHIFTED || params.mId.mElementId == KeyboardId.ELEMENT_ALPHABET_SHIFT_LOCK_SHIFTED))
+        if (params.mId.mElementId == KeyboardId.ELEMENT_ALPHABET_MANUAL_SHIFTED || params.mId.mElementId == KeyboardId.ELEMENT_ALPHABET_SHIFT_LOCK_SHIFTED)
             return "!icon/enter_key"
         val iconName = when (params.mId.imeAction()) {
             EditorInfo.IME_ACTION_GO               -> KeyboardIconsSet.NAME_GO_KEY
