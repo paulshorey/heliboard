@@ -659,9 +659,9 @@ public final class InputLogic {
      *
      */
     private void handleClipboardPaste() {
-        final String clipboardContent = mLatinIME.getClipboardHistoryManager().retrieveClipboardContent().toString();
+        final String clipboardContent = mLatinIME.getClipboardHistoryManager().getClipboardContentForPaste();
         if (!clipboardContent.isEmpty()) {
-            mLatinIME.onTextInput(clipboardContent + " ");
+            mLatinIME.onTextInput(clipboardContent);
         }
     }
 
