@@ -38,7 +38,7 @@ class SpeechmaticsTranscriptionClientTest {
         assertEquals("en-US", config.getString("output_locale"))
         assertEquals(2.0, config.getDouble("max_delay"))
         assertEquals("flexible", config.getString("max_delay_mode"))
-        assertFalse(config.getBoolean("enable_partials"))
+        assertTrue(config.getBoolean("enable_partials"))
         assertTrue(config.getBoolean("enable_entities"))
         assertEquals("enhanced", config.getString("operating_point"))
         assertFalse(config.has("conversation_config"))
@@ -512,6 +512,39 @@ class SpeechmaticsTranscriptionClientTest {
         assertTrue(error.description.contains("quota_exceeded"))
         assertTrue(error.description.contains("4005"))
         assertTrue(error.description.contains("upgrade required"))
+    }
+
+    @Test
+    fun parseServerEvent_parsesPartialTranscript() {
+        val event = SpeechmaticsTranscriptionClient.parseServerEvent(
+            """
+            {
+              "message":"AddPartialTranscript",
+              "metadata":{
+                "transcript":"hello wor"
+              }
+            }
+            """.trimIndent()
+        )
+
+        val partial = assertIs<SpeechmaticsServerEvent.PartialTranscript>(event)
+        assertEquals("hello wor", partial.transcript)
+    }
+
+    @Test
+    fun parseServerEvent_ignoresBlankPartialTranscript() {
+        val event = SpeechmaticsTranscriptionClient.parseServerEvent(
+            """
+            {
+              "message":"AddPartialTranscript",
+              "metadata":{
+                "transcript":"   "
+              }
+            }
+            """.trimIndent()
+        )
+
+        assertNull(event)
     }
 
     @Test
