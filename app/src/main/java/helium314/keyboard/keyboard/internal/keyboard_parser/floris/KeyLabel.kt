@@ -142,6 +142,12 @@ object KeyLabel {
         else -> "!icon/${KeyboardIconsSet.NAME_SHIFT_KEY}"
     }
 
+    private fun getDeleteLabel(params: KeyboardParams): String {
+        return if (params.mId.mElementId == KeyboardId.ELEMENT_ALPHABET_MANUAL_SHIFTED || params.mId.mElementId == KeyboardId.ELEMENT_ALPHABET_SHIFT_LOCK_SHIFTED)
+            "\u2326|!code/key_forward_delete"
+        else "!icon/delete_key|!code/key_delete"
+    }
+
     // todo (later): try avoiding this weirdness
     //  maybe just remove it and if users want it they can use custom functional layouts?
     //  but it has been like this "forever" and actually seems to make sense
