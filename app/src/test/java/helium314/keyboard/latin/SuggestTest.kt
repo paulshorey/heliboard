@@ -24,6 +24,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.Implements
 import org.robolectric.shadows.ShadowLog
+import java.lang.reflect.Field
 import java.util.*
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -342,17 +343,27 @@ class SuggestTest {
         ).toList()
     }
 
-    private fun composerForTest(word: String, capitalizedMode: Int = WordComposer.CAPS_MODE_OFF): WordComposer =
-        WordComposer.getComposerForTest(false).apply {
-            setTypedWordCacheForTests(word)
-            setCapitalizedModeAtStartComposingTime(capitalizedMode)
-            word.forEachIndexed { index, c ->
-                applyProcessedEvent(processEvent(Event.createSoftwareTextEvent(c.toString(), index, 0, false)))
-            }
-        }
+    private fun composerForTest(word: String, capitalizedMode: Int = WordComposer.CAPS_MODE_OFF): WordComposer {
+        val composer = WordComposer.getComposerForTest(false)
+        composer.setTypedWordCacheForTests(word)
+        composer.setCapitalizedModeAtStartComposingTime(capitalizedMode)
+        codePointSizeField.setInt(composer, word.codePointCount(0, word.length))
+        capsCountField.setInt(composer, word.count { it.isUpperCase() })
+        digitsCountField.setInt(composer, word.count { it.isDigit() })
+        isOnlyFirstCharCapitalizedField.setBoolean(
+            composer,
+            word.firstOrNull()?.isUpperCase() == true && word.drop(1).none { it.isUpperCase() }
+        )
+        return composer
+    }
 }
 
 private var currentTypingLocale = Locale.ENGLISH
+private val codePointSizeField: Field = WordComposer::class.java.getDeclaredField("mCodePointSize").apply { isAccessible = true }
+private val capsCountField: Field = WordComposer::class.java.getDeclaredField("mCapsCount").apply { isAccessible = true }
+private val digitsCountField: Field = WordComposer::class.java.getDeclaredField("mDigitsCount").apply { isAccessible = true }
+private val isOnlyFirstCharCapitalizedField: Field =
+    WordComposer::class.java.getDeclaredField("mIsOnlyFirstCharCapitalized").apply { isAccessible = true }
 
 fun suggestion(word: String, score: Int, locale: Locale, shortcut: Boolean = false) =
     SuggestedWordInfo(
