@@ -206,7 +206,9 @@ class Suggest(private val mDictionaryFacilitator: DictionaryFacilitator) {
             // for auto-correction
             || suggestionResults.isEmpty() // If the word has digits, we never auto-correct because it's likely the word
             // was type with a lot of care
-            || wordComposer.hasDigits() // If the word is mostly caps, we never auto-correct because this is almost
+            || wordComposer.hasDigits() // If the word is capitalized, we never auto-correct because this is often
+            // intentional (for example, names at the start of a word)
+            || wordComposer.isOrWillBeOnlyFirstCharCapitalized // If the word is mostly caps, we never auto-correct because this is almost
             // certainly intentional (and careful input)
             || wordComposer.isMostlyCaps // We never auto-correct when suggestions are resumed because it would be unexpected
             || wordComposer.isResumed // If we don't have a main dictionary, we never want to auto-correct. The reason
