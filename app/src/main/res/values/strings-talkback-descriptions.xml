@@ -47,6 +47,8 @@
     <string name="spoken_description_settings">Settings</string>
     <!-- Spoken description for the "Tab" keyboard key. -->
     <string name="spoken_description_tab">Tab</string>
+    <!-- Spoken description for the "Shift+Enter" (new line) keyboard key. -->
+    <string name="spoken_description_shift_enter">New line</string>
     <!-- Spoken description for the "Space" keyboard key. -->
     <string name="spoken_description_space">Space</string>
     <!-- Spoken description for the "Mic" keyboard key. -->

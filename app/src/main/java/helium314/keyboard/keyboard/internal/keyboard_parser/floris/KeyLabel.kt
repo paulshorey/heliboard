@@ -39,6 +39,7 @@ object KeyLabel {
     const val FN = "fn"
     const val META = "meta"
     const val TAB = "tab"
+    const val SHIFT_ENTER = "shift_enter"
     const val ESCAPE = "esc"
     const val TIMESTAMP = "timestamp"
 
@@ -109,6 +110,7 @@ object KeyLabel {
             CURRENCY5 -> params.mLocaleKeyboardInfos.currencyKey.second[4]
             CTRL, ALT, FN, META, ESCAPE -> label.uppercase(Locale.US)
             TAB -> "!icon/tab_key|!code/${KeyCode.TAB}"
+            SHIFT_ENTER -> "!icon/enter_key|!code/key_shift_enter"
             TIMESTAMP -> "⌚"
             else -> if (label in toolbarKeyStrings.values)
                 "!icon/$label|!code/${getCodeForToolbarKey(ToolbarKey.valueOf(label.uppercase(Locale.US)))}"
