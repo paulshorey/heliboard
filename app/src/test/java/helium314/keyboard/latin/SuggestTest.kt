@@ -270,6 +270,36 @@ class SuggestTest {
         assert(!result.last()) // should not be corrected
     }
 
+    @Test fun `capitalized words are not auto-corrected`() {
+        val locale = Locale.ENGLISH
+        val composer = composerForTest("Word", WordComposer.CAPS_MODE_MANUAL_SHIFTED)
+        val result = shouldBeAutoCorrected(
+            "Word",
+            listOf(suggestion("Wood", 1_900_000, locale), suggestion("Word", 1_500_000, locale)),
+            null,
+            null,
+            locale,
+            thresholdModest,
+            composer
+        )
+        assert(!result.last()) // should not be corrected
+    }
+
+    @Test fun `words with digits are not auto-corrected`() {
+        val locale = Locale.ENGLISH
+        val composer = composerForTest("h3llo")
+        val result = shouldBeAutoCorrected(
+            "h3llo",
+            listOf(suggestion("hello", 1_900_000, locale), suggestion("h3llo", 1_500_000, locale)),
+            null,
+            null,
+            locale,
+            thresholdModest,
+            composer
+        )
+        assert(!result.last()) // should not be corrected
+    }
+
     @Test fun `quotes are added to suggestions when needed`() {
         val result = Suggest.getTransformedSuggestedWordInfo(suggestion("word", 1, Locale.ENGLISH, true),
             Locale.ENGLISH, false, false, 1)
@@ -281,7 +311,8 @@ class SuggestTest {
                               firstSuggestionForEmpty: SuggestedWordInfo?, // first suggestion if typed word would be empty (null if none)
                               typedWordSuggestionForEmpty: SuggestedWordInfo?, // suggestion for actually typed word if typed word would be empty (null if none)
                               typingLocale: Locale, // used for checking whether suggestion locale is the same, relevant e.g. for English i -> I shortcut, but we want Polish i
-                              autoCorrectThreshold: Float
+                              autoCorrectThreshold: Float,
+                              wordComposer: WordComposer = composerForTest(word)
     ): List<Boolean> {
         latinIME.prefs().edit { putFloat(Settings.PREF_AUTO_CORRECT_THRESHOLD, autoCorrectThreshold) }
         // enable "more autocorrect" so we actually have autocorrect even though we don't set a compatible input type
@@ -304,12 +335,21 @@ class SuggestTest {
             suggestionsContainer.firstOrNull(), // todo: get from suggestions? mostly it's just removing the typed word, right?
             { firstSuggestionForEmpty to typedWordSuggestionForEmpty },
             true, // doesn't make sense otherwise
-            WordComposer.getComposerForTest(false),
+            wordComposer,
             suggestionResults,
             firstOccurrenceOfTypedWordInSuggestions,
             typedWordFirstOccurrenceWordInfo
         ).toList()
     }
+
+    private fun composerForTest(word: String, capitalizedMode: Int = WordComposer.CAPS_MODE_OFF): WordComposer =
+        WordComposer.getComposerForTest(false).apply {
+            setTypedWordCacheForTests(word)
+            setCapitalizedModeAtStartComposingTime(capitalizedMode)
+            word.forEachIndexed { index, c ->
+                applyProcessedEvent(processEvent(Event.createSoftwareTextEvent(c.toString(), index, 0, false)))
+            }
+        }
 }
 
 private var currentTypingLocale = Locale.ENGLISH
