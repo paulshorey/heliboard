@@ -196,8 +196,6 @@ public class LatinIME extends InputMethodService implements
     // Wake lock to prevent CPU sleep during voice recording
     private PowerManager.WakeLock mVoiceWakeLock;
     private boolean mPendingNewParagraph = false;
-    /** True while a partial transcript is shown as composing text in the editor. */
-    private boolean mHasVoiceComposingText = false;
     private static final int FULLAPP_SYNC_MAX_CHARS = 100_000;
     private static final int FULLAPP_SYNC_RETRY_ATTEMPTS = 5;
     private static final long FULLAPP_SYNC_RETRY_DELAY_MS = 120L;
@@ -1114,7 +1112,6 @@ public class LatinIME extends InputMethodService implements
             final boolean voiceSessionActive = mVoiceInputManager != null
                     && (!mVoiceInputManager.isIdle() || mVoiceInputManager.hasPendingProcessing());
             if (voiceSessionActive
-                    && !mHasVoiceComposingText
                     && (oldSelStart != newSelStart || oldSelEnd != newSelEnd)
                     && !mInputLogic.mConnection.isBelatedExpectedUpdate(
                             oldSelStart, newSelStart, oldSelEnd, newSelEnd,
@@ -2039,7 +2036,6 @@ public class LatinIME extends InputMethodService implements
             public void onTranscriptionResult(@NonNull String text, boolean attachesToPrevious) {
                 try {
                     Log.i(TAG, "VOICE raw transcript=[" + text + "]");
-                    clearVoiceComposingText();
                     final String trimmed = text.trim();
                     if (trimmed.isEmpty()) {
                         Log.i(TAG, "VOICE_STEP_4 empty transcription result — nothing to insert");
@@ -2063,11 +2059,10 @@ public class LatinIME extends InputMethodService implements
 
             @Override
             public void onPartialTranscript(@NonNull String text) {
-                try {
-                    showVoiceComposingText(text);
-                } catch (Exception e) {
-                    Log.e(TAG, "Error showing partial transcript: " + e.getMessage(), e);
-                }
+                // Partials are enabled server-side to improve Speechmatics' internal
+                // pipeline efficiency and reduce final-transcript latency, but we do
+                // not display them in the editor. Android's setComposingText is not
+                // reliable across all text fields and causes duplicate text issues.
             }
 
             @Override
@@ -2120,46 +2115,6 @@ public class LatinIME extends InputMethodService implements
                     new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER));
         }
         mInputLogic.mConnection.endBatchEdit();
-    }
-
-    /**
-     * Show partial transcript text as composing (preview) text in the editor.
-     * This is replaced when the final transcript arrives.
-     */
-    private void showVoiceComposingText(@NonNull final String text) {
-        if (text.isEmpty()) return;
-        final android.view.inputmethod.InputConnection ic = getCurrentInputConnection();
-        if (ic == null) return;
-
-        final String preview;
-        if (!mHasVoiceComposingText) {
-            final CharSequence rawBefore =
-                    mInputLogic.mConnection.getTextBeforeCursor(1, 0);
-            final boolean needsSpace = rawBefore != null && rawBefore.length() > 0
-                    && !Character.isWhitespace(rawBefore.charAt(rawBefore.length() - 1));
-            preview = needsSpace ? " " + text : text;
-        } else {
-            preview = text;
-        }
-
-        ic.beginBatchEdit();
-        ic.setComposingText(preview, 1);
-        ic.endBatchEdit();
-        mHasVoiceComposingText = true;
-    }
-
-    /**
-     * Clear any partial transcript composing text from the editor.
-     */
-    private void clearVoiceComposingText() {
-        if (!mHasVoiceComposingText) return;
-        mHasVoiceComposingText = false;
-        final android.view.inputmethod.InputConnection ic = getCurrentInputConnection();
-        if (ic == null) return;
-        ic.beginBatchEdit();
-        ic.setComposingText("", 0);
-        ic.finishComposingText();
-        ic.endBatchEdit();
     }
 
     /**
@@ -2315,7 +2270,6 @@ public class LatinIME extends InputMethodService implements
      */
     private void resetVoiceInputState() {
         mPendingNewParagraph = false;
-        clearVoiceComposingText();
         mKeyboardSwitcher.hideProcessingIndicator();
     }
 
