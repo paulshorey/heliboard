@@ -348,6 +348,16 @@ class TranscriptPostProcessorTest {
     }
 
     @Test
+    fun `casing preserved for single uppercase letter (acronym initial)`() {
+        assertEquals("A", adjust("A", "the "))
+    }
+
+    @Test
+    fun `casing preserved for single letter mid-sentence avoids aPI artifacts`() {
+        assertEquals("B", adjust("B", "and "))
+    }
+
+    @Test
     fun `casing preserved for camelCase first word`() {
         assertEquals("iPhone updates", adjust("iPhone updates", "the "))
     }

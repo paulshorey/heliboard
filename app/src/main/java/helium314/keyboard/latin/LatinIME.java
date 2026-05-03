@@ -2094,18 +2094,14 @@ public class LatinIME extends InputMethodService implements
     }
 
     private void insertParagraphBreak() {
-        sendEnterKeyEvents(2);
-    }
-
-    private void sendEnterKeyEvents(final int count) {
+        // Use commitText instead of KEYCODE_ENTER key events. Many apps and web
+        // forms interpret KEYCODE_ENTER as a "submit" or "send" action, which
+        // causes in-progress dictation to be submitted prematurely. Committing
+        // the newline characters directly inserts them without triggering the
+        // editor's action handling.
         mInputLogic.mConnection.beginBatchEdit();
         mInputLogic.finishInput();
-        for (int i = 0; i < count; i++) {
-            mInputLogic.mConnection.sendKeyEvent(
-                    new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER));
-            mInputLogic.mConnection.sendKeyEvent(
-                    new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER));
-        }
+        mInputLogic.mConnection.commitText("\n\n", 1);
         mInputLogic.mConnection.endBatchEdit();
     }
 

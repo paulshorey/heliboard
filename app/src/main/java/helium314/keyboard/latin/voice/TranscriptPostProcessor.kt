@@ -45,6 +45,7 @@ object TranscriptPostProcessor {
 
     private fun isSentenceContinuation(context: CharSequence): Boolean {
         for (c in context) {
+            if (c == '\n' || c == '\r') return false
             if (c.isWhitespace()) continue
             return c.isLetter() && c.isLowerCase()
         }
@@ -94,6 +95,11 @@ object TranscriptPostProcessor {
 
     private fun shouldPreserveWordCasing(word: String): Boolean {
         if (word.isEmpty()) return true
+        // A single uppercase letter is likely an acronym initial being delivered
+        // as its own span (Speechmatics may split spelled-out acronyms across
+        // multiple AddTranscript events). Lowercasing it would produce artifacts
+        // like "aPI" when the following attached span keeps its uppercase.
+        if (word.length == 1) return true
         // Keep pronoun "I" and its contractions.
         if (word == "I" || word.startsWith("I'") || word.startsWith("I’")) return true
         // Keep camel/Pascal-case and acronyms: any uppercase letter after index 0.
