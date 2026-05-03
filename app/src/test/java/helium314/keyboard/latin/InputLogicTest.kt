@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package helium314.keyboard.latin
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.inputmethodservice.InputMethodService
 import android.os.Bundle
 import android.os.Handler
@@ -117,6 +119,18 @@ class InputLogicTest {
         assertEquals(" world", textAfterCursor)
         assertEquals(10, cursor)
         checkConnectionConsistency()
+    }
+
+    @Test fun clipboardPasteTrimsWhitespaceAndDoesNotAppendSpace() {
+        reset()
+        val clipboardManager = latinIME.getSystemService(ClipboardManager::class.java)
+        clipboardManager!!.setPrimaryClip(ClipData.newPlainText("label", "  copied text  "))
+
+        functionalKeyPress(KeyCode.CLIPBOARD_PASTE)
+
+        assertEquals("copied text", getText())
+        assertEquals("copied text", textBeforeCursor)
+        assertEquals("", textAfterCursor)
     }
 
     @Test fun insertLetterIntoWord() {
