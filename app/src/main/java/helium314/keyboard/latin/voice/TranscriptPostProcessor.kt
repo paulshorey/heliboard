@@ -45,6 +45,7 @@ object TranscriptPostProcessor {
 
     private fun isSentenceContinuation(context: CharSequence): Boolean {
         for (c in context) {
+            if (c == '\n' || c == '\r') return false
             if (c.isWhitespace()) continue
             return c.isLetter() && c.isLowerCase()
         }
