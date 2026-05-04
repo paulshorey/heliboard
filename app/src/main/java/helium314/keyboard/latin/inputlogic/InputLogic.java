@@ -687,6 +687,7 @@ public final class InputLogic {
                 inputTransaction.setDidAffectContents();
                 break;
             case KeyCode.FORWARD_DELETE:
+                mWordComposer.reset();
                 sendDownUpKeyEvent(KeyEvent.KEYCODE_FORWARD_DEL);
                 inputTransaction.setDidAffectContents();
                 break;
