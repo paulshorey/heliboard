@@ -10,11 +10,11 @@ HeliBoard uses Speechmatics realtime transcription for voice input.
    - `StartRecognition` JSON
    - binary PCM audio chunks
    - `ForceEndOfUtterance` and `EndOfStream(last_seq_no=...)` on graceful stop after all audio acks arrive
-4. Partial transcript previews arrive as `AddPartialTranscript` messages (<500ms latency). `LatinIME` shows these as composing text so the user sees words appearing in near-real-time.
-5. Finalized transcript text arrives as `AddTranscript` messages. The composing preview is cleared and replaced with the final text via `commitText(...)`.
-6. The client rebuilds finalized text from Speechmatics token results so spacing and punctuation attachments are preserved across chunk boundaries.
-7. `VoiceInputManager` queues transcript spans in FIFO order and tracks whether the next segment should attach to previous text.
-8. `LatinIME` calls `finishInput()` and then `commitText(...)` to insert the finalized text at the caret, restoring a leading space only when the provider segment is a continuation rather than punctuation.
+5. Partial transcript previews arrive as `AddPartialTranscript` messages (<500ms latency). These are not displayed in the editor (composing text is unreliable across Android text fields) but enabling partials improves Speechmatics' pipeline efficiency and reduces final-transcript latency.
+6. Finalized transcript text arrives as `AddTranscript` messages and is committed to the editor via `commitText(...)`.
+7. The client rebuilds finalized text from Speechmatics token results so spacing and punctuation attachments are preserved across chunk boundaries.
+8. `VoiceInputManager` queues transcript spans in FIFO order and tracks whether the next segment should attach to previous text.
+9. `LatinIME` calls `finishInput()` and then `commitText(...)` to insert the finalized text at the caret, restoring a leading space only when the provider segment is a continuation rather than punctuation.
 
 ## Important files
 
@@ -48,5 +48,5 @@ HeliBoard uses Speechmatics realtime transcription for voice input.
 - English sessions can remove disfluencies server-side so dictation inserts cleaner finalized text without extra client-side cleanup.
 - Final transcript text is reconstructed from `results[].alternatives[].content` plus `attaches_to`, rather than trusting each finalized segment string to be self-contained for spacing.
 - Punctuation balance for dictation: server end-of-utterance detection is disabled by default (`PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS = 0`) and punctuation sensitivity defaults to `0.30` (well below Speechmatics' native default of 0.5). The low value substantially reduces premature sentence-ending periods while still preserving commas at natural speech pauses. Enabling server end-of-utterance forces a sentence-end mark (period in English) at every pause past the threshold regardless of sensitivity, which produces runaway periods and suppresses commas. Leaving it at `0` lets Speechmatics insert commas at short pauses and periods at natural sentence boundaries based on prosody, while HeliBoard's local paragraph-silence timer still handles paragraph breaks from the mic stream.
-- Partial transcripts are enabled (`enable_partials: true`) and displayed as composing text in the editor for near-real-time feedback (<500ms latency). When the higher-accuracy final transcript arrives, the composing preview is cleared and replaced with committed text. This eliminates the perceived lag that occurs when relying solely on final transcripts (which are delayed by `max_delay`).
+- Partial transcripts are enabled (`enable_partials: true`) to improve Speechmatics' internal pipeline efficiency and reduce final-transcript latency. Partials are not displayed in the editor because Android's `setComposingText` is unreliable across text fields and causes duplicate text. The reduced `max_delay` (2.0s) provides meaningful latency improvement for final transcripts.
 - Default `max_delay` is `2.0s` — Speechmatics recommends this as the optimal trade-off between accuracy (~1% degradation vs batch) and latency for most use cases.
