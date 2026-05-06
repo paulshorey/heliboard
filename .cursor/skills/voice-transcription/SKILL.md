@@ -37,10 +37,11 @@ All source files live under `app/src/main/java/helium314/keyboard/latin/voice/` 
 2. `VoiceInputManager` builds a provider config from settings + current subtype locale
 3. `VoiceInputManager` buffers chunks until Speechmatics sends `RecognitionStarted`
 4. Chunks stream as binary PCM16 frames; Speechmatics replies with `AudioAdded` sequence acks
-5. Final transcript spans arrive as `AddTranscript` messages
-6. `SpeechmaticsTranscriptionClient` rebuilds span text from token results so spacing and punctuation attachment stay correct across finalized chunks
-7. `VoiceInputManager` delivers them in FIFO order to `LatinIME`
-8. `LatinIME` inserts each finalized span with `commitText(...)`, replacing any active selection range and restoring a leading space only when the provider marks the span as a continuation
+5. Partial transcript previews arrive as `AddPartialTranscript` messages (<500ms latency). These are not displayed in the editor (Android's `setComposingText` is unreliable across text fields) but enabling partials improves Speechmatics' pipeline efficiency and reduces final-transcript latency.
+6. Final transcript spans arrive as `AddTranscript` messages
+7. `SpeechmaticsTranscriptionClient` rebuilds span text from token results so spacing and punctuation attachment stay correct across finalized chunks
+8. `VoiceInputManager` delivers final transcripts in FIFO order to `LatinIME`
+9. `LatinIME` inserts each finalized span with `commitText(...)`, replacing any active selection range and restoring a leading space only when the provider marks the span as a continuation
 
 On graceful stop, the client waits for all sent audio to be acknowledged, sends `ForceEndOfUtterance`, then `EndOfStream(last_seq_no=...)`, and only closes after the tail transcript is flushed or a close timeout expires.
 
@@ -48,11 +49,13 @@ On graceful stop, the client waits for all sent audio to be acknowledged, sends 
 
 Speechmatics smart formatting is used for finalized transcript text. Key Speechmatics config features:
 - **operating_point**: `"enhanced"` for best accuracy
+- **enable_partials**: `true` — partials are enabled to improve Speechmatics' internal pipeline efficiency and reduce final-transcript latency. They are not displayed in the editor (Android's `setComposingText` is unreliable across text fields).
+- **max_delay**: `2.0s` — Speechmatics recommends this as optimal for accuracy/latency trade-off (~1% degradation vs batch).
 - **output_locale**: Defaults to `en-US` for English (supports `en-GB`, `en-AU` when detected)
 - **diarization**: Speaker diarization with `prefer_current_speaker: true`, `max_speakers: 2` (Speechmatics requires at least 2), and reduced `speaker_sensitivity` to limit spurious speaker splits. Only the primary speaker (S1) is transcribed; other speakers are filtered out from token results (metadata transcript is not used when diarization is on, so aggregation cannot bypass filtering).
 - **additional_vocab**: Custom dictionary for proper nouns, brand names, technical terms with optional `sounds_like` pronunciations
 - **replacements**: Post-transcription word and regex replacements (e.g. brand name corrections, voice assistant trigger normalization)
-- **punctuation**: All marks permitted (`permitted_marks: ["all"]`, which includes commas, periods, `?`, `!` for English, plus locale-specific marks like `、` for Japanese). Sensitivity defaults to 0.55 — slightly above Speechmatics' own default of 0.5, biased toward inserting commas at short pauses.
+- **punctuation**: All marks permitted (`permitted_marks: ["all"]`, which includes commas, periods, `?`, `!` for English, plus locale-specific marks like `、` for Japanese). Sensitivity defaults to 0.30 — well below Speechmatics' own default of 0.5, to reduce premature sentence-ending periods while preserving commas at natural speech pauses.
 - **end_of_utterance_silence_trigger**: Disabled by default (`0`). When enabled, Speechmatics forces a final transcript at every pause exceeding the threshold and terminates that final with a sentence-end mark (a period in English) **regardless of punctuation sensitivity**. That is the root cause of "period-after-every-pause" behavior, so by default we let Speechmatics choose punctuation from prosody alone — commas land at short pauses, periods at natural sentence boundaries. HeliBoard's own local silence timers (`PREF_VOICE_CHUNK_SILENCE_SECONDS`, `PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS`, `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS`) still drive paragraph breaks and auto-stop from the local mic stream.
 - **disfluency removal**: Optional removal of English hesitation words (um, uh, hmm)
 
