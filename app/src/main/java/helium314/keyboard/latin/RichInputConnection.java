@@ -590,6 +590,25 @@ public final class RichInputConnection implements PrivateCommandPerformer {
         if (DEBUG_PREVIOUS_TEXT) checkConsistencyForDebug();
     }
 
+    /**
+     * Deletes the given number of java chars after the cursor.
+     * <p>
+     * Caches for text before the cursor (committed text and composing text) are unaffected,
+     * because they describe text up to the selection start. The expected selection range is
+     * also unchanged: deleting after the cursor only removes text that follows the caret.
+     * Callers must only invoke this when there is no active selection.
+     */
+    public void deleteTextAfterCursor(final int afterLength) {
+        if (DEBUG_BATCH_NESTING) checkBatchEdit();
+        if (afterLength <= 0) return;
+        if (DebugFlags.DEBUG_ENABLED)
+            Log.d(TAG, "deleting "+afterLength+" characters after cursor");
+        if (isConnected()) {
+            mIC.deleteSurroundingText(0, afterLength);
+        }
+        if (DEBUG_PREVIOUS_TEXT) checkConsistencyForDebug();
+    }
+
     public void performEditorAction(final int actionId) {
         mIC = mParent.getCurrentInputConnection();
         if (isConnected()) {
