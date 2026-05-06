@@ -15,54 +15,68 @@ import helium314.keyboard.latin.utils.Log
  * Why this exists in addition to the commit-time capture in
  * `InputLogic.performAdditionToUserHistoryDictionary`:
  *
- * - The IME only commits the typed word (and therefore only learns it) when the
- *   user types a separator (typically a space or punctuation). If the user
- *   types an email address and immediately submits the field — pressing Send,
- *   Done, Search, the back button, switching apps, etc. — the composing word
- *   is dropped without ever being learned. Email fields in particular often
- *   end with submission rather than space.
+ * - The IME only commits the typed word (and therefore only learns it) when
+ *   the user types a separator (typically a space or punctuation). If the
+ *   user types an email and immediately submits the field — Send / Done /
+ *   Search / focus loss / app switch — the composing word is dropped without
+ *   ever being learned. Email fields in particular often end with submission
+ *   rather than space.
  *
  * - We also want to capture emails the user typed *before* this feature
- *   existed. As long as such an email is still visible in the editor near the
- *   cursor, the debounced scan will pick it up the next time the user types in
- *   that field.
+ *   existed. As long as such an email is still visible in the editor near
+ *   the cursor, the debounced scan will pick it up the next time the user
+ *   types in that field.
  *
- * The scanner is intentionally lossy (only scans a window around the cursor)
- * to keep the work bounded, and is gated by [Settings.mIncognitoModeEnabled]
- * so we don't capture from password fields, no-learning fields, or while the
- * user has incognito mode enabled.
+ * Behavioral guarantees:
  *
- * The scanner runs on the same Looper as the IME so it can safely call into
- * [RichInputConnection].
+ * - **At most one count increment per editor session per email.** A single
+ *   editor session contributes +1 to each distinct email's usage count. This
+ *   prevents pure cursor movement (selection-only `onUpdateSelection` events)
+ *   or repeated scans of the same window from inflating counts. The seen
+ *   set is reset on [flushNow] (called from `onFinishInput`) so the next
+ *   editor session starts fresh.
+ *
+ * - **Skipped while incognito.** Capture is gated by
+ *   `SettingsValues.mIncognitoModeEnabled` (which already covers password
+ *   fields, no-learning fields, and the always-incognito toggle) and by
+ *   `mUsePersonalizedDicts`. Both checks live in the caller so the learner
+ *   can stay context-free.
+ *
+ * - **Bounded work.** Only a window of ~512 chars before and ~64 chars
+ *   after the cursor is scanned. A fingerprint of that window short-circuits
+ *   redundant scans when text has not actually changed since the last scan.
+ *
+ * The scanner runs on the main looper because that is the only safe thread
+ * for [RichInputConnection] reads.
  */
 object EmailLearner {
     private const val TAG = "EmailLearner"
 
-    /** Wait this long after the most recent change before scanning. Long enough
-     *  that mid-word typing doesn't churn, short enough that it usually fires
-     *  before the user submits. */
+    /** Wait this long after the most recent change before scanning. Long
+     *  enough that mid-word typing doesn't churn, short enough that it
+     *  usually fires before the user submits. */
     private const val DEBOUNCE_MS = 1500L
 
-    /** How much text before the cursor to scan. A few hundred chars is enough
-     *  to cover the email and any preceding word, but small enough to keep IPC
-     *  cheap on slow input connections. */
+    /** How much text before the cursor to scan. A few hundred chars is
+     *  enough to cover the email and any preceding word, but small enough to
+     *  keep IPC cheap on slow input connections. */
     private const val LOOKBEHIND = 512
 
-    /** How much text after the cursor to scan, so we still catch emails when
-     *  the user is editing in the middle of existing text. */
+    /** How much text after the cursor to scan, so we still catch emails
+     *  when the user is editing in the middle of existing text. */
     private const val LOOKAHEAD = 64
 
     /**
      * Email-shaped match: [local]@[domain](.[domain])+
      *
      * - Local part: letters, digits, and the typical "atom" punctuation
-     *   (`._%+-`). We deliberately do not allow spaces, slashes, etc.
+     *   (`._%+-`). Spaces, slashes, etc. are not allowed.
      * - Domain labels: letters, digits, hyphens.
      * - At least one dot in the domain so we can distinguish a real address
      *   from text like `foo@bar`.
      *
-     * Trailing sentence punctuation (e.g. trailing `.`, `,`, `!`) is stripped
-     * after the match — see [extractEmails].
+     * Trailing sentence punctuation (e.g. trailing `.`, `,`, `!`) is
+     * stripped after the match — see [extractEmails].
      */
     private val EMAIL_REGEX = Regex(
         "[A-Za-z0-9._%+\\-]+@[A-Za-z0-9\\-]+(?:\\.[A-Za-z0-9\\-]+)+"
@@ -80,8 +94,15 @@ object EmailLearner {
     @Volatile
     private var pendingConnection: RichInputConnection? = null
 
+    /** Emails already recorded for the current editor session. Reset on
+     *  [flushNow] / [reset], i.e. when input switches editors. */
+    private val seenInCurrentEditor: MutableSet<String> = HashSet()
+
+    /** Hash of the last scanned window. Used to skip redundant scans when
+     *  the user is just moving the cursor without changing text. Null means
+     *  "no scan has run yet for this editor session". */
     @Volatile
-    private var pendingIncognito: Boolean = false
+    private var lastWindowFingerprint: Int? = null
 
     @Volatile
     private var initialized = false
@@ -97,47 +118,53 @@ object EmailLearner {
     }
 
     /**
-     * Schedule a debounced scan of the text around the cursor. Repeated calls
-     * within [DEBOUNCE_MS] coalesce — only the last one fires.
+     * Schedule a debounced scan of the text around the cursor. Repeated
+     * calls within [DEBOUNCE_MS] coalesce — only the last one fires.
      *
-     * Pass `incognito = true` (e.g. password / no-learning fields, or when the
-     * user has enabled incognito) to skip capture entirely; the existing
-     * pending scan is also cancelled in that case so we don't accidentally
-     * leak a still-buffered scan from a previous, non-incognito field.
+     * Pass `skipCapture = true` when the current field should not be
+     * learned from (incognito, password, no-learning, or personalized
+     * dicts disabled). The pending scan is also cancelled in that case so
+     * we don't accidentally leak a still-buffered scan from a previous,
+     * non-incognito field.
      */
-    fun notifyTextChanged(connection: RichInputConnection?, incognito: Boolean) {
+    fun notifyTextChanged(connection: RichInputConnection?, skipCapture: Boolean) {
         if (!initialized || connection == null) return
-        if (incognito) {
+        if (skipCapture) {
             cancelPending()
             return
         }
         pendingConnection = connection
-        pendingIncognito = false
         handler.removeCallbacks(pendingScan)
         handler.postDelayed(pendingScan, DEBOUNCE_MS)
     }
 
     /**
-     * Run any pending scan immediately, on the current thread. Called from
-     * `LatinIME.onFinishInputInternal` so we get a last chance to learn any
-     * email the user typed but never separated.
+     * Run any pending scan immediately, on the current thread, then clear
+     * the per-editor seen set so the next editor session starts fresh.
+     * Called from `LatinIME.onFinishInputInternal`.
      */
-    fun flushNow(connection: RichInputConnection?, incognito: Boolean) {
+    fun flushNow(connection: RichInputConnection?, skipCapture: Boolean) {
         if (!initialized) return
         handler.removeCallbacks(pendingScan)
-        if (incognito || connection == null) {
-            pendingConnection = null
-            return
+        if (!skipCapture && connection != null) {
+            scan(connection)
         }
-        scan(connection)
-        pendingConnection = null
+        reset()
     }
 
-    /** Cancel any in-flight scan and forget the connection reference. Use when
-     *  switching to an incognito field, or in tests. */
+    /** Cancel any in-flight scan and forget the connection reference. */
     fun cancelPending() {
         handler.removeCallbacks(pendingScan)
         pendingConnection = null
+    }
+
+    /** Drop all per-editor state. Public for tests; also called from
+     *  [flushNow]. */
+    @JvmStatic
+    fun reset() {
+        cancelPending()
+        synchronized(seenInCurrentEditor) { seenInCurrentEditor.clear() }
+        lastWindowFingerprint = null
     }
 
     private fun runPendingScan() {
@@ -150,11 +177,27 @@ object EmailLearner {
         try {
             val before = connection.getTextBeforeCursor(LOOKBEHIND, 0) ?: ""
             val after = connection.getTextAfterCursor(LOOKAHEAD, 0) ?: ""
+            if (before.isEmpty() && after.isEmpty()) return
+
+            // Skip the regex pass entirely when the surrounding text hasn't
+            // changed since our last scan. This is the common case for cursor
+            // moves and selection updates that aren't actually edits.
+            val fingerprint = (before.toString() + "\u0000" + after.toString()).hashCode()
+            if (fingerprint == lastWindowFingerprint) return
+            lastWindowFingerprint = fingerprint
+
             val window = StringBuilder(before.length + after.length)
                 .append(before).append(after).toString()
-            if (window.isEmpty()) return
+            val fresh = ArrayList<String>(2)
             for (email in extractEmails(window)) {
-                EmailsDictionary.recordEmail(email)
+                val added: Boolean
+                synchronized(seenInCurrentEditor) {
+                    added = seenInCurrentEditor.add(email)
+                }
+                if (added) fresh.add(email)
+            }
+            if (fresh.isNotEmpty()) {
+                EmailsDictionary.recordEmails(fresh)
             }
         } catch (t: Throwable) {
             Log.w(TAG, "Email scan failed", t)
@@ -162,15 +205,21 @@ object EmailLearner {
     }
 
     /**
-     * Extract every well-formed email address from [text]. Each candidate is
-     * trimmed of trailing sentence punctuation and re-validated with
-     * [StringUtils.looksLikeEmailAddress] so weird matches are dropped.
+     * Extract every well-formed email address from [text]. Each candidate
+     * is trimmed of trailing sentence punctuation, rejected if it appears
+     * to be inside a URL (preceded by `/` or `://`), and finally
+     * re-validated with [StringUtils.looksLikeEmailAddress].
      */
     @JvmStatic
     fun extractEmails(text: CharSequence): List<String> {
         if (text.isEmpty()) return emptyList()
         val out = LinkedHashSet<String>()
         for (match in EMAIL_REGEX.findAll(text)) {
+            // Drop matches that are part of a URL path, e.g.
+            // "https://example.com/foo@bar.com" — the trailing piece
+            // matches our regex but isn't an email the user typed.
+            if (looksLikePartOfUrl(text, match.range.first)) continue
+
             var candidate = match.value
             while (candidate.isNotEmpty() && TRAILING_PUNCTUATION.contains(candidate.last())) {
                 candidate = candidate.dropLast(1)
@@ -180,5 +229,17 @@ object EmailLearner {
             out.add(StringUtils.normalizeEmailAddress(candidate))
         }
         return out.toList()
+    }
+
+    /** Returns true if the character right before [start] looks like it puts
+     *  us inside a URL path or scheme rather than at the start of a word. */
+    private fun looksLikePartOfUrl(text: CharSequence, start: Int): Boolean {
+        if (start <= 0) return false
+        val prev = text[start - 1]
+        if (prev != '/') return false
+        // Single '/' is enough to suggest URL path. We don't need to look
+        // for the full "://" — anything URL-pathy will have a '/' immediately
+        // before the segment.
+        return true
     }
 }

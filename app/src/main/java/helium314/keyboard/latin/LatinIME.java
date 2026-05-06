@@ -1069,12 +1069,13 @@ public class LatinIME extends InputMethodService implements
         mDictionaryFacilitator.onFinishInput();
         // Last-chance scan for any email still in the editor that the user
         // typed but never finalized with a separator (e.g. they hit Send,
-        // Done, Search, or just navigated away). After this we drop the
-        // connection reference so we don't keep it alive past the field.
+        // Done, Search, or just navigated away). After this we clear the
+        // per-editor seen set so the next editor starts fresh.
         try {
+            final SettingsValues finishSettings = mSettings.getCurrent();
             helium314.keyboard.latin.personalization.EmailLearner.INSTANCE.flushNow(
                     mInputLogic.mConnection,
-                    mSettings.getCurrent().mIncognitoModeEnabled);
+                    shouldSkipEmailCapture(finishSettings));
         } catch (Throwable t) {
             // Defensive: never let learner errors break the IME teardown path.
             Log.w(TAG, "EmailLearner.flushNow failed", t);
@@ -1089,6 +1090,18 @@ public class LatinIME extends InputMethodService implements
         super.onFinishInputView(finishingInput);
         Log.i(TAG, "onFinishInputView");
         cleanupInternalStateForFinishInput();
+    }
+
+    /**
+     * Whether email capture should be suppressed for the current field. We
+     * skip capture when the user is in incognito (which already covers
+     * password fields, no-learning fields, and the always-incognito toggle)
+     * or when personalized dictionaries are disabled, since the same
+     * setting governs auto-learning for the regular dictionary.
+     */
+    private static boolean shouldSkipEmailCapture(final SettingsValues sv) {
+        if (sv == null) return true;
+        return sv.mIncognitoModeEnabled || !sv.mUsePersonalizedDicts;
     }
 
     private void cleanupInternalStateForFinishInput() {
@@ -1165,7 +1178,7 @@ public class LatinIME extends InputMethodService implements
             try {
                 helium314.keyboard.latin.personalization.EmailLearner.INSTANCE.notifyTextChanged(
                         mInputLogic.mConnection,
-                        settingsValues.mIncognitoModeEnabled);
+                        shouldSkipEmailCapture(settingsValues));
             } catch (Throwable t) {
                 Log.w(TAG, "EmailLearner.notifyTextChanged failed", t);
             }

@@ -92,4 +92,20 @@ class EmailLearnerTest {
     @Test fun `empty input returns empty`() {
         assertEquals(emptyList(), EmailLearner.extractEmails(""))
     }
+
+    @Test fun `does not extract email-shaped substrings inside URLs`() {
+        // The "/foo@bar.com" suffix matches our regex, but it's part of a
+        // URL path, not an email the user typed.
+        assertEquals(
+            emptyList(),
+            EmailLearner.extractEmails("see https://example.com/foo@bar.com here")
+        )
+    }
+
+    @Test fun `still extracts a real email next to a URL in the same paragraph`() {
+        assertEquals(
+            listOf("real@addr.com"),
+            EmailLearner.extractEmails("https://example.com/x — real@addr.com")
+        )
+    }
 }
