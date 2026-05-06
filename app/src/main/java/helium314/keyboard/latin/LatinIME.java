@@ -565,6 +565,7 @@ public class LatinIME extends InputMethodService implements
         mDisplayContext = KtxKt.getDisplayContext(this);
         KeyboardSwitcher.init(this);
         helium314.keyboard.latin.personalization.EmailsDictionary.INSTANCE.init(this);
+        helium314.keyboard.latin.personalization.EmailLearner.INSTANCE.init(this);
         super.onCreate();
 
         loadSettings();
@@ -1066,6 +1067,18 @@ public class LatinIME extends InputMethodService implements
         discardPendingVoiceWork("Input connection finished — discarding voice work");
 
         mDictionaryFacilitator.onFinishInput();
+        // Last-chance scan for any email still in the editor that the user
+        // typed but never finalized with a separator (e.g. they hit Send,
+        // Done, Search, or just navigated away). After this we drop the
+        // connection reference so we don't keep it alive past the field.
+        try {
+            helium314.keyboard.latin.personalization.EmailLearner.INSTANCE.flushNow(
+                    mInputLogic.mConnection,
+                    mSettings.getCurrent().mIncognitoModeEnabled);
+        } catch (Throwable t) {
+            // Defensive: never let learner errors break the IME teardown path.
+            Log.w(TAG, "EmailLearner.flushNow failed", t);
+        }
         final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
         if (mainKeyboardView != null) {
             mainKeyboardView.closing();
@@ -1144,6 +1157,19 @@ public class LatinIME extends InputMethodService implements
         // view is not displayed we have no means of showing suggestions anyway, and if it is then
         // we want to show suggestions anyway.
         final SettingsValues settingsValues = mSettings.getCurrent();
+        // Schedule a debounced scan of the surrounding text for email
+        // addresses. Selection-only moves (oldSelStart == newSelStart &&
+        // oldSelEnd == newSelEnd) can't introduce new text, so we skip them
+        // to avoid scanning on every cursor blink in long fields.
+        if (oldSelStart != newSelStart || oldSelEnd != newSelEnd) {
+            try {
+                helium314.keyboard.latin.personalization.EmailLearner.INSTANCE.notifyTextChanged(
+                        mInputLogic.mConnection,
+                        settingsValues.mIncognitoModeEnabled);
+            } catch (Throwable t) {
+                Log.w(TAG, "EmailLearner.notifyTextChanged failed", t);
+            }
+        }
         if (isInputViewShown()
                 && mInputLogic.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd,
                 composingSpanStart, composingSpanEnd, settingsValues)) {
