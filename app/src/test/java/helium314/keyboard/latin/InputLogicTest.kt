@@ -527,6 +527,43 @@ class InputLogicTest {
         assertEquals("", composingText)
     }
 
+    @Test fun `pickSuggestionWithCursorInsideWord replaces the focused word`() {
+        // Tap inside an existing word, then pick a suggestion. The whole focused word should
+        // be replaced - not the same number of characters counted backwards from the caret,
+        // which would otherwise eat the previous whitespace and previous word and leave the
+        // tail of the focused word intact.
+        reset()
+        setText("hello world")
+        // "hello world" -> caret between "wo" and "rld"
+        setCursorPosition(8)
+        pickSuggestion("planet")
+        assertEquals("hello planet", text)
+        assertEquals("hello planet".length, cursor)
+        assertEquals("", composingText)
+    }
+
+    @Test fun `pickSuggestionWithCursorAtStartOfWord replaces the focused word`() {
+        reset()
+        setText("hello world")
+        // caret at the very start of "world"
+        setCursorPosition(6)
+        pickSuggestion("planet")
+        assertEquals("hello planet", text)
+        assertEquals("hello planet".length, cursor)
+        assertEquals("", composingText)
+    }
+
+    @Test fun `pickSuggestionWithCursorAtEndOfWordStillWorks`() {
+        reset()
+        setText("hello world")
+        // caret at the end of "world" - the existing happy path
+        setCursorPosition(11)
+        pickSuggestion("planet")
+        assertEquals("hello planet", text)
+        assertEquals("hello planet".length, cursor)
+        assertEquals("", composingText)
+    }
+
     @Test fun `autospace works in URL field when input isn't URL`() {
         reset()
         latinIME.prefs().edit { putBoolean(Settings.PREF_URL_DETECTION, true) }

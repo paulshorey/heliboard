@@ -2084,6 +2084,14 @@ public class LatinIME extends InputMethodService implements
             }
 
             @Override
+            public void onPartialTranscript(@NonNull String text) {
+                // Partials are enabled server-side to improve Speechmatics' internal
+                // pipeline efficiency and reduce final-transcript latency, but we do
+                // not display them in the editor. Android's setComposingText is not
+                // reliable across all text fields and causes duplicate text issues.
+            }
+
+            @Override
             public void onNewParagraphRequested() {
                 try {
                     final boolean managerStillProcessing =
