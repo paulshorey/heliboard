@@ -57,6 +57,12 @@ class VoiceInputManager(private val context: Context) {
         /** A transcript unit was finalized — process and insert this text. */
         fun onTranscriptionResult(text: String, attachesToPrevious: Boolean)
 
+        /**
+         * Low-latency partial transcript preview. Partials arrive in <500ms and
+         * should be shown as composing/preview text, then replaced by the final.
+         */
+        fun onPartialTranscript(text: String)
+
         /** Voice processing is actively running (transcripts are pending delivery). */
         fun onProcessingStarted()
 
@@ -388,6 +394,11 @@ class VoiceInputManager(private val context: Context) {
                 override fun onTranscriptionResult(segment: TranscriptSegment) {
                     if (sessionId != activeSessionId) return
                     enqueueTranscript(segment, sessionId)
+                }
+
+                override fun onPartialTranscript(transcript: String) {
+                    if (sessionId != activeSessionId) return
+                    listener?.onPartialTranscript(transcript)
                 }
 
                 override fun onStreamError(error: String) {

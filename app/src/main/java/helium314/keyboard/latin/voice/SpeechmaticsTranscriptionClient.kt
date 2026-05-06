@@ -27,6 +27,9 @@ internal sealed interface SpeechmaticsServerEvent {
         val startTime: Double,
         val endTime: Double
     ) : SpeechmaticsServerEvent
+    data class PartialTranscript(
+        val transcript: String
+    ) : SpeechmaticsServerEvent
     data class Error(val description: String) : SpeechmaticsServerEvent
     data object EndOfUtterance : SpeechmaticsServerEvent
     data object EndOfTranscript : SpeechmaticsServerEvent
@@ -147,7 +150,7 @@ class SpeechmaticsTranscriptionClient {
                         put("language", config.language)
                         put("max_delay", config.maxDelaySeconds)
                         put("max_delay_mode", "flexible")
-                        put("enable_partials", false)
+                        put("enable_partials", true)
                         put("enable_entities", true)
                         put("operating_point", config.operatingPoint)
                         // permitted_marks = ["all"] permits every punctuation mark the
@@ -275,6 +278,16 @@ class SpeechmaticsTranscriptionClient {
                             startTime = metadata?.optDouble("start_time", -1.0) ?: -1.0,
                             endTime = metadata?.optDouble("end_time", -1.0) ?: -1.0
                         )
+                    }
+                }
+
+                "AddPartialTranscript" -> {
+                    val metadata = json.optJSONObject("metadata")
+                    val transcript = metadata?.optString("transcript", "").orEmpty().trim()
+                    if (transcript.isBlank()) {
+                        null
+                    } else {
+                        SpeechmaticsServerEvent.PartialTranscript(transcript = transcript)
                     }
                 }
 
@@ -428,6 +441,9 @@ class SpeechmaticsTranscriptionClient {
 
         /** Finalized transcription text from Speechmatics AddTranscript events. */
         fun onTranscriptionResult(segment: TranscriptSegment)
+
+        /** Low-latency partial transcript from Speechmatics AddPartialTranscript events. */
+        fun onPartialTranscript(transcript: String)
 
         /** Streaming failed and this stream can no longer be used. */
         fun onStreamError(error: String)
@@ -702,6 +718,12 @@ class SpeechmaticsTranscriptionClient {
                             attachesToPrevious = event.attachesToPrevious
                         )
                     )
+                }
+            }
+
+            is SpeechmaticsServerEvent.PartialTranscript -> {
+                postIfCurrent(connectionToken) {
+                    callback?.onPartialTranscript(event.transcript)
                 }
             }
 
