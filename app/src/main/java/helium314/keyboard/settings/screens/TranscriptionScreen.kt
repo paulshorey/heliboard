@@ -91,14 +91,6 @@ fun TranscriptionScreen(
             ).toString()
         )
     }
-    var newParagraphSilenceSeconds by remember {
-        mutableStateOf(
-            prefs.getInt(
-                Settings.PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS,
-                Defaults.PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS
-            ).toString()
-        )
-    }
     var autoStopSilenceSeconds by remember {
         mutableStateOf(
             prefs.getInt(
@@ -240,24 +232,6 @@ fun TranscriptionScreen(
                                 putInt(
                                     Settings.PREF_VOICE_SILENCE_THRESHOLD,
                                     parsed.coerceIn(40, 5000)
-                                )
-                            }
-                        }
-                    },
-                    minLines = 1,
-                    maxLines = 1
-                )
-
-                InlineTextField(
-                    label = stringResource(R.string.voice_new_paragraph_silence_seconds_title),
-                    value = newParagraphSilenceSeconds,
-                    onValueChange = { newValue ->
-                        newParagraphSilenceSeconds = newValue
-                        newValue.toIntOrNull()?.let { parsed ->
-                            prefs.edit {
-                                putInt(
-                                    Settings.PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS,
-                                    parsed.coerceIn(3, 120)
                                 )
                             }
                         }

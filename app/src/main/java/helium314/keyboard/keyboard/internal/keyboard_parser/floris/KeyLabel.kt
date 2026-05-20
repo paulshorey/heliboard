@@ -39,6 +39,7 @@ object KeyLabel {
     const val FN = "fn"
     const val META = "meta"
     const val TAB = "tab"
+    const val SHIFT_ENTER = "shift_enter"
     const val ESCAPE = "esc"
     const val TIMESTAMP = "timestamp"
 
@@ -96,7 +97,7 @@ object KeyLabel {
             PERIOD -> getPeriodLabel(params)
             SPACE -> getSpaceLabel(params)
             ACTION -> "${getActionKeyLabel(params)}|${getActionKeyCode(params)}"
-            DELETE -> "!icon/delete_key|!code/key_delete"
+            DELETE -> getDeleteLabel(params)
             SHIFT -> "${getShiftLabel(params)}|!code/key_shift"
             COM -> params.mLocaleKeyboardInfos.tlds.first()
             LANGUAGE_SWITCH -> "!icon/language_switch_key|!code/key_language_switch"
@@ -109,6 +110,7 @@ object KeyLabel {
             CURRENCY5 -> params.mLocaleKeyboardInfos.currencyKey.second[4]
             CTRL, ALT, FN, META, ESCAPE -> label.uppercase(Locale.US)
             TAB -> "!icon/tab_key|!code/${KeyCode.TAB}"
+            SHIFT_ENTER -> "!icon/enter_key|!code/key_shift_enter"
             TIMESTAMP -> "⌚"
             else -> if (label in toolbarKeyStrings.values)
                 "!icon/$label|!code/${getCodeForToolbarKey(ToolbarKey.valueOf(label.uppercase(Locale.US)))}"
@@ -140,6 +142,12 @@ object KeyLabel {
         else -> "!icon/${KeyboardIconsSet.NAME_SHIFT_KEY}"
     }
 
+    private fun getDeleteLabel(params: KeyboardParams): String {
+        return if (params.mId.mElementId == KeyboardId.ELEMENT_ALPHABET_MANUAL_SHIFTED || params.mId.mElementId == KeyboardId.ELEMENT_ALPHABET_SHIFT_LOCK_SHIFTED)
+            "\u2326|!code/key_forward_delete"
+        else "!icon/delete_key|!code/key_delete"
+    }
+
     // todo (later): try avoiding this weirdness
     //  maybe just remove it and if users want it they can use custom functional layouts?
     //  but it has been like this "forever" and actually seems to make sense
@@ -158,14 +166,14 @@ object KeyLabel {
     // todo (later): should this be handled with metaState? but metaState shift would require LOTS of changes...
     private fun getActionKeyCode(params: KeyboardParams): String {
         params.mId.mInternalAction?.let { return "${KeyboardCodesSet.PREFIX_CODE}${it.code()}" }
-        return if (params.mId.isMultiLine && (params.mId.mElementId == KeyboardId.ELEMENT_ALPHABET_MANUAL_SHIFTED || params.mId.mElementId == KeyboardId.ELEMENT_ALPHABET_SHIFT_LOCK_SHIFTED))
+        return if (params.mId.mElementId == KeyboardId.ELEMENT_ALPHABET_MANUAL_SHIFTED || params.mId.mElementId == KeyboardId.ELEMENT_ALPHABET_SHIFT_LOCK_SHIFTED)
             "!code/key_shift_enter"
         else "!code/key_enter"
     }
 
     private fun getActionKeyLabel(params: KeyboardParams): String {
         params.mId.mInternalAction?.let { return it.label() }
-        if (params.mId.isMultiLine && (params.mId.mElementId == KeyboardId.ELEMENT_ALPHABET_MANUAL_SHIFTED || params.mId.mElementId == KeyboardId.ELEMENT_ALPHABET_SHIFT_LOCK_SHIFTED))
+        if (params.mId.mElementId == KeyboardId.ELEMENT_ALPHABET_MANUAL_SHIFTED || params.mId.mElementId == KeyboardId.ELEMENT_ALPHABET_SHIFT_LOCK_SHIFTED)
             return "!icon/enter_key"
         val iconName = when (params.mId.imeAction()) {
             EditorInfo.IME_ACTION_GO               -> KeyboardIconsSet.NAME_GO_KEY
