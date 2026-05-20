@@ -19,7 +19,6 @@ import helium314.keyboard.latin.define.DebugFlags
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.utils.LayoutType
 import helium314.keyboard.latin.utils.POPUP_KEYS_LAYOUT
-import helium314.keyboard.latin.utils.POPUP_KEYS_NUMBER
 import helium314.keyboard.latin.utils.replaceFirst
 import helium314.keyboard.latin.utils.splitAt
 import helium314.keyboard.latin.utils.sumOf
@@ -104,9 +103,10 @@ class KeyboardParser(private val params: KeyboardParams, private val context: Co
 
         val numberRow = getNumberRow()
         addNumberRowOrPopupKeys(baseKeys, numberRow)
-        if (params.mId.isAlphabetKeyboard)
-            addSymbolPopupKeys(baseKeys)
-        if (params.mId.isAlphaOrSymbolKeyboard && params.mId.mNumberRowEnabled) {
+        // Symbol popups are now defined inline in the layout files
+        // if (params.mId.isAlphabetKeyboard)
+        //     addSymbolPopupKeys(baseKeys)
+        if (params.mId.isAlphabetKeyboard && params.mId.mNumberRowEnabled) {
             val newLabelFlags = defaultLabelFlags or
                     if (Settings.getValues().mShowNumberRowHints) 0 else Key.LABEL_FLAGS_DISABLE_HINT_LABEL
             baseKeys.add(0, numberRow.mapTo(mutableListOf()) { it.copy(newLabelFlags = newLabelFlags) })
@@ -272,23 +272,7 @@ class KeyboardParser(private val params: KeyboardParams, private val context: Co
     }
 
     private fun addNumberRowOrPopupKeys(baseKeys: MutableList<MutableList<KeyData>>, numberRow: MutableList<KeyData>) {
-        if (!params.mId.mNumberRowEnabled && params.mId.mNumberRowInSymbols && params.mId.mElementId == KeyboardId.ELEMENT_SYMBOLS) {
-            // replace first symbols row with number row, but use the labels as popupKeys
-            val numberRowCopy = numberRow.toMutableList()
-            numberRowCopy.forEachIndexed { index, keyData -> keyData.popup.symbol = baseKeys[0].getOrNull(index)?.label }
-            baseKeys[0] = numberRowCopy
-        } else if (!params.mId.mNumberRowEnabled && params.mId.isAlphabetKeyboard && !hasBuiltInNumbers()) {
-            if (baseKeys[0].any { it.popup.main != null || !it.popup.relevant.isNullOrEmpty() } // first row of baseKeys has any layout popup key
-                && params.mPopupKeyLabelSources.let {
-                    val layout = it.indexOf(POPUP_KEYS_LAYOUT)
-                    val number = it.indexOf(POPUP_KEYS_NUMBER)
-                    layout != -1 && layout < number // layout before number label
-                }
-            ) {
-                // remove number from labels, to avoid awkward mix of numbers and others caused by layout popup keys
-                params.mPopupKeyLabelSources.remove(POPUP_KEYS_NUMBER)
-            }
-            // add number to the first first row
+        if (!params.mId.mNumberRowEnabled && params.mId.isAlphabetKeyboard && !hasBuiltInNumbers()) {
             baseKeys.first().forEachIndexed { index, keyData -> keyData.popup.numberLabel = numberRow.getOrNull(index)?.label }
         }
     }

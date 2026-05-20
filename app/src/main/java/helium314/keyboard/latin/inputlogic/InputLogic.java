@@ -686,6 +686,11 @@ public final class InputLogic {
                 // Backspace is a functional key, but it affects the contents of the editor.
                 inputTransaction.setDidAffectContents();
                 break;
+            case KeyCode.FORWARD_DELETE:
+                mWordComposer.reset();
+                sendDownUpKeyEvent(KeyEvent.KEYCODE_FORWARD_DEL);
+                inputTransaction.setDidAffectContents();
+                break;
             case KeyCode.SHIFT:
                 if (KeyboardSwitcher.getInstance().getKeyboard() != null && !KeyboardSwitcher.getInstance().getKeyboard().mId.isAlphabetKeyboard())
                     break; // recapitalization and follow-up code should only trigger for alphabet shift, see #1256
