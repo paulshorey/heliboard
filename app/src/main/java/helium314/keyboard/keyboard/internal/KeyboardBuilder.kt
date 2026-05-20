@@ -135,12 +135,14 @@ open class KeyboardBuilder<KP : KeyboardParams>(protected val mContext: Context,
     }
 
     /**
-     * Nudges the main space key(s) down slightly inside the bottom row slot: same row height and
-     * bottom alignment, with a small non-hit strip at the top (letter-row padding) while using most
-     * of the slot for drawing and hit-testing (see [Key.KeyParams.mSpaceVisualInsetTop]).
+     * Optionally nudges the main space key(s) down inside the bottom row slot: same row height and
+     * bottom alignment, with an optional non-hit strip at the top when
+     * [R.dimen.config_spacebar_visual_inset_top] is positive (see [Key.KeyParams.mSpaceVisualInsetTop]).
      */
     private fun applyMainKeyboardSpaceInset() {
         if (!mParams.mId.isAlphaOrSymbolKeyboard) return
+        val paddingPx = mResources.getDimensionPixelSize(R.dimen.config_spacebar_visual_inset_top)
+        if (paddingPx <= 0) return
         val bottomRow = keysInRows.lastOrNull() ?: return
         val normalKeyWidth = bottomRow.firstOrNull { !it.isSpacer && it.mCode != Constants.CODE_SPACE }?.mWidth
             ?: return
@@ -148,11 +150,10 @@ open class KeyboardBuilder<KP : KeyboardParams>(protected val mContext: Context,
             !it.isSpacer && it.mCode == Constants.CODE_SPACE && it.mWidth > normalKeyWidth * 1.5f
         }
         if (spaceKeys.isEmpty()) return
-        val paddingPx = mResources.getDimensionPixelSize(R.dimen.config_spacebar_visual_inset_top)
         for (space in spaceKeys) {
             val fullAbsH = space.mAbsoluteHeight
             val maxInset = (fullAbsH - 1).toInt().coerceAtLeast(1)
-            val insetTop = paddingPx.coerceIn(1, maxInset)
+            val insetTop = paddingPx.coerceIn(0, maxInset)
             space.mSpaceVisualInsetTop = insetTop
         }
     }
