@@ -1,25 +1,25 @@
 # Voice Transcription Data Flow
 
-End-to-end voice transcription pipeline: local capture, Speechmatics realtime streaming, FIFO transcript delivery, and immediate caret insertion.
+End-to-end voice transcription pipeline: local capture, Soniox real-time streaming, FIFO transcript delivery, and immediate caret insertion.
 
 ## Overview
 
-1. **VoiceRecorder** captures PCM16 audio locally; silence detection drives paragraph breaks and auto-stop.
-2. **SpeechmaticsTranscriptionClient** opens the realtime websocket, sends `StartRecognition`, streams binary PCM frames, tracks `AudioAdded` acknowledgements, can request `ForceEndOfUtterance`, reconstructs finalized transcript text from tokenized `results`, and surfaces finalized transcript segments.
-3. **VoiceInputManager** buffers audio until the stream is ready, retries broken sessions, derives a provider config from preferences + current subtype locale, queues finalized transcript segments in FIFO order, and performs graceful `EndOfStream` shutdown.
+1. **VoiceRecorder** captures PCM16 audio locally; silence detection drives auto-stop.
+2. **SonioxTranscriptionClient** opens the real-time WebSocket, sends the JSON start config, streams binary PCM frames, parses `tokens` arrays from each response, and surfaces finalized transcript segments.
+3. **VoiceInputManager** buffers audio until the start config is queued, retries broken sessions, derives a session config from preferences + current subtype locale, queues finalized transcript segments in FIFO order, and performs graceful empty-frame shutdown.
 4. **LatinIME** inserts each finalized transcript immediately at the current caret position through `InputConnection`, restoring a leading space only when the new segment is a continuation of previous text rather than punctuation.
 
 ## Architecture
 
 ```
 ┌─────────────────┐     ┌──────────────────────┐     ┌──────────────────────┐
-│   Microphone    │────▶│   VoiceRecorder      │────▶│  Speechmatics RT API │
-│   (Hardware)    │     │   (PCM16 16kHz)      │     │  (WebSocket /v2/)    │
+│   Microphone    │────▶│   VoiceRecorder      │────▶│  Soniox Realtime API │
+│   (Hardware)    │     │   (PCM16 16kHz)      │     │  (WebSocket)         │
 └─────────────────┘     │   Silence detection  │     └──────────┬───────────┘
                         │   Chunking/timers     │                ▼
                         └──────────────────────┘     ┌──────────────────────┐
-┌─────────────────┐     ┌──────────────────────┐◀────│  Finalized transcript │
-│   Text Field    │◀────│   LatinIME           │     │  spans (AddTranscript)│
+┌─────────────────┐     ┌──────────────────────┐◀────│  Final-token spans   │
+│   Text Field    │◀────│   LatinIME           │     │  (is_final: true)    │
 │   (App)         │     │   (Orchestrator)     │     └──────────────────────┘
 └─────────────────┘     └──────────────────────┘
 ```
@@ -30,80 +30,81 @@ End-to-end voice transcription pipeline: local capture, Speechmatics realtime st
 Captures audio from the microphone with client-side silence detection.
 - **Format**: PCM16, 16kHz, mono
 - **Silence detection**: Adaptive RMS threshold on each 100ms chunk
-- **Callbacks**: Supplies PCM chunks to `VoiceInputManager`; long silence can request a new paragraph or auto-stop
+- **Callbacks**: Supplies PCM chunks to `VoiceInputManager`; long silence can request auto-stop
 
-### SpeechmaticsTranscriptionClient.kt
-WebSocket client for Speechmatics realtime transcription.
-- **URL**: `wss://eu.rt.speechmatics.com/v2/`
-- **Handshake**: `Authorization: Bearer <API_KEY>`
-- **Startup**: Sends `StartRecognition` with raw PCM16 audio settings plus a configurable `transcription_config`
+### SonioxTranscriptionClient.kt
+WebSocket client for Soniox real-time transcription.
+- **URL**: `wss://stt-rt.soniox.com/transcribe-websocket`
+- **Authentication**: `api_key` field inside the start config JSON; no HTTP headers
+- **Startup**: Sends a single JSON config text frame (`api_key`, `model`, `audio_format`, `sample_rate`, `num_channels`, optional `language_hints`, merged `context.terms` (built-in + user custom), `context.text` from the editor when available, plus the endpoint-detection and diarization flags)
 - **Transport**: Binary PCM frames over the socket
-- **Acks**: Tracks `AudioAdded.seq_no` so `EndOfStream(last_seq_no=...)` can be sent safely on stop
-- **Turn flush**: Sends `ForceEndOfUtterance` before `EndOfStream` during graceful stop to help flush the tail transcript
-- **Output**: Rebuilds finalized spans from Speechmatics `results[]` tokens so spacing and punctuation attachment follow `attaches_to`
+- **Output**: Filters Soniox's `<end>` (endpoint detection) and `<fin>` (manual finalize) control markers, then concatenates final-token text in arrival order (Soniox encodes inter-word whitespace inside token text), trims, and emits a `TranscriptSegment`
+- **Graceful stop**: Sends an empty WebSocket frame, waits for `{"finished": true}` (8 s grace), closes 1000
 
 ### VoiceInputManager.kt
-Orchestrates recording, Speechmatics streaming, and ordered transcript delivery.
+Orchestrates recording, Soniox streaming, and ordered transcript delivery.
 - **State machine**: IDLE → RECORDING ↔ PAUSED → IDLE
-- **Buffered audio**: Holds PCM chunks until `RecognitionStarted`
-- **Transcript queue**: Preserves FIFO delivery for finalized Speechmatics segments, including whether a segment attaches to previous text
-- **Reconnects**: Retries transient websocket failures while the recording session remains active
-- **Session config**: Maps current subtype locale to Speechmatics `language` and optional `output_locale`; sanitizes max-delay, conservative punctuation sensitivity, and disfluency settings from preferences
-- **New Paragraph Timer**: Requests a paragraph break after long silence
-- **Graceful stop**: Waits for pending acks, sends `ForceEndOfUtterance`, then `EndOfStream`, and lets the tail transcript drain
+- **Buffered audio**: Holds PCM chunks until the stream is ready
+- **Transcript queue**: Preserves FIFO delivery for finalized Soniox segments, including whether a segment attaches to previous text
+- **Reconnects**: Retries transient WebSocket failures while the recording session remains active (3 attempts with exponential backoff)
+- **Session config**: Maps the active keyboard subtype's base language to a single Soniox `language_hints` entry; sanitizes `max_endpoint_delay_ms` to Soniox's 500–3000 ms range
+- **Auto-stop timer**: Stops recording after prolonged silence
+- **Graceful stop**: Posts a finalize task that the client converts into the empty-frame shutdown handshake
 
 ### LatinIME.java
 Main orchestrator that coordinates all components and inserts text into the editor.
-- Uses `InputConnection.commitText(...)` at the caret, or to replace the active selection when text is highlighted
+- Uses `InputConnection.commitText(...)` at the caret, or replaces an active selection when text is highlighted
 - Calls `mInputLogic.finishInput()` first to keep composing state in sync
-- Defers paragraph insertion until manager processing is idle if needed
+- Runs paragraph-level post-processing after committed voice text
 
 ## Data Flow Steps
 
 ### 1. Recording Start
 ```
-User taps mic button
+User taps mic
     → LatinIME.onVoiceInputClicked()
     → VoiceInputManager.toggleRecording()
     → VoiceRecorder.startRecording()
     → State = RECORDING
 ```
 
-### 2. Speech → Speechmatics
+### 2. Speech → Soniox
 ```
 User speaks
     → VoiceRecorder captures PCM chunks
-    → VoiceInputManager buffers/sends them to SpeechmaticsTranscriptionClient
-    → SpeechmaticsTranscriptionClient streams them to Speechmatics
-    → Speechmatics emits finalized AddTranscript messages
+    → VoiceInputManager buffers/sends them to SonioxTranscriptionClient
+    → SonioxTranscriptionClient streams binary PCM frames
+    → Soniox emits JSON responses with `tokens` arrays
 ```
 
-### 2b. Speechmatics session config
+### 2b. Soniox session config
 ```
-Current subtype locale + transcription preferences
-    → VoiceInputManager.buildTranscriptionConfig()
-    → language = base language / supported provider language
-    → output_locale = locale-specific spelling when Speechmatics documents it
-    → max_delay / end_of_utterance_silence_trigger sanitized to provider-safe ranges
-    → remove_disfluencies enabled only for English when requested
+Active subtype locale + transcription preferences + editor text
+    → SonioxTranscriptionClient.buildSessionConfig()
+    → language_hints  = single ISO language code or omitted
+    → context.terms = built-in product terms ∪ PREF_SONIOX_CUSTOM_TERMS (deduped)
+    → context.text  = LatinIME.buildVoiceContextText() (≤ 4000 chars before cursor)
+    → enable_endpoint_detection / max_endpoint_delay_ms (500–3000)
+    → enable_speaker_diarization
+    → model = "stt-rt-v4", audio_format = "pcm_s16le", 16 kHz / mono
 ```
 
 ### 3. Transcript → Immediate Insert
 ```
-Finalized transcript span arrives
-    → SpeechmaticsTranscriptionClient rebuilds text from token results
-    → attaches_to metadata determines whether a leading space is needed
+Soniox response arrives
+    → SonioxTranscriptionClient collects is_final:true tokens
+    → Concatenates token text directly, trims
+    → attachesToPrevious = (first char is . , ! ? : ; ) ] } %)
     → VoiceInputManager queues and delivers the segment to LatinIME in FIFO order
-    → LatinIME trims empty spans, conditionally restores a leading space, and commits the finalized text via InputConnection.commitText(...), replacing any active selection
+    → LatinIME conditionally restores a leading space and commits via InputConnection.commitText(...)
 ```
 
-### 4. New Paragraph
+### 4. Explicit New Paragraph Command
 ```
-Speech stops
-    → VoiceInputManager starts new paragraph timer
-    → Delay elapses with no speech
-    → LatinIME.onNewParagraphRequested()
-    → Insert "\n\n" when processing is idle
+User says "New paragraph."
+    → Soniox finalizes the text
+    → LatinIME commits it
+    → TranscriptPostProcessor replaces the spoken command with "\n\n"
 ```
 
 ## State Management
@@ -117,23 +118,24 @@ PAUSED     → User taps pause  → RECORDING (resume)
 ```
 
 ### Ordering Guarantees
-- Speechmatics transcript spans are queued and delivered in FIFO order by `VoiceInputManager`.
+- Soniox transcript spans are queued and delivered in FIFO order by `VoiceInputManager`.
 - `LatinIME` inserts each finalized transcript immediately when received.
-- Paragraph breaks are deferred until manager processing drains, so they do not interleave in the middle of pending transcript insertion.
-- Cancelling voice input invalidates the active manager session so stale Speechmatics callbacks are dropped before they reach the IME.
+- Silence-driven automatic paragraph breaks are disabled to avoid unintended host-app side effects.
+- Cancelling voice input invalidates the active manager session so stale Soniox callbacks are dropped before they reach the IME.
 
 ## Configuration
 
 ### Settings (TranscriptionScreen.kt)
-- **Speechmatics API Key**: Required for transcription
-- **Final transcript delay**: Upper bound for Speechmatics finalization latency
-- **Punctuation sensitivity**: Higher values make Speechmatics insert more punctuation; in practice this mostly affects commas at short pauses (sentence-end periods come from prosodic utterance ends and are less sensitive to this setting). Default `0.55`.
-- **End of utterance trigger**: Server-side silence duration before Speechmatics force-finalizes an utterance. Disabled by default (`0`) because any non-zero value forces a sentence-end mark (a period in English) at every pause past the threshold, regardless of punctuation sensitivity — that is what would otherwise suppress commas and overproduce periods during dictation.
-- **Remove disfluencies**: Removes English hesitation sounds like “um” and “uh”
-- **Chunk Silence Duration**: Silence window before detecting a speech boundary
+- **Soniox API Key**: required for transcription
+- **Speaker diarization**: when on, Soniox tags each token with a `speaker` ID and the client locks onto the first observed speaker
+- **Enable endpoint detection**: lets Soniox finalize tokens immediately once it detects the speaker has stopped talking; reduces latency for dictation
+- **Max endpoint delay (ms)**: Soniox-documented bounds 500–3000 (default 2000)
+- **Custom voice vocabulary**: opens `SonioxContextTermsScreen` where the user can view the built-in `context.terms` list and edit their own (one term per line, merged at session start)
+- **Chunk Silence Duration**: silence window before detecting a speech boundary
 - **Silence Threshold**: RMS threshold floor for silence/speech detection
-- **New Paragraph Silence Duration**: Delay before inserting a paragraph break
-- **Auto-stop Silence Duration**: Delay before automatically stopping voice recording
+- **Auto-stop Silence Duration**: delay before automatically stopping voice recording
+
+Soniox decides punctuation automatically. HeliBoard supplies recognition hints (built-in + user-editable `context.terms`) and recent editor text (`context.text`) so the model can use it to disambiguate sentence structure, but it does not expose direct replacements, output locale, disfluency removal, or punctuation sensitivity settings.
 
 ### Silence Detection (VoiceRecorder.kt)
 ```kotlin
@@ -149,12 +151,13 @@ MAX_SILENCE_DURATION_MS = 30000L
 - **Empty transcriptions**: ignored
 - **Session cancellation**: pending stream/transcript work is invalidated through the manager session ID
 - **Insertion failures**: logged and the processing indicator is cleared
+- **Soniox `error_code` JSON**: routed to `onStreamError` with `error_type`, status code, message, and request id when present
 
 ## Thread Safety
 
 Callbacks are marshalled back to the main thread before UI/editor operations:
 - Audio recording runs on a background thread
-- Speechmatics callbacks are forwarded onto the main thread
+- Soniox callbacks are forwarded onto the main thread
 - Timer callbacks run on the main thread
 
 This keeps text insertion sequential and avoids concurrent editor mutations.

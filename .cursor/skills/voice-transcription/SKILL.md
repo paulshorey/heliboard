@@ -1,17 +1,17 @@
 ---
 name: voice-transcription
-description: Voice-to-text pipeline using Speechmatics realtime transcription with local audio capture and direct finalized-text insertion. Use when working on microphone recording, audio streaming, transcription results, silence detection, or voice input UI.
+description: Voice-to-text pipeline using Soniox real-time transcription with local audio capture and direct finalized-text insertion. Use when working on microphone recording, audio streaming, transcription results, silence detection, or voice input UI.
 ---
 
 # Voice Transcription
 
-Local recording + Speechmatics realtime streaming transcription + immediate caret insertion.
+Local recording + Soniox real-time streaming transcription + immediate caret insertion.
 
 ## Architecture
 
 ```
-Microphone → VoiceRecorder (PCM16 16kHz) → Speechmatics WebSocket → finalized AddTranscript spans
-                                                                                ↓
+Microphone → VoiceRecorder (PCM16 16kHz) → Soniox WebSocket → final-token spans
+                                                                        ↓
 Text Field ← LatinIME (commitText) ← VoiceInputManager (FIFO queue + reconnect + graceful stop)
 ```
 
@@ -22,44 +22,42 @@ Recording starts **instantly** on mic tap — no network round-trip delay.
 | File | Role |
 |------|------|
 | `VoiceRecorder.kt` | PCM16 capture, adaptive RMS silence detection |
-| `SpeechmaticsTranscriptionClient.kt` | WebSocket client for `wss://eu.rt.speechmatics.com/v2/` with configurable `StartRecognition`, binary audio, `AudioAdded`, `ForceEndOfUtterance`, `AddTranscript`, and `EndOfStream` |
-| `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO transcript queue, reconnects, paragraph timer, Speechmatics locale/config assembly |
-| `TranscriptionPreferences.kt` | Reads/writes sanitized Speechmatics settings and drops the legacy provider key |
-| `TranscriptPostProcessor.kt` | Paragraph-level post-processing of committed text (spelled-out punctuation replacement, etc.) |
-| `LatinIME.java` | Orchestrator — finalizes composing state, commits transcript text at the caret, and triggers post-processing |
-| `TranscriptionScreen.kt` / `SetupAppScreen.kt` | Settings UI for API key, Speechmatics latency/formatting controls, silence thresholds, paragraph timing |
+| `SonioxTranscriptionClient.kt` | WebSocket client for `wss://stt-rt.soniox.com/transcribe-websocket`. Sends JSON start config (auth via `api_key` field), streams binary PCM, parses responses, filters `<end>`/`<fin>` control markers, handles graceful shutdown (empty frame → wait for `finished:true`) |
+| `TranscriptSegment.kt` | Finalized chunk passed from the client to the IME pipeline |
+| `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO transcript queue, reconnects, auto-stop timers, Soniox session config assembly (incl. `context.text` via `setPriorTextProvider`) |
+| `TranscriptionPreferences.kt` | Reads/writes Soniox preferences (incl. user-editable `context.terms`) and clears legacy provider keys (Speechmatics, Deepgram) |
+| `TranscriptPostProcessor.kt` | Paragraph-level post-processing of committed text (spelled-out punctuation replacement, leading-casing correction, etc.) |
+| `LatinIME.java` | Orchestrator — finalizes composing state, commits transcript text at the caret, supplies `context.text` to Soniox via `buildVoiceContextText`, triggers post-processing |
+| `TranscriptionScreen.kt` / `SetupAppScreen.kt` | Settings UI for API key, endpoint detection, diarization, silence thresholds, and auto-stop timing |
+| `SonioxContextTermsScreen.kt` | Settings UI for editing user-defined `context.terms` (one per line). Merged with the built-in list at session start. |
 
 All source files live under `app/src/main/java/helium314/keyboard/latin/voice/` except `LatinIME.java` (parent package) and the settings UI/preferences helpers in `latin/settings` and `settings/screens`.
 
 ## Chunked Audio Flow
 
-1. Mic chunks are captured locally in `VoiceRecorder`
-2. `VoiceInputManager` builds a provider config from settings + current subtype locale
-3. `VoiceInputManager` buffers chunks until Speechmatics sends `RecognitionStarted`
-4. Chunks stream as binary PCM16 frames; Speechmatics replies with `AudioAdded` sequence acks
-5. Partial transcript previews arrive as `AddPartialTranscript` messages (<500ms latency). These are not displayed in the editor (Android's `setComposingText` is unreliable across text fields) but enabling partials improves Speechmatics' pipeline efficiency and reduces final-transcript latency.
-6. Final transcript spans arrive as `AddTranscript` messages
-7. `SpeechmaticsTranscriptionClient` rebuilds span text from token results so spacing and punctuation attachment stay correct across finalized chunks
-8. `VoiceInputManager` delivers final transcripts in FIFO order to `LatinIME`
-9. `LatinIME` inserts each finalized span with `commitText(...)`, replacing any active selection range and restoring a leading space only when the provider marks the span as a continuation
+1. Mic chunks are captured locally in `VoiceRecorder`.
+2. `VoiceInputManager` builds a Soniox session config from preferences + the current subtype locale.
+3. The `SonioxTranscriptionClient` opens the socket and sends the JSON start config; PCM frames are streamed immediately afterwards.
+4. Soniox emits JSON responses containing a `tokens` array. Each token has a `text` and `is_final` flag.
+5. `SonioxTranscriptionClient` collects only `is_final: true` tokens, drops Soniox's special markers (`<end>` from endpoint detection, `<fin>` from manual finalize), concatenates the remaining text directly (Soniox encodes inter-word whitespace inside the token text), trims, and emits a `TranscriptSegment`.
+6. `VoiceInputManager` delivers segments in FIFO order to `LatinIME`.
+7. `LatinIME` inserts each finalized segment with `commitText(...)`, replacing any active selection range and restoring a leading space only when the segment is a non-attaching continuation.
 
-On graceful stop, the client waits for all sent audio to be acknowledged, sends `ForceEndOfUtterance`, then `EndOfStream(last_seq_no=...)`, and only closes after the tail transcript is flushed or a close timeout expires.
+On graceful stop, the client sends an empty WebSocket frame, waits for `{"finished": true}`, and closes with code 1000. An 8-second grace timer guards against the server not emitting `finished`.
 
 ## Transcript Handling
 
-Speechmatics smart formatting is used for finalized transcript text. Key Speechmatics config features:
-- **operating_point**: `"enhanced"` for best accuracy
-- **enable_partials**: `true` — partials are enabled to improve Speechmatics' internal pipeline efficiency and reduce final-transcript latency. They are not displayed in the editor (Android's `setComposingText` is unreliable across text fields).
-- **max_delay**: `2.0s` — Speechmatics recommends this as optimal for accuracy/latency trade-off (~1% degradation vs batch).
-- **output_locale**: Defaults to `en-US` for English (supports `en-GB`, `en-AU` when detected)
-- **diarization**: Speaker diarization with `prefer_current_speaker: true`, `max_speakers: 2` (Speechmatics requires at least 2), and reduced `speaker_sensitivity` to limit spurious speaker splits. Only the primary speaker (S1) is transcribed; other speakers are filtered out from token results (metadata transcript is not used when diarization is on, so aggregation cannot bypass filtering).
-- **additional_vocab**: Custom dictionary for proper nouns, brand names, technical terms with optional `sounds_like` pronunciations
-- **replacements**: Post-transcription word and regex replacements (e.g. brand name corrections, voice assistant trigger normalization)
-- **punctuation**: All marks permitted (`permitted_marks: ["all"]`, which includes commas, periods, `?`, `!` for English, plus locale-specific marks like `、` for Japanese). Sensitivity defaults to 0.30 — well below Speechmatics' own default of 0.5, to reduce premature sentence-ending periods while preserving commas at natural speech pauses.
-- **end_of_utterance_silence_trigger**: Disabled by default (`0`). When enabled, Speechmatics forces a final transcript at every pause exceeding the threshold and terminates that final with a sentence-end mark (a period in English) **regardless of punctuation sensitivity**. That is the root cause of "period-after-every-pause" behavior, so by default we let Speechmatics choose punctuation from prosody alone — commas land at short pauses, periods at natural sentence boundaries. HeliBoard's own local silence timers (`PREF_VOICE_CHUNK_SILENCE_SECONDS`, `PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS`, `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS`) still drive paragraph breaks and auto-stop from the local mic stream.
-- **disfluency removal**: Optional removal of English hesitation words (um, uh, hmm)
+Soniox returns smart-formatted text with punctuation already inserted; HeliBoard does not tune it client-side. Key Soniox config features the client uses:
 
-HeliBoard rebuilds finalized text from Speechmatics token results so word spacing and punctuation attachment survive chunk boundaries, then commits the finalized text exactly once at the current insertion point. If the editor currently has selected text, that selection is overwritten via `commitText(...)`, matching normal typing behavior.
+- **`model`** — pinned to `"stt-rt-v4"` in code. Not user-configurable.
+- **`audio_format` / `sample_rate` / `num_channels`** — `pcm_s16le` / `16000` / `1`, matching `VoiceRecorder` output.
+- **`language_hints`** — single-element ISO language code from the keyboard subtype (e.g. `["en"]`). Omitted when the subtype has no usable language so Soniox auto-detects.
+- **`context.terms`** — built-in list (`HeliBoard`, `Soniox`, `Kubernetes`, `API`, `gnocchi`) merged with the user-editable list from `PREF_SONIOX_CUSTOM_TERMS` (managed in `SonioxContextTermsScreen`), then deduped/trimmed in `SonioxTranscriptionClient.buildSessionConfig`.
+- **`context.text`** — populated at session start (and on reconnect) from up to the most recent 4 000 chars of editor text before the cursor, supplied by `LatinIME.buildVoiceContextText` via `VoiceInputManager.setPriorTextProvider`. Soniox uses this for sentence-structure punctuation, mid-sentence casing, and proper-noun spelling.
+- **`enable_endpoint_detection`** + **`max_endpoint_delay_ms`** — when enabled, Soniox finalizes tokens immediately once it detects the speaker has stopped talking. `max_endpoint_delay_ms` must be between 500 and 3000 ms (Soniox's documented bounds); HeliBoard defaults to 2000 ms.
+- **`enable_speaker_diarization`** — when enabled, the client locks onto the first non-empty `speaker` label observed and drops tokens from other speakers. Soniox uses string speaker IDs (`"1"`, `"2"`, …); the locked ID isn't guaranteed to be the local speaker.
+
+Direct replacement rules, disfluency removal, punctuation sensitivity, and output locale are not configured in HeliBoard's Soniox integration.
 
 ## Post-Processing (TranscriptPostProcessor)
 
@@ -71,33 +69,33 @@ To add new post-processing rules, edit `TranscriptPostProcessor.buildRules()` in
 
 ## Leading-Casing Correction
 
-Speechmatics always capitalizes the first letter of a new `AddTranscript` span (it treats each span as a sentence start). When the user dictates mid-sentence — caret placed inside existing text, or resumed after deleting a trailing period — that capitalization is wrong.
+Real-time STT providers (including Soniox) typically capitalize the first letter of a new utterance. When the user dictates mid-sentence — caret placed inside existing text, or resumed after deleting a trailing period — that capitalization is wrong.
 
 `TranscriptPostProcessor.adjustLeadingCasing(chunk, previousContext)` handles this **before commit**. It is called from `LatinIME.prepareVoiceTranscriptionText`, which reads `VOICE_CASING_LOOKBACK` (16) characters before the cursor and passes them in alongside the chunk.
 
 The first character is lowercased only when all of these hold:
-- the chunk is not `attachesToPrevious` (continuation spans are already correctly cased by Speechmatics and are short-circuited earlier in `prepareVoiceTranscriptionText`)
+- the chunk is not `attachesToPrevious` (segments that start with attaching punctuation are short-circuited earlier in `prepareVoiceTranscriptionText`)
 - the first character is an uppercase letter
 - the previous visible character (ignoring trailing whitespace and closing `"`, `'`, `“”`, `‘’`, `)`, `]`, `}`, `»`) is **not** `.`, `!`, `?`, or a newline — and the context is not empty/whitespace
 - the first word is **not** `I`/`I'm`/`I'll`/`I've`/`I'd`, an all-uppercase acronym (`NASA`), or a camel/Pascal-case word with internal uppercase (`iPhone`, `McDonald's`)
 
-Known tradeoff: proper nouns dictated as the first word of a mid-sentence chunk (e.g. `Amazon`, `Paris`) are lowercased. Mitigated by the `additional_vocab` dictionary for known brands.
+Known tradeoff: proper nouns dictated as the first word of a mid-sentence chunk (e.g. `Amazon`, `Paris`) are lowercased. Soniox does not currently expose a custom-vocab feature that would let us bias such words.
 
 ## Paragraph Breaks
 
-After configured silence, `VoiceInputManager` fires `onNewParagraphRequested()` → LatinIME inserts `"\n\n"` when processing is idle (deferred so it doesn't interleave with pending transcript spans).
+Silence-driven automatic paragraph insertion is disabled because inserting `"\n\n"` into arbitrary host fields caused form submissions and other unintended side effects. Explicit spoken commands such as "New paragraph." are still handled by `TranscriptPostProcessor`.
 
 ## Thread Safety
 
 - Audio recording: background thread
-- Speechmatics callbacks: forwarded to main thread
+- Soniox callbacks: forwarded to main thread
 - Timer callbacks: main thread
 - Text insertion: always sequential on main thread
 
 ## Additional Resources
 
 - Detailed data flow: [data-flow.md](data-flow.md)
-- Speechmatics API reference and settings keys: [api-reference.md](api-reference.md)
+- Soniox API reference and settings keys: [api-reference.md](api-reference.md)
 
 ## Update documentation
 

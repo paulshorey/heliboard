@@ -157,7 +157,7 @@ object Defaults {
     val PREF_TOOLBAR_KEYS = defaultToolbarPref
     const val PREF_AUTO_SHOW_TOOLBAR = false
     const val PREF_AUTO_HIDE_TOOLBAR = false
-  val PREF_CLIPBOARD_TOOLBAR_KEYS = defaultClipboardToolbarPref
+    val PREF_CLIPBOARD_TOOLBAR_KEYS = defaultClipboardToolbarPref
     const val PREF_ABC_AFTER_EMOJI = false
     const val PREF_ABC_AFTER_CLIP = false
     const val PREF_ABC_AFTER_SYMBOL_SPACE = true
@@ -165,29 +165,18 @@ object Defaults {
     const val PREF_REMOVE_REDUNDANT_POPUPS = false
     const val PREF_SPACE_BAR_TEXT = ""
     const val PREF_TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss"
-    const val PREF_SPEECHMATICS_API_KEY = ""
-    // 2.0s gives Speechmatics enough context for good accuracy (<1% degradation
-    // vs batch) while keeping final-transcript latency under control. Combined
-    // with partials (<500ms), perceived latency is minimal.
-    const val PREF_SPEECHMATICS_MAX_DELAY_MILLIS = 2000
-    // 0 disables the server-side end-of-utterance detector. Leaving it enabled
-    // forces a final transcript after every short pause, and Speechmatics always
-    // terminates that forced final with a sentence-end mark (a period in
-    // English) regardless of punctuation sensitivity. Disabling it lets
-    // Speechmatics insert commas at short pauses and periods only at natural
-    // sentence boundaries.
-    const val PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS = 0
-    const val PREF_SPEECHMATICS_REMOVE_DISFLUENCIES = true
-    // Speechmatics' native default is 0.5 (50). Lower values reduce how readily
-    // the model inserts sentence-ending periods — the main source of premature
-    // sentence splitting in dictation. 0.3 still preserves commas at natural
-    // speech pauses but substantially reduces spurious period insertion compared
-    // to 0.4 or 0.5. Range 0–100 (maps to 0.0–1.0).
-    const val PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT = 30
-    const val PREF_SPEECHMATICS_DIARIZATION = true
+    const val PREF_SONIOX_API_KEY = ""
+    // Soniox finalizes tokens immediately when the model detects the speaker
+    // has stopped talking. Enabled by default to keep dictation latency low.
+    const val PREF_SONIOX_ENABLE_ENDPOINT_DETECTION = true
+    // Soniox accepts values between 500 and 3000 ms. 2000 ms is the API default.
+    const val PREF_SONIOX_MAX_ENDPOINT_DELAY_MS = 2000
+    const val PREF_SONIOX_DIARIZATION = true
+    // User-editable Soniox `context.terms`, stored as a single string with one term per line.
+    // The built-in product/technical term list is added on top of this in the client.
+    const val PREF_SONIOX_CUSTOM_TERMS = ""
     const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 1
     const val PREF_VOICE_SILENCE_THRESHOLD = 220
-    const val PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS = 10
     const val PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = 30
     const val PREF_EMOJI_RECENT_KEYS = ""
     const val PREF_LAST_SHOWN_EMOJI_CATEGORY_PAGE_ID = 0

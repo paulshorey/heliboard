@@ -231,7 +231,7 @@
     <string name="backup_restored">Backup restored</string>
     <!-- Preferences item for format for timestamp keycode -->
     <string name="timestamp_format_title">Format for timestamp key</string>
-    <!-- Voice Input (Speechmatics transcription) settings -->
+    <!-- Voice Input (Soniox transcription) settings -->
     <string name="settings_screen_setup_app">Setup this app</string>
     <string name="settings_screen_transcription">Transcription</string>
     <!-- Settings screen showing saved standalone fullapp edits and archived history -->
@@ -261,18 +261,35 @@
     <string name="fullapp_drafts_ime_options">IME options: 0x%s</string>
     <!-- Private IME options label in the fullapp drafts screen -->
     <string name="fullapp_drafts_private_ime_options">Private IME options: %s</string>
-    <string name="speechmatics_api_key_title">Speechmatics API Key</string>
-    <string name="speechmatics_api_key_summary">API key for voice transcription. Get from portal.speechmatics.com</string>
-    <string name="speechmatics_max_delay_title">Final transcript delay (seconds)</string>
-    <string name="speechmatics_end_of_utterance_title">End-of-utterance silence (seconds)</string>
-    <string name="speechmatics_remove_disfluencies_title">Remove English disfluencies</string>
-    <string name="speechmatics_remove_disfluencies_summary">Removes fillers like um and uh before text is inserted. Speechmatics only supports this in English.</string>
-    <string name="speechmatics_punctuation_sensitivity_title">Punctuation sensitivity (0.0-1.0)</string>
-    <string name="speechmatics_diarization_title">Speaker diarization</string>
-    <string name="speechmatics_diarization_summary">Only the first detected speaker (S1) is inserted; other labeled speakers are dropped. The service still tracks up to two voices internally.</string>
+    <string name="soniox_api_key_title">Soniox API Key</string>
+    <string name="soniox_api_key_summary">API key for voice transcription. Get from console.soniox.com</string>
+    <string name="soniox_enable_endpoint_detection_title">Enable endpoint detection</string>
+    <string name="soniox_enable_endpoint_detection_summary">Lets Soniox finalize tokens immediately when it detects the speaker has stopped talking. Reduces dictation latency.</string>
+    <string name="soniox_max_endpoint_delay_ms_title">Max endpoint delay (ms, 500–3000)</string>
+    <string name="soniox_diarization_title">Speaker diarization</string>
+    <string name="soniox_diarization_summary">Only the first detected speaker is inserted; tokens from other speakers are dropped.</string>
+    <!-- Title for the per-user "context terms" / custom vocabulary screen, used both as the row in the transcription screen and as the screen title. -->
+    <string name="soniox_context_terms_title">Custom voice vocabulary</string>
+    <!-- Summary shown for the row that opens the custom voice vocabulary screen. -->
+    <string name="soniox_context_terms_summary">Add product names, jargon and proper nouns so Soniox spells them correctly during dictation.</string>
+    <!-- Intro paragraph at the top of the custom voice vocabulary screen explaining what the list is used for. -->
+    <string name="soniox_context_terms_intro">Terms here are sent to Soniox as recognition hints (`context.terms`) at the start of every voice session. They bias the model toward the correct spelling and casing for words it might otherwise mis-hear.</string>
+    <!-- Section header for the read-only built-in terms list. -->
+    <string name="soniox_context_terms_builtin_section">Built-in terms</string>
+    <!-- Caption under the built-in terms list. -->
+    <string name="soniox_context_terms_builtin_summary">These ship with HeliBoard and are always sent.</string>
+    <!-- Section header for the user-editable terms list. -->
+    <string name="soniox_context_terms_user_section">Your terms</string>
+    <!-- Caption under the user-editable terms list explaining the format. -->
+    <string name="soniox_context_terms_user_summary">One term per line. Examples: a coworker\'s last name, a project codename, a medication name.</string>
+    <!-- Label inside the user-terms text field. -->
+    <string name="soniox_context_terms_user_field_label">Custom terms</string>
+    <!-- Placeholder for an empty user-terms text field. -->
+    <string name="soniox_context_terms_user_placeholder">Add one term per line</string>
+    <!-- Counter under the user-terms text field showing how many terms will be sent. -->
+    <string name="soniox_context_terms_user_count">%1$d term(s) will be sent</string>
     <string name="voice_chunk_silence_seconds_title">Chunk silence duration (seconds)</string>
     <string name="voice_silence_threshold_title">Silence threshold (RMS loudness)</string>
-    <string name="voice_new_paragraph_silence_seconds_title">New paragraph silence duration (seconds)</string>
     <string name="voice_auto_stop_silence_seconds_title">Auto-stop silence duration (seconds)</string>
     <string name="setup_app_breadcrumb">Settings -&gt; Setup this app</string>
     <string name="setup_app_checklist_title">Checklist</string>

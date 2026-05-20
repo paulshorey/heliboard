@@ -191,11 +191,10 @@ public class LatinIME extends InputMethodService implements
 
     private final ClipboardHistoryManager mClipboardHistoryManager = new ClipboardHistoryManager(this);
 
-    // Voice input manager (local recording + Speechmatics transcription)
+    // Voice input manager (local recording + Soniox transcription)
     private VoiceInputManager mVoiceInputManager;
     // Wake lock to prevent CPU sleep during voice recording
     private PowerManager.WakeLock mVoiceWakeLock;
-    private boolean mPendingNewParagraph = false;
     private static final int FULLAPP_SYNC_MAX_CHARS = 100_000;
     private static final int FULLAPP_SYNC_RETRY_ATTEMPTS = 5;
     private static final long FULLAPP_SYNC_RETRY_DELAY_MS = 120L;
@@ -575,6 +574,7 @@ public class LatinIME extends InputMethodService implements
         // Initialize voice input manager
         mVoiceInputManager = new VoiceInputManager(this);
         setupVoiceInputListener();
+        mVoiceInputManager.setPriorTextProvider(this::buildVoiceContextText);
 
         // Register to receive ringer mode change.
         final IntentFilter filter = new IntentFilter();
@@ -2056,13 +2056,6 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onProcessingIdle() {
                 try {
-                    if (mPendingNewParagraph
-                            && mVoiceInputManager != null
-                            && mVoiceInputManager.isIdle()
-                            && !mVoiceInputManager.hasPendingProcessing()) {
-                        insertParagraphBreak();
-                        mPendingNewParagraph = false;
-                    }
                     if (mVoiceInputManager == null || !mVoiceInputManager.hasPendingProcessing()) {
                         mKeyboardSwitcher.hideProcessingIndicator();
                     }
@@ -2097,30 +2090,6 @@ public class LatinIME extends InputMethodService implements
             }
 
             @Override
-            public void onPartialTranscript(@NonNull String text) {
-                // Partials are enabled server-side to improve Speechmatics' internal
-                // pipeline efficiency and reduce final-transcript latency, but we do
-                // not display them in the editor. Android's setComposingText is not
-                // reliable across all text fields and causes duplicate text issues.
-            }
-
-            @Override
-            public void onNewParagraphRequested() {
-                try {
-                    final boolean managerStillProcessing =
-                            mVoiceInputManager != null && mVoiceInputManager.hasPendingProcessing();
-                    if (managerStillProcessing) {
-                        mPendingNewParagraph = true;
-                    } else {
-                        Log.i(TAG, "New paragraph break inserted (recording remains active)");
-                        insertParagraphBreak();
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "Error inserting paragraph break: " + e.getMessage(), e);
-                }
-            }
-
-            @Override
             public void onPendingProcessingCancelled() {
                 resetVoiceInputState();
             }
@@ -2138,22 +2107,6 @@ public class LatinIME extends InputMethodService implements
                 launchSetupAppSettings();
             }
         });
-    }
-
-    private void insertParagraphBreak() {
-        sendEnterKeyEvents(2);
-    }
-
-    private void sendEnterKeyEvents(final int count) {
-        mInputLogic.mConnection.beginBatchEdit();
-        mInputLogic.finishInput();
-        for (int i = 0; i < count; i++) {
-            mInputLogic.mConnection.sendKeyEvent(
-                    new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER));
-            mInputLogic.mConnection.sendKeyEvent(
-                    new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER));
-        }
-        mInputLogic.mConnection.endBatchEdit();
     }
 
     /**
@@ -2304,11 +2257,37 @@ public class LatinIME extends InputMethodService implements
     }
 
     /**
+     * Maximum chars of editor context sent as Soniox `context.text`. Soniox's
+     * documented context limit is ~10,000 chars / 8,000 tokens for the entire
+     * context object; staying well under that leaves headroom for terms.
+     */
+    private static final int VOICE_CONTEXT_TEXT_LOOKBACK = 4000;
+
+    /**
+     * Provider hook for {@link VoiceInputManager#setPriorTextProvider}. Reads
+     * up to {@link #VOICE_CONTEXT_TEXT_LOOKBACK} characters of editor text
+     * before the cursor so Soniox can use it as `context.text` to inform
+     * sentence-structure punctuation, casing, and proper-noun spelling.
+     */
+    @Nullable
+    private String buildVoiceContextText() {
+        try {
+            if (mInputLogic == null || mInputLogic.mConnection == null) return null;
+            final CharSequence before =
+                    mInputLogic.mConnection.getTextBeforeCursor(VOICE_CONTEXT_TEXT_LOOKBACK, 0);
+            if (before == null || before.length() == 0) return null;
+            return before.toString();
+        } catch (Exception e) {
+            Log.e(TAG, "Error reading editor context for Soniox: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * Reset all voice input state variables.
      * Called when voice input session ends.
      */
     private void resetVoiceInputState() {
-        mPendingNewParagraph = false;
         mKeyboardSwitcher.hideProcessingIndicator();
     }
 
@@ -2484,9 +2463,6 @@ public class LatinIME extends InputMethodService implements
     private void launchFullappEditorActivity() {
         mInputLogic.commitTyped(mSettings.getCurrent(), LastComposedWord.NOT_A_SEPARATOR);
         stopVoiceRecordingGracefully();
-
-        // Prevent the paragraph timer from inserting "\n\n" into the field before we read it.
-        mPendingNewParagraph = false;
 
         // Use fallback path to avoid trailing newlines that getExtractedText adds (e.g. WebView)
         String initialText = getOriginalFieldTextForFullapp();

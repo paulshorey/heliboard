@@ -51,7 +51,7 @@ This is the main IME engine. It owns the InputMethodService lifecycle, the curre
 - `suggestions/` - suggestion strip and more-suggestions UI.
 - `touchinputconsumer/` - gesture typing consumer hook.
 - `utils/` - cross-cutting helpers used across the IME.
-- `voice/` - Speechmatics recording, streaming, and transcript post-processing.
+- `voice/` - Soniox recording, streaming, and transcript post-processing.
 
 ## Non-obvious notes
 - The simplified input model keeps the current word in `WordComposer`, not in the host editor.

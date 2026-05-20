@@ -1,6 +1,6 @@
 # HeliBoard
 
-HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds a Speechmatics-backed voice pipeline, smart auto-capitalization work, and a standalone full-app editing mode.
+HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds a Soniox-backed voice pipeline, smart auto-capitalization work, and a standalone full-app editing mode.
 
 ## Repo map
 - `app/` - Android application module and the main Gradle project to build for product work.
@@ -12,7 +12,7 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
 - `app/src/main/res/` and `app/src/main/assets/` - Android resources, IME metadata, layout definitions, popup text, emoji data, and bundled dictionaries.
 - `app/src/main/jni/` - native dictionary/suggestion/proximity code used through JNI.
 - `app/src/test/` - JVM and Robolectric tests.
-- `docs/` - deeper design notes such as `input-simplified.md` and `speechmatics-transcription.md`.
+- `docs/` - deeper design notes such as `input-simplified.md` and `soniox-transcription.md`.
 - `tools/` - SDK setup, canonical APK build, release scripts, and the `tools:make-emoji-keys` helper module.
 
 ## High-value entry points
@@ -21,7 +21,7 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
 - `app/src/main/java/helium314/keyboard/latin/inputlogic/InputLogic.java` + `app/src/main/java/helium314/keyboard/latin/WordComposer.java` + `app/src/main/java/helium314/keyboard/latin/RichInputConnection.java` - core text entry pipeline.
 - `app/src/main/java/helium314/keyboard/latin/inputlogic/EditorWordMirror.java` - mirrors the keyboard-owned current word into the host app.
 - `app/src/main/java/helium314/keyboard/latin/Suggest.kt` - suggestion request pipeline entry point.
-- `app/src/main/java/helium314/keyboard/latin/voice/VoiceInputManager.kt` + `app/src/main/java/helium314/keyboard/latin/voice/SpeechmaticsTranscriptionClient.kt` - voice recording and realtime transcription.
+- `app/src/main/java/helium314/keyboard/latin/voice/VoiceInputManager.kt` + `app/src/main/java/helium314/keyboard/latin/voice/SonioxTranscriptionClient.kt` - voice recording and realtime transcription.
 - `app/src/main/java/helium314/keyboard/settings/FullappEditorActivity.kt` - standalone full-screen editor mode.
 - `app/src/main/java/helium314/keyboard/latin/settings/Settings.java` + `Settings.kt` + `Defaults.kt` + `TranscriptionPreferences.kt` - runtime preference keys, defaults, and typed access.
 - `app/src/main/java/helium314/keyboard/keyboard/internal/keyboard_parser/KeyboardParser.kt` + `app/src/main/assets/layouts/` - keyboard layout parsing and source layout data.

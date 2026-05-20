@@ -1,128 +1,130 @@
 # API Reference
 
-Quick reference for the external APIs and settings used in voice transcription.
+Quick reference for the external API and settings used in voice transcription.
 
-## Speechmatics Realtime API (Transcription)
+## Soniox Real-Time WebSocket API (Transcription)
 
-HeliBoard uses the Speechmatics **Realtime WebSocket** API (`wss://eu.rt.speechmatics.com/v2/`) with raw PCM16 frames. The websocket is authenticated with `Authorization: Bearer <API_KEY>`, then initialized with a `StartRecognition` JSON message.
+HeliBoard uses the Soniox **Real-Time STT WebSocket** API (`wss://stt-rt.soniox.com/transcribe-websocket`) with raw PCM16 frames. Authentication is in the JSON body, not in HTTP headers. Documentation: <https://soniox.com/docs/api-reference/stt/websocket-api>.
 
-### StartRecognition payload
+### Start config message (first WebSocket text frame)
+
 ```json
 {
-  "message": "StartRecognition",
-  "audio_format": {
-    "type": "raw",
-    "encoding": "pcm_s16le",
-    "sample_rate": 16000
+  "api_key": "<SONIOX_API_KEY>",
+  "model": "stt-rt-v4",
+  "audio_format": "pcm_s16le",
+  "sample_rate": 16000,
+  "num_channels": 1,
+  "language_hints": ["en"],
+  "context": {
+    "terms": ["HeliBoard", "Soniox", "Kubernetes", "API", "gnocchi", "MyProject"],
+    "text": "<up to 4000 chars of editor text before the cursor>"
   },
-  "transcription_config": {
-    "language": "en",
-    "output_locale": "en-US",
-    "max_delay": 1.25,
-    "max_delay_mode": "flexible",
-    "enable_partials": false,
-    "enable_entities": true,
-    "operating_point": "enhanced",
-    "punctuation_overrides": {
-      "permitted_marks": ["all"],
-      "sensitivity": 0.5
-    },
-    "diarization": "speaker",
-    "speaker_diarization_config": {
-      "max_speakers": 2,
-      "prefer_current_speaker": true,
-      "speaker_sensitivity": 0.35
-    },
-    "additional_vocab": [
-      "HeliBoard",
-      {"content": "gnocchi", "sounds_like": ["nyohki", "nokey", "nochi"]}
-    ],
-    "transcript_filtering_config": {
-      "remove_disfluencies": true,
-      "replacements": [
-        {"from": "heli board", "to": "HeliBoard"},
-        {"from": "/^[Oo]kay google$/", "to": "OK Google"}
-      ]
-    }
-  }
+  "enable_endpoint_detection": true,
+  "max_endpoint_delay_ms": 2000,
+  "enable_speaker_diarization": false
 }
 ```
 
-### Key config features
-- **operating_point**: Set to `"enhanced"` for best accuracy
-- **output_locale**: Defaults to `en-US` for English (also supports `en-GB`, `en-AU`)
-- **diarization**: When enabled, speaker labels (`S1`, `S2`, `UU`) appear in each token's `alternatives[].speaker` field. We filter to only the primary speaker (S1) to ignore background voices. Speechmatics does not allow `max_speakers` below 2; a third distinct voice may still be lumped into S1/S2 rather than dropped. `speaker_sensitivity` is set below the API default to reduce false multi-speaker splits. With diarization on, `metadata.transcript` is ignored so mixed-speaker summaries cannot leak past client-side filtering.
-- **additional_vocab**: Custom dictionary for proper nouns, brand names, technical terms. Supports optional `sounds_like` pronunciations.
-- **replacements**: Post-transcription word/regex replacements in `transcript_filtering_config`. Regex patterns use ECMAScript format with `/pattern/` delimiters.
-- **punctuation_overrides**: `permitted_marks: ["all"]` enables every mark the active language pack supports (for English: `. , ! ?`; other languages also include locale-specific marks like Japanese `、 。`). `sensitivity` (0.0–1.0) controls how aggressively punctuation is inserted — higher values bias toward more commas at short pauses. Speechmatics' native default is `0.5`; HeliBoard defaults to `0.55`.
-- **end_of_utterance_silence_trigger**: Kept at `0` (disabled) by default because a non-zero value forces a final transcript at every pause past that threshold, and Speechmatics always terminates a forced final with a sentence-end mark (a period in English). That makes HeliBoard print a period after every short pause rather than a comma. Leave it at 0 and let Speechmatics pick punctuation from prosody; use HeliBoard's local paragraph-silence timer for paragraph breaks instead.
-- **remove_disfluencies**: Removes English hesitation words (um, uh, hmm, etc.)
+### Key config fields
+
+- **`api_key`** (required): Soniox API key. Authentication failures arrive later as JSON responses with `error_code` (`Authentication failed` etc.) and the connection closes.
+- **`model`** (required): real-time STT model. HeliBoard pins `"stt-rt-v4"`.
+- **`audio_format` / `sample_rate` / `num_channels`** (required for raw PCM): `pcm_s16le` / `16000` / `1` to match `VoiceRecorder` output.
+- **`language_hints`** (optional): array of ISO language codes. HeliBoard sends a single-element array based on the active keyboard subtype, or omits the field entirely so Soniox auto-detects.
+- **`context.terms`** (optional): recognition hints. HeliBoard sends the union of a built-in list (`HeliBoard`, `Soniox`, `Kubernetes`, `API`, `gnocchi`) and the user's custom terms from `PREF_SONIOX_CUSTOM_TERMS` (one per line, managed in `SonioxContextTermsScreen`). Merged, trimmed, and deduplicated by `SonioxTranscriptionClient.buildSessionConfig`.
+- **`context.text`** (optional): free-form prior text. HeliBoard sends up to the last 4 000 characters of editor text before the cursor (`LatinIME.buildVoiceContextText` via `VoiceInputManager.setPriorTextProvider`). Soniox uses this for sentence-structure punctuation, mid-sentence casing, and proper-noun spelling. Reconnects re-fetch the prior text so the running transcript stays in context.
+- **`enable_endpoint_detection`** (boolean, optional): when true, Soniox finalizes tokens immediately once it detects the speaker has stopped talking.
+- **`max_endpoint_delay_ms`** (number, optional): valid range **500–3000 ms**, default **2000 ms**.
+- **`enable_speaker_diarization`** (boolean, optional): when true, every token includes a `speaker` field. HeliBoard uses this to lock onto the first observed speaker and drop tokens from later speakers.
+
+Other documented fields (`enable_language_identification`, `translation`, `client_reference_id`) are not used.
 
 ### Audio format
-- **Encoding**: PCM16 (16-bit signed, little-endian), mono, 16 kHz
-- **Transport**: Binary websocket frames after `RecognitionStarted`
 
-### Important received messages
-```json
-{
-  "message": "RecognitionStarted"
-}
-```
+- **Encoding**: PCM16 (16-bit signed, little-endian), mono, 16 kHz.
+- **Transport**: Binary WebSocket frames after the start config has been queued.
+
+### Server responses
+
+A typical successful response:
 
 ```json
 {
-  "message": "AudioAdded",
-  "seq_no": 42
-}
-```
-
-```json
-{
-  "message": "AddTranscript",
-  "metadata": {
-    "start_time": 0.0,
-    "end_time": 1.2,
-    "transcript": "hello world"
-  },
-  "results": [
+  "tokens": [
     {
-      "type": "word",
-      "attaches_to": "none",
-      "alternatives": [{"content": "hello", "speaker": "S1"}]
-    },
-    {
-      "type": "punctuation",
-      "attaches_to": "previous",
-      "alternatives": [{"content": ".", "speaker": "S1"}]
+      "text": "Hello",
+      "start_ms": 600,
+      "end_ms": 760,
+      "confidence": 0.97,
+      "is_final": true,
+      "speaker": "1"
     }
-  ]
+  ],
+  "final_audio_proc_ms": 760,
+  "total_audio_proc_ms": 880
 }
 ```
 
+- **Final tokens** (`is_final: true`) are confirmed and never repeated. HeliBoard concatenates them as they arrive.
+- **Non-final tokens** (`is_final: false`) are partials that update on every response. HeliBoard drops them — the IME only commits stable text.
+- Token text already encodes inter-word whitespace (e.g. `"Hello"`, `" world"`, `"."`); concatenating then trimming yields correctly spaced output.
+- When `enable_speaker_diarization` is on, each token carries a string `speaker` ID.
+
+### Finished response
+
 ```json
 {
-  "message": "EndOfTranscript"
+  "tokens": [],
+  "final_audio_proc_ms": 1560,
+  "total_audio_proc_ms": 1680,
+  "finished": true
 }
 ```
+
+Sent after the client closes the audio stream. The server then closes the WebSocket.
+
+### Error response
+
+```json
+{
+  "tokens": [],
+  "error_code": 401,
+  "error_type": "unauthenticated",
+  "error_message": "Incorrect API key",
+  "request_id": "..."
+}
+```
+
+Soniox emits this and immediately closes the connection. HeliBoard surfaces it via `onStreamError`.
 
 ### Graceful stop
-- Client can send `ForceEndOfUtterance` before ending the stream to flush the tail of an utterance sooner
-- Client keeps track of `AudioAdded.seq_no`
-- On stop, once all sent audio chunks are acknowledged, client sends:
 
-```json
-{
-  "message": "EndOfStream",
-  "last_seq_no": 42
-}
-```
+To end the session cleanly:
+
+1. Stop the microphone.
+2. Send an **empty WebSocket frame** (binary or text).
+3. Wait for `{"finished": true}` (HeliBoard uses an 8 s grace timeout).
+4. Close the socket with code 1000.
+
+There is no per-chunk audio acknowledgement to track. (Soniox also exposes an optional manual finalize control message `{"type": "finalize"}` for mid-stream finalization; HeliBoard does not use it.)
+
+### Special control tokens
+
+Soniox emits two reserved markers as final tokens inside the regular `tokens` array. Raw WebSocket consumers must filter them or they leak into the transcript as literal text. HeliBoard's `SonioxTranscriptionClient` filters both via the `STREAM_MARKERS` set:
+
+- **`<end>`** — appears once at the end of every utterance when `enable_endpoint_detection` is on. Documented at <https://soniox.com/docs/stt/rt/endpoint-detection>.
+- **`<fin>`** — appears at the end of every manual finalize segment. Documented at <https://soniox.com/docs/stt/rt/manual-finalization>. HeliBoard does not send `{"type": "finalize"}` today, but the filter is in place defensively.
+
+The Soniox SDKs filter these via `filterSpecialTokens()`; raw WebSocket users (HeliBoard) implement the same filter explicitly.
 
 ### Common HTTP / connection errors
+
 | Code | Meaning |
 |------|---------|
 | 401/403 | Invalid API key |
 | 429 | Rate limited |
-| 5xx | Speechmatics service failure |
+| 5xx | Soniox service failure |
 
 ---
 
@@ -130,13 +132,11 @@ HeliBoard uses the Speechmatics **Realtime WebSocket** API (`wss://eu.rt.speechm
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `PREF_SPEECHMATICS_API_KEY` | String | Speechmatics API key for transcription |
-| `PREF_SPEECHMATICS_MAX_DELAY_MILLIS` | Int | Final transcript latency target in milliseconds |
-| `PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS` | Int | Speechmatics server-side end-of-utterance trigger in milliseconds |
-| `PREF_SPEECHMATICS_REMOVE_DISFLUENCIES` | Boolean | Removes English hesitation words like "um" and "uh" |
-| `PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT` | Int | Speechmatics punctuation sensitivity as a percentage (default 50) |
-| `PREF_SPEECHMATICS_DIARIZATION` | Boolean | Enable speaker diarization to filter to primary speaker only |
+| `PREF_SONIOX_API_KEY` | String | Soniox API key for transcription |
+| `PREF_SONIOX_ENABLE_ENDPOINT_DETECTION` | Boolean | Lets Soniox finalize tokens as soon as it detects the speaker has stopped talking |
+| `PREF_SONIOX_MAX_ENDPOINT_DELAY_MS` | Int | Maximum endpoint delay in ms (Soniox-documented bounds: 500–3000) |
+| `PREF_SONIOX_DIARIZATION` | Boolean | Enable speaker diarization to filter to primary speaker only |
+| `PREF_SONIOX_CUSTOM_TERMS` | String | User-defined `context.terms`, one per line. Merged with the built-in list at session start. |
 | `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Silence window before treating speech as paused |
 | `PREF_VOICE_SILENCE_THRESHOLD` | Int | RMS threshold used for silence detection |
-| `PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS` | Int | Silence duration before inserting a new paragraph |
 | `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` | Int | Silence duration before auto-stopping recording |

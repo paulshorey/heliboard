@@ -35,11 +35,14 @@ import helium314.keyboard.latin.settings.TranscriptionPreferences
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.getActivity
 import helium314.keyboard.latin.utils.prefs
+import helium314.keyboard.settings.NextScreenIcon
 import helium314.keyboard.settings.SearchSettingsScreen
 import helium314.keyboard.settings.Setting
 import helium314.keyboard.settings.SettingsActivity
 import helium314.keyboard.settings.SettingsContainer
+import helium314.keyboard.settings.SettingsDestination
 import helium314.keyboard.settings.Theme
+import helium314.keyboard.settings.preferences.Preference
 import helium314.keyboard.settings.previewDark
 
 @Composable
@@ -52,28 +55,19 @@ fun TranscriptionScreen(
     if ((b?.value ?: 0) < 0)
         Log.v("irrelevant", "stupid way to trigger recomposition on preference change")
 
-    // API keys
-    var speechmaticsApiKey by remember {
-        mutableStateOf(TranscriptionPreferences.readSpeechmaticsApiKey(prefs))
+    var sonioxApiKey by remember {
+        mutableStateOf(TranscriptionPreferences.readSonioxApiKey(prefs))
     }
-    var speechmaticsMaxDelay by remember {
+    var sonioxDiarization by remember {
+        mutableStateOf(TranscriptionPreferences.readSonioxDiarization(prefs))
+    }
+    var sonioxEnableEndpointDetection by remember {
+        mutableStateOf(TranscriptionPreferences.readSonioxEnableEndpointDetection(prefs))
+    }
+    var sonioxMaxEndpointDelayMs by remember {
         mutableStateOf(
-            TranscriptionPreferences.readSpeechmaticsMaxDelaySeconds(prefs).toString()
+            TranscriptionPreferences.readSonioxMaxEndpointDelayMs(prefs).toString()
         )
-    }
-    var speechmaticsEndOfUtterance by remember {
-        mutableStateOf(
-            TranscriptionPreferences.readSpeechmaticsEndOfUtteranceSeconds(prefs).toString()
-        )
-    }
-    var speechmaticsRemoveDisfluencies by remember {
-        mutableStateOf(TranscriptionPreferences.readSpeechmaticsRemoveDisfluencies(prefs))
-    }
-    var speechmaticsPunctuationSensitivity by remember {
-        mutableStateOf(TranscriptionPreferences.readSpeechmaticsPunctuationSensitivity(prefs).toString())
-    }
-    var speechmaticsDiarization by remember {
-        mutableStateOf(TranscriptionPreferences.readSpeechmaticsDiarization(prefs))
     }
     var chunkSilenceSeconds by remember {
         mutableStateOf(
@@ -111,98 +105,52 @@ fun TranscriptionScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(innerPadding)
             ) {
-                // Speechmatics API Key
                 InlineTextField(
-                    label = stringResource(R.string.speechmatics_api_key_title),
-                    value = speechmaticsApiKey,
+                    label = stringResource(R.string.soniox_api_key_title),
+                    value = sonioxApiKey,
                     onValueChange = { newValue ->
-                        speechmaticsApiKey = newValue.trim()
-                        TranscriptionPreferences.writeSpeechmaticsApiKey(prefs, newValue)
+                        sonioxApiKey = newValue.trim()
+                        TranscriptionPreferences.writeSonioxApiKey(prefs, newValue)
                     },
                     minLines = 1,
                     maxLines = 2
                 )
-                InlineTextField(
-                    label = stringResource(R.string.speechmatics_max_delay_title),
-                    value = speechmaticsMaxDelay,
-                    onValueChange = { newValue ->
-                        speechmaticsMaxDelay = newValue
-                        newValue.toDoubleOrNull()?.let { parsed ->
-                            val sanitized = TranscriptionPreferences.sanitizeSpeechmaticsMaxDelaySeconds(parsed)
-                            TranscriptionPreferences.writeSpeechmaticsMaxDelayTenths(
-                                prefs,
-                                (sanitized * 10).toInt()
-                            )
-                            val currentEndOfUtterance =
-                                TranscriptionPreferences.readSpeechmaticsEndOfUtteranceSeconds(prefs)
-                            val adjustedEndOfUtterance = minOf(
-                                currentEndOfUtterance,
-                                TranscriptionPreferences.maxEndOfUtteranceForMaxDelay(sanitized)
-                            )
-                            if (adjustedEndOfUtterance != currentEndOfUtterance) {
-                                TranscriptionPreferences.writeSpeechmaticsEndOfUtteranceMs(
-                                    prefs,
-                                    (adjustedEndOfUtterance * 1000).toInt()
-                                )
-                                speechmaticsEndOfUtterance = adjustedEndOfUtterance.toString()
-                            }
-                        }
-                    },
-                    minLines = 1,
-                    maxLines = 1
-                )
-                InlineTextField(
-                    label = stringResource(R.string.speechmatics_end_of_utterance_title),
-                    value = speechmaticsEndOfUtterance,
-                    onValueChange = { newValue ->
-                        speechmaticsEndOfUtterance = newValue
-                        newValue.toDoubleOrNull()?.let { parsed ->
-                            val maxDelay = TranscriptionPreferences.readSpeechmaticsMaxDelaySeconds(prefs)
-                            val sanitized = TranscriptionPreferences.sanitizeSpeechmaticsEndOfUtteranceSeconds(
-                                value = parsed,
-                                maxDelaySeconds = maxDelay
-                            )
-                            TranscriptionPreferences.writeSpeechmaticsEndOfUtteranceMs(
-                                prefs,
-                                (sanitized * 1000).toInt()
-                            )
-                        }
-                    },
-                    minLines = 1,
-                    maxLines = 1
-                )
                 BooleanSettingRow(
-                    label = stringResource(R.string.speechmatics_remove_disfluencies_title),
-                    summary = stringResource(R.string.speechmatics_remove_disfluencies_summary),
-                    checked = speechmaticsRemoveDisfluencies,
+                    label = stringResource(R.string.soniox_diarization_title),
+                    summary = stringResource(R.string.soniox_diarization_summary),
+                    checked = sonioxDiarization,
                     onCheckedChange = { checked ->
-                        speechmaticsRemoveDisfluencies = checked
-                        TranscriptionPreferences.writeSpeechmaticsRemoveDisfluencies(prefs, checked)
+                        sonioxDiarization = checked
+                        TranscriptionPreferences.writeSonioxDiarization(prefs, checked)
+                    }
+                )
+                Preference(
+                    name = stringResource(R.string.soniox_context_terms_title),
+                    description = stringResource(R.string.soniox_context_terms_summary),
+                    onClick = {
+                        SettingsDestination.navigateTo(SettingsDestination.SonioxContextTerms)
+                    },
+                ) { NextScreenIcon() }
+                BooleanSettingRow(
+                    label = stringResource(R.string.soniox_enable_endpoint_detection_title),
+                    summary = stringResource(R.string.soniox_enable_endpoint_detection_summary),
+                    checked = sonioxEnableEndpointDetection,
+                    onCheckedChange = { checked ->
+                        sonioxEnableEndpointDetection = checked
+                        TranscriptionPreferences.writeSonioxEnableEndpointDetection(prefs, checked)
                     }
                 )
                 InlineTextField(
-                    label = stringResource(R.string.speechmatics_punctuation_sensitivity_title),
-                    value = speechmaticsPunctuationSensitivity,
+                    label = stringResource(R.string.soniox_max_endpoint_delay_ms_title),
+                    value = sonioxMaxEndpointDelayMs,
                     onValueChange = { newValue ->
-                        speechmaticsPunctuationSensitivity = newValue
-                        newValue.toDoubleOrNull()?.let { parsed ->
-                            TranscriptionPreferences.writeSpeechmaticsPunctuationSensitivityPercent(
-                                prefs,
-                                (parsed.coerceIn(0.0, 1.0) * 100).toInt()
-                            )
+                        sonioxMaxEndpointDelayMs = newValue
+                        newValue.toIntOrNull()?.let { parsed ->
+                            TranscriptionPreferences.writeSonioxMaxEndpointDelayMs(prefs, parsed)
                         }
                     },
                     minLines = 1,
                     maxLines = 1
-                )
-                BooleanSettingRow(
-                    label = stringResource(R.string.speechmatics_diarization_title),
-                    summary = stringResource(R.string.speechmatics_diarization_summary),
-                    checked = speechmaticsDiarization,
-                    onCheckedChange = { checked ->
-                        speechmaticsDiarization = checked
-                        TranscriptionPreferences.writeSpeechmaticsDiarization(prefs, checked)
-                    }
                 )
                 InlineTextField(
                     label = stringResource(R.string.voice_chunk_silence_seconds_title),
