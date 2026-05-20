@@ -27,7 +27,7 @@ class SonioxTranscriptionClientTest {
         )
 
         assertEquals("API_KEY", payload.getString("api_key"))
-        assertEquals("stt-rt-preview", payload.getString("model"))
+        assertEquals("stt-rt-v4", payload.getString("model"))
         assertEquals("pcm_s16le", payload.getString("audio_format"))
         assertEquals(VoiceRecorder.SAMPLE_RATE, payload.getInt("sample_rate"))
         assertEquals(1, payload.getInt("num_channels"))
@@ -38,6 +38,26 @@ class SonioxTranscriptionClientTest {
         val hints = payload.getJSONArray("language_hints")
         assertEquals(1, hints.length())
         assertEquals("en", hints.getString(0))
+
+        val terms = payload.getJSONObject("context").getJSONArray("terms")
+        assertTrue((0 until terms.length()).any { terms.getString(it) == "HeliBoard" })
+        assertTrue((0 until terms.length()).any { terms.getString(it) == "Soniox" })
+    }
+
+    @Test
+    fun buildStartConfigMessage_omitsContextWhenNoTermsProvided() {
+        val sessionConfig = SonioxTranscriptionClient.buildSessionConfig(
+            languageTag = "en-US",
+            enableEndpointDetection = true,
+            maxEndpointDelayMs = 2000,
+            diarizationEnabled = false,
+            contextTerms = emptyList()
+        )
+        val payload = JSONObject(
+            SonioxTranscriptionClient.buildStartConfigMessage("API_KEY", sessionConfig)
+        )
+
+        assertFalse(payload.has("context"))
     }
 
     @Test
@@ -206,10 +226,12 @@ class SonioxTranscriptionClientTest {
     @Test
     fun buildErrorDescription_combinesCodeAndMessage() {
         val payload = JSONObject()
-            .put("error_code", "Authentication failed")
-            .put("error_message", "Invalid API key")
+            .put("error_code", 401)
+            .put("error_type", "unauthenticated")
+            .put("error_message", "Incorrect API key")
+            .put("request_id", "req_123")
         val description = SonioxTranscriptionClient.buildErrorDescription(payload)
-        assertEquals("Authentication failed: Invalid API key", description)
+        assertEquals("unauthenticated 401: Incorrect API key (request_id=req_123)", description)
     }
 
     @Test

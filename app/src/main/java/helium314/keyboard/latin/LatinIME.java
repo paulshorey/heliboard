@@ -195,7 +195,6 @@ public class LatinIME extends InputMethodService implements
     private VoiceInputManager mVoiceInputManager;
     // Wake lock to prevent CPU sleep during voice recording
     private PowerManager.WakeLock mVoiceWakeLock;
-    private boolean mPendingNewParagraph = false;
     private static final int FULLAPP_SYNC_MAX_CHARS = 100_000;
     private static final int FULLAPP_SYNC_RETRY_ATTEMPTS = 5;
     private static final long FULLAPP_SYNC_RETRY_DELAY_MS = 120L;
@@ -565,6 +564,7 @@ public class LatinIME extends InputMethodService implements
         mDisplayContext = KtxKt.getDisplayContext(this);
         KeyboardSwitcher.init(this);
         helium314.keyboard.latin.personalization.EmailsDictionary.INSTANCE.init(this);
+        helium314.keyboard.latin.personalization.EmailLearner.INSTANCE.init(this);
         super.onCreate();
 
         loadSettings();
@@ -1066,6 +1066,19 @@ public class LatinIME extends InputMethodService implements
         discardPendingVoiceWork("Input connection finished — discarding voice work");
 
         mDictionaryFacilitator.onFinishInput();
+        // Last-chance scan for any email still in the editor that the user
+        // typed but never finalized with a separator (e.g. they hit Send,
+        // Done, Search, or just navigated away). After this we clear the
+        // per-editor seen set so the next editor starts fresh.
+        try {
+            final SettingsValues finishSettings = mSettings.getCurrent();
+            helium314.keyboard.latin.personalization.EmailLearner.INSTANCE.flushNow(
+                    mInputLogic.mConnection,
+                    shouldSkipEmailCapture(finishSettings));
+        } catch (Throwable t) {
+            // Defensive: never let learner errors break the IME teardown path.
+            Log.w(TAG, "EmailLearner.flushNow failed", t);
+        }
         final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
         if (mainKeyboardView != null) {
             mainKeyboardView.closing();
@@ -1076,6 +1089,18 @@ public class LatinIME extends InputMethodService implements
         super.onFinishInputView(finishingInput);
         Log.i(TAG, "onFinishInputView");
         cleanupInternalStateForFinishInput();
+    }
+
+    /**
+     * Whether email capture should be suppressed for the current field. We
+     * skip capture when the user is in incognito (which already covers
+     * password fields, no-learning fields, and the always-incognito toggle)
+     * or when personalized dictionaries are disabled, since the same
+     * setting governs auto-learning for the regular dictionary.
+     */
+    private static boolean shouldSkipEmailCapture(final SettingsValues sv) {
+        if (sv == null) return true;
+        return sv.mIncognitoModeEnabled || !sv.mUsePersonalizedDicts;
     }
 
     private void cleanupInternalStateForFinishInput() {
@@ -1144,6 +1169,19 @@ public class LatinIME extends InputMethodService implements
         // view is not displayed we have no means of showing suggestions anyway, and if it is then
         // we want to show suggestions anyway.
         final SettingsValues settingsValues = mSettings.getCurrent();
+        // Schedule a debounced scan of the surrounding text for email
+        // addresses. Selection-only moves (oldSelStart == newSelStart &&
+        // oldSelEnd == newSelEnd) can't introduce new text, so we skip them
+        // to avoid scanning on every cursor blink in long fields.
+        if (oldSelStart != newSelStart || oldSelEnd != newSelEnd) {
+            try {
+                helium314.keyboard.latin.personalization.EmailLearner.INSTANCE.notifyTextChanged(
+                        mInputLogic.mConnection,
+                        shouldSkipEmailCapture(settingsValues));
+            } catch (Throwable t) {
+                Log.w(TAG, "EmailLearner.notifyTextChanged failed", t);
+            }
+        }
         if (isInputViewShown()
                 && mInputLogic.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd,
                 composingSpanStart, composingSpanEnd, settingsValues)) {
@@ -2017,13 +2055,6 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onProcessingIdle() {
                 try {
-                    if (mPendingNewParagraph
-                            && mVoiceInputManager != null
-                            && mVoiceInputManager.isIdle()
-                            && !mVoiceInputManager.hasPendingProcessing()) {
-                        insertParagraphBreak();
-                        mPendingNewParagraph = false;
-                    }
                     if (mVoiceInputManager == null || !mVoiceInputManager.hasPendingProcessing()) {
                         mKeyboardSwitcher.hideProcessingIndicator();
                     }
@@ -2058,22 +2089,6 @@ public class LatinIME extends InputMethodService implements
             }
 
             @Override
-            public void onNewParagraphRequested() {
-                try {
-                    final boolean managerStillProcessing =
-                            mVoiceInputManager != null && mVoiceInputManager.hasPendingProcessing();
-                    if (managerStillProcessing) {
-                        mPendingNewParagraph = true;
-                    } else {
-                        Log.i(TAG, "New paragraph break inserted (recording remains active)");
-                        insertParagraphBreak();
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "Error inserting paragraph break: " + e.getMessage(), e);
-                }
-            }
-
-            @Override
             public void onPendingProcessingCancelled() {
                 resetVoiceInputState();
             }
@@ -2091,22 +2106,6 @@ public class LatinIME extends InputMethodService implements
                 launchSetupAppSettings();
             }
         });
-    }
-
-    private void insertParagraphBreak() {
-        sendEnterKeyEvents(2);
-    }
-
-    private void sendEnterKeyEvents(final int count) {
-        mInputLogic.mConnection.beginBatchEdit();
-        mInputLogic.finishInput();
-        for (int i = 0; i < count; i++) {
-            mInputLogic.mConnection.sendKeyEvent(
-                    new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER));
-            mInputLogic.mConnection.sendKeyEvent(
-                    new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER));
-        }
-        mInputLogic.mConnection.endBatchEdit();
     }
 
     /**
@@ -2261,7 +2260,6 @@ public class LatinIME extends InputMethodService implements
      * Called when voice input session ends.
      */
     private void resetVoiceInputState() {
-        mPendingNewParagraph = false;
         mKeyboardSwitcher.hideProcessingIndicator();
     }
 
@@ -2437,9 +2435,6 @@ public class LatinIME extends InputMethodService implements
     private void launchFullappEditorActivity() {
         mInputLogic.commitTyped(mSettings.getCurrent(), LastComposedWord.NOT_A_SEPARATOR);
         stopVoiceRecordingGracefully();
-
-        // Prevent the paragraph timer from inserting "\n\n" into the field before we read it.
-        mPendingNewParagraph = false;
 
         // Use fallback path to avoid trailing newlines that getExtractedText adds (e.g. WebView)
         String initialText = getOriginalFieldTextForFullapp();

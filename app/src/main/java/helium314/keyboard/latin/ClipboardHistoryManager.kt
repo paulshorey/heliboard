@@ -95,10 +95,14 @@ class ClipboardHistoryManager(
         clipboardDao?.listener = listener
     }
 
-    fun retrieveClipboardContent(): CharSequence {
+    fun getClipboardContentForPaste(): String {
         val clipData = clipboardManager.primaryClip ?: return ""
         if (clipData.itemCount == 0) return ""
-        return clipData.getItemAt(0)?.coerceToText(latinIME) ?: ""
+        return prepareClipboardTextForPaste(clipData.getItemAt(0)?.coerceToText(latinIME))
+    }
+
+    fun getHistoryEntryContentForPaste(id: Long): String {
+        return prepareClipboardTextForPaste(clipboardDao?.get(id)?.text)
     }
 
     private fun isClipSensitive(inputType: Int): Boolean {
@@ -135,7 +139,10 @@ class ClipboardHistoryManager(
         textView.setCompoundDrawablesRelativeWithIntrinsicBounds(clipIcon, null, null, null)
         textView.setOnClickListener {
             dontShowCurrentSuggestion = true
-            latinIME.onTextInput(content.toString() + " ")
+            val textToPaste = prepareClipboardTextForPaste(content)
+            if (textToPaste.isNotEmpty()) {
+                latinIME.onTextInput(textToPaste)
+            }
             AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, it, HapticEvent.KEY_PRESS)
             binding.root.isGone = true
         }
@@ -167,5 +174,9 @@ class ClipboardHistoryManager(
     companion object {
         private var dontShowCurrentSuggestion: Boolean = false
         const val RECENT_TIME_MILLIS = 3 * 60 * 1000L // 3 minutes (for clipboard suggestions)
+
+        fun prepareClipboardTextForPaste(content: CharSequence?): String {
+            return content?.toString()?.trim().orEmpty()
+        }
     }
 }

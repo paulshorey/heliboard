@@ -27,8 +27,6 @@ class VoiceInputManager(private val context: Context) {
 
         private const val MIN_CHUNK_SILENCE_SECONDS = 1
         private const val MAX_CHUNK_SILENCE_SECONDS = 30
-        private const val MIN_NEW_PARAGRAPH_SILENCE_SECONDS = 3
-        private const val MAX_NEW_PARAGRAPH_SILENCE_SECONDS = 120
         private const val MIN_AUTO_STOP_SILENCE_SECONDS = 5
         private const val MAX_AUTO_STOP_SILENCE_SECONDS = 300
         private const val MIN_SILENCE_THRESHOLD = 40
@@ -63,9 +61,6 @@ class VoiceInputManager(private val context: Context) {
         /** No queued transcription work remains at manager level. */
         fun onProcessingIdle()
 
-        /** Configured silence window elapsed — start a new paragraph. */
-        fun onNewParagraphRequested()
-
         /** Transcripts queued for the previous session were dropped (cancel, new session, etc.). */
         fun onPendingProcessingCancelled()
 
@@ -92,11 +87,10 @@ class VoiceInputManager(private val context: Context) {
     private var currentState = State.IDLE
     private var activeSessionId = 0L
 
-    // Local speech-boundary detection window used by VoiceRecorder callbacks
-    // (paragraph/auto-stop behavior). Soniox transcript segmentation is server-managed.
+    // Local speech-boundary detection window used by VoiceRecorder callbacks.
+    // Soniox transcript segmentation is server-managed; local silence only drives auto-stop.
     private var chunkSilenceDurationMs = Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS * 1000L
     private var chunkSilenceThreshold = Defaults.PREF_VOICE_SILENCE_THRESHOLD.toDouble()
-    private var newParagraphDelayMs = Defaults.PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS * 1000L
     private var autoStopSilenceMs = Defaults.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS * 1000L
     private var sonioxConfig: SonioxConfig = TranscriptionPreferences.readSonioxConfig(context.prefs())
 
@@ -118,17 +112,8 @@ class VoiceInputManager(private val context: Context) {
     private val pendingTranscripts = ArrayDeque<PendingTranscript>()
     private var isDispatchingTranscripts = false
 
-    // New paragraph timer — insert paragraph break after long silence
-    private val newParagraphTimerRunnable = Runnable {
-        if (currentState == State.RECORDING) {
-            Log.i(
-                TAG,
-                "New paragraph timer fired after ${newParagraphDelayMs}ms " +
-                    "(paragraph break only; recording continues)"
-            )
-            listener?.onNewParagraphRequested()
-        }
-    }
+    // New paragraph timer removed — inserting line breaks on silence caused
+    // form submissions and other unintended side effects in host apps.
 
     // Auto-stop timer — stop recording after prolonged silence (no speech)
     private val autoStopSilenceRunnable = Runnable {
@@ -209,13 +194,11 @@ class VoiceInputManager(private val context: Context) {
 
             override fun onSpeechStarted() {
                 if (sessionId != activeSessionId) return
-                cancelNewParagraphTimer()
                 cancelAutoStopTimer()
             }
 
             override fun onSpeechStopped() {
                 if (sessionId != activeSessionId) return
-                startNewParagraphTimer()
                 startAutoStopTimer()
             }
 
@@ -262,7 +245,6 @@ class VoiceInputManager(private val context: Context) {
 
     fun pauseRecording() {
         if (currentState != State.RECORDING) return
-        cancelNewParagraphTimer()
         cancelAutoStopTimer()
         voiceRecorder.pauseRecording()
         cancelPendingReconnect()
@@ -324,7 +306,6 @@ class VoiceInputManager(private val context: Context) {
     }
 
     private fun stopRecordingInternal(cancelPending: Boolean) {
-        cancelNewParagraphTimer()
         cancelAutoStopTimer()
         cancelStreamConnectTimeout()
 
@@ -625,9 +606,22 @@ class VoiceInputManager(private val context: Context) {
         if (error == null) return false
         val lower = error.lowercase()
         return (lower.contains("invalid") && lower.contains("api key")) ||
+            lower.contains("incorrect api key") ||
+            lower.contains("missing api key") ||
+            lower.contains("expired temporary api key") ||
+            lower.contains("unauthenticated") ||
             lower.contains("unauthorized") ||
             lower.contains("authentication failed") ||
-            lower.contains("connection rejected")
+            lower.contains("connection rejected") ||
+            lower.contains("model_not_available") ||
+            lower.contains("requested model is not available") ||
+            lower.contains("does not support real-time") ||
+            lower.contains("limit_exceeded") ||
+            lower.contains("rate limited") ||
+            lower.contains("too many requests") ||
+            lower.contains("payment required") ||
+            lower.contains("balance exhausted") ||
+            lower.contains("monthly budget")
     }
 
     private fun scheduleReconnectOrStop(sessionId: Long, reason: String) {
@@ -738,14 +732,6 @@ class VoiceInputManager(private val context: Context) {
             Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS
         ).coerceIn(MIN_CHUNK_SILENCE_SECONDS, MAX_CHUNK_SILENCE_SECONDS)
 
-        val paragraphSilenceSeconds = prefs.getInt(
-            Settings.PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS,
-            Defaults.PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS
-        ).coerceIn(
-            MIN_NEW_PARAGRAPH_SILENCE_SECONDS,
-            MAX_NEW_PARAGRAPH_SILENCE_SECONDS
-        )
-
         val autoStopSilenceSeconds = prefs.getInt(
             Settings.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS,
             Defaults.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS
@@ -760,7 +746,6 @@ class VoiceInputManager(private val context: Context) {
         ).coerceIn(MIN_SILENCE_THRESHOLD, MAX_SILENCE_THRESHOLD)
 
         chunkSilenceDurationMs = chunkSilenceSeconds * 1000L
-        newParagraphDelayMs = paragraphSilenceSeconds * 1000L
         autoStopSilenceMs = autoStopSilenceSeconds * 1000L
         chunkSilenceThreshold = silenceThreshold.toDouble()
         sonioxConfig = TranscriptionPreferences.readSonioxConfig(prefs)
@@ -774,7 +759,6 @@ class VoiceInputManager(private val context: Context) {
             TAG,
             "Voice config loaded: localSpeechSilence=${chunkSilenceDurationMs}ms, " +
                 "silenceThreshold=${chunkSilenceThreshold}, " +
-                "newParagraphSilence=${newParagraphDelayMs}ms, " +
                 "autoStopSilence=${autoStopSilenceMs}ms, " +
                 "sonioxEnableEndpointDetection=${sonioxConfig.enableEndpointDetection}, " +
                 "sonioxMaxEndpointDelayMs=${sonioxConfig.maxEndpointDelayMs}, " +
@@ -790,18 +774,6 @@ class VoiceInputManager(private val context: Context) {
     }
 
     // ── Timers ─────────────────────────────────────────────────────────
-
-    private fun startNewParagraphTimer() {
-        mainHandler.removeCallbacks(newParagraphTimerRunnable)
-        if (currentState == State.RECORDING) {
-            Log.i(TAG, "Starting new paragraph timer: ${newParagraphDelayMs}ms")
-            mainHandler.postDelayed(newParagraphTimerRunnable, newParagraphDelayMs)
-        }
-    }
-
-    private fun cancelNewParagraphTimer() {
-        mainHandler.removeCallbacks(newParagraphTimerRunnable)
-    }
 
     private fun startAutoStopTimer() {
         mainHandler.removeCallbacks(autoStopSilenceRunnable)

@@ -11,7 +11,7 @@ Preference keys, defaults, runtime snapshots, and transcription-specific prefere
 - `SettingsValues.java` - loaded settings snapshot for runtime logic.
 - `SettingsValuesForSuggestion.java` - suggestion-specific settings snapshot.
 - `SpacingAndPunctuations.java` - punctuation/spacing rules loaded from settings/resources.
-- `TranscriptionPreferences.kt` - typed access to Soniox/voice preferences with one-time legacy provider key migration.
+- `TranscriptionPreferences.kt` - typed access to Soniox/voice preferences with legacy provider key cleanup.
 
 ## Non-obvious notes
 - This is not the settings UI package; Compose screens live in `helium314.keyboard.settings`.

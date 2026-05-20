@@ -157,7 +157,7 @@ object Defaults {
     val PREF_TOOLBAR_KEYS = defaultToolbarPref
     const val PREF_AUTO_SHOW_TOOLBAR = false
     const val PREF_AUTO_HIDE_TOOLBAR = false
-  val PREF_CLIPBOARD_TOOLBAR_KEYS = defaultClipboardToolbarPref
+    val PREF_CLIPBOARD_TOOLBAR_KEYS = defaultClipboardToolbarPref
     const val PREF_ABC_AFTER_EMOJI = false
     const val PREF_ABC_AFTER_CLIP = false
     const val PREF_ABC_AFTER_SYMBOL_SPACE = true
@@ -174,7 +174,6 @@ object Defaults {
     const val PREF_SONIOX_DIARIZATION = true
     const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 1
     const val PREF_VOICE_SILENCE_THRESHOLD = 220
-    const val PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS = 10
     const val PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = 30
     const val PREF_EMOJI_RECENT_KEYS = ""
     const val PREF_LAST_SHOWN_EMOJI_CATEGORY_PAGE_ID = 0

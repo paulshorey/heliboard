@@ -4,18 +4,21 @@ Quick reference for the external API and settings used in voice transcription.
 
 ## Soniox Real-Time WebSocket API (Transcription)
 
-HeliBoard uses the Soniox **Real-Time STT WebSocket** API (`wss://stt-rt.soniox.com/transcribe-websocket`) with raw PCM16 frames. Authentication is in the JSON body, not in HTTP headers. Documentation: <https://soniox.com/docs/stt/api-reference/websocket-api>.
+HeliBoard uses the Soniox **Real-Time STT WebSocket** API (`wss://stt-rt.soniox.com/transcribe-websocket`) with raw PCM16 frames. Authentication is in the JSON body, not in HTTP headers. Documentation: <https://soniox.com/docs/api-reference/stt/websocket-api>.
 
 ### Start config message (first WebSocket text frame)
 
 ```json
 {
   "api_key": "<SONIOX_API_KEY>",
-  "model": "stt-rt-preview",
+  "model": "stt-rt-v4",
   "audio_format": "pcm_s16le",
   "sample_rate": 16000,
   "num_channels": 1,
   "language_hints": ["en"],
+  "context": {
+    "terms": ["HeliBoard", "Soniox", "Kubernetes", "API", "gnocchi"]
+  },
   "enable_endpoint_detection": true,
   "max_endpoint_delay_ms": 2000,
   "enable_speaker_diarization": false
@@ -25,14 +28,15 @@ HeliBoard uses the Soniox **Real-Time STT WebSocket** API (`wss://stt-rt.soniox.
 ### Key config fields
 
 - **`api_key`** (required): Soniox API key. Authentication failures arrive later as JSON responses with `error_code` (`Authentication failed` etc.) and the connection closes.
-- **`model`** (required): real-time STT model. HeliBoard pins `"stt-rt-preview"`; future migration to `"stt-rt-v4"` is tracked in code.
+- **`model`** (required): real-time STT model. HeliBoard pins `"stt-rt-v4"`.
 - **`audio_format` / `sample_rate` / `num_channels`** (required for raw PCM): `pcm_s16le` / `16000` / `1` to match `VoiceRecorder` output.
 - **`language_hints`** (optional): array of ISO language codes. HeliBoard sends a single-element array based on the active keyboard subtype, or omits the field entirely so Soniox auto-detects.
+- **`context.terms`** (optional): built-in recognition hints for product/technical words. HeliBoard sends a small fixed list and does not expose a user-editable vocabulary UI.
 - **`enable_endpoint_detection`** (boolean, optional): when true, Soniox finalizes tokens immediately once it detects the speaker has stopped talking.
 - **`max_endpoint_delay_ms`** (number, optional): valid range **500–3000 ms**, default **2000 ms**.
 - **`enable_speaker_diarization`** (boolean, optional): when true, every token includes a `speaker` field. HeliBoard uses this to lock onto the first observed speaker and drop tokens from later speakers.
 
-Other documented fields (`context`, `enable_language_identification`, `translation`, `client_reference_id`) are not used.
+Other documented fields (`enable_language_identification`, `translation`, `client_reference_id`) are not used.
 
 ### Audio format
 
@@ -82,8 +86,11 @@ Sent after the client closes the audio stream. The server then closes the WebSoc
 
 ```json
 {
-  "error_code": "Authentication failed",
-  "error_message": "Invalid API key"
+  "tokens": [],
+  "error_code": 401,
+  "error_type": "unauthenticated",
+  "error_message": "Incorrect API key",
+  "request_id": "..."
 }
 ```
 
@@ -120,5 +127,4 @@ There is no per-chunk audio acknowledgement to track. (Soniox also exposes an op
 | `PREF_SONIOX_DIARIZATION` | Boolean | Enable speaker diarization to filter to primary speaker only |
 | `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Silence window before treating speech as paused |
 | `PREF_VOICE_SILENCE_THRESHOLD` | Int | RMS threshold used for silence detection |
-| `PREF_VOICE_NEW_PARAGRAPH_SILENCE_SECONDS` | Int | Silence duration before inserting a new paragraph |
 | `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` | Int | Silence duration before auto-stopping recording |

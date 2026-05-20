@@ -4,8 +4,8 @@ import android.content.SharedPreferences
 import androidx.core.content.edit
 
 /**
- * Typed access to Soniox transcription preferences with one-time migration of
- * legacy provider keys (Speechmatics, Deepgram).
+ * Typed access to Soniox transcription preferences with cleanup for legacy
+ * provider keys (Speechmatics, Deepgram).
  */
 object TranscriptionPreferences {
     private const val LEGACY_SPEECHMATICS_API_KEY_PREF = "speechmatics_api_key"
@@ -27,7 +27,7 @@ object TranscriptionPreferences {
     )
 
     fun readSonioxApiKey(prefs: SharedPreferences): String {
-        migrateLegacyApiKey(prefs)
+        clearLegacyApiKeys(prefs)
         return prefs.getString(
             Settings.PREF_SONIOX_API_KEY,
             Defaults.PREF_SONIOX_API_KEY
@@ -100,25 +100,12 @@ object TranscriptionPreferences {
         return value.coerceIn(MIN_MAX_ENDPOINT_DELAY_MS, MAX_MAX_ENDPOINT_DELAY_MS)
     }
 
-    /**
-     * Copies a legacy Speechmatics API key into the new Soniox preference once
-     * (if the new key isn't already set), then deletes legacy provider keys.
-     */
-    private fun migrateLegacyApiKey(prefs: SharedPreferences) {
+    private fun clearLegacyApiKeys(prefs: SharedPreferences) {
         val hasLegacySpeechmatics = prefs.contains(LEGACY_SPEECHMATICS_API_KEY_PREF)
         val hasLegacyDeepgram = prefs.contains(LEGACY_DEEPGRAM_API_KEY_PREF)
         if (!hasLegacySpeechmatics && !hasLegacyDeepgram) return
 
-        val hasNewKey = prefs.contains(Settings.PREF_SONIOX_API_KEY)
-        val legacy = if (hasLegacySpeechmatics) {
-            prefs.getString(LEGACY_SPEECHMATICS_API_KEY_PREF, null)?.trim().orEmpty()
-        } else {
-            ""
-        }
         prefs.edit {
-            if (!hasNewKey && legacy.isNotEmpty()) {
-                putString(Settings.PREF_SONIOX_API_KEY, legacy)
-            }
             remove(LEGACY_SPEECHMATICS_API_KEY_PREF)
             remove(LEGACY_DEEPGRAM_API_KEY_PREF)
         }

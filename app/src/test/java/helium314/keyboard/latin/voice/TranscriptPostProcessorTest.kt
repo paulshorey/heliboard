@@ -9,10 +9,10 @@ class TranscriptPostProcessorTest {
     private fun process(input: String): String =
         TranscriptPostProcessor.processCurrentParagraph(input) ?: input
 
-    // --- Exclamation point ---
+    // --- Exclamation point (capitalized command form) ---
 
     @Test
-    fun `replaces dot-space exclamation point dot with bang`() {
+    fun `replaces Exclamation point after period`() {
         assertEquals(
             "That was great!",
             process("That was great. Exclamation point.")
@@ -20,7 +20,7 @@ class TranscriptPostProcessorTest {
     }
 
     @Test
-    fun `replaces question mark before exclamation point`() {
+    fun `replaces Exclamation point after question mark`() {
         assertEquals(
             "Really!",
             process("Really? Exclamation point.")
@@ -28,7 +28,7 @@ class TranscriptPostProcessorTest {
     }
 
     @Test
-    fun `replaces bang before exclamation point`() {
+    fun `replaces Exclamation point after bang`() {
         assertEquals(
             "Wow!",
             process("Wow! Exclamation point.")
@@ -36,7 +36,7 @@ class TranscriptPostProcessorTest {
     }
 
     @Test
-    fun `replaces trailing exclamation point-bang variant`() {
+    fun `replaces Exclamation point with bang trailing variant`() {
         assertEquals(
             "Nice!",
             process("Nice. Exclamation point!")
@@ -44,7 +44,7 @@ class TranscriptPostProcessorTest {
     }
 
     @Test
-    fun `replaces exclamation mark alias`() {
+    fun `replaces Exclamation mark alias`() {
         assertEquals(
             "Wow!",
             process("Wow. Exclamation mark.")
@@ -52,75 +52,35 @@ class TranscriptPostProcessorTest {
     }
 
     @Test
-    fun `standalone exclamation point at sentence end`() {
-        assertEquals(
-            "Hello!",
-            process("Hello exclamation point.")
-        )
-    }
-
-    @Test
-    fun `exclamation point at very start of paragraph`() {
+    fun `Exclamation point at paragraph start`() {
         assertEquals(
             "!",
-            process("exclamation point.")
+            process("Exclamation point.")
         )
     }
 
     @Test
-    fun `case insensitive match`() {
-        assertEquals(
-            "Wow!",
-            process("Wow. exclamation point.")
-        )
-    }
-
-    // --- Comma ---
-
-    @Test
-    fun `replaces dot-space comma with comma`() {
-        assertEquals(
-            "Hello, world",
-            process("Hello. comma world")
+    fun `lowercase exclamation point is NOT replaced (user talking about it)`() {
+        assertNull(
+            TranscriptPostProcessor.processCurrentParagraph(
+                "An exclamation point is a type of punctuation"
+            )
         )
     }
 
     @Test
-    fun `replaces comma-comma dedup`() {
-        assertEquals(
-            "Hello, world",
-            process("Hello, comma world")
-        )
-    }
-
-    @Test
-    fun `replaces comma-comma literal dedup`() {
-        assertEquals(
-            "Hello, world",
-            process("Hello comma, world")
-        )
-    }
-
-    @Test
-    fun `comma at very start`() {
-        assertEquals(
-            ", world",
-            process("comma, world")
+    fun `lowercase exclamation point with period is NOT replaced`() {
+        assertNull(
+            TranscriptPostProcessor.processCurrentParagraph(
+                "use an exclamation point."
+            )
         )
     }
 
     // --- Question mark ---
 
     @Test
-    fun `replaces dot-space question mark-question`() {
-        assertEquals(
-            "Really?",
-            process("Really. question mark?")
-        )
-    }
-
-    @Test
-    fun `replaces dot-space question mark-dot`() {
+    fun `replaces Question mark after period`() {
         assertEquals(
             "Really?",
             process("Really. Question mark.")
@@ -128,104 +88,266 @@ class TranscriptPostProcessorTest {
     }
 
     @Test
-    fun `standalone question mark at end`() {
+    fun `replaces Question mark with question trailing variant`() {
         assertEquals(
-            "Are you sure?",
-            process("Are you sure question mark.")
+            "Really?",
+            process("Really. Question mark?")
         )
     }
 
     @Test
-    fun `question mark at very start`() {
+    fun `Question mark at paragraph start`() {
         assertEquals(
             "?",
-            process("question mark.")
+            process("Question mark.")
+        )
+    }
+
+    @Test
+    fun `lowercase question mark is NOT replaced`() {
+        assertNull(
+            TranscriptPostProcessor.processCurrentParagraph(
+                "add a question mark here"
+            )
         )
     }
 
     // --- Period / full stop ---
 
     @Test
-    fun `replaces question-space period-dot`() {
+    fun `replaces Period after question mark`() {
         assertEquals(
             "End.",
-            process("End? period.")
+            process("End? Period.")
         )
     }
 
     @Test
-    fun `replaces full stop alias`() {
+    fun `replaces Full stop alias`() {
         assertEquals(
             "End.",
-            process("End! full stop.")
+            process("End! Full stop.")
         )
     }
 
     @Test
-    fun `standalone period dot`() {
-        assertEquals(
-            "End.",
-            process("End period.")
-        )
-    }
-
-    @Test
-    fun `period at very start`() {
+    fun `Period at paragraph start`() {
         assertEquals(
             ".",
-            process("period.")
+            process("Period.")
         )
     }
 
     // --- Colon ---
 
     @Test
-    fun `replaces dot-space colon-colon`() {
+    fun `replaces Colon after period`() {
         assertEquals(
             "Note:",
-            process("Note. colon:")
+            process("Note. Colon:")
         )
     }
 
     @Test
-    fun `standalone colon-dot`() {
+    fun `replaces Colon with dot trailing`() {
         assertEquals(
             "Dear sir:",
-            process("Dear sir colon.")
+            process("Dear sir. Colon.")
         )
     }
 
     @Test
-    fun `colon at very start`() {
+    fun `Colon at paragraph start`() {
         assertEquals(
             ":",
-            process("colon.")
+            process("Colon.")
+        )
+    }
+
+    @Test
+    fun `lowercase colon is NOT replaced`() {
+        assertNull(
+            TranscriptPostProcessor.processCurrentParagraph(
+                "use a colon there"
+            )
         )
     }
 
     // --- Semicolon ---
 
     @Test
-    fun `replaces dot-space semicolon-semicolon`() {
+    fun `replaces Semicolon after period`() {
         assertEquals(
             "Also;",
-            process("Also. semicolon;")
+            process("Also. Semicolon;")
         )
     }
 
     @Test
-    fun `standalone semicolon-dot`() {
+    fun `replaces Semicolon with dot trailing`() {
         assertEquals(
             "However;",
-            process("However semicolon.")
+            process("However. Semicolon.")
         )
     }
 
     @Test
-    fun `semicolon at very start`() {
+    fun `Semicolon at paragraph start`() {
         assertEquals(
             ";",
-            process("semicolon.")
+            process("Semicolon.")
+        )
+    }
+
+    // --- Comma ---
+
+    @Test
+    fun `replaces Comma after period`() {
+        assertEquals(
+            "Hello,",
+            process("Hello. Comma.")
+        )
+    }
+
+    @Test
+    fun `replaces Comma with comma trailing`() {
+        assertEquals(
+            "Hello,",
+            process("Hello. Comma,")
+        )
+    }
+
+    @Test
+    fun `Comma at paragraph start`() {
+        assertEquals(
+            ",",
+            process("Comma.")
+        )
+    }
+
+    @Test
+    fun `lowercase comma is NOT replaced`() {
+        assertNull(
+            TranscriptPostProcessor.processCurrentParagraph(
+                "add a comma here"
+            )
+        )
+    }
+
+    // --- New line ---
+
+    @Test
+    fun `replaces New line after period`() {
+        assertEquals(
+            "First line.\n",
+            process("First line. New line.")
+        )
+    }
+
+    @Test
+    fun `New line at paragraph start`() {
+        assertEquals(
+            "\n",
+            process("New line.")
+        )
+    }
+
+    @Test
+    fun `lowercase new line is NOT replaced`() {
+        assertNull(
+            TranscriptPostProcessor.processCurrentParagraph(
+                "start a new line here"
+            )
+        )
+    }
+
+    // --- New paragraph ---
+
+    @Test
+    fun `replaces New paragraph after period`() {
+        assertEquals(
+            "End of section.\n\n",
+            process("End of section. New paragraph.")
+        )
+    }
+
+    @Test
+    fun `New paragraph at paragraph start`() {
+        assertEquals(
+            "\n\n",
+            process("New paragraph.")
+        )
+    }
+
+    // --- Hyphen ---
+
+    @Test
+    fun `replaces Hyphen after period`() {
+        assertEquals(
+            "Self-",
+            process("Self. Hyphen.")
+        )
+    }
+
+    @Test
+    fun `Hyphen at paragraph start`() {
+        assertEquals(
+            "-",
+            process("Hyphen.")
+        )
+    }
+
+    // --- Dash ---
+
+    @Test
+    fun `replaces Dash after period`() {
+        assertEquals(
+            "Something — ",
+            process("Something. Dash.")
+        )
+    }
+
+    @Test
+    fun `Dash at paragraph start`() {
+        assertEquals(
+            " — ",
+            process("Dash.")
+        )
+    }
+
+    // --- Open quote / Close quote ---
+
+    @Test
+    fun `replaces Open quote after period`() {
+        assertEquals(
+            "He said\"",
+            process("He said. Open quote.")
+        )
+    }
+
+    @Test
+    fun `replaces Close quote after period`() {
+        assertEquals(
+            "Done\"",
+            process("Done. Close quote.")
+        )
+    }
+
+    // --- Open parenthesis / Close parenthesis ---
+
+    @Test
+    fun `replaces Open parenthesis after period`() {
+        assertEquals(
+            "See(",
+            process("See. Open parenthesis.")
+        )
+    }
+
+    @Test
+    fun `replaces Close parenthesis after period`() {
+        assertEquals(
+            "Note)",
+            process("Note. Close parenthesis.")
         )
     }
 
@@ -241,21 +363,10 @@ class TranscriptPostProcessorTest {
     // --- Multiple replacements in one paragraph ---
 
     @Test
-    fun `handles multiple spelled-out punctuation in one paragraph`() {
+    fun `handles multiple commands in one paragraph`() {
         assertEquals(
             "Hello, are you sure? Yes!",
-            process("Hello, comma are you sure question mark. Yes exclamation point.")
-        )
-    }
-
-    // --- Mid-sentence should still replace when pattern matches ---
-
-    @Test
-    fun `exclamation point without trailing dot is untouched`() {
-        assertNull(
-            TranscriptPostProcessor.processCurrentParagraph(
-                "An exclamation point is a type of punctuation"
-            )
+            process("Hello. Comma, are you sure. Question mark. Yes. Exclamation point.")
         )
     }
 
@@ -339,12 +450,22 @@ class TranscriptPostProcessorTest {
 
     @Test
     fun `casing preserved for curly apostrophe I contraction`() {
-        assertEquals("I’ve tried", adjust("I’ve tried", "so "))
+        assertEquals("I\u2019ve tried", adjust("I\u2019ve tried", "so "))
     }
 
     @Test
     fun `casing preserved for acronyms`() {
         assertEquals("NASA launched", adjust("NASA launched", "yesterday "))
+    }
+
+    @Test
+    fun `casing preserved for single uppercase letter (acronym initial)`() {
+        assertEquals("A", adjust("A", "the "))
+    }
+
+    @Test
+    fun `casing preserved for single letter mid-sentence avoids aPI artifacts`() {
+        assertEquals("B", adjust("B", "and "))
     }
 
     @Test
@@ -374,7 +495,6 @@ class TranscriptPostProcessorTest {
 
     @Test
     fun `casing preserved after comma (treated as mid-sentence)`() {
-        // Comma ends a clause but not a sentence — lowercase is correct.
         assertEquals("then we went", adjust("Then we went", "First we ate, "))
     }
 
@@ -458,7 +578,6 @@ class TranscriptPostProcessorTest {
 
     @Test
     fun `strips period when followed by digit (not a letter so preserves)`() {
-        // Digit is not a lowercase letter — do not strip
         assertEquals("some text.", strip("some text.", "42 more"))
     }
 }

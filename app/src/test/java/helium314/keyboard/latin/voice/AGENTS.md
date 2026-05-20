@@ -5,6 +5,7 @@ Tests for the Soniox voice pipeline.
 ## Direct files
 - `SonioxTranscriptionClientTest.kt` - session config and transcript-assembly tests.
 - `TranscriptPostProcessorTest.kt` - finalized-text cleanup tests.
+- `TranscriptionPreferencesTest.kt` - Soniox preference cleanup tests.
 
 ## Non-obvious notes
 - Voice bugs often split cleanly between transport/session setup and local post-processing, so keep that distinction clear in new tests.

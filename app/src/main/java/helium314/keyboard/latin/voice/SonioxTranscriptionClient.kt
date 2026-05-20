@@ -11,6 +11,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.ConnectException
 import java.net.SocketTimeoutException
@@ -40,8 +41,7 @@ class SonioxTranscriptionClient {
         private const val TAG = "SonioxTranscription"
         private const val STREAMING_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
 
-        // TODO: revisit when Soniox marks `stt-rt-v4` as the recommended default.
-        private const val MODEL = "stt-rt-preview"
+        private const val MODEL = "stt-rt-v4"
 
         private const val FINALIZE_CLOSE_GRACE_MS = 8_000L
 
@@ -65,14 +65,16 @@ class SonioxTranscriptionClient {
             val languageHint: String?,
             val enableEndpointDetection: Boolean,
             val maxEndpointDelayMs: Int,
-            val diarizationEnabled: Boolean
+            val diarizationEnabled: Boolean,
+            val contextTerms: List<String>
         )
 
         internal fun buildSessionConfig(
             languageTag: String?,
             enableEndpointDetection: Boolean,
             maxEndpointDelayMs: Int,
-            diarizationEnabled: Boolean
+            diarizationEnabled: Boolean,
+            contextTerms: List<String> = defaultContextTerms()
         ): SessionConfig {
             return SessionConfig(
                 languageHint = normalizeLanguageHint(languageTag),
@@ -81,9 +83,18 @@ class SonioxTranscriptionClient {
                     MIN_MAX_ENDPOINT_DELAY_MS,
                     MAX_MAX_ENDPOINT_DELAY_MS
                 ),
-                diarizationEnabled = diarizationEnabled
+                diarizationEnabled = diarizationEnabled,
+                contextTerms = contextTerms.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
             )
         }
+
+        internal fun defaultContextTerms(): List<String> = listOf(
+            "HeliBoard",
+            "Soniox",
+            "Kubernetes",
+            "API",
+            "gnocchi"
+        )
 
         internal fun buildStartConfigMessage(apiKey: String, config: SessionConfig): String {
             val payload = JSONObject()
@@ -99,7 +110,18 @@ class SonioxTranscriptionClient {
             if (config.languageHint != null) {
                 payload.put(
                     "language_hints",
-                    org.json.JSONArray().apply { put(config.languageHint) }
+                    JSONArray().apply { put(config.languageHint) }
+                )
+            }
+            if (config.contextTerms.isNotEmpty()) {
+                payload.put(
+                    "context",
+                    JSONObject().put(
+                        "terms",
+                        JSONArray().apply {
+                            config.contextTerms.forEach { put(it) }
+                        }
+                    )
                 )
             }
             return payload.toString()
@@ -181,12 +203,22 @@ class SonioxTranscriptionClient {
 
         internal fun buildErrorDescription(json: JSONObject): String {
             val code = json.optString("error_code", "")
+            val type = json.optString("error_type", "")
             val message = json.optString("error_message", "")
-            return when {
-                code.isBlank() && message.isBlank() -> "Soniox reported an unknown error"
-                code.isBlank() -> message
-                message.isBlank() -> code
-                else -> "$code: $message"
+            val requestId = json.optString("request_id", "")
+            val summary = listOf(type, code)
+                .filter { it.isNotBlank() }
+                .joinToString(" ")
+            val description = when {
+                summary.isBlank() && message.isBlank() -> "Soniox reported an unknown error"
+                summary.isBlank() -> message
+                message.isBlank() -> summary
+                else -> "$summary: $message"
+            }
+            return if (requestId.isBlank()) {
+                description
+            } else {
+                "$description (request_id=$requestId)"
             }
         }
     }
@@ -264,7 +296,8 @@ class SonioxTranscriptionClient {
                 "(language=${sessionConfig.languageHint ?: "auto"}, " +
                 "endpointDetection=${sessionConfig.enableEndpointDetection}, " +
                 "maxEndpointDelayMs=${sessionConfig.maxEndpointDelayMs}, " +
-                "diarization=${sessionConfig.diarizationEnabled})"
+                "diarization=${sessionConfig.diarizationEnabled}, " +
+                "contextTerms=${sessionConfig.contextTerms.size})"
         )
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {

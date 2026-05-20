@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package helium314.keyboard.latin
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.inputmethodservice.InputMethodService
 import android.os.Bundle
 import android.os.Handler
@@ -117,6 +119,18 @@ class InputLogicTest {
         assertEquals(" world", textAfterCursor)
         assertEquals(10, cursor)
         checkConnectionConsistency()
+    }
+
+    @Test fun clipboardPasteTrimsWhitespaceAndDoesNotAppendSpace() {
+        reset()
+        val clipboardManager = latinIME.getSystemService(ClipboardManager::class.java)
+        clipboardManager!!.setPrimaryClip(ClipData.newPlainText("label", "  copied text  "))
+
+        functionalKeyPress(KeyCode.CLIPBOARD_PASTE)
+
+        assertEquals("copied text", getText())
+        assertEquals("copied text", textBeforeCursor)
+        assertEquals("", textAfterCursor)
     }
 
     @Test fun insertLetterIntoWord() {
@@ -510,6 +524,43 @@ class InputLogicTest {
         pickSuggestion("this")
         input('b')
         assertEquals("this b", text)
+        assertEquals("", composingText)
+    }
+
+    @Test fun `pickSuggestionWithCursorInsideWord replaces the focused word`() {
+        // Tap inside an existing word, then pick a suggestion. The whole focused word should
+        // be replaced - not the same number of characters counted backwards from the caret,
+        // which would otherwise eat the previous whitespace and previous word and leave the
+        // tail of the focused word intact.
+        reset()
+        setText("hello world")
+        // "hello world" -> caret between "wo" and "rld"
+        setCursorPosition(8)
+        pickSuggestion("planet")
+        assertEquals("hello planet", text)
+        assertEquals("hello planet".length, cursor)
+        assertEquals("", composingText)
+    }
+
+    @Test fun `pickSuggestionWithCursorAtStartOfWord replaces the focused word`() {
+        reset()
+        setText("hello world")
+        // caret at the very start of "world"
+        setCursorPosition(6)
+        pickSuggestion("planet")
+        assertEquals("hello planet", text)
+        assertEquals("hello planet".length, cursor)
+        assertEquals("", composingText)
+    }
+
+    @Test fun `pickSuggestionWithCursorAtEndOfWordStillWorks`() {
+        reset()
+        setText("hello world")
+        // caret at the end of "world" - the existing happy path
+        setCursorPosition(11)
+        pickSuggestion("planet")
+        assertEquals("hello planet", text)
+        assertEquals("hello planet".length, cursor)
         assertEquals("", composingText)
     }
 

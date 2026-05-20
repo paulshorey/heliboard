@@ -24,11 +24,11 @@ Recording starts **instantly** on mic tap — no network round-trip delay.
 | `VoiceRecorder.kt` | PCM16 capture, adaptive RMS silence detection |
 | `SonioxTranscriptionClient.kt` | WebSocket client for `wss://stt-rt.soniox.com/transcribe-websocket`. Sends JSON start config (auth via `api_key` field), streams binary PCM, parses responses, handles graceful shutdown (empty frame → wait for `finished:true`) |
 | `TranscriptSegment.kt` | Finalized chunk passed from the client to the IME pipeline |
-| `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO transcript queue, reconnects, paragraph timer, Soniox session config assembly |
-| `TranscriptionPreferences.kt` | Reads/writes Soniox preferences and migrates legacy provider keys (Speechmatics, Deepgram) to the new `soniox_api_key` |
+| `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO transcript queue, reconnects, auto-stop timers, Soniox session config assembly |
+| `TranscriptionPreferences.kt` | Reads/writes Soniox preferences and clears legacy provider keys (Speechmatics, Deepgram) |
 | `TranscriptPostProcessor.kt` | Paragraph-level post-processing of committed text (spelled-out punctuation replacement, leading-casing correction, etc.) |
 | `LatinIME.java` | Orchestrator — finalizes composing state, commits transcript text at the caret, and triggers post-processing |
-| `TranscriptionScreen.kt` / `SetupAppScreen.kt` | Settings UI for API key, endpoint detection, diarization, silence thresholds, paragraph timing |
+| `TranscriptionScreen.kt` / `SetupAppScreen.kt` | Settings UI for API key, endpoint detection, diarization, silence thresholds, and auto-stop timing |
 
 All source files live under `app/src/main/java/helium314/keyboard/latin/voice/` except `LatinIME.java` (parent package) and the settings UI/preferences helpers in `latin/settings` and `settings/screens`.
 
@@ -48,13 +48,14 @@ On graceful stop, the client sends an empty WebSocket frame, waits for `{"finish
 
 Soniox returns smart-formatted text with punctuation already inserted; HeliBoard does not tune it client-side. Key Soniox config features the client uses:
 
-- **`model`** — pinned to `"stt-rt-preview"` in code (TODO to revisit when `stt-rt-v4` becomes the recommended default). Not user-configurable.
+- **`model`** — pinned to `"stt-rt-v4"` in code. Not user-configurable.
 - **`audio_format` / `sample_rate` / `num_channels`** — `pcm_s16le` / `16000` / `1`, matching `VoiceRecorder` output.
 - **`language_hints`** — single-element ISO language code from the keyboard subtype (e.g. `["en"]`). Omitted when the subtype has no usable language so Soniox auto-detects.
+- **`context.terms`** — small built-in terms list (`HeliBoard`, `Soniox`, `Kubernetes`, `API`, `gnocchi`) to preserve the useful parts of the older custom vocabulary behavior now that Soniox supports context.
 - **`enable_endpoint_detection`** + **`max_endpoint_delay_ms`** — when enabled, Soniox finalizes tokens immediately once it detects the speaker has stopped talking. `max_endpoint_delay_ms` must be between 500 and 3000 ms (Soniox's documented bounds); HeliBoard defaults to 2000 ms.
 - **`enable_speaker_diarization`** — when enabled, the client locks onto the first non-empty `speaker` label observed and drops tokens from other speakers. Soniox uses string speaker IDs (`"1"`, `"2"`, …); the locked ID isn't guaranteed to be the local speaker.
 
-Custom vocab / replacements / disfluency removal / punctuation sensitivity / output locale are **not exposed** by the Soniox real-time API and are therefore not configurable.
+Direct replacement rules, disfluency removal, punctuation sensitivity, and output locale are not configured in HeliBoard's Soniox integration.
 
 ## Post-Processing (TranscriptPostProcessor)
 
@@ -80,7 +81,7 @@ Known tradeoff: proper nouns dictated as the first word of a mid-sentence chunk 
 
 ## Paragraph Breaks
 
-After configured silence, `VoiceInputManager` fires `onNewParagraphRequested()` → LatinIME inserts `"\n\n"` when processing is idle (deferred so it doesn't interleave with pending transcript spans).
+Silence-driven automatic paragraph insertion is disabled because inserting `"\n\n"` into arbitrary host fields caused form submissions and other unintended side effects. Explicit spoken commands such as "New paragraph." are still handled by `TranscriptPostProcessor`.
 
 ## Thread Safety
 
