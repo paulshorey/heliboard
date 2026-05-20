@@ -32,6 +32,7 @@ import helium314.keyboard.settings.screens.PersonalDictionaryScreen
 import helium314.keyboard.settings.screens.PreferencesScreen
 import helium314.keyboard.settings.screens.SecondaryLayoutScreen
 import helium314.keyboard.settings.screens.SetupAppScreen
+import helium314.keyboard.settings.screens.SonioxContextTermsScreen
 import helium314.keyboard.settings.screens.SubtypeScreen
 import helium314.keyboard.settings.screens.TextCorrectionScreen
 import helium314.keyboard.settings.screens.ToolbarScreen
@@ -109,6 +110,9 @@ fun SettingsNavHost(
         composable(SettingsDestination.Transcription) {
             TranscriptionScreen(onClickBack = ::goBack)
         }
+        composable(SettingsDestination.SonioxContextTerms) {
+            SonioxContextTermsScreen(onClickBack = ::goBack)
+        }
         composable(SettingsDestination.FullappDrafts) {
             FullappDraftsScreen(onClickBack = ::goBack)
         }
@@ -164,6 +168,7 @@ object SettingsDestination {
     const val Advanced = "advanced"
     const val SetupApp = "setup_app"
     const val Transcription = "transcription"
+    const val SonioxContextTerms = "soniox_context_terms"
     const val FullappDrafts = "fullapp_drafts"
     const val Debug = "debug"
     const val Appearance = "appearance"

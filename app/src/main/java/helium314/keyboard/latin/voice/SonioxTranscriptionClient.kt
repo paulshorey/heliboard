@@ -55,18 +55,34 @@ class SonioxTranscriptionClient {
         )
 
         /**
-         * Soniox's manual-finalize feature emits this special token to mark the
-         * end of a manually-flushed segment. We use empty-frame end-of-stream
-         * instead of manual finalize, but defensively skip the marker either way.
+         * Soniox emits special control tokens in the same `tokens` array as real
+         * transcript text:
+         *  - `<end>` marks the end of an utterance when endpoint detection is on.
+         *  - `<fin>` marks the end of a manually-flushed segment.
+         * The Soniox SDKs filter these via `filterSpecialTokens()`; raw WebSocket
+         * consumers must do it themselves or the markers leak into the user's
+         * editor as literal text.
          */
-        private const val MANUAL_FINALIZE_MARKER = "<fin>"
+        private val STREAM_MARKERS: Set<String> = setOf("<end>", "<fin>")
+
+        /**
+         * Maximum characters of editor context sent as `context.text`. Soniox's
+         * documented context limit is ~10,000 characters / 8,000 tokens for the
+         * entire context object; staying well under that leaves headroom for
+         * `terms`.
+         */
+        internal const val MAX_CONTEXT_TEXT_CHARS = 4000
+
+        /** Hard cap on the number of user-defined custom terms. */
+        internal const val MAX_USER_CONTEXT_TERMS = 200
 
         internal data class SessionConfig(
             val languageHint: String?,
             val enableEndpointDetection: Boolean,
             val maxEndpointDelayMs: Int,
             val diarizationEnabled: Boolean,
-            val contextTerms: List<String>
+            val contextTerms: List<String>,
+            val contextText: String?
         )
 
         internal fun buildSessionConfig(
@@ -74,8 +90,14 @@ class SonioxTranscriptionClient {
             enableEndpointDetection: Boolean,
             maxEndpointDelayMs: Int,
             diarizationEnabled: Boolean,
-            contextTerms: List<String> = defaultContextTerms()
+            contextTerms: List<String> = defaultContextTerms(),
+            customContextTerms: List<String> = emptyList(),
+            contextText: String? = null
         ): SessionConfig {
+            val mergedTerms = (contextTerms + customContextTerms)
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct()
             return SessionConfig(
                 languageHint = normalizeLanguageHint(languageTag),
                 enableEndpointDetection = enableEndpointDetection,
@@ -84,7 +106,8 @@ class SonioxTranscriptionClient {
                     MAX_MAX_ENDPOINT_DELAY_MS
                 ),
                 diarizationEnabled = diarizationEnabled,
-                contextTerms = contextTerms.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+                contextTerms = mergedTerms,
+                contextText = sanitizeContextText(contextText)
             )
         }
 
@@ -95,6 +118,22 @@ class SonioxTranscriptionClient {
             "API",
             "gnocchi"
         )
+
+        /**
+         * Trim incoming editor context to the most recent [MAX_CONTEXT_TEXT_CHARS]
+         * characters and collapse it to a single non-blank string. Returns null
+         * when the context is empty after sanitization.
+         */
+        internal fun sanitizeContextText(raw: String?): String? {
+            if (raw.isNullOrBlank()) return null
+            val condensed = raw.replace("\u0000", "").trim()
+            if (condensed.isEmpty()) return null
+            return if (condensed.length <= MAX_CONTEXT_TEXT_CHARS) {
+                condensed
+            } else {
+                condensed.substring(condensed.length - MAX_CONTEXT_TEXT_CHARS)
+            }
+        }
 
         internal fun buildStartConfigMessage(apiKey: String, config: SessionConfig): String {
             val payload = JSONObject()
@@ -113,16 +152,20 @@ class SonioxTranscriptionClient {
                     JSONArray().apply { put(config.languageHint) }
                 )
             }
+            val contextObject = JSONObject()
             if (config.contextTerms.isNotEmpty()) {
-                payload.put(
-                    "context",
-                    JSONObject().put(
-                        "terms",
-                        JSONArray().apply {
-                            config.contextTerms.forEach { put(it) }
-                        }
-                    )
+                contextObject.put(
+                    "terms",
+                    JSONArray().apply {
+                        config.contextTerms.forEach { put(it) }
+                    }
                 )
+            }
+            if (!config.contextText.isNullOrBlank()) {
+                contextObject.put("text", config.contextText)
+            }
+            if (contextObject.length() > 0) {
+                payload.put("context", contextObject)
             }
             return payload.toString()
         }
@@ -169,7 +212,7 @@ class SonioxTranscriptionClient {
                 if (!token.optBoolean("is_final", false)) continue
                 val text = token.optString("text", "")
                 if (text.isEmpty()) continue
-                if (text == MANUAL_FINALIZE_MARKER) continue
+                if (text in STREAM_MARKERS) continue
 
                 if (diarizationEnabled) {
                     val speaker = token.optString("speaker", "")
@@ -297,7 +340,8 @@ class SonioxTranscriptionClient {
                 "endpointDetection=${sessionConfig.enableEndpointDetection}, " +
                 "maxEndpointDelayMs=${sessionConfig.maxEndpointDelayMs}, " +
                 "diarization=${sessionConfig.diarizationEnabled}, " +
-                "contextTerms=${sessionConfig.contextTerms.size})"
+                "contextTerms=${sessionConfig.contextTerms.size}, " +
+                "contextTextChars=${sessionConfig.contextText?.length ?: 0})"
         )
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {

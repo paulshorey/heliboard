@@ -574,6 +574,7 @@ public class LatinIME extends InputMethodService implements
         // Initialize voice input manager
         mVoiceInputManager = new VoiceInputManager(this);
         setupVoiceInputListener();
+        mVoiceInputManager.setPriorTextProvider(this::buildVoiceContextText);
 
         // Register to receive ringer mode change.
         final IntentFilter filter = new IntentFilter();
@@ -2253,6 +2254,33 @@ public class LatinIME extends InputMethodService implements
                 || c == '\t'
                 || c == '/'
                 || c == '\\';
+    }
+
+    /**
+     * Maximum chars of editor context sent as Soniox `context.text`. Soniox's
+     * documented context limit is ~10,000 chars / 8,000 tokens for the entire
+     * context object; staying well under that leaves headroom for terms.
+     */
+    private static final int VOICE_CONTEXT_TEXT_LOOKBACK = 4000;
+
+    /**
+     * Provider hook for {@link VoiceInputManager#setPriorTextProvider}. Reads
+     * up to {@link #VOICE_CONTEXT_TEXT_LOOKBACK} characters of editor text
+     * before the cursor so Soniox can use it as `context.text` to inform
+     * sentence-structure punctuation, casing, and proper-noun spelling.
+     */
+    @androidx.annotation.Nullable
+    private String buildVoiceContextText() {
+        try {
+            if (mInputLogic == null || mInputLogic.mConnection == null) return null;
+            final CharSequence before =
+                    mInputLogic.mConnection.getTextBeforeCursor(VOICE_CONTEXT_TEXT_LOOKBACK, 0);
+            if (before == null || before.length() == 0) return null;
+            return before.toString();
+        } catch (Exception e) {
+            Log.e(TAG, "Error reading editor context for Soniox: " + e.getMessage());
+            return null;
+        }
     }
 
     /**

@@ -68,6 +68,16 @@ class VoiceInputManager(private val context: Context) {
         fun onPermissionRequired()
     }
 
+    /**
+     * Supplies the most recent editor text before the cursor for use as Soniox
+     * `context.text`. Called on the main thread from [startStreamingSession],
+     * including reconnects, so callers should return the freshest available
+     * text. Returning null or a blank string omits the field.
+     */
+    fun interface PriorTextProvider {
+        fun getPriorText(): String?
+    }
+
     private data class PendingAudioChunk(
         val sessionId: Long,
         val pcmData: ByteArray
@@ -82,6 +92,7 @@ class VoiceInputManager(private val context: Context) {
     private val voiceRecorder = VoiceRecorder(context)
     private val transcriptionClient = SonioxTranscriptionClient()
     private var listener: VoiceInputListener? = null
+    private var priorTextProvider: PriorTextProvider? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private var currentState = State.IDLE
@@ -143,6 +154,16 @@ class VoiceInputManager(private val context: Context) {
 
     fun setListener(listener: VoiceInputListener?) {
         this.listener = listener
+    }
+
+    /**
+     * Register a provider that returns the editor text before the cursor for
+     * use as Soniox `context.text`. The provider is invoked synchronously on
+     * the main thread when a streaming session opens (including reconnects),
+     * so it must be cheap and must not block.
+     */
+    fun setPriorTextProvider(provider: PriorTextProvider?) {
+        this.priorTextProvider = provider
     }
 
     /** Toggle: IDLE → start, RECORDING → stop, PAUSED → resume. */
@@ -332,11 +353,19 @@ class VoiceInputManager(private val context: Context) {
 
     private fun startStreamingSession(sessionId: Long, apiKey: String, isReconnect: Boolean = false) {
         if (sessionId != activeSessionId) return
+        val priorText = try {
+            priorTextProvider?.getPriorText()
+        } catch (e: Exception) {
+            Log.e(TAG, "Prior text provider threw: ${e.message}")
+            null
+        }
         val sessionConfig = SonioxTranscriptionClient.buildSessionConfig(
             languageTag = getCurrentLanguageHint(),
             enableEndpointDetection = sonioxConfig.enableEndpointDetection,
             maxEndpointDelayMs = sonioxConfig.maxEndpointDelayMs,
-            diarizationEnabled = sonioxConfig.diarizationEnabled
+            diarizationEnabled = sonioxConfig.diarizationEnabled,
+            customContextTerms = sonioxConfig.customTerms,
+            contextText = priorText
         )
         streamSessionId = sessionId
         isStreamingConnecting = true
@@ -762,7 +791,8 @@ class VoiceInputManager(private val context: Context) {
                 "autoStopSilence=${autoStopSilenceMs}ms, " +
                 "sonioxEnableEndpointDetection=${sonioxConfig.enableEndpointDetection}, " +
                 "sonioxMaxEndpointDelayMs=${sonioxConfig.maxEndpointDelayMs}, " +
-                "sonioxDiarization=${sonioxConfig.diarizationEnabled}"
+                "sonioxDiarization=${sonioxConfig.diarizationEnabled}, " +
+                "sonioxCustomTerms=${sonioxConfig.customTerms.size}"
         )
     }
 

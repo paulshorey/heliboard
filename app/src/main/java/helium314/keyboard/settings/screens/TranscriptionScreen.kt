@@ -35,11 +35,14 @@ import helium314.keyboard.latin.settings.TranscriptionPreferences
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.getActivity
 import helium314.keyboard.latin.utils.prefs
+import helium314.keyboard.settings.NextScreenIcon
 import helium314.keyboard.settings.SearchSettingsScreen
 import helium314.keyboard.settings.Setting
 import helium314.keyboard.settings.SettingsActivity
 import helium314.keyboard.settings.SettingsContainer
+import helium314.keyboard.settings.SettingsDestination
 import helium314.keyboard.settings.Theme
+import helium314.keyboard.settings.preferences.Preference
 import helium314.keyboard.settings.previewDark
 
 @Composable
@@ -121,6 +124,13 @@ fun TranscriptionScreen(
                         TranscriptionPreferences.writeSonioxDiarization(prefs, checked)
                     }
                 )
+                Preference(
+                    name = stringResource(R.string.soniox_context_terms_title),
+                    description = stringResource(R.string.soniox_context_terms_summary),
+                    onClick = {
+                        SettingsDestination.navigateTo(SettingsDestination.SonioxContextTerms)
+                    },
+                ) { NextScreenIcon() }
                 BooleanSettingRow(
                     label = stringResource(R.string.soniox_enable_endpoint_detection_title),
                     summary = stringResource(R.string.soniox_enable_endpoint_detection_summary),

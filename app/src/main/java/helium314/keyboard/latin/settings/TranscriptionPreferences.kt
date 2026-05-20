@@ -19,11 +19,18 @@ object TranscriptionPreferences {
     const val DEFAULT_MAX_ENDPOINT_DELAY_MS = Defaults.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS
     const val DEFAULT_DIARIZATION = Defaults.PREF_SONIOX_DIARIZATION
 
+    /** Hard cap on user-defined custom terms, mirroring the client. */
+    private const val MAX_CUSTOM_TERMS = 200
+
+    /** Hard cap on the length of any individual custom term. */
+    private const val MAX_CUSTOM_TERM_LENGTH = 100
+
     data class SonioxConfig(
         val apiKey: String,
         val enableEndpointDetection: Boolean,
         val maxEndpointDelayMs: Int,
-        val diarizationEnabled: Boolean
+        val diarizationEnabled: Boolean,
+        val customTerms: List<String>
     )
 
     fun readSonioxApiKey(prefs: SharedPreferences): String {
@@ -59,8 +66,52 @@ object TranscriptionPreferences {
             diarizationEnabled = prefs.getBoolean(
                 Settings.PREF_SONIOX_DIARIZATION,
                 Defaults.PREF_SONIOX_DIARIZATION
-            )
+            ),
+            customTerms = readSonioxCustomTerms(prefs)
         )
+    }
+
+    /**
+     * Read user-defined custom Soniox `context.terms`. The preference is stored
+     * as a single string with one term per line; this helper splits, trims,
+     * deduplicates and clamps to [MAX_CUSTOM_TERMS] entries.
+     */
+    fun readSonioxCustomTerms(prefs: SharedPreferences): List<String> {
+        val raw = prefs.getString(
+            Settings.PREF_SONIOX_CUSTOM_TERMS,
+            Defaults.PREF_SONIOX_CUSTOM_TERMS
+        ).orEmpty()
+        return parseCustomTerms(raw)
+    }
+
+    /** Stored form (as the user sees it) — preserves their order, trims whitespace. */
+    fun readSonioxCustomTermsRaw(prefs: SharedPreferences): String {
+        return prefs.getString(
+            Settings.PREF_SONIOX_CUSTOM_TERMS,
+            Defaults.PREF_SONIOX_CUSTOM_TERMS
+        ).orEmpty()
+    }
+
+    fun writeSonioxCustomTerms(prefs: SharedPreferences, value: String) {
+        prefs.edit {
+            putString(Settings.PREF_SONIOX_CUSTOM_TERMS, value)
+        }
+    }
+
+    internal fun parseCustomTerms(raw: String): List<String> {
+        if (raw.isBlank()) return emptyList()
+        val seen = LinkedHashSet<String>()
+        for (line in raw.lineSequence()) {
+            val trimmed = line.trim()
+            if (trimmed.isEmpty()) continue
+            val clamped = if (trimmed.length > MAX_CUSTOM_TERM_LENGTH) {
+                trimmed.substring(0, MAX_CUSTOM_TERM_LENGTH)
+            } else {
+                trimmed
+            }
+            if (seen.add(clamped) && seen.size >= MAX_CUSTOM_TERMS) break
+        }
+        return seen.toList()
     }
 
     fun writeSonioxEnableEndpointDetection(prefs: SharedPreferences, enabled: Boolean) {
