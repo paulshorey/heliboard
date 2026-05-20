@@ -22,7 +22,7 @@ object TranscriptPostProcessor {
     fun processCurrentParagraph(paragraph: String): String? {
         var result = paragraph
         for (rule in rules) {
-            result = result.replace(rule.find, rule.replace, ignoreCase = true)
+            result = result.replace(rule.find, rule.replace)
         }
         return if (result != paragraph) result else null
     }
@@ -95,6 +95,11 @@ object TranscriptPostProcessor {
 
     private fun shouldPreserveWordCasing(word: String): Boolean {
         if (word.isEmpty()) return true
+        // A single uppercase letter is likely an acronym initial being delivered
+        // as its own span (Speechmatics may split spelled-out acronyms across
+        // multiple AddTranscript events). Lowercasing it would produce artifacts
+        // like "aPI" when the following attached span keeps its uppercase.
+        if (word.length == 1) return true
         // Keep pronoun "I" and its contractions.
         if (word == "I" || word.startsWith("I'") || word.startsWith("I’")) return true
         // Keep camel/Pascal-case and acronyms: any uppercase letter after index 0.
@@ -123,19 +128,26 @@ object TranscriptPostProcessor {
     }
 
     // ------------------------------------------------------------------
-    // Rule construction — sorted by find-length descending so the most
-    // specific (longest) patterns are tried first.
+    // Rule construction — only matches capitalized sentence-form commands
+    // as returned by Speechmatics (e.g. "Colon." not "colon").
+    //
+    // When the user speaks a punctuation command after a pause, Speechmatics
+    // returns it as its own sentence: capitalized, with trailing punctuation.
+    // If the same word appears lowercase mid-sentence, the user is talking
+    // ABOUT the punctuation, not commanding it. We only replace the
+    // sentence-form command.
+    //
+    // Rules are sorted by find-length descending so the most specific
+    // (longest) patterns are tried first.
     // ------------------------------------------------------------------
 
     private fun buildRules(): List<Rule> {
         val raw = mutableListOf<Rule>()
 
-        // Helper: for a given punctuation name, add rules with every combination
-        // of leading context (previous punctuation or a plain space) and trailing
-        // punctuation variant.  Rules with leading punctuation context are the
-        // longest; the space-prefixed standalone variant is shorter; the bare
-        // variant (for paragraph start) is shortest.
-        fun addPuncRules(
+        // Helper: for a given punctuation command name (capitalized), add rules
+        // that match the command preceded by sentence-ending context or at the
+        // start of the paragraph, always requiring trailing punctuation.
+        fun addCommandRules(
             names: List<String>,
             replacement: String,
             trailingVariants: List<String>,
@@ -146,50 +158,101 @@ object TranscriptPostProcessor {
                     for (leading in leadingContexts) {
                         raw += Rule("$leading$name$trailing", replacement)
                     }
-                    raw += Rule(" $name$trailing", replacement)
+                    // At paragraph start (no leading context)
                     raw += Rule("$name$trailing", replacement)
                 }
             }
         }
 
-        addPuncRules(
-            names = listOf("exclamation point", "exclamation mark"),
+        // --- Punctuation commands (capitalized, with trailing punctuation) ---
+
+        addCommandRules(
+            names = listOf("Exclamation point", "Exclamation mark"),
             replacement = "!",
             trailingVariants = listOf(".", "!")
         )
 
-        addPuncRules(
-            names = listOf("question mark"),
+        addCommandRules(
+            names = listOf("Question mark"),
             replacement = "?",
             trailingVariants = listOf("?", ".")
         )
 
-        addPuncRules(
-            names = listOf("period", "full stop"),
+        addCommandRules(
+            names = listOf("Period", "Full stop"),
             replacement = ".",
             trailingVariants = listOf(".")
         )
 
-        addPuncRules(
-            names = listOf("colon"),
+        addCommandRules(
+            names = listOf("Colon"),
             replacement = ":",
             trailingVariants = listOf(":", ".")
         )
 
-        addPuncRules(
-            names = listOf("semicolon"),
+        addCommandRules(
+            names = listOf("Semicolon"),
             replacement = ";",
             trailingVariants = listOf(";", ".")
         )
 
-        // Comma is special — trailing can be the comma itself, or absent.
+        addCommandRules(
+            names = listOf("Comma"),
+            replacement = ",",
+            trailingVariants = listOf(",", ".")
+        )
+
+        // --- Structural commands (preserve leading sentence punctuation) ---
+
         for (leading in listOf(". ", "? ", "! ", ", ")) {
-            raw += Rule("${leading}comma,", ",")
-            raw += Rule("${leading}comma", ",")
+            val punct = leading.trimEnd()
+            raw += Rule("${leading}New line.", "$punct\n")
         }
-        raw += Rule(" comma,", ",")
-        raw += Rule(" comma", ",")
-        raw += Rule("comma,", ",")
+        raw += Rule("New line.", "\n")
+
+        for (leading in listOf(". ", "? ", "! ", ", ")) {
+            val punct = leading.trimEnd()
+            raw += Rule("${leading}New paragraph.", "$punct\n\n")
+        }
+        raw += Rule("New paragraph.", "\n\n")
+
+        // --- Symbol commands ---
+
+        addCommandRules(
+            names = listOf("Hyphen"),
+            replacement = "-",
+            trailingVariants = listOf(".", "-")
+        )
+
+        addCommandRules(
+            names = listOf("Dash"),
+            replacement = " — ",
+            trailingVariants = listOf(".")
+        )
+
+        addCommandRules(
+            names = listOf("Open quote"),
+            replacement = "\"",
+            trailingVariants = listOf(".")
+        )
+
+        addCommandRules(
+            names = listOf("Close quote"),
+            replacement = "\"",
+            trailingVariants = listOf(".")
+        )
+
+        addCommandRules(
+            names = listOf("Open parenthesis"),
+            replacement = "(",
+            trailingVariants = listOf(".")
+        )
+
+        addCommandRules(
+            names = listOf("Close parenthesis"),
+            replacement = ")",
+            trailingVariants = listOf(".")
+        )
 
         return raw.sortedByDescending { it.find.length }
     }
