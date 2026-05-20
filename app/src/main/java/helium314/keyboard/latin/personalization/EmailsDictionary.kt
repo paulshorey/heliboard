@@ -2,9 +2,13 @@
 package helium314.keyboard.latin.personalization
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import helium314.keyboard.latin.utils.Log
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * A tiny, locale-agnostic dictionary of email addresses the user has typed, along
@@ -40,6 +44,28 @@ object EmailsDictionary {
     @Volatile
     private var appContext: Context? = null
 
+    /**
+     * Single background thread for disk writes. Both file I/O and listener
+     * notifications happen here so we never block the IME's main thread on
+     * disk, and so we can coalesce bursts of changes (e.g. a single
+     * [EmailLearner] scan that records 5 emails at once) into one save and
+     * one notification.
+     *
+     * The executor is daemon so it doesn't block process shutdown.
+     */
+    private val ioExecutor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "EmailsDictionary-IO").apply { isDaemon = true }
+    }
+
+    /** True when a save+notify task is queued on [ioExecutor] but has not
+     *  started running yet. We only enqueue one at a time; whichever task
+     *  is next to run will pick up the latest snapshot of [entries]. */
+    private val saveScheduled = AtomicBoolean(false)
+
+    /** Listener notifications fire on the main looper so observers (Compose
+     *  screens) don't have to do their own thread hopping. */
+    private val mainHandler = Handler(Looper.getMainLooper())
+
     /** A listener notified whenever the dictionary contents change. Used by the
      *  settings screen so the list updates live. */
     fun interface ChangeListener {
@@ -58,10 +84,32 @@ object EmailsDictionary {
         listeners.remove(listener)
     }
 
-    private fun notifyChanged() {
+    private fun notifyChangedOnMain() {
         val snapshot: List<ChangeListener>
         synchronized(this) { snapshot = listeners.toList() }
-        for (l in snapshot) l.onEmailsChanged()
+        for (l in snapshot) {
+            try {
+                l.onEmailsChanged()
+            } catch (t: Throwable) {
+                Log.w(TAG, "ChangeListener threw", t)
+            }
+        }
+    }
+
+    /**
+     * Mark the dictionary dirty: schedule one background save + one
+     * main-thread listener notification. Repeated calls before the
+     * scheduled task starts running coalesce into a single save.
+     */
+    private fun scheduleSaveAndNotify() {
+        if (!saveScheduled.compareAndSet(false, true)) return
+        ioExecutor.execute {
+            // Clear the flag *before* writing so any new mutation happening
+            // mid-write is captured by a follow-up scheduled save.
+            saveScheduled.set(false)
+            save()
+            mainHandler.post { notifyChangedOnMain() }
+        }
     }
 
     /** Initialize from the given context. Safe to call multiple times; the
@@ -119,15 +167,30 @@ object EmailsDictionary {
     }
 
     /**
-     * Record that the user typed the given email. Increments its usage counter
-     * (or inserts it with count=1 if new) and persists.
+     * Record that the user typed the given email. Increments its usage
+     * counter (or inserts it with count=1 if new). Persistence and listener
+     * notification happen asynchronously so this is safe to call from the
+     * main thread.
      */
     fun recordEmail(email: String) {
-        val normalized = email.trim().lowercase()
-        if (normalized.isEmpty() || !normalized.contains('@')) return
-        entries.merge(normalized, 1) { old, add -> old + add }
-        save()
-        notifyChanged()
+        recordEmails(listOf(email))
+    }
+
+    /**
+     * Batch version of [recordEmail]. Increments each email's count by 1,
+     * does at most one save and one listener notification regardless of how
+     * many emails are in the batch.
+     */
+    fun recordEmails(emails: Collection<String>) {
+        if (emails.isEmpty()) return
+        var changed = false
+        for (raw in emails) {
+            val normalized = raw.trim().lowercase()
+            if (normalized.isEmpty() || !normalized.contains('@')) continue
+            entries.merge(normalized, 1) { old, add -> old + add }
+            changed = true
+        }
+        if (changed) scheduleSaveAndNotify()
     }
 
     /** Add or replace an entry. Used by the settings UI. */
@@ -135,8 +198,7 @@ object EmailsDictionary {
         val normalized = email.trim().lowercase()
         if (normalized.isEmpty() || !normalized.contains('@')) return
         entries[normalized] = count.coerceAtLeast(0)
-        save()
-        notifyChanged()
+        scheduleSaveAndNotify()
     }
 
     /** Rename an email, preserving its count. */
@@ -147,23 +209,20 @@ object EmailsDictionary {
         val existingCount = entries[oldKey] ?: 0
         if (oldKey != newKey) entries.remove(oldKey)
         entries[newKey] = newCount.coerceAtLeast(0).takeIf { it > 0 } ?: existingCount.coerceAtLeast(1)
-        save()
-        notifyChanged()
+        scheduleSaveAndNotify()
     }
 
     fun remove(email: String) {
         val normalized = email.trim().lowercase()
         if (entries.remove(normalized) != null) {
-            save()
-            notifyChanged()
+            scheduleSaveAndNotify()
         }
     }
 
     fun clear() {
         if (entries.isEmpty()) return
         entries.clear()
-        save()
-        notifyChanged()
+        scheduleSaveAndNotify()
     }
 
     /** Returns all entries, sorted by usage count (descending), then email. */

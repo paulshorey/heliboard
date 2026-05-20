@@ -166,7 +166,10 @@ object Defaults {
     const val PREF_SPACE_BAR_TEXT = ""
     const val PREF_TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss"
     const val PREF_SPEECHMATICS_API_KEY = ""
-    const val PREF_SPEECHMATICS_MAX_DELAY_MILLIS = 2500
+    // 2.0s gives Speechmatics enough context for good accuracy (<1% degradation
+    // vs batch) while keeping final-transcript latency under control. Combined
+    // with partials (<500ms), perceived latency is minimal.
+    const val PREF_SPEECHMATICS_MAX_DELAY_MILLIS = 2000
     // 0 disables the server-side end-of-utterance detector. Leaving it enabled
     // forces a final transcript after every short pause, and Speechmatics always
     // terminates that forced final with a sentence-end mark (a period in
@@ -175,13 +178,12 @@ object Defaults {
     // sentence boundaries.
     const val PREF_SPEECHMATICS_END_OF_UTTERANCE_MILLIS = 0
     const val PREF_SPEECHMATICS_REMOVE_DISFLUENCIES = true
-    // Speechmatics' native default is 0.5 (50). Setting below the native default
-    // reduces how readily the model inserts sentence-ending periods, which is the
-    // main source of over-eager sentence splitting in dictation. 0.4 is the value
-    // Speechmatics' own docs use as the "reduce punctuation" example. Commas at
-    // natural speech pauses are still emitted at this level. Range 0–100 (maps to
-    // 0.0–1.0).
-    const val PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT = 40
+    // Speechmatics' native default is 0.5 (50). Lower values reduce how readily
+    // the model inserts sentence-ending periods — the main source of premature
+    // sentence splitting in dictation. 0.3 still preserves commas at natural
+    // speech pauses but substantially reduces spurious period insertion compared
+    // to 0.4 or 0.5. Range 0–100 (maps to 0.0–1.0).
+    const val PREF_SPEECHMATICS_PUNCTUATION_SENSITIVITY_PERCENT = 30
     const val PREF_SPEECHMATICS_DIARIZATION = true
     const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 1
     const val PREF_VOICE_SILENCE_THRESHOLD = 220

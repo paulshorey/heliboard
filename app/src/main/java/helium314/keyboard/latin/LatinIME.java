@@ -565,6 +565,7 @@ public class LatinIME extends InputMethodService implements
         mDisplayContext = KtxKt.getDisplayContext(this);
         KeyboardSwitcher.init(this);
         helium314.keyboard.latin.personalization.EmailsDictionary.INSTANCE.init(this);
+        helium314.keyboard.latin.personalization.EmailLearner.INSTANCE.init(this);
         super.onCreate();
 
         loadSettings();
@@ -1066,6 +1067,19 @@ public class LatinIME extends InputMethodService implements
         discardPendingVoiceWork("Input connection finished — discarding voice work");
 
         mDictionaryFacilitator.onFinishInput();
+        // Last-chance scan for any email still in the editor that the user
+        // typed but never finalized with a separator (e.g. they hit Send,
+        // Done, Search, or just navigated away). After this we clear the
+        // per-editor seen set so the next editor starts fresh.
+        try {
+            final SettingsValues finishSettings = mSettings.getCurrent();
+            helium314.keyboard.latin.personalization.EmailLearner.INSTANCE.flushNow(
+                    mInputLogic.mConnection,
+                    shouldSkipEmailCapture(finishSettings));
+        } catch (Throwable t) {
+            // Defensive: never let learner errors break the IME teardown path.
+            Log.w(TAG, "EmailLearner.flushNow failed", t);
+        }
         final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
         if (mainKeyboardView != null) {
             mainKeyboardView.closing();
@@ -1076,6 +1090,18 @@ public class LatinIME extends InputMethodService implements
         super.onFinishInputView(finishingInput);
         Log.i(TAG, "onFinishInputView");
         cleanupInternalStateForFinishInput();
+    }
+
+    /**
+     * Whether email capture should be suppressed for the current field. We
+     * skip capture when the user is in incognito (which already covers
+     * password fields, no-learning fields, and the always-incognito toggle)
+     * or when personalized dictionaries are disabled, since the same
+     * setting governs auto-learning for the regular dictionary.
+     */
+    private static boolean shouldSkipEmailCapture(final SettingsValues sv) {
+        if (sv == null) return true;
+        return sv.mIncognitoModeEnabled || !sv.mUsePersonalizedDicts;
     }
 
     private void cleanupInternalStateForFinishInput() {
@@ -1144,6 +1170,19 @@ public class LatinIME extends InputMethodService implements
         // view is not displayed we have no means of showing suggestions anyway, and if it is then
         // we want to show suggestions anyway.
         final SettingsValues settingsValues = mSettings.getCurrent();
+        // Schedule a debounced scan of the surrounding text for email
+        // addresses. Selection-only moves (oldSelStart == newSelStart &&
+        // oldSelEnd == newSelEnd) can't introduce new text, so we skip them
+        // to avoid scanning on every cursor blink in long fields.
+        if (oldSelStart != newSelStart || oldSelEnd != newSelEnd) {
+            try {
+                helium314.keyboard.latin.personalization.EmailLearner.INSTANCE.notifyTextChanged(
+                        mInputLogic.mConnection,
+                        shouldSkipEmailCapture(settingsValues));
+            } catch (Throwable t) {
+                Log.w(TAG, "EmailLearner.notifyTextChanged failed", t);
+            }
+        }
         if (isInputViewShown()
                 && mInputLogic.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd,
                 composingSpanStart, composingSpanEnd, settingsValues)) {
@@ -2055,6 +2094,14 @@ public class LatinIME extends InputMethodService implements
                 } catch (Exception e) {
                     Log.e(TAG, "Error processing transcription result: " + e.getMessage(), e);
                 }
+            }
+
+            @Override
+            public void onPartialTranscript(@NonNull String text) {
+                // Partials are enabled server-side to improve Speechmatics' internal
+                // pipeline efficiency and reduce final-transcript latency, but we do
+                // not display them in the editor. Android's setComposingText is not
+                // reliable across all text fields and causes duplicate text issues.
             }
 
             @Override
