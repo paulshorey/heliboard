@@ -175,6 +175,103 @@ class SonioxTranscriptionClientTest {
     }
 
     @Test
+    fun buildSegmentFromFinalTokens_skipsEndpointMarker() {
+        // Soniox emits "<end>" as a final token whenever endpoint detection
+        // fires; raw WebSocket consumers must filter it manually or it leaks
+        // into the user's editor.
+        val tokens = JSONArray()
+            .put(finalToken("Hello world"))
+            .put(finalToken("."))
+            .put(finalToken("<end>"))
+
+        val result = SonioxTranscriptionClient.buildSegmentFromFinalTokens(
+            tokens = tokens,
+            primarySpeaker = null,
+            diarizationEnabled = false
+        )
+        val segment = assertNotNull(result.segment)
+        assertEquals("Hello world.", segment.text)
+    }
+
+    @Test
+    fun buildStartConfigMessage_includesContextTextWhenProvided() {
+        val sessionConfig = SonioxTranscriptionClient.buildSessionConfig(
+            languageTag = "en",
+            enableEndpointDetection = true,
+            maxEndpointDelayMs = 2000,
+            diarizationEnabled = false,
+            contextText = "Earlier in the document we discussed the migration plan."
+        )
+        val payload = JSONObject(
+            SonioxTranscriptionClient.buildStartConfigMessage("API_KEY", sessionConfig)
+        )
+        val context = payload.getJSONObject("context")
+        assertEquals(
+            "Earlier in the document we discussed the migration plan.",
+            context.getString("text")
+        )
+        assertTrue(context.has("terms"), "default terms should still be present")
+    }
+
+    @Test
+    fun buildStartConfigMessage_omitsContextTextWhenBlank() {
+        for (raw in listOf<String?>(null, "", "   ", "\n\n  \t")) {
+            val sessionConfig = SonioxTranscriptionClient.buildSessionConfig(
+                languageTag = "en",
+                enableEndpointDetection = true,
+                maxEndpointDelayMs = 2000,
+                diarizationEnabled = false,
+                contextText = raw
+            )
+            val payload = JSONObject(
+                SonioxTranscriptionClient.buildStartConfigMessage("API_KEY", sessionConfig)
+            )
+            val context = payload.optJSONObject("context")
+            assertTrue(
+                context == null || !context.has("text"),
+                "raw=$raw should omit context.text"
+            )
+        }
+    }
+
+    @Test
+    fun buildStartConfigMessage_truncatesOverlongContextText() {
+        val long = "x".repeat(SonioxTranscriptionClient.MAX_CONTEXT_TEXT_CHARS + 250)
+        val sessionConfig = SonioxTranscriptionClient.buildSessionConfig(
+            languageTag = "en",
+            enableEndpointDetection = true,
+            maxEndpointDelayMs = 2000,
+            diarizationEnabled = false,
+            contextText = long
+        )
+        val payload = JSONObject(
+            SonioxTranscriptionClient.buildStartConfigMessage("API_KEY", sessionConfig)
+        )
+        val sentText = payload.getJSONObject("context").getString("text")
+        assertEquals(SonioxTranscriptionClient.MAX_CONTEXT_TEXT_CHARS, sentText.length)
+    }
+
+    @Test
+    fun buildStartConfigMessage_mergesBuiltinAndCustomTermsDeduped() {
+        val sessionConfig = SonioxTranscriptionClient.buildSessionConfig(
+            languageTag = "en",
+            enableEndpointDetection = true,
+            maxEndpointDelayMs = 2000,
+            diarizationEnabled = false,
+            // Includes a duplicate "API" already in the defaults plus blank/whitespace entries.
+            customContextTerms = listOf("Kubernetes", "MyProject", "API", "  ", "")
+        )
+        val payload = JSONObject(
+            SonioxTranscriptionClient.buildStartConfigMessage("API_KEY", sessionConfig)
+        )
+        val terms = payload.getJSONObject("context").getJSONArray("terms")
+        val termsList = (0 until terms.length()).map { terms.getString(it) }
+        assertTrue(termsList.contains("MyProject"), "custom term should be present: $termsList")
+        assertEquals(termsList.toSet().size, termsList.size, "terms must be deduped: $termsList")
+        assertFalse(termsList.contains(""), "blank terms must be filtered: $termsList")
+    }
+
+    @Test
     fun buildSegmentFromFinalTokens_returnsNullForEmptyOrAllNonFinalTokens() {
         val empty = SonioxTranscriptionClient.buildSegmentFromFinalTokens(
             tokens = JSONArray(),

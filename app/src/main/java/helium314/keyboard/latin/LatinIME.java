@@ -2269,7 +2269,7 @@ public class LatinIME extends InputMethodService implements
      * before the cursor so Soniox can use it as `context.text` to inform
      * sentence-structure punctuation, casing, and proper-noun spelling.
      */
-    @androidx.annotation.Nullable
+    @Nullable
     private String buildVoiceContextText() {
         try {
             if (mInputLogic == null || mInputLogic.mConnection == null) return null;

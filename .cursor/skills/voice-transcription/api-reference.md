@@ -17,7 +17,8 @@ HeliBoard uses the Soniox **Real-Time STT WebSocket** API (`wss://stt-rt.soniox.
   "num_channels": 1,
   "language_hints": ["en"],
   "context": {
-    "terms": ["HeliBoard", "Soniox", "Kubernetes", "API", "gnocchi"]
+    "terms": ["HeliBoard", "Soniox", "Kubernetes", "API", "gnocchi", "MyProject"],
+    "text": "<up to 4000 chars of editor text before the cursor>"
   },
   "enable_endpoint_detection": true,
   "max_endpoint_delay_ms": 2000,
@@ -31,7 +32,8 @@ HeliBoard uses the Soniox **Real-Time STT WebSocket** API (`wss://stt-rt.soniox.
 - **`model`** (required): real-time STT model. HeliBoard pins `"stt-rt-v4"`.
 - **`audio_format` / `sample_rate` / `num_channels`** (required for raw PCM): `pcm_s16le` / `16000` / `1` to match `VoiceRecorder` output.
 - **`language_hints`** (optional): array of ISO language codes. HeliBoard sends a single-element array based on the active keyboard subtype, or omits the field entirely so Soniox auto-detects.
-- **`context.terms`** (optional): built-in recognition hints for product/technical words. HeliBoard sends a small fixed list and does not expose a user-editable vocabulary UI.
+- **`context.terms`** (optional): recognition hints. HeliBoard sends the union of a built-in list (`HeliBoard`, `Soniox`, `Kubernetes`, `API`, `gnocchi`) and the user's custom terms from `PREF_SONIOX_CUSTOM_TERMS` (one per line, managed in `SonioxContextTermsScreen`). Merged, trimmed, and deduplicated by `SonioxTranscriptionClient.buildSessionConfig`.
+- **`context.text`** (optional): free-form prior text. HeliBoard sends up to the last 4 000 characters of editor text before the cursor (`LatinIME.buildVoiceContextText` via `VoiceInputManager.setPriorTextProvider`). Soniox uses this for sentence-structure punctuation, mid-sentence casing, and proper-noun spelling. Reconnects re-fetch the prior text so the running transcript stays in context.
 - **`enable_endpoint_detection`** (boolean, optional): when true, Soniox finalizes tokens immediately once it detects the speaker has stopped talking.
 - **`max_endpoint_delay_ms`** (number, optional): valid range **500–3000 ms**, default **2000 ms**.
 - **`enable_speaker_diarization`** (boolean, optional): when true, every token includes a `speaker` field. HeliBoard uses this to lock onto the first observed speaker and drop tokens from later speakers.
@@ -105,7 +107,16 @@ To end the session cleanly:
 3. Wait for `{"finished": true}` (HeliBoard uses an 8 s grace timeout).
 4. Close the socket with code 1000.
 
-There is no per-chunk audio acknowledgement to track. (Soniox also exposes an optional manual finalize control message `{"type": "finalize"}` for mid-stream finalization; HeliBoard does not use it but defensively skips the resulting `<fin>` marker token if it ever appears.)
+There is no per-chunk audio acknowledgement to track. (Soniox also exposes an optional manual finalize control message `{"type": "finalize"}` for mid-stream finalization; HeliBoard does not use it.)
+
+### Special control tokens
+
+Soniox emits two reserved markers as final tokens inside the regular `tokens` array. Raw WebSocket consumers must filter them or they leak into the transcript as literal text. HeliBoard's `SonioxTranscriptionClient` filters both via the `STREAM_MARKERS` set:
+
+- **`<end>`** — appears once at the end of every utterance when `enable_endpoint_detection` is on. Documented at <https://soniox.com/docs/stt/rt/endpoint-detection>.
+- **`<fin>`** — appears at the end of every manual finalize segment. Documented at <https://soniox.com/docs/stt/rt/manual-finalization>. HeliBoard does not send `{"type": "finalize"}` today, but the filter is in place defensively.
+
+The Soniox SDKs filter these via `filterSpecialTokens()`; raw WebSocket users (HeliBoard) implement the same filter explicitly.
 
 ### Common HTTP / connection errors
 
@@ -125,6 +136,7 @@ There is no per-chunk audio acknowledgement to track. (Soniox also exposes an op
 | `PREF_SONIOX_ENABLE_ENDPOINT_DETECTION` | Boolean | Lets Soniox finalize tokens as soon as it detects the speaker has stopped talking |
 | `PREF_SONIOX_MAX_ENDPOINT_DELAY_MS` | Int | Maximum endpoint delay in ms (Soniox-documented bounds: 500–3000) |
 | `PREF_SONIOX_DIARIZATION` | Boolean | Enable speaker diarization to filter to primary speaker only |
+| `PREF_SONIOX_CUSTOM_TERMS` | String | User-defined `context.terms`, one per line. Merged with the built-in list at session start. |
 | `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Silence window before treating speech as paused |
 | `PREF_VOICE_SILENCE_THRESHOLD` | Int | RMS threshold used for silence detection |
 | `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` | Int | Silence duration before auto-stopping recording |

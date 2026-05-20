@@ -38,6 +38,36 @@ class TranscriptionPreferencesTest {
         assertFalse(prefs.contains("speechmatics_api_key"))
     }
 
+    @Test
+    fun readSonioxCustomTerms_returnsEmptyByDefault() {
+        val prefs = newPrefs()
+        assertEquals(emptyList(), TranscriptionPreferences.readSonioxCustomTerms(prefs))
+    }
+
+    @Test
+    fun parseCustomTerms_trimsBlankAndDuplicateEntries() {
+        val raw = """
+            Kubernetes
+            
+            kubernetes
+            MyProject
+              MyProject  
+            
+        """.trimIndent()
+        val parsed = TranscriptionPreferences.parseCustomTerms(raw)
+        // Trim/dedup is case-sensitive on purpose — Soniox uses casing as a hint.
+        assertEquals(listOf("Kubernetes", "kubernetes", "MyProject"), parsed)
+    }
+
+    @Test
+    fun writeAndReadSonioxCustomTerms_roundTripsRawAndParsed() {
+        val prefs = newPrefs()
+        TranscriptionPreferences.writeSonioxCustomTerms(prefs, "Foo\nBar\nFoo\n")
+        assertEquals("Foo\nBar\nFoo\n", TranscriptionPreferences.readSonioxCustomTermsRaw(prefs))
+        assertEquals(listOf("Foo", "Bar"), TranscriptionPreferences.readSonioxCustomTerms(prefs))
+        assertEquals(listOf("Foo", "Bar"), TranscriptionPreferences.readSonioxConfig(prefs).customTerms)
+    }
+
     private fun newPrefs() = ApplicationProvider.getApplicationContext<Context>()
         .getSharedPreferences(
             "transcription_preferences_test_${System.nanoTime()}",

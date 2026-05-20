@@ -18,10 +18,11 @@ Feature-specific Compose screens for the settings app.
 - `PreferencesScreen.kt` - general preference settings screen.
 - `SecondaryLayoutScreen.kt` - secondary layout settings screen.
 - `SetupAppScreen.kt` - app setup/onboarding utility screen.
+- `SonioxContextTermsScreen.kt` - voice transcription custom vocabulary screen (built-in `context.terms` view + user-editable list).
 - `SubtypeScreen.kt` - subtype detail/configuration screen.
 - `TextCorrectionScreen.kt` - text correction/autocorrect settings screen.
 - `ToolbarScreen.kt` - toolbar customization screen.
-- `TranscriptionScreen.kt` - voice transcription settings screen.
+- `TranscriptionScreen.kt` - voice transcription settings screen (links into `SonioxContextTermsScreen`).
 
 ## Non-obvious notes
 - These screens are UI only; the actual preference keys/defaults live in `latin/settings/`.

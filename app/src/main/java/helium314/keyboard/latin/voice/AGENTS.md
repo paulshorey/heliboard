@@ -11,8 +11,10 @@ Soniox realtime transcription pipeline.
 
 ## Non-obvious notes
 - Final insertion still happens through `LatinIME` and `InputConnection`, not by writing directly into UI widgets.
-- Preference keys/defaults for this feature live in `latin/settings/`, while the settings screen lives in `settings/screens/TranscriptionScreen.kt`.
+- Preference keys/defaults for this feature live in `latin/settings/`, while the settings screens live in `settings/screens/TranscriptionScreen.kt` and `settings/screens/SonioxContextTermsScreen.kt`.
 - Soniox token text already encodes inter-word whitespace, so transcript assembly concatenates final tokens directly and trims the result rather than re-inserting spaces.
+- Soniox emits `<end>` (after every endpoint detection) and `<fin>` (after every manual finalize) as final tokens that look like real text. Raw WebSocket consumers must filter them; HeliBoard does it via `STREAM_MARKERS` in `SonioxTranscriptionClient`.
+- `context.text` is supplied per session by `LatinIME.buildVoiceContextText` through `VoiceInputManager.setPriorTextProvider` (up to 4 000 chars before the cursor). `context.terms` is the union of a small built-in list and the user's `PREF_SONIOX_CUSTOM_TERMS`.
 - Graceful end-of-stream is an empty WebSocket frame; the client then waits for `{"finished": true}` before closing.
 
 ## Keep this file current

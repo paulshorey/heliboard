@@ -36,9 +36,9 @@ Captures audio from the microphone with client-side silence detection.
 WebSocket client for Soniox real-time transcription.
 - **URL**: `wss://stt-rt.soniox.com/transcribe-websocket`
 - **Authentication**: `api_key` field inside the start config JSON; no HTTP headers
-- **Startup**: Sends a single JSON config text frame (`api_key`, `model`, `audio_format`, `sample_rate`, `num_channels`, optional `language_hints`, built-in `context.terms`, plus the endpoint-detection and diarization flags)
+- **Startup**: Sends a single JSON config text frame (`api_key`, `model`, `audio_format`, `sample_rate`, `num_channels`, optional `language_hints`, merged `context.terms` (built-in + user custom), `context.text` from the editor when available, plus the endpoint-detection and diarization flags)
 - **Transport**: Binary PCM frames over the socket
-- **Output**: Concatenates final-token text in arrival order (Soniox encodes inter-word whitespace inside token text), trims, and emits a `TranscriptSegment`
+- **Output**: Filters Soniox's `<end>` (endpoint detection) and `<fin>` (manual finalize) control markers, then concatenates final-token text in arrival order (Soniox encodes inter-word whitespace inside token text), trims, and emits a `TranscriptSegment`
 - **Graceful stop**: Sends an empty WebSocket frame, waits for `{"finished": true}` (8 s grace), closes 1000
 
 ### VoiceInputManager.kt
@@ -79,10 +79,11 @@ User speaks
 
 ### 2b. Soniox session config
 ```
-Active subtype locale + transcription preferences
+Active subtype locale + transcription preferences + editor text
     → SonioxTranscriptionClient.buildSessionConfig()
     → language_hints  = single ISO language code or omitted
-    → context.terms = built-in product/technical terms
+    → context.terms = built-in product terms ∪ PREF_SONIOX_CUSTOM_TERMS (deduped)
+    → context.text  = LatinIME.buildVoiceContextText() (≤ 4000 chars before cursor)
     → enable_endpoint_detection / max_endpoint_delay_ms (500–3000)
     → enable_speaker_diarization
     → model = "stt-rt-v4", audio_format = "pcm_s16le", 16 kHz / mono
@@ -129,11 +130,12 @@ PAUSED     → User taps pause  → RECORDING (resume)
 - **Speaker diarization**: when on, Soniox tags each token with a `speaker` ID and the client locks onto the first observed speaker
 - **Enable endpoint detection**: lets Soniox finalize tokens immediately once it detects the speaker has stopped talking; reduces latency for dictation
 - **Max endpoint delay (ms)**: Soniox-documented bounds 500–3000 (default 2000)
+- **Custom voice vocabulary**: opens `SonioxContextTermsScreen` where the user can view the built-in `context.terms` list and edit their own (one term per line, merged at session start)
 - **Chunk Silence Duration**: silence window before detecting a speech boundary
 - **Silence Threshold**: RMS threshold floor for silence/speech detection
 - **Auto-stop Silence Duration**: delay before automatically stopping voice recording
 
-Soniox decides punctuation automatically. HeliBoard sends a small built-in context terms list, but does not expose user-editable terms, direct replacements, output locale, disfluency removal, or punctuation sensitivity settings.
+Soniox decides punctuation automatically. HeliBoard supplies recognition hints (built-in + user-editable `context.terms`) and recent editor text (`context.text`) so the model can use it to disambiguate sentence structure, but it does not expose direct replacements, output locale, disfluency removal, or punctuation sensitivity settings.
 
 ### Silence Detection (VoiceRecorder.kt)
 ```kotlin

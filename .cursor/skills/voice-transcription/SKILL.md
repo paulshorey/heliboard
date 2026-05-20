@@ -22,13 +22,14 @@ Recording starts **instantly** on mic tap — no network round-trip delay.
 | File | Role |
 |------|------|
 | `VoiceRecorder.kt` | PCM16 capture, adaptive RMS silence detection |
-| `SonioxTranscriptionClient.kt` | WebSocket client for `wss://stt-rt.soniox.com/transcribe-websocket`. Sends JSON start config (auth via `api_key` field), streams binary PCM, parses responses, handles graceful shutdown (empty frame → wait for `finished:true`) |
+| `SonioxTranscriptionClient.kt` | WebSocket client for `wss://stt-rt.soniox.com/transcribe-websocket`. Sends JSON start config (auth via `api_key` field), streams binary PCM, parses responses, filters `<end>`/`<fin>` control markers, handles graceful shutdown (empty frame → wait for `finished:true`) |
 | `TranscriptSegment.kt` | Finalized chunk passed from the client to the IME pipeline |
-| `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO transcript queue, reconnects, auto-stop timers, Soniox session config assembly |
-| `TranscriptionPreferences.kt` | Reads/writes Soniox preferences and clears legacy provider keys (Speechmatics, Deepgram) |
+| `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO transcript queue, reconnects, auto-stop timers, Soniox session config assembly (incl. `context.text` via `setPriorTextProvider`) |
+| `TranscriptionPreferences.kt` | Reads/writes Soniox preferences (incl. user-editable `context.terms`) and clears legacy provider keys (Speechmatics, Deepgram) |
 | `TranscriptPostProcessor.kt` | Paragraph-level post-processing of committed text (spelled-out punctuation replacement, leading-casing correction, etc.) |
-| `LatinIME.java` | Orchestrator — finalizes composing state, commits transcript text at the caret, and triggers post-processing |
+| `LatinIME.java` | Orchestrator — finalizes composing state, commits transcript text at the caret, supplies `context.text` to Soniox via `buildVoiceContextText`, triggers post-processing |
 | `TranscriptionScreen.kt` / `SetupAppScreen.kt` | Settings UI for API key, endpoint detection, diarization, silence thresholds, and auto-stop timing |
+| `SonioxContextTermsScreen.kt` | Settings UI for editing user-defined `context.terms` (one per line). Merged with the built-in list at session start. |
 
 All source files live under `app/src/main/java/helium314/keyboard/latin/voice/` except `LatinIME.java` (parent package) and the settings UI/preferences helpers in `latin/settings` and `settings/screens`.
 
@@ -38,7 +39,7 @@ All source files live under `app/src/main/java/helium314/keyboard/latin/voice/` 
 2. `VoiceInputManager` builds a Soniox session config from preferences + the current subtype locale.
 3. The `SonioxTranscriptionClient` opens the socket and sends the JSON start config; PCM frames are streamed immediately afterwards.
 4. Soniox emits JSON responses containing a `tokens` array. Each token has a `text` and `is_final` flag.
-5. `SonioxTranscriptionClient` collects only `is_final: true` tokens, concatenates their text directly (Soniox encodes inter-word whitespace inside the token text), trims, and emits a `TranscriptSegment`.
+5. `SonioxTranscriptionClient` collects only `is_final: true` tokens, drops Soniox's special markers (`<end>` from endpoint detection, `<fin>` from manual finalize), concatenates the remaining text directly (Soniox encodes inter-word whitespace inside the token text), trims, and emits a `TranscriptSegment`.
 6. `VoiceInputManager` delivers segments in FIFO order to `LatinIME`.
 7. `LatinIME` inserts each finalized segment with `commitText(...)`, replacing any active selection range and restoring a leading space only when the segment is a non-attaching continuation.
 
@@ -51,7 +52,8 @@ Soniox returns smart-formatted text with punctuation already inserted; HeliBoard
 - **`model`** — pinned to `"stt-rt-v4"` in code. Not user-configurable.
 - **`audio_format` / `sample_rate` / `num_channels`** — `pcm_s16le` / `16000` / `1`, matching `VoiceRecorder` output.
 - **`language_hints`** — single-element ISO language code from the keyboard subtype (e.g. `["en"]`). Omitted when the subtype has no usable language so Soniox auto-detects.
-- **`context.terms`** — small built-in terms list (`HeliBoard`, `Soniox`, `Kubernetes`, `API`, `gnocchi`) to preserve the useful parts of the older custom vocabulary behavior now that Soniox supports context.
+- **`context.terms`** — built-in list (`HeliBoard`, `Soniox`, `Kubernetes`, `API`, `gnocchi`) merged with the user-editable list from `PREF_SONIOX_CUSTOM_TERMS` (managed in `SonioxContextTermsScreen`), then deduped/trimmed in `SonioxTranscriptionClient.buildSessionConfig`.
+- **`context.text`** — populated at session start (and on reconnect) from up to the most recent 4 000 chars of editor text before the cursor, supplied by `LatinIME.buildVoiceContextText` via `VoiceInputManager.setPriorTextProvider`. Soniox uses this for sentence-structure punctuation, mid-sentence casing, and proper-noun spelling.
 - **`enable_endpoint_detection`** + **`max_endpoint_delay_ms`** — when enabled, Soniox finalizes tokens immediately once it detects the speaker has stopped talking. `max_endpoint_delay_ms` must be between 500 and 3000 ms (Soniox's documented bounds); HeliBoard defaults to 2000 ms.
 - **`enable_speaker_diarization`** — when enabled, the client locks onto the first non-empty `speaker` label observed and drops tokens from other speakers. Soniox uses string speaker IDs (`"1"`, `"2"`, …); the locked ID isn't guaranteed to be the local speaker.
 
