@@ -1834,6 +1834,7 @@ public final class InputLogic {
 
     private void restartSuggestions(final TextRange range) {
         final int numberOfCharsInWordBeforeCursor = range.getNumberOfCharsInWordBeforeCursor();
+        final int numberOfCharsInWordAfterCursor = range.getNumberOfCharsInWordAfterCursor();
         final int expectedCursorPosition = mConnection.getExpectedSelectionStart();
         if (numberOfCharsInWordBeforeCursor > expectedCursorPosition) return;
         final ArrayList<SuggestedWordInfo> suggestions = new ArrayList<>();
@@ -1863,8 +1864,10 @@ public final class InputLogic {
         mWordComposer.setCursorPositionWithinWord(
                 typedWordString.codePointCount(0, numberOfCharsInWordBeforeCursor));
         // The host editor already contains this word. Arm the mirror so future edits replace
-        // the touched word instead of appending after it.
-        mEditorWordMirror.setMirroredWord(typedWordString, true);
+        // the touched word instead of appending after it. The caret may be in the middle of the
+        // word here; pass the trailing count so that committing a suggestion replaces the whole
+        // word and not just an equal-length run of characters before the caret.
+        mEditorWordMirror.setMirroredWord(typedWordString, numberOfCharsInWordAfterCursor, true);
         if (suggestions.size() <= 1) {
             // If there weren't any suggestion spans on this word, suggestions#size() will be 1
             // if shouldIncludeResumedWordInSuggestions is true, 0 otherwise. In this case, we
