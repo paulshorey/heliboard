@@ -6,7 +6,8 @@ Repository automation scripts for builds, SDK setup, releases, and asset mainten
 - `build-dist-apk.sh` - canonical APK build script that writes `dist/HeliBoard.apk`.
 - `diacritics.py` - offline diacritics-analysis helper for external wordlist data.
 - `release.py` - maintainer script for translation import, dictionary index refresh, Khipro mapping refresh, and changelog checks.
-- `setup-android-sdk.sh` - cloud/CI Android SDK bootstrap script.
+- `setup-android-sdk.sh` - cloud/CI Android SDK bootstrap script (also validates a Gradle-compatible JDK via `setup-java.sh`).
+- `setup-java.sh` - selects a compatible JDK (17-21) for Gradle builds in cloud/CI environments.
 
 ## Subfolders
 - `make-emoji-keys/` - standalone tool for regenerating bundled emoji data/resources.

@@ -8,6 +8,8 @@ DEBUG_APK_DIR="$ROOT_DIR/app/build/outputs/apk/debug"
 
 cd "$ROOT_DIR"
 
+source "$ROOT_DIR/tools/setup-java.sh"
+
 if [[ -f "$ROOT_DIR/local.properties" ]] && grep -q '^sdk\.dir=' "$ROOT_DIR/local.properties"; then
   echo "Using existing SDK from local.properties"
 else
