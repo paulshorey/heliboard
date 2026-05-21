@@ -39,9 +39,9 @@ All source files live under `app/src/main/java/helium314/keyboard/latin/voice/` 
 2. `VoiceInputManager` builds a Soniox session config from preferences + the current subtype locale.
 3. The `SonioxTranscriptionClient` opens the socket and sends the JSON start config; PCM frames are streamed immediately afterwards.
 4. Soniox emits JSON responses containing a `tokens` array. Each token has a `text` and `is_final` flag.
-5. `SonioxTranscriptionClient` collects only `is_final: true` tokens, drops Soniox's special markers (`<end>` from endpoint detection, `<fin>` from manual finalize), concatenates the remaining text directly (Soniox encodes inter-word whitespace inside the token text), trims, and emits a `TranscriptSegment`.
+5. `SonioxTranscriptionClient` collects only `is_final: true` tokens, drops Soniox's special markers (`<end>` from endpoint detection, `<fin>` from manual finalize), concatenates the remaining text directly (Soniox encodes inter-word whitespace as separate space tokens), trims, and emits a `TranscriptSegment`. The client also tracks whether the previous response's finalized text ended on a "wordy" character (letter/digit/`'`/`-`); when the next response's raw text does **not** start with whitespace and the previous tail was wordy, Soniox is signaling a mid-word continuation (e.g. `"head"` then `"ing"` for `"heading"`) and the segment is marked `attachesToPrevious` so the IME does not insert a separating space.
 6. `VoiceInputManager` delivers segments in FIFO order to `LatinIME`.
-7. `LatinIME` inserts each finalized segment with `commitText(...)`, replacing any active selection range and restoring a leading space only when the segment is a non-attaching continuation.
+7. `LatinIME` inserts each finalized segment with `commitText(...)`, replacing any active selection range and restoring a leading space only when the segment is **not** flagged `attachesToPrevious` (which covers both leading attaching punctuation and Soniox-split mid-word continuations).
 
 On graceful stop, the client sends an empty WebSocket frame, waits for `{"finished": true}`, and closes with code 1000. An 8-second grace timer guards against the server not emitting `finished`.
 

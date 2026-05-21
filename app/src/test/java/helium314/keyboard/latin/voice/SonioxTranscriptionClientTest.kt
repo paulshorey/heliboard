@@ -127,6 +127,139 @@ class SonioxTranscriptionClientTest {
         val segment = assertNotNull(result.segment)
         assertEquals("Hello world.", segment.text)
         assertFalse(segment.attachesToPrevious)
+        // Last char "." is not wordy, so a follow-up chunk should NOT be
+        // treated as a word continuation.
+        assertFalse(result.tailIsWordy)
+    }
+
+    @Test
+    fun buildSegmentFromFinalTokens_marksMidWordContinuationWhenSecondChunkHasNoLeadingSpace() {
+        // Soniox finalizes the first half of "heading" prematurely. The next
+        // response carries the rest of the word with NO leading space token,
+        // signaling that it continues the previous word rather than starting
+        // a new one. Without this signal the IME would emit "head ing".
+        val first = SonioxTranscriptionClient.buildSegmentFromFinalTokens(
+            tokens = JSONArray().put(finalToken("I'm head")),
+            primarySpeaker = null,
+            diarizationEnabled = false,
+            previousTailIsWordy = false
+        )
+        assertEquals("I'm head", assertNotNull(first.segment).text)
+        assertFalse(first.segment!!.attachesToPrevious)
+        assertTrue(first.tailIsWordy, "trailing 'd' should be wordy")
+
+        val second = SonioxTranscriptionClient.buildSegmentFromFinalTokens(
+            tokens = JSONArray()
+                .put(finalToken("ing"))
+                .put(finalToken(" over"))
+                .put(finalToken(" to"))
+                .put(finalToken(" the"))
+                .put(finalToken(" gym")),
+            primarySpeaker = null,
+            diarizationEnabled = false,
+            previousTailIsWordy = first.tailIsWordy
+        )
+        val secondSegment = assertNotNull(second.segment)
+        assertEquals("ing over to the gym", secondSegment.text)
+        assertTrue(
+            secondSegment.attachesToPrevious,
+            "continuation of split word should attach so IME does not insert a space"
+        )
+        assertTrue(second.tailIsWordy)
+    }
+
+    @Test
+    fun buildSegmentFromFinalTokens_doesNotAttachWhenNextChunkHasLeadingSpaceToken() {
+        // After a real word boundary, Soniox emits a leading space token.
+        // Even if the previous chunk ended on a wordy character, a leading
+        // space means a fresh word and the IME should add the usual
+        // separator.
+        val tokens = JSONArray()
+            .put(finalToken(" "))
+            .put(finalToken("over"))
+            .put(finalToken(" the"))
+            .put(finalToken(" gym"))
+
+        val result = SonioxTranscriptionClient.buildSegmentFromFinalTokens(
+            tokens = tokens,
+            primarySpeaker = null,
+            diarizationEnabled = false,
+            previousTailIsWordy = true
+        )
+        val segment = assertNotNull(result.segment)
+        assertEquals("over the gym", segment.text)
+        assertFalse(segment.attachesToPrevious)
+    }
+
+    @Test
+    fun buildSegmentFromFinalTokens_doesNotAttachAfterPunctuationTail() {
+        // Previous chunk ended with "." (not wordy) — this is a real
+        // sentence boundary, so the next chunk must start a new word
+        // regardless of whether it has a leading space.
+        val tokens = JSONArray().put(finalToken("Hello"))
+
+        val result = SonioxTranscriptionClient.buildSegmentFromFinalTokens(
+            tokens = tokens,
+            primarySpeaker = null,
+            diarizationEnabled = false,
+            previousTailIsWordy = false
+        )
+        val segment = assertNotNull(result.segment)
+        assertFalse(segment.attachesToPrevious)
+    }
+
+    @Test
+    fun buildSegmentFromFinalTokens_doesNotAttachOnSessionStart() {
+        // Default state at session start: previousTailIsWordy = false.
+        val tokens = JSONArray().put(finalToken("Hello"))
+
+        val result = SonioxTranscriptionClient.buildSegmentFromFinalTokens(
+            tokens = tokens,
+            primarySpeaker = null,
+            diarizationEnabled = false
+        )
+        val segment = assertNotNull(result.segment)
+        assertFalse(segment.attachesToPrevious)
+    }
+
+    @Test
+    fun buildSegmentFromFinalTokens_endpointMarkerDoesNotResetTailWordiness() {
+        // Endpoint detection triggers `<end>` after a finalized token. The
+        // marker is filtered from the assembled text, but it must NOT erase
+        // the wordiness of the real trailing token — otherwise Soniox-split
+        // words across endpoint events would slip through.
+        val tokens = JSONArray()
+            .put(finalToken("head"))
+            .put(finalToken("<end>"))
+
+        val result = SonioxTranscriptionClient.buildSegmentFromFinalTokens(
+            tokens = tokens,
+            primarySpeaker = null,
+            diarizationEnabled = false,
+            previousTailIsWordy = false
+        )
+        assertEquals("head", assertNotNull(result.segment).text)
+        assertTrue(result.tailIsWordy, "trailing 'd' should remain wordy after <end>")
+    }
+
+    @Test
+    fun buildSegmentFromFinalTokens_apostropheTailKeepsContinuationSignal() {
+        // English contractions can land an apostrophe at the chunk boundary
+        // (e.g. "don'" + "t"). Treat `'` as wordy so the next chunk attaches.
+        val first = SonioxTranscriptionClient.buildSegmentFromFinalTokens(
+            tokens = JSONArray().put(finalToken("don'")),
+            primarySpeaker = null,
+            diarizationEnabled = false
+        )
+        assertTrue(first.tailIsWordy)
+
+        val second = SonioxTranscriptionClient.buildSegmentFromFinalTokens(
+            tokens = JSONArray().put(finalToken("t")),
+            primarySpeaker = null,
+            diarizationEnabled = false,
+            previousTailIsWordy = first.tailIsWordy
+        )
+        assertTrue(assertNotNull(second.segment).attachesToPrevious)
     }
 
     @Test
