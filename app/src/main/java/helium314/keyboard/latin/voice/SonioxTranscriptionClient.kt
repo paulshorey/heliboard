@@ -191,17 +191,41 @@ class SonioxTranscriptionClient {
          * array. Returns `null` if the response contained no usable final
          * tokens for the active speaker.
          *
-         * Soniox encodes inter-word whitespace inside token text (e.g. tokens
-         * arrive as `"Hello"`, `" world"`, `"."`). Concatenating the text in
-         * order, then trimming, yields the correct rendered text.
+         * Soniox encodes inter-word whitespace as **separate space tokens**
+         * (e.g. a stream may arrive as `"Hello"`, `" "`, `"world"`, `"."`).
+         * Concatenating the text in order, then trimming, yields the correct
+         * rendered text for the segment.
+         *
+         * Word-boundary detection across responses
+         * ----------------------------------------
+         * When endpoint detection or internal segmentation finalize tokens
+         * mid-word, Soniox splits the word across two responses. The second
+         * response then starts with a content token that has **no preceding
+         * space token** — this missing leading whitespace is Soniox's signal
+         * that the new chunk continues the previous word (e.g. `"head"`
+         * finalizes in response A and `"ing"` starts response B with no space
+         * token between them, meaning "heading"). Without this signal the IME
+         * would auto-insert a space and produce `"head ing"`.
+         *
+         * To honor that signal we pass [previousTailIsWordy] from the previous
+         * call: if it's `true` and the current response's raw text does **not**
+         * start with whitespace, we mark the segment as `attachesToPrevious`
+         * so the IME does not insert a separating space. The new tail state is
+         * returned in [SegmentResult.tailIsWordy] so the caller can feed it
+         * back on the next response.
          */
         internal fun buildSegmentFromFinalTokens(
             tokens: org.json.JSONArray?,
             primarySpeaker: String?,
-            diarizationEnabled: Boolean
+            diarizationEnabled: Boolean,
+            previousTailIsWordy: Boolean = false
         ): SegmentResult {
             if (tokens == null || tokens.length() == 0) {
-                return SegmentResult(segment = null, observedSpeaker = primarySpeaker)
+                return SegmentResult(
+                    segment = null,
+                    observedSpeaker = primarySpeaker,
+                    tailIsWordy = previousTailIsWordy
+                )
             }
 
             val builder = StringBuilder()
@@ -228,23 +252,60 @@ class SonioxTranscriptionClient {
                 builder.append(text)
             }
 
-            val assembled = builder.toString()
-            val trimmed = assembled.trim()
+            val raw = builder.toString()
+            val trimmed = raw.trim()
             if (trimmed.isEmpty()) {
-                return SegmentResult(segment = null, observedSpeaker = lockedSpeaker)
+                return SegmentResult(
+                    segment = null,
+                    observedSpeaker = lockedSpeaker,
+                    tailIsWordy = previousTailIsWordy
+                )
             }
-            val startsWithoutLeadingWhitespace = assembled.firstOrNull()?.isWhitespace() == false
-            val attachesToPrevious = startsWithoutLeadingWhitespace ||
-                trimmed.first() in PUNCTUATION_ATTACHING_TO_PREVIOUS
+            val rawStartsWithWhitespace = raw[0].isWhitespace()
+            val firstChar = trimmed[0]
+            val isPunctuationStart = firstChar in PUNCTUATION_ATTACHING_TO_PREVIOUS
+            // Mid-word continuation: Soniox emitted the new chunk with no
+            // preceding space token, signaling that it joins onto the previous
+            // chunk's last (wordy) character rather than starting a new word.
+            // We require previousTailIsWordy to be true so the first chunk of
+            // a session (or a chunk that follows sentence-ending punctuation)
+            // is NOT silently attached without a separator. That preserves
+            // both leading-casing adjustment and auto-leading-space behavior
+            // for legitimate new utterances.
+            val isWordContinuation =
+                previousTailIsWordy && !rawStartsWithWhitespace
+            val attachesToPrevious = isPunctuationStart || isWordContinuation
+            val tailIsWordy = isWordyContinuationChar(trimmed.last())
             return SegmentResult(
                 segment = TranscriptSegment(text = trimmed, attachesToPrevious = attachesToPrevious),
-                observedSpeaker = lockedSpeaker
+                observedSpeaker = lockedSpeaker,
+                tailIsWordy = tailIsWordy
             )
+        }
+
+        /**
+         * A "wordy" character is one that, when followed by another non-space
+         * character, would form a continuous word (no separating space). Used
+         * to detect when a finalized chunk ends inside a word so the next
+         * chunk can be attached without an injected space.
+         *
+         * Letters and digits are wordy. Apostrophes and hyphens are also
+         * treated as wordy because they appear inside English words
+         * (`"don't"`, `"co-op"`); ending a chunk on one and resuming with
+         * a letter typically means the word continues. Sentence-attaching
+         * punctuation (`.`, `,`, `!`, `?`, …) is explicitly **not** wordy
+         * because those mark word/clause ends.
+         */
+        private fun isWordyContinuationChar(c: Char): Boolean {
+            if (c.isLetterOrDigit()) return true
+            return c == '\'' || c == '\u2019' /* right single quote */ ||
+                c == '-' || c == '\u2010' /* hyphen */
         }
 
         internal data class SegmentResult(
             val segment: TranscriptSegment?,
-            val observedSpeaker: String?
+            val observedSpeaker: String?,
+            val tailIsWordy: Boolean = false
         )
 
         internal fun buildErrorDescription(json: JSONObject): String {
@@ -316,6 +377,15 @@ class SonioxTranscriptionClient {
     @Volatile
     private var primarySpeaker: String? = null
 
+    /**
+     * Tracks whether the most recently emitted finalized text ended on a
+     * "wordy" character (letter/digit/apostrophe/hyphen). Used to detect
+     * Soniox-signaled mid-word continuations across consecutive responses;
+     * see [Companion.buildSegmentFromFinalTokens].
+     */
+    @Volatile
+    private var lastFinalTokenTailIsWordy = false
+
     internal fun startStreaming(
         apiKey: String,
         sessionConfig: SessionConfig,
@@ -330,6 +400,7 @@ class SonioxTranscriptionClient {
         isRecognitionReady = false
         diarizationEnabled = sessionConfig.diarizationEnabled
         primarySpeaker = null
+        lastFinalTokenTailIsWordy = false
         clearFinalizeCloseTimer()
 
         val request = Request.Builder()
@@ -486,6 +557,7 @@ class SonioxTranscriptionClient {
         isRecognitionReady = false
         diarizationEnabled = false
         primarySpeaker = null
+        lastFinalTokenTailIsWordy = false
         val socket = webSocket
         webSocket = null
         if (socket != null) {
@@ -521,13 +593,15 @@ class SonioxTranscriptionClient {
         val result = buildSegmentFromFinalTokens(
             tokens = tokens,
             primarySpeaker = primarySpeaker,
-            diarizationEnabled = diarizationEnabled
+            diarizationEnabled = diarizationEnabled,
+            previousTailIsWordy = lastFinalTokenTailIsWordy
         )
         if (result.observedSpeaker != null && primarySpeaker == null) {
             primarySpeaker = result.observedSpeaker
         }
         val segment = result.segment
         if (segment != null) {
+            lastFinalTokenTailIsWordy = result.tailIsWordy
             Log.i(
                 TAG,
                 "VOICE_STEP_4 Soniox final transcript (${segment.text.length} chars)"
