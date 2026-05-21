@@ -16,7 +16,22 @@ else
   source "$ROOT_DIR/tools/setup-android-sdk.sh"
 fi
 
-./gradlew :app:assembleDebug
+GRADLE_ARGS=(":app:assembleDebug")
+if [[ "${HELIBOARD_GRADLE_OFFLINE:-0}" == "1" ]]; then
+  GRADLE_ARGS=("--offline" "${GRADLE_ARGS[@]}")
+fi
+
+if ! ./gradlew "${GRADLE_ARGS[@]}"; then
+  cat >&2 <<'MSG'
+Gradle assemble failed.
+
+If you see HTTP 403 errors while resolving Maven artifacts in cloud environments,
+this workspace likely lacks outbound access to Maven Central / Google Maven.
+Use a network-enabled runner or a pre-warmed Gradle cache for reproducible APK builds.
+You can also retry with HELIBOARD_GRADLE_OFFLINE=1 when dependencies are already cached.
+MSG
+  exit 1
+fi
 
 shopt -s nullglob
 debug_apks=("$DEBUG_APK_DIR"/HeliBoard_*-debug.apk)
