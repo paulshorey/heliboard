@@ -32,7 +32,8 @@ The client:
 - pins `model = "stt-rt-v4"`
 - sends raw PCM (`audio_format = "pcm_s16le"`, `sample_rate = 16000`, `num_channels = 1`) to match `VoiceRecorder` output
 - maps the active keyboard subtype's base language to a single-element `language_hints` array (omitting it when the subtype has no usable language so Soniox auto-detects)
-- sends a small built-in `context.terms` list for product/technical words such as `HeliBoard`, `Soniox`, and `Kubernetes`
+- sends `context.terms` as the union of a small built-in list (`HeliBoard`, `Soniox`, `Kubernetes`, …) and any user-defined custom terms from settings
+- sends `context.text` from up to the most recent 4 000 characters of editor text before the cursor (via `LatinIME.buildVoiceContextText`) when available
 - forwards the user's endpoint-detection and diarization preferences
 - streams binary PCM frames immediately after queuing the start config
 - ends the session by sending an empty WebSocket frame and waiting for `{"finished": true}` (with an 8 s grace timeout)
@@ -41,9 +42,13 @@ The client:
 
 When enabled, Soniox tags every token with a `speaker` string ID (`"1"`, `"2"`, …). The client locks onto the first non-empty `speaker` it observes and drops tokens from any other speaker. Soniox's documented IDs aren't guaranteed to correspond to the local speaker; if the locked ID drifts, the user can briefly stop and restart recording.
 
+### Custom voice vocabulary
+
+Settings → Transcription → **Custom voice vocabulary** (`SonioxContextTermsScreen.kt`) lets users add `context.terms` (one term per line, pref `PREF_SONIOX_CUSTOM_TERMS`). These merge with the built-in list at every session start.
+
 ### What HeliBoard does not configure
 
-HeliBoard does not expose user-editable context terms, direct post-transcription replacements, output locale, disfluency removal, or a punctuation-sensitivity knob for Soniox. Punctuation is decided automatically by the model.
+HeliBoard does not configure Soniox direct replacement rules, output locale, disfluency removal, or a punctuation-sensitivity knob. Punctuation is decided automatically by the model. After commit, `TranscriptPostProcessor` handles local cleanup such as spelled-out punctuation.
 
 ### User-facing settings (Settings → Transcription)
 
@@ -51,6 +56,7 @@ HeliBoard does not expose user-editable context terms, direct post-transcription
 |---------|----------|---------|-------------|
 | API key | `PREF_SONIOX_API_KEY` | `""` | Soniox API key |
 | Speaker diarization | `PREF_SONIOX_DIARIZATION` | `true` | Filter to primary speaker |
+| Custom voice vocabulary | `PREF_SONIOX_CUSTOM_TERMS` | `""` | User-defined `context.terms`, one term per line |
 | Enable endpoint detection | `PREF_SONIOX_ENABLE_ENDPOINT_DETECTION` | `true` | Finalize tokens immediately when Soniox detects the speaker has stopped talking |
 | Max endpoint delay (ms) | `PREF_SONIOX_MAX_ENDPOINT_DELAY_MS` | `2000` | Soniox-documented bounds: 500–3000 |
 

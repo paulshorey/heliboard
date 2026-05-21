@@ -23,6 +23,7 @@ HeliBoard uses Soniox real-time transcription for voice input.
 - `app/src/main/java/helium314/keyboard/latin/voice/VoiceRecorder.kt`
 - `app/src/main/java/helium314/keyboard/latin/settings/TranscriptionPreferences.kt`
 - `app/src/main/java/helium314/keyboard/settings/screens/TranscriptionScreen.kt`
+- `app/src/main/java/helium314/keyboard/settings/screens/SonioxContextTermsScreen.kt`
 - `app/src/main/java/helium314/keyboard/settings/screens/SetupAppScreen.kt`
 - `app/src/main/java/helium314/keyboard/latin/LatinIME.java`
 
