@@ -228,11 +228,14 @@ class SonioxTranscriptionClient {
                 builder.append(text)
             }
 
-            val trimmed = builder.toString().trim()
+            val assembled = builder.toString()
+            val trimmed = assembled.trim()
             if (trimmed.isEmpty()) {
                 return SegmentResult(segment = null, observedSpeaker = lockedSpeaker)
             }
-            val attachesToPrevious = trimmed.first() in PUNCTUATION_ATTACHING_TO_PREVIOUS
+            val startsWithoutLeadingWhitespace = assembled.firstOrNull()?.isWhitespace() == false
+            val attachesToPrevious = startsWithoutLeadingWhitespace ||
+                trimmed.first() in PUNCTUATION_ATTACHING_TO_PREVIOUS
             return SegmentResult(
                 segment = TranscriptSegment(text = trimmed, attachesToPrevious = attachesToPrevious),
                 observedSpeaker = lockedSpeaker
