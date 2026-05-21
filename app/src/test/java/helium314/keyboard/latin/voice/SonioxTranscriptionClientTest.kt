@@ -129,6 +129,22 @@ class SonioxTranscriptionClientTest {
         assertFalse(segment.attachesToPrevious)
     }
 
+
+    @Test
+    fun buildSegmentFromFinalTokens_attachesWhenSegmentStartsWithSubwordContinuation() {
+        val tokens = JSONArray()
+            .put(finalToken("ing"))
+
+        val result = SonioxTranscriptionClient.buildSegmentFromFinalTokens(
+            tokens = tokens,
+            primarySpeaker = null,
+            diarizationEnabled = false
+        )
+        val segment = assertNotNull(result.segment)
+        assertEquals("ing", segment.text)
+        assertTrue(segment.attachesToPrevious)
+    }
+
     @Test
     fun buildSegmentFromFinalTokens_attachesWhenSegmentStartsWithPunctuation() {
         val tokens = JSONArray()
