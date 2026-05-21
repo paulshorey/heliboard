@@ -262,6 +262,27 @@ class SonioxTranscriptionClientTest {
         assertTrue(assertNotNull(second.segment).attachesToPrevious)
     }
 
+
+    @Test
+    fun buildSegmentFromFinalTokens_attachesWhenSegmentStartsWithSubwordContinuation() {
+        // The previous response finalized text ending on a wordy character
+        // (e.g. "head" → tail = 'd'), and Soniox continues with "ing"
+        // without a leading space token. That combination signals a mid-word
+        // continuation, so the chunk must attach.
+        val tokens = JSONArray()
+            .put(finalToken("ing"))
+
+        val result = SonioxTranscriptionClient.buildSegmentFromFinalTokens(
+            tokens = tokens,
+            primarySpeaker = null,
+            diarizationEnabled = false,
+            previousTailIsWordy = true
+        )
+        val segment = assertNotNull(result.segment)
+        assertEquals("ing", segment.text)
+        assertTrue(segment.attachesToPrevious)
+    }
+
     @Test
     fun buildSegmentFromFinalTokens_attachesWhenSegmentStartsWithPunctuation() {
         val tokens = JSONArray()

@@ -267,6 +267,11 @@ class SonioxTranscriptionClient {
             // Mid-word continuation: Soniox emitted the new chunk with no
             // preceding space token, signaling that it joins onto the previous
             // chunk's last (wordy) character rather than starting a new word.
+            // We require previousTailIsWordy to be true so the first chunk of
+            // a session (or a chunk that follows sentence-ending punctuation)
+            // is NOT silently attached without a separator. That preserves
+            // both leading-casing adjustment and auto-leading-space behavior
+            // for legitimate new utterances.
             val isWordContinuation =
                 previousTailIsWordy && !rawStartsWithWhitespace
             val attachesToPrevious = isPunctuationStart || isWordContinuation
