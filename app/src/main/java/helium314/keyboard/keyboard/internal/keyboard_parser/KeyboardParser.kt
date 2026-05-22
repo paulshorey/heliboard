@@ -36,8 +36,12 @@ import kotlin.math.roundToInt
  * requirements of certain non-latin languages.
  */
 class KeyboardParser(private val params: KeyboardParams, private val context: Context) {
+    // True only when the active subtype's locale actually has a matching
+    // Custom keyboards preset. Subtypes whose locale doesn't match any preset
+    // get the stock per-language layout and behave like vanilla HeliBoard,
+    // so language switching keeps working when the feature is enabled.
     private val customKeyboardsActive = CustomKeyboards.isEnabled(context.prefs())
-            && CustomKeyboards.activePreset(context.prefs()) != null
+            && CustomKeyboards.presetForLocale(context.prefs(), params.mId.mSubtype.locale) != null
     private val defaultLabelFlags = when {
         params.mId.isAlphabetKeyboard -> params.mLocaleKeyboardInfos.labelFlags
         // Custom keyboards want the small gray hint above the primary on

@@ -8,7 +8,7 @@ Cross-cutting helpers used across the IME. Search here before adding another gen
 - `CapsModeUtils.java` - capitalization mode helpers.
 - `ChecksumCalculator.kt` - file checksum helpers.
 - `ColorUtil.kt` - theme color utilities.
-- `CustomKeyboards.kt` - user-defined keyboard-preset data model (alphabet/symbols/more_symbols rows with primary + optional single hint per key) plus JSON parse/encode/validate helpers. Each slot must have exactly 3 or 4 rows: 4 rows means the top row is the number row, 3 rows means the layout has no number row at all. The JSON pref is the source of truth for the override path in `LayoutParser`; when a preset is active the built-in number row from `assets/layouts/number_row/` is never prepended.
+- `CustomKeyboards.kt` - user-defined keyboard-preset data model (alphabet/symbols/more_symbols rows with primary + optional single hint per key) plus JSON parse/encode/validate helpers. Each preset carries a `locales` array of BCP-47 tags (`["en"]`, `["en-US", "en-GB"]`, or `["*"]` for "any language"); at render time `presetForLocale(prefs, locale)` picks the most specific match (exact tag → language only → wildcard → no match). Subtypes whose locale matches no preset fall through to the stock per-language layout under `assets/layouts/main/`, so language switching keeps working when the feature is on. Each slot must have exactly 3 or 4 rows: 4 rows = top row is the number row, 3 rows = no number row; the built-in number row from `assets/layouts/number_row/` is never prepended when a preset matches.
 - `CombinedFormatUtils.java` - formatting helpers for combined values.
 - `DebugLogUtils.java` - debug logging helpers.
 - `DeviceProtectedUtils.java` - device-protected storage helpers.

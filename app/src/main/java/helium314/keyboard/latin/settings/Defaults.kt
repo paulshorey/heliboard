@@ -136,7 +136,8 @@ object Defaults {
   "active": 0,
   "presets": [
     {
-      "name": "Default",
+      "name": "English",
+      "locales": ["en"],
       "alphabet": [
         "1 2 3 4 5 6 7 8 9 0",
         "q w e r t y u i o p",
@@ -157,7 +158,8 @@ object Defaults {
       ]
     },
     {
-      "name": "Programming",
+      "name": "Programming (any language)",
+      "locales": ["*"],
       "alphabet": [
         "1 2 3 4 5 6 7 8 9 0",
         "q w e r t y u i o p",
@@ -178,7 +180,30 @@ object Defaults {
       ]
     },
     {
-      "name": "Compact (no number row)",
+      "name": "French AZERTY",
+      "locales": ["fr"],
+      "alphabet": [
+        "1 2 3 4 5 6 7 8 9 0",
+        "a z e r t y u i o p",
+        "q s d f g h j k l m",
+        "w x c v b n"
+      ],
+      "symbols": [
+        "1 2 3 4 5 6 7 8 9 0",
+        "@ # $ _ & - + ( ) /",
+        "* « » ' : ; ! ?",
+        "< > = { } [ ] \\\\"
+      ],
+      "more_symbols": [
+        "~ ` \\| • √ π ÷ × ¶ Δ",
+        "£ € ¥ ¢ ^ ° = { } \\\\",
+        "% © ® ™ ✓ [ ] § µ Ω",
+        "à â ç é è ê ë î ï ô"
+      ]
+    },
+    {
+      "name": "Compact English (no number row)",
+      "locales": ["en"],
       "alphabet": [
         "q w e r t y u i o p",
         "a s d f g h j k l",
