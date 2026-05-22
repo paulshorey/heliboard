@@ -7,6 +7,7 @@ Feature-specific Compose screens for the settings app.
 - `AdvancedScreen.kt` - advanced settings screen.
 - `AppearanceScreen.kt` - appearance/theme settings screen (keyboard height appears first under a **Size and layout** heading).
 - `ColorsScreen.kt` - color customization screen.
+- `CustomKeyboardsScreen.kt` - JSON text-editor screen for user-defined keyboard presets; toggles `PREF_USE_CUSTOM_KEYBOARDS`, validates and writes `PREF_CUSTOM_KEYBOARDS_JSON`, and offers a "next preset" button that mirrors what a future toolbar cycle action would do.
 - `DebugScreen.kt` - debug/developer settings screen.
 - `DictionaryScreen.kt` - dictionary management screen.
 - `FullappDraftsScreen.kt` - saved fullapp drafts screen.

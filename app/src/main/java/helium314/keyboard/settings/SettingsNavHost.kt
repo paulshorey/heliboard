@@ -20,6 +20,7 @@ import helium314.keyboard.settings.screens.AboutScreen
 import helium314.keyboard.settings.screens.AdvancedSettingsScreen
 import helium314.keyboard.settings.screens.AppearanceScreen
 import helium314.keyboard.settings.screens.ColorsScreen
+import helium314.keyboard.settings.screens.CustomKeyboardsScreen
 import helium314.keyboard.settings.screens.DebugScreen
 import helium314.keyboard.settings.screens.DictionaryScreen
 import helium314.keyboard.settings.screens.EmailsDictionaryScreen
@@ -82,6 +83,7 @@ fun SettingsNavHost(
                 onClickAppearance = { navController.navigate(SettingsDestination.Appearance) },
                 onClickLanguage = { navController.navigate(SettingsDestination.Languages) },
                 onClickLayouts = { navController.navigate(SettingsDestination.Layouts) },
+                onClickCustomKeyboards = { navController.navigate(SettingsDestination.CustomKeyboards) },
                 onClickDictionaries = { navController.navigate(SettingsDestination.Dictionaries) },
                 onClickBack = ::goBack,
             )
@@ -144,6 +146,9 @@ fun SettingsNavHost(
         composable(SettingsDestination.Layouts) {
             SecondaryLayoutScreen(onClickBack = ::goBack)
         }
+        composable(SettingsDestination.CustomKeyboards) {
+            CustomKeyboardsScreen(onClickBack = ::goBack)
+        }
         composable(SettingsDestination.Colors + "{theme}") {
             ColorsScreen(isNight = false, theme = it.arguments?.getString("theme"), onClickBack = ::goBack)
         }
@@ -180,6 +185,7 @@ object SettingsDestination {
     const val Languages = "languages"
     const val Subtype = "subtype/"
     const val Layouts = "layouts"
+    const val CustomKeyboards = "custom_keyboards"
     const val Dictionaries = "dictionaries"
     val navTarget = MutableStateFlow(Settings)
 
