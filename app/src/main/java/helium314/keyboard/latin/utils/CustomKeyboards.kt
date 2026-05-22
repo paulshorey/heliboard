@@ -37,6 +37,11 @@ import kotlinx.serialization.json.JsonPrimitive
  * gray label and is the only available long-press popup; no other hidden popups
  * are emitted for these layouts when custom keyboards are active.
  *
+ * Because `|` is the primary/hint separator, a literal pipe character must be
+ * escaped as `\|` and a literal backslash as `\\` inside row strings. In the
+ * JSON document (where `\` itself is the JSON escape character) this means
+ * writing `\\|` for a pipe key and `\\\\` for a backslash key.
+ *
  * The model is multi-preset from day one so the user can later cycle between
  * variations (e.g. via a toolbar button); only the preset selected by `active`
  * drives the keyboard at any given moment.
@@ -130,15 +135,53 @@ object CustomKeyboards {
         return null
     }
 
-    /** Splits a row string into `(primary, hint?)` tuples. */
+    /** Splits a row string into `(primary, hint?)` tuples, honoring `\|` escapes. */
     fun parseRowTokens(row: String): List<Pair<String, String?>> {
         if (row.isBlank()) return emptyList()
         return row.trim().split(Regex("\\s+")).map { token ->
-            val sep = token.indexOf(HINT_SEPARATOR)
-            if (sep < 0) token to null
-            else token.substring(0, sep) to token.substring(sep + 1)
+            splitKeyToken(token)
         }
     }
+
+    /**
+     * Find the first unescaped [HINT_SEPARATOR] in [token], split into
+     * primary / hint, and unescape both halves.
+     */
+    private fun splitKeyToken(token: String): Pair<String, String?> {
+        var i = 0
+        while (i < token.length) {
+            val ch = token[i]
+            if (ch == '\\' && i + 1 < token.length) {
+                i += 2
+            } else if (ch == HINT_SEPARATOR) {
+                return unescape(token.substring(0, i)) to unescape(token.substring(i + 1))
+            } else {
+                i++
+            }
+        }
+        return unescape(token) to null
+    }
+
+    /** Replace `\|` with `|` and `\\` with `\`. */
+    private fun unescape(s: String): String {
+        if (!s.contains('\\')) return s
+        val sb = StringBuilder(s.length)
+        var i = 0
+        while (i < s.length) {
+            if (s[i] == '\\' && i + 1 < s.length) {
+                sb.append(s[i + 1])
+                i += 2
+            } else {
+                sb.append(s[i])
+                i++
+            }
+        }
+        return sb.toString()
+    }
+
+    /** Escape a raw character string for use inside a row token (escapes `\` and `|`). */
+    fun escapeForRow(s: String): String =
+        s.replace("\\", "\\\\").replace("|", "\\|")
 
     /**
      * Convert a preset's [slot] into the simple-text layout format the existing
