@@ -136,8 +136,11 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
     public static final String PREF_ONE_HANDED_GRAVITY_PREFIX = "one_handed_mode_gravity";
     public static final String PREF_ONE_HANDED_SCALE_PREFIX = "one_handed_mode_scale";
 
-    public static final String PREF_SHOW_NUMBER_ROW = "show_number_row";
-    public static final String PREF_SHOW_NUMBER_ROW_IN_SYMBOLS = "show_number_row_in_symbols";
+    // Whether to display the number row is now driven entirely by the active
+    // Custom keyboards preset (3 rows = no number row, 4 rows = number row).
+    // The legacy global toggle is gone, but the localized-digits toggle and
+    // the per-key hint toggle still apply to layouts that do show a number
+    // row in the non-custom path.
     public static final String PREF_LOCALIZED_NUMBER_ROW = "localized_number_row";
     public static final String PREF_SHOW_NUMBER_ROW_HINTS = "show_number_row_hints";
     public static final String PREF_CUSTOM_CURRENCY_KEY = "custom_currency_key";

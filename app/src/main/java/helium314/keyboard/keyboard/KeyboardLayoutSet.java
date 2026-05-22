@@ -86,7 +86,6 @@ public final class KeyboardLayoutSet {
         boolean mVoiceInputKeyEnabled;
         boolean mDeviceLocked;
         boolean mNumberRowEnabled;
-        boolean mNumberRowInSymbols;
         boolean mLanguageSwitchKeyEnabled;
         boolean mEmojiKeyEnabled;
         boolean mOneHandedModeEnabled;
@@ -257,11 +256,6 @@ public final class KeyboardLayoutSet {
 
         public Builder setNumberRowEnabled(final boolean enabled) {
             mParams.mNumberRowEnabled = enabled;
-            return this;
-        }
-
-        public Builder setNumberRowInSymbolsEnabled(final boolean enabled) {
-            mParams.mNumberRowInSymbols = enabled;
             return this;
         }
 

@@ -23,13 +23,22 @@ import kotlinx.serialization.json.JsonPrimitive
  *   "presets": [
  *     {
  *       "name": "Default",
- *       "alphabet":     ["...row1...", "...row2...", "...row3..."],
- *       "symbols":      ["...row1...", "...row2...", "...row3..."],
- *       "more_symbols": ["...row1...", "...row2...", "...row3..."]
+ *       "alphabet":     ["...numberRow?...", "...row1...", "...row2...", "...row3..."],
+ *       "symbols":      ["...numberRow?...", "...row1...", "...row2...", "...row3..."],
+ *       "more_symbols": ["...numberRow?...", "...row1...", "...row2...", "...row3..."]
  *     }
  *   ]
  * }
  * ```
+ *
+ * Each slot accepts either **4** rows or **3** rows. When 4 rows are given the
+ * first row is the number row and is rendered at the top of the keyboard. When
+ * 3 rows are given the keyboard has no number row at all; the three rows are
+ * laid out from the bottom up (i.e. the top row of the standard alphabet is
+ * still the top of the keyboard, the slot just owns less vertical territory).
+ * The built-in number row from `assets/layouts/number_row/` is **never** added
+ * on top of a preset; the preset is the single source of truth for which rows
+ * a layout has.
  *
  * Each row string is a list of keys separated by spaces. Each key token is either
  * a single primary character (`q`) or a primary character followed by `|` and a
@@ -51,6 +60,9 @@ object CustomKeyboards {
 
     /** Token separator for primary|hint. */
     const val HINT_SEPARATOR = '|'
+
+    /** Accepted row counts per slot. 4 rows = with number row (top), 3 rows = no number row. */
+    val ALLOWED_ROW_COUNTS = setOf(3, 4)
 
     /** The three layouts every preset describes. */
     enum class Slot(val jsonKey: String) {
@@ -122,6 +134,9 @@ object CustomKeyboards {
                 val rows = p.rowsFor(slot)
                 if (rows.isEmpty())
                     return "Preset $label is missing ${slot.jsonKey}"
+                if (rows.size !in ALLOWED_ROW_COUNTS)
+                    return "Preset $label / ${slot.jsonKey} must have 3 or 4 rows (got ${rows.size}). " +
+                            "4 rows = top row is the number row; 3 rows = no number row."
                 rows.forEachIndexed { ri, row ->
                     parseRowTokens(row).forEach { (primary, hint) ->
                         if (primary.isEmpty())

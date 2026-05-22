@@ -8,7 +8,7 @@ Cross-cutting helpers used across the IME. Search here before adding another gen
 - `CapsModeUtils.java` - capitalization mode helpers.
 - `ChecksumCalculator.kt` - file checksum helpers.
 - `ColorUtil.kt` - theme color utilities.
-- `CustomKeyboards.kt` - user-defined keyboard-preset data model (alphabet/symbols/more_symbols rows with primary + optional single hint per key) plus JSON parse/encode/validate helpers; the JSON pref is the source of truth for the override path in `LayoutParser`.
+- `CustomKeyboards.kt` - user-defined keyboard-preset data model (alphabet/symbols/more_symbols rows with primary + optional single hint per key) plus JSON parse/encode/validate helpers. Each slot must have exactly 3 or 4 rows: 4 rows means the top row is the number row, 3 rows means the layout has no number row at all. The JSON pref is the source of truth for the override path in `LayoutParser`; when a preset is active the built-in number row from `assets/layouts/number_row/` is never prepended.
 - `CombinedFormatUtils.java` - formatting helpers for combined values.
 - `DebugLogUtils.java` - debug logging helpers.
 - `DeviceProtectedUtils.java` - device-protected storage helpers.

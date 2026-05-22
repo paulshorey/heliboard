@@ -113,7 +113,11 @@ class KeyboardParser(private val params: KeyboardParams, private val context: Co
         // Symbol popups are now defined inline in the layout files
         // if (params.mId.isAlphabetKeyboard)
         //     addSymbolPopupKeys(baseKeys)
-        if (params.mId.isAlphabetKeyboard && params.mId.mNumberRowEnabled) {
+        // When custom keyboards is active the preset is the single source of
+        // truth for which rows the alphabet has: 4 rows = top row is the
+        // number row, 3 rows = no number row. Do not prepend the built-in
+        // number row in that case (otherwise we'd get an extra squished row).
+        if (!customKeyboardsActive && params.mId.isAlphabetKeyboard && params.mId.mNumberRowEnabled) {
             val newLabelFlags = defaultLabelFlags or
                     if (Settings.getValues().mShowNumberRowHints) 0 else Key.LABEL_FLAGS_DISABLE_HINT_LABEL
             baseKeys.add(0, numberRow.mapTo(mutableListOf()) { it.copy(newLabelFlags = newLabelFlags) })

@@ -63,8 +63,12 @@ public class SettingsValues {
     public final boolean mLanguageSwitchKeyToOtherImes;
     public final boolean mLanguageSwitchKeyToOtherSubtypes;
     private final boolean mShowsLanguageSwitchKey;
-    public final boolean mShowsNumberRow;
-    public final boolean mShowsNumberRowInSymbols;
+    // The number row is no longer gated by a global toggle; it lives in the
+    // active Custom keyboards preset (4-row alphabet = number row on top,
+    // 3-row alphabet = no number row). For non-custom layouts the number row
+    // is always shown, which is what users running the stock layouts already
+    // got because the legacy toggle was forced to true.
+    public final boolean mShowsNumberRow = true;
     public final boolean mLocalizedNumberRow;
     public final boolean mShowNumberRowHints;
     public final boolean mShowsHints;
@@ -188,8 +192,6 @@ public class SettingsValues {
         mLanguageSwitchKeyToOtherImes = languagePref.equals("input_method") || languagePref.equals("both");
         mLanguageSwitchKeyToOtherSubtypes = languagePref.equals("internal") || languagePref.equals("both");
         mShowsLanguageSwitchKey = prefs.getBoolean(Settings.PREF_SHOW_LANGUAGE_SWITCH_KEY, Defaults.PREF_SHOW_LANGUAGE_SWITCH_KEY);
-        mShowsNumberRow = true;
-        mShowsNumberRowInSymbols = prefs.getBoolean(Settings.PREF_SHOW_NUMBER_ROW_IN_SYMBOLS, Defaults.PREF_SHOW_NUMBER_ROW_IN_SYMBOLS);
         mLocalizedNumberRow = SubtypeUtilsKt.getHasLocalizedNumberRow(selectedSubtype, prefs);
         mShowNumberRowHints = prefs.getBoolean(Settings.PREF_SHOW_NUMBER_ROW_HINTS, Defaults.PREF_SHOW_NUMBER_ROW_HINTS);
         mShowsHints = prefs.getBoolean(Settings.PREF_SHOW_HINTS, Defaults.PREF_SHOW_HINTS);
