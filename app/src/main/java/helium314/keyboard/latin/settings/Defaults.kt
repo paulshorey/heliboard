@@ -131,6 +131,51 @@ object Defaults {
     const val PREF_LOCALIZED_NUMBER_ROW = true
     const val PREF_SHOW_NUMBER_ROW_HINTS = false
     const val PREF_CUSTOM_CURRENCY_KEY = ""
+    const val PREF_USE_CUSTOM_KEYBOARDS = false
+    // Seed text for the JSON pref. Kept human-readable so the settings text-area
+    // round-trips cleanly when the user first opens it.
+    const val PREF_CUSTOM_KEYBOARDS_JSON = """{
+  "active": 0,
+  "presets": [
+    {
+      "name": "Default",
+      "alphabet": [
+        "q|1 w|2 e|3 r|4 t|5 y|6 u|7 i|8 o|9 p|0",
+        "a s d f g h j k l",
+        "z x c v b n m"
+      ],
+      "symbols": [
+        "1 2 3 4 5 6 7 8 9 0",
+        "@ # $ _ & - + ( ) /",
+        "* \" ' : ; ! ?"
+      ],
+      "more_symbols": [
+        "~ ` | • √ π ÷ × ¶ Δ",
+        "£ ¢ € ¥ ^ ° = { } \\",
+        "% © ® ™ ✓ [ ]"
+      ]
+    },
+    {
+      "name": "Programming",
+      "alphabet": [
+        "q|1 w|2 e|3 r|4 t|5 y|6 u|7 i|8 o|9 p|0",
+        "a|@ s|# d|$ f|_ g|& h|- j|+ k|( l|)",
+        "z|* x|\" c|' v|: b|; n|! m|?"
+      ],
+      "symbols": [
+        "1 2 3 4 5 6 7 8 9 0",
+        "! @ # $ % ^ & * ( )",
+        "- _ = + [ ] { } / \\"
+      ],
+      "more_symbols": [
+        "` ~ | < > ; : , . ?",
+        "\" ' \\\\ / ° ¶ § © ® ™",
+        "α β γ δ ε λ μ π σ Ω"
+      ]
+    }
+  ]
+}"""
+
     const val PREF_SHOW_HINTS = true
     const val PREF_POPUP_KEYS_ORDER = POPUP_KEYS_ORDER_DEFAULT
     const val PREF_POPUP_KEYS_LABELS_ORDER = POPUP_KEYS_LABEL_DEFAULT

@@ -8,6 +8,7 @@ Cross-cutting helpers used across the IME. Search here before adding another gen
 - `CapsModeUtils.java` - capitalization mode helpers.
 - `ChecksumCalculator.kt` - file checksum helpers.
 - `ColorUtil.kt` - theme color utilities.
+- `CustomKeyboards.kt` - user-defined keyboard-preset data model (alphabet/symbols/more_symbols rows with primary + optional single hint per key) plus JSON parse/encode/validate helpers; the JSON pref is the source of truth for the override path in `LayoutParser`.
 - `CombinedFormatUtils.java` - formatting helpers for combined values.
 - `DebugLogUtils.java` - debug logging helpers.
 - `DeviceProtectedUtils.java` - device-protected storage helpers.
