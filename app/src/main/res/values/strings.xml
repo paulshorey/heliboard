@@ -583,7 +583,7 @@ language, hence "No language". -->
     <string name="custom_keyboards_reset_done">Default preset restored.</string>
     <string name="custom_keyboards_saved">Saved.</string>
     <string name="custom_keyboards_error_prefix">Could not save: %1$s</string>
-    <string name="custom_keyboards_format_help">Format: each preset has three layouts (alphabet, symbols, more_symbols), each with three rows of space-separated keys. Use \"primary|hint\" to add a small hint character above the primary that is inserted on long-press. Use \"primary\" alone for a key with no hint.</string>
+    <string name="custom_keyboards_format_help">Format: each preset has three layouts (alphabet, symbols, more_symbols), each with three rows of space-separated keys. Use \"primary|hint\" to add a small hint character above the primary that is inserted on long-press. Use \"primary\" alone for a key with no hint.\n\nSince | is the delimiter, use \\| for a literal pipe character (e.g. \"\\|\" for a pipe key, or \"T|\\|\" for T with pipe hint). Use \\\\ for a literal backslash.</string>
     <!-- Name for functional keys layout -->
     <string name="layout_functional_keys" tools:keep="@string/layout_functional_keys">Functional keys</string>
     <!-- Name for functional keys layout for tablets -->
