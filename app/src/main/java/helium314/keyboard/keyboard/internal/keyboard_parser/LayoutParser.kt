@@ -18,6 +18,7 @@ import helium314.keyboard.keyboard.internal.keyboard_parser.floris.VariationSele
 import helium314.keyboard.keyboard.internal.keyboard_parser.floris.toTextKey
 import helium314.keyboard.latin.common.splitOnWhitespace
 import helium314.keyboard.latin.settings.Settings
+import helium314.keyboard.latin.utils.CustomKeyboards
 import helium314.keyboard.latin.utils.LayoutType
 import helium314.keyboard.latin.utils.LayoutUtils
 import helium314.keyboard.latin.utils.LayoutUtilsCustom
@@ -37,11 +38,37 @@ object LayoutParser {
     fun parseLayout(layoutType: LayoutType, params: KeyboardParams, context: Context): MutableList<MutableList<KeyData>> {
         if (layoutType == LayoutType.FUNCTIONAL && !params.mId.isAlphaOrSymbolKeyboard)
             return mutableListOf(mutableListOf()) // no functional keys
+
+        // Custom-keyboards override path: when the user opts in, replace MAIN,
+        // SYMBOLS and MORE_SYMBOLS with rows generated from the active preset.
+        // The cache key embeds the document fingerprint so edits invalidate
+        // automatically without us having to clear the layout cache by hand
+        // for every keystroke in the JSON editor.
+        val customSlot = layoutType.customKeyboardsSlot()
+        if (customSlot != null) {
+            val preset = CustomKeyboards.activePreset(context.prefs())
+            if (preset != null) {
+                val syntheticName = "__custom_keyboards__:${preset.hashCode()}:${customSlot.name}"
+                return layoutCache.getOrPut(layoutType.name + syntheticName) {
+                    val rendered = CustomKeyboards.toSimpleLayoutText(preset, customSlot)
+                    val parsed = parseSimpleString(rendered)
+                    return@getOrPut { _ -> parsed.mapTo(mutableListOf()) { it.toMutableList() } }
+                }(params)
+            }
+        }
+
         val layoutName = if (layoutType == LayoutType.MAIN) params.mId.mSubtype.mainLayoutName
             else params.mId.mSubtype.layouts[layoutType] ?: Settings.readDefaultLayoutName(layoutType, context.prefs())
         return layoutCache.getOrPut(layoutType.name + layoutName) {
             createCacheLambda(layoutType, layoutName, context)
         }(params)
+    }
+
+    private fun LayoutType.customKeyboardsSlot(): CustomKeyboards.Slot? = when (this) {
+        LayoutType.MAIN -> CustomKeyboards.Slot.ALPHABET
+        LayoutType.SYMBOLS -> CustomKeyboards.Slot.SYMBOLS
+        LayoutType.MORE_SYMBOLS -> CustomKeyboards.Slot.MORE_SYMBOLS
+        else -> null
     }
 
     /**

@@ -21,6 +21,7 @@ Converts layout assets and XML metadata into typed keyboard models.
 - `res/xml/method.xml` and `assets/layouts/` are the external inputs most likely to break parser assumptions.
 - Treat parser model changes as schema changes for the layout assets, not as isolated refactors.
 - When `KeyboardParser` inserts an extra row (for example the number row) it rescales row heights; it also rescales `mVerticalGap` so the visible gap between rows matches the four-row baseline instead of leaving a tall “dead” band under the new row.
+- When the **Custom Keyboards** override is on (see `latin/utils/CustomKeyboards.kt` and `PREF_USE_CUSTOM_KEYBOARDS`), `LayoutParser.parseLayout` synthesizes MAIN, SYMBOLS, and MORE_SYMBOLS rows from the active preset instead of reading the asset, using a synthetic cache key keyed on the preset hash. `KeyboardParser` then drops `LABEL_FLAGS_DISABLE_HINT_LABEL` on symbol layouts (so the user-defined hint is shown above each primary) and skips the automatic number-row popup injection so the preset's hints win.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.
