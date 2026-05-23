@@ -569,6 +569,12 @@ language, hence "No language". -->
     <string name="layout_error">Layout error: %s</string>
     <!-- Text hint for editing layout -->
     <string name="edit_layout">Tap to edit raw layout</string>
+    <!-- Content description for fork/copy-a-layout icon -->
+    <string name="fork_layout">Edit a copy</string>
+    <!-- Warning caption shown when forking a "+" layout whose locale extras are baked into the copy -->
+    <string name="fork_plus_layout_caption">Locale-specific extra keys are baked into this copy. They won\'t update if you later use this layout in a different language.</string>
+    <!-- Hint shown on the language screen when search yields no results -->
+    <string name="language_search_empty_hint">To customise a layout, tap a language above and use the + or the fork icon on any layout.</string>
     <!-- Settings screen title for secondary layouts (functional keys, symbols, numpad, ...) -->
     <string name="settings_screen_secondary_layouts">Secondary layouts</string>
     <!-- Name for functional keys layout -->

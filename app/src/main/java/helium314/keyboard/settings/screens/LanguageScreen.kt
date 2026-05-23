@@ -78,7 +78,14 @@ fun LanguageScreen(
                     .splitOnWhitespace().any { it.startsWith(term, true) }
             }
         },
-        itemContent = { SubtypeRow(it, it in enabledSubtypes) }
+        itemContent = { SubtypeRow(it, it in enabledSubtypes) },
+        emptySearchContent = {
+            Text(
+                stringResource(R.string.language_search_empty_hint),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
     )
 }
 
