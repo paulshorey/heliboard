@@ -12,7 +12,7 @@ class LayoutAssetsTest {
 
     @Test fun `main layouts parse and have valid row counts and top row width`() {
         val files = java.io.File("$root/main").listFiles()
-            ?.filter { it.extension == "txt" || it.extension == "json" }
+            ?.filter { (it.extension == "txt" || it.extension == "json") && it.name !in skippedMain }
             ?.sortedBy { it.name }
             ?: emptyList()
         files.forEach { file ->

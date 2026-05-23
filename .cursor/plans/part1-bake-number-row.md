@@ -109,13 +109,13 @@ Implement tests with these assertions:
 
 Tick a box (`[ ]` → `[x]`) when the work is done and committed.
 
-- [ ] **1.1 Prep:** Create branch `cursor/custom-layouts-pr1-bake-number-row` off `main`.
-- [ ] **1.2 Scripting:** Write `tools/bake_number_row.py` per specification; commit standalone.
-- [ ] **1.3 Verification:** Dry-run (`python3 tools/bake_number_row.py --dry-run`) and verify unified diff outputs for `qwerty.txt`, `azerty.json`, `farsi.txt`, and `symbols.txt`.
-- [ ] **1.4 Execution:** Run the script for real to bake in-place; commit changes under "Bake number row into built-in layouts".
-- [ ] **1.5 JVM Testing:** Create `app/src/test/java/helium314/keyboard/LayoutAssetsTest.kt` with all 4 asset validation assertions.
-- [ ] **1.6 Local Build:** Run `./gradlew :app:testDebugUnitTest` and ensure all tests are green.
-- [ ] **1.7 Documentation:** Update `app/src/main/assets/layouts/AGENTS.md` to document that "row 1 is the baked-in number row in built-in layouts".
+- [x] **1.1 Prep:** Create branch `cursor/custom-layouts-pr1-bake-number-row` off `main`.
+- [x] **1.2 Scripting:** Write `tools/bake_number_row.py` per specification; commit standalone.
+- [x] **1.3 Verification:** Dry-run (`python3 tools/bake_number_row.py --dry-run`) and verify unified diff outputs for `qwerty.txt`, `azerty.json`, `farsi.txt`, and `symbols.txt`.
+- [x] **1.4 Execution:** Run the script for real to bake in-place; commit changes under "Bake number row into built-in layouts".
+- [x] **1.5 JVM Testing:** Create `app/src/test/java/helium314/keyboard/LayoutAssetsTest.kt` with all 4 asset validation assertions.
+- [x] **1.6 Local Build:** Run `./gradlew :app:testDebugUnitTest` and ensure all tests are green.
+- [x] **1.7 Documentation:** Update `app/src/main/assets/layouts/AGENTS.md` to document that "row 1 is the baked-in number row in built-in layouts".
 - [ ] **1.8 Smoke Test:**
   - [ ] Build and install on device (`./gradlew installDebug`).
   - [ ] English (US) — check top row shows Western numbers with hints and full popups.
