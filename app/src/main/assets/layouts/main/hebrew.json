@@ -1,89 +1,448 @@
 [
   [
-    { "$": "variation_selector",
-      "email": { "label": "-" },
-      "uri": { "label": "-" },
-      "default": { "label": "'", "popup": { "relevant": [{ "label": "׳" }, { "label": "״" }, { "label": "\"" }] } }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "!"
+      },
+      "default": {
+        "label": "1",
+        "popup": {
+          "main": {
+            "label": "!"
+          },
+          "relevant": [
+            {
+              "label": "¹"
+            },
+            {
+              "label": "½"
+            },
+            {
+              "label": "⅓"
+            },
+            {
+              "label": "¼"
+            },
+            {
+              "label": "⅛"
+            }
+          ]
+        }
+      }
     },
-    { "$": "variation_selector",
-      "email": { "label": "_" },
-      "uri": { "label": "_" },
-      "default": { "label": "-", "popup": { "relevant": [{ "label": "־" }, { "label": "_" }] } }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "@"
+      },
+      "default": {
+        "label": "2",
+        "popup": {
+          "main": {
+            "label": "@"
+          },
+          "relevant": [
+            {
+              "label": "²"
+            },
+            {
+              "label": "⅔"
+            }
+          ]
+        }
+      }
     },
-    { "label": "ק", "popup": {
-      "relevant": [
-        { "label": "\u05b8" },
-        { "label": "\u05b3" },
-        { "label": "\u05bb" }
-      ]
-    } },
-    { "label": "ר", "popup": {
-      "relevant": [
-        { "label": "\u05bf" }
-      ]
-    } },
-    { "label": "א" },
-    { "label": "ט" },
-    { "label": "ו", "popup": {
-      "relevant": [
-        { "label": "ו\u05b9" },
-        { "label": "ו\u05bc" }
-      ]
-    } },
-    { "label": "ן" },
-    { "label": "ם" },
-    { "label": "פ", "popup": {
-      "relevant": [
-        { "label": "\u05b7" },
-        { "label": "\u05b2" }
-      ]
-    } }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "#"
+      },
+      "default": {
+        "label": "3",
+        "popup": {
+          "main": {
+            "label": "#"
+          },
+          "relevant": [
+            {
+              "label": "³"
+            },
+            {
+              "label": "¾"
+            },
+            {
+              "label": "⅜"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "$"
+      },
+      "default": {
+        "label": "4",
+        "popup": {
+          "main": {
+            "label": "$"
+          },
+          "relevant": [
+            {
+              "label": "⁴"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "%"
+      },
+      "default": {
+        "label": "5",
+        "popup": {
+          "main": {
+            "label": "%"
+          },
+          "relevant": [
+            {
+              "label": "⁵"
+            },
+            {
+              "label": "⅝"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "^"
+      },
+      "default": {
+        "label": "6",
+        "popup": {
+          "main": {
+            "label": "^"
+          },
+          "relevant": [
+            {
+              "label": "⁶"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "&"
+      },
+      "default": {
+        "label": "7",
+        "popup": {
+          "main": {
+            "label": "&"
+          },
+          "relevant": [
+            {
+              "label": "⁷"
+            },
+            {
+              "label": "⅞"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "*"
+      },
+      "default": {
+        "label": "8",
+        "popup": {
+          "main": {
+            "label": "*"
+          },
+          "relevant": [
+            {
+              "label": "⁸"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "("
+      },
+      "default": {
+        "label": "9",
+        "popup": {
+          "main": {
+            "label": "("
+          },
+          "relevant": [
+            {
+              "label": "⁹"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": ")"
+      },
+      "default": {
+        "label": "0",
+        "popup": {
+          "main": {
+            "label": ")"
+          },
+          "relevant": [
+            {
+              "label": "⁰"
+            },
+            {
+              "label": "ⁿ"
+            },
+            {
+              "label": "∅"
+            }
+          ]
+        }
+      }
+    }
   ],
   [
-    { "label": "ש", "popup": {
-      "relevant": [
-        { "label": "\u05b0" },
-        { "label": "ש\u05c2" },
-        { "label": "ש\u05c1" }
-      ]
-    } },
-    { "label": "ד", "popup": {
-      "relevant": [
-        { "label": "\u05bc" }
-      ]
-    } },
-    { "label": "ג" },
-    { "label": "כ" },
-    { "label": "ע" },
-    { "label": "י" },
-    { "label": "ח", "popup": {
-      "relevant": [
-        { "label": "\u05b4" },
-        { "label": "\u05b9" }
-      ]
-    } },
-    { "label": "ל" },
-    { "label": "ך" },
-    { "label": "ף" }
+    {
+      "$": "variation_selector",
+      "email": {
+        "label": "-"
+      },
+      "uri": {
+        "label": "-"
+      },
+      "default": {
+        "label": "'",
+        "popup": {
+          "relevant": [
+            {
+              "label": "׳"
+            },
+            {
+              "label": "״"
+            },
+            {
+              "label": "\""
+            }
+          ]
+        }
+      }
+    },
+    {
+      "$": "variation_selector",
+      "email": {
+        "label": "_"
+      },
+      "uri": {
+        "label": "_"
+      },
+      "default": {
+        "label": "-",
+        "popup": {
+          "relevant": [
+            {
+              "label": "־"
+            },
+            {
+              "label": "_"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "label": "ק",
+      "popup": {
+        "relevant": [
+          {
+            "label": "ָ"
+          },
+          {
+            "label": "ֳ"
+          },
+          {
+            "label": "ֻ"
+          }
+        ]
+      }
+    },
+    {
+      "label": "ר",
+      "popup": {
+        "relevant": [
+          {
+            "label": "ֿ"
+          }
+        ]
+      }
+    },
+    {
+      "label": "א"
+    },
+    {
+      "label": "ט"
+    },
+    {
+      "label": "ו",
+      "popup": {
+        "relevant": [
+          {
+            "label": "וֹ"
+          },
+          {
+            "label": "וּ"
+          }
+        ]
+      }
+    },
+    {
+      "label": "ן"
+    },
+    {
+      "label": "ם"
+    },
+    {
+      "label": "פ",
+      "popup": {
+        "relevant": [
+          {
+            "label": "ַ"
+          },
+          {
+            "label": "ֲ"
+          }
+        ]
+      }
+    }
   ],
   [
-    { "label": "ז" },
-    { "label": "ס", "popup": {
-      "relevant": [
-        { "label": "\u05b6" },
-        { "label": "\u05b1" }
-      ]
-    } },
-    { "label": "ב" },
-    { "label": "ה" },
-    { "label": "נ" },
-    { "label": "מ" },
-    { "label": "צ", "popup": {
-      "relevant": [
-        { "label": "\u05b5" }
-      ]
-    } },
-    { "label": "ת" },
-    { "label": "ץ" }
+    {
+      "label": "ש",
+      "popup": {
+        "relevant": [
+          {
+            "label": "ְ"
+          },
+          {
+            "label": "שׂ"
+          },
+          {
+            "label": "שׁ"
+          }
+        ]
+      }
+    },
+    {
+      "label": "ד",
+      "popup": {
+        "relevant": [
+          {
+            "label": "ּ"
+          }
+        ]
+      }
+    },
+    {
+      "label": "ג"
+    },
+    {
+      "label": "כ"
+    },
+    {
+      "label": "ע"
+    },
+    {
+      "label": "י"
+    },
+    {
+      "label": "ח",
+      "popup": {
+        "relevant": [
+          {
+            "label": "ִ"
+          },
+          {
+            "label": "ֹ"
+          }
+        ]
+      }
+    },
+    {
+      "label": "ל"
+    },
+    {
+      "label": "ך"
+    },
+    {
+      "label": "ף"
+    }
+  ],
+  [
+    {
+      "label": "ז"
+    },
+    {
+      "label": "ס",
+      "popup": {
+        "relevant": [
+          {
+            "label": "ֶ"
+          },
+          {
+            "label": "ֱ"
+          }
+        ]
+      }
+    },
+    {
+      "label": "ב"
+    },
+    {
+      "label": "ה"
+    },
+    {
+      "label": "נ"
+    },
+    {
+      "label": "מ"
+    },
+    {
+      "label": "צ",
+      "popup": {
+        "relevant": [
+          {
+            "label": "ֵ"
+          }
+        ]
+      }
+    },
+    {
+      "label": "ת"
+    },
+    {
+      "label": "ץ"
+    }
   ]
 ]
