@@ -22,6 +22,7 @@ Runtime keyboard layouts. Files here define rows, popup sets, width hints, and p
 - `functional/functional_keys_tablet.json` - tablet functional row.
 - `number/number.json` - number layer.
 - `number_row/number_row.json` and `number_row_basic.txt` - two styles of number-row data.
+- Built-in `main/`, `symbols/`, and `more_symbols/` layout files now store the number row as row 1; treat these files as WYSIWYG row definitions.
 - `numpad/numpad.json` - numeric keypad.
 - `numpad_landscape/numpad_landscape.json` - landscape numeric keypad.
 - `phone/phone.json` - phone keypad.

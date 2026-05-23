@@ -81,7 +81,7 @@ public final class ResourceUtils {
     }
 
     public static int getKeyboardHeight(final Resources res, final SettingsValues settingsValues) {
-        final int defaultKeyboardHeight = getDefaultKeyboardHeight(res, settingsValues.mShowsNumberRow);
+        final int defaultKeyboardHeight = getDefaultKeyboardHeight(res, true);
         // mKeyboardHeightScale Ranges from [.5,1.5], from xml/prefs_screen_appearance.xml
         return (int)(defaultKeyboardHeight * settingsValues.mKeyboardHeightScale);
     }

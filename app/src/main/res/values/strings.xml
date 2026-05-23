@@ -368,7 +368,7 @@
     <!-- Title of the setting to localize number row -->
     <string name="localized_number_row">Localize number row</string>
     <!-- Description of the settings to localize number row -->
-    <string name="localized_number_row_summary">Prefer localized over latin numbers</string>
+    <string name="localized_number_row_summary">Show localised digits in the number row when this language has its own digits</string>
     <!-- Title of the setting to enable number row hints -->
     <string name="number_row_hints">Show hints on number row</string>
     <!-- Title of the setting to save subtype per app -->

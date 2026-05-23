@@ -1,116 +1,486 @@
 [
   [
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "ٔ" },
-      "default": { "label": "ق" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "!"
+      },
+      "default": {
+        "label": "1",
+        "popup": {
+          "main": {
+            "label": "!"
+          },
+          "relevant": [
+            {
+              "label": "¹"
+            },
+            {
+              "label": "½"
+            },
+            {
+              "label": "⅓"
+            },
+            {
+              "label": "¼"
+            },
+            {
+              "label": "⅛"
+            }
+          ]
+        }
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "ْ" },
-      "default": { "label": "و" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "@"
+      },
+      "default": {
+        "label": "2",
+        "popup": {
+          "main": {
+            "label": "@"
+          },
+          "relevant": [
+            {
+              "label": "²"
+            },
+            {
+              "label": "⅔"
+            }
+          ]
+        }
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "ّ" },
-      "default": { "label": "ع" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "#"
+      },
+      "default": {
+        "label": "3",
+        "popup": {
+          "main": {
+            "label": "#"
+          },
+          "relevant": [
+            {
+              "label": "³"
+            },
+            {
+              "label": "¾"
+            },
+            {
+              "label": "⅜"
+            }
+          ]
+        }
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "ً" },
-      "default": { "label": "ر" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "$"
+      },
+      "default": {
+        "label": "4",
+        "popup": {
+          "main": {
+            "label": "$"
+          },
+          "relevant": [
+            {
+              "label": "⁴"
+            }
+          ]
+        }
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "ٗ" },
-      "default": { "label": "ت" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "%"
+      },
+      "default": {
+        "label": "5",
+        "popup": {
+          "main": {
+            "label": "%"
+          },
+          "relevant": [
+            {
+              "label": "⁵"
+            },
+            {
+              "label": "⅝"
+            }
+          ]
+        }
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "ٖ" },
-      "default": { "label": "ے" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "^"
+      },
+      "default": {
+        "label": "6",
+        "popup": {
+          "main": {
+            "label": "^"
+          },
+          "relevant": [
+            {
+              "label": "⁶"
+            }
+          ]
+        }
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "ٰ" },
-      "default": { "label": "ء" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "&"
+      },
+      "default": {
+        "label": "7",
+        "popup": {
+          "main": {
+            "label": "&"
+          },
+          "relevant": [
+            {
+              "label": "⁷"
+            },
+            {
+              "label": "⅞"
+            }
+          ]
+        }
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "ُ" },
-      "default": { "label": "ی" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "*"
+      },
+      "default": {
+        "label": "8",
+        "popup": {
+          "main": {
+            "label": "*"
+          },
+          "relevant": [
+            {
+              "label": "⁸"
+            }
+          ]
+        }
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "ِ" },
-      "default": { "label": "ہ" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "("
+      },
+      "default": {
+        "label": "9",
+        "popup": {
+          "main": {
+            "label": "("
+          },
+          "relevant": [
+            {
+              "label": "⁹"
+            }
+          ]
+        }
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "َ" },
-      "default": { "label": "پ" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": ")"
+      },
+      "default": {
+        "label": "0",
+        "popup": {
+          "main": {
+            "label": ")"
+          },
+          "relevant": [
+            {
+              "label": "⁰"
+            },
+            {
+              "label": "ⁿ"
+            },
+            {
+              "label": "∅"
+            }
+          ]
+        }
+      }
     }
   ],
   [
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "؏" },
-      "default": { "label": "ا" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "ٔ"
+      },
+      "default": {
+        "label": "ق"
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "؎" },
-      "default": { "label": "س" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "ْ"
+      },
+      "default": {
+        "label": "و"
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "ؔ" },
-      "default": { "label": "د" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "ّ"
+      },
+      "default": {
+        "label": "ع"
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "ؒ" },
-      "default": { "label": "ف" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "ً"
+      },
+      "default": {
+        "label": "ر"
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "ؓ" },
-      "default": { "label": "گ" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "ٗ"
+      },
+      "default": {
+        "label": "ت"
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "ؑ" },
-      "default": { "label": "ح" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "ٖ"
+      },
+      "default": {
+        "label": "ے"
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "ؐ" },
-      "default": { "label": "ج" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "ٰ"
+      },
+      "default": {
+        "label": "ء"
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "ﷺ" },
-      "default": { "label": "ک" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "ُ"
+      },
+      "default": {
+        "label": "ی"
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "ﷻ" },
-      "default": { "label": "ل" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "ِ"
+      },
+      "default": {
+        "label": "ہ"
+      }
+    },
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "َ"
+      },
+      "default": {
+        "label": "پ"
+      }
     }
   ],
   [
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "ﷲ" },
-      "default": { "label": "َ" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "؏"
+      },
+      "default": {
+        "label": "ا"
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "؀" },
-      "default": { "label": "ز" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "؎"
+      },
+      "default": {
+        "label": "س"
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "؂" },
-      "default": { "label": "ش" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "ؔ"
+      },
+      "default": {
+        "label": "د"
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "؃" },
-      "default": { "label": "چ" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "ؒ"
+      },
+      "default": {
+        "label": "ف"
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "؍" },
-      "default": { "label": "ط" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "ؓ"
+      },
+      "default": {
+        "label": "گ"
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "٘" },
-      "default": { "label": "ب", "popup": { "main": { "label": "(" } } }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "ؑ"
+      },
+      "default": {
+        "label": "ح"
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "؟" },
-      "default": { "label": "ن" }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "ؐ"
+      },
+      "default": {
+        "label": "ج"
+      }
     },
-    { "$": "shift_state_selector",
-      "manualOrLocked": { "label": "٫" },
-      "default": { "label": "م", "popup": { "main": { "label": ")" } } }
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "ﷺ"
+      },
+      "default": {
+        "label": "ک"
+      }
+    },
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "ﷻ"
+      },
+      "default": {
+        "label": "ل"
+      }
+    }
+  ],
+  [
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "ﷲ"
+      },
+      "default": {
+        "label": "َ"
+      }
+    },
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "؀"
+      },
+      "default": {
+        "label": "ز"
+      }
+    },
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "؂"
+      },
+      "default": {
+        "label": "ش"
+      }
+    },
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "؃"
+      },
+      "default": {
+        "label": "چ"
+      }
+    },
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "؍"
+      },
+      "default": {
+        "label": "ط"
+      }
+    },
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "٘"
+      },
+      "default": {
+        "label": "ب",
+        "popup": {
+          "main": {
+            "label": "("
+          }
+        }
+      }
+    },
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "؟"
+      },
+      "default": {
+        "label": "ن"
+      }
+    },
+    {
+      "$": "shift_state_selector",
+      "manualOrLocked": {
+        "label": "٫"
+      },
+      "default": {
+        "label": "م",
+        "popup": {
+          "main": {
+            "label": ")"
+          }
+        }
+      }
     }
   ]
 ]

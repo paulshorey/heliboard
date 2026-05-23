@@ -36,7 +36,7 @@ internal class EmojiLayoutParams(res: Resources) {
         val topPadding = res.getFraction(R.fraction.config_keyboard_top_padding_holo,
             defaultKeyboardHeight, defaultKeyboardHeight).toInt()
 
-        val rowCount = KeyboardParams.DEFAULT_KEYBOARD_ROWS + if (sv.mShowsNumberRow) 1 else 0
+        val rowCount = KeyboardParams.DEFAULT_KEYBOARD_ROWS + 1
         bottomRowKeyboardHeight = (defaultKeyboardHeight - bottomPadding - topPadding) / rowCount - keyVerticalGap / 2
 
         val pageIdHeight = res.getDimension(R.dimen.config_emoji_category_page_id_height)
