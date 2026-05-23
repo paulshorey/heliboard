@@ -9,6 +9,7 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import java.util.Locale
 
 /**
  * User-defined keyboard presets.
@@ -22,14 +23,42 @@ import kotlinx.serialization.json.JsonPrimitive
  *   "active": 0,
  *   "presets": [
  *     {
- *       "name": "Default",
- *       "alphabet":     ["...row1...", "...row2...", "...row3..."],
- *       "symbols":      ["...row1...", "...row2...", "...row3..."],
- *       "more_symbols": ["...row1...", "...row2...", "...row3..."]
+ *       "name": "English",
+ *       "locales":      ["en"],
+ *       "alphabet":     ["...numberRow?...", "...row1...", "...row2...", "...row3..."],
+ *       "symbols":      ["...numberRow?...", "...row1...", "...row2...", "...row3..."],
+ *       "more_symbols": ["...numberRow?...", "...row1...", "...row2...", "...row3..."]
  *     }
  *   ]
  * }
  * ```
+ *
+ * ## Rows
+ *
+ * Each slot ([Slot.ALPHABET], [Slot.SYMBOLS], [Slot.MORE_SYMBOLS]) accepts either
+ * **4** rows or **3** rows. When 4 rows are given the first row is the number row
+ * and is rendered at the top of the keyboard. When 3 rows are given the keyboard
+ * has no number row at all. The built-in number row from
+ * `assets/layouts/number_row/` is **never** added on top of a preset; the preset
+ * is the single source of truth for which rows a layout has.
+ *
+ * ## Per-language matching
+ *
+ * The optional `locales` array on each preset narrows which subtype/language the
+ * preset applies to. When the active keyboard subtype changes (globe key /
+ * language switch), [presetForLocale] picks the best-matching preset for the new
+ * locale. Matching tries:
+ *
+ *  1. an exact BCP-47 tag (e.g. `"en-US"`, `"sr-Latn"`),
+ *  2. then the language code only (e.g. `"en"`, `"fr"`),
+ *  3. then the wildcard `"*"` / empty `locales` list ("applies to any language").
+ *
+ * If no preset matches, the stock per-language layout under `assets/layouts/main/`
+ * is used so language switching keeps working. This means the user can ship a
+ * preset that only applies to a couple of languages and let every other
+ * subtype fall through to the bundled layout for that language.
+ *
+ * ## Keys
  *
  * Each row string is a list of keys separated by spaces. Each key token is either
  * a single primary character (`q`) or a primary character followed by `|` and a
@@ -42,15 +71,23 @@ import kotlinx.serialization.json.JsonPrimitive
  * JSON document (where `\` itself is the JSON escape character) this means
  * writing `\\|` for a pipe key and `\\\\` for a backslash key.
  *
- * The model is multi-preset from day one so the user can later cycle between
- * variations (e.g. via a toolbar button); only the preset selected by `active`
- * drives the keyboard at any given moment.
+ * ## `active`
+ *
+ * The `active` index is the preset highlighted in the settings editor (and the
+ * preset advanced by [cycleActive]). Runtime keyboard rendering does **not**
+ * depend on `active`; it always uses [presetForLocale] for the current subtype.
  */
 object CustomKeyboards {
     private const val TAG = "CustomKeyboards"
 
     /** Token separator for primary|hint. */
     const val HINT_SEPARATOR = '|'
+
+    /** Accepted row counts per slot. 4 rows = with number row (top), 3 rows = no number row. */
+    val ALLOWED_ROW_COUNTS = setOf(3, 4)
+
+    /** Wildcard locale token meaning "applies to any language". */
+    const val LOCALE_WILDCARD = "*"
 
     /** The three layouts every preset describes. */
     enum class Slot(val jsonKey: String) {
@@ -62,6 +99,13 @@ object CustomKeyboards {
     @Serializable
     data class Preset(
         val name: String = "",
+        /**
+         * Locales (BCP-47 tags such as `"en"`, `"en-US"`, `"fr"`) the preset
+         * applies to. Empty list or a list containing only [LOCALE_WILDCARD]
+         * (`"*"`) means "applies to any language" and acts as the fallback when
+         * no more-specific preset matches the active subtype.
+         */
+        val locales: List<String> = emptyList(),
         val alphabet: List<String> = emptyList(),
         val symbols: List<String> = emptyList(),
         val more_symbols: List<String> = emptyList()
@@ -71,6 +115,40 @@ object CustomKeyboards {
             Slot.SYMBOLS -> symbols
             Slot.MORE_SYMBOLS -> more_symbols
         }
+
+        /** True when the preset has no explicit locales or only the `*` wildcard. */
+        fun isUniversal(): Boolean =
+            locales.isEmpty() || locales.all { it.trim() == LOCALE_WILDCARD }
+
+        /**
+         * Match score for [locale]:
+         *  - 2 when an entry equals the full BCP-47 tag (e.g. `"en-US"`),
+         *  - 1 when an entry equals just the language (e.g. `"en"`),
+         *  - 0 when this preset is the universal/wildcard fallback,
+         *  - -1 when nothing in [locales] matches.
+         *
+         * Comparison is case-insensitive on the language subtag and case-sensitive
+         * (per BCP-47) on script/region subtags.
+         */
+        fun matchScore(locale: Locale): Int {
+            if (isUniversal()) return 0
+            val tag = locale.toLanguageTagOrEmpty().lowercase(Locale.ROOT)
+            val lang = locale.language.lowercase(Locale.ROOT)
+            var best = -1
+            for (raw in locales) {
+                val entry = raw.trim()
+                if (entry.isEmpty() || entry == LOCALE_WILDCARD) {
+                    // Mixing "*" with explicit tags still leaves an explicit match
+                    // path; treat "*" as a 0-score fallback.
+                    if (best < 0) best = 0
+                    continue
+                }
+                val normalized = entry.lowercase(Locale.ROOT)
+                if (normalized == tag) return 2
+                if (normalized == lang && best < 1) best = 1
+            }
+            return best
+        }
     }
 
     @Serializable
@@ -78,8 +156,37 @@ object CustomKeyboards {
         val active: Int = 0,
         val presets: List<Preset> = emptyList()
     ) {
+        /** Preset highlighted in the editor UI. Not consulted by the renderer. */
         val activePreset: Preset?
             get() = presets.getOrNull(active.coerceIn(0, (presets.size - 1).coerceAtLeast(0)))
+
+        /**
+         * Pick the preset that should be used to render [locale], or `null` when
+         * no preset declares this locale (in which case the parser should fall
+         * back to the stock per-language layout under `assets/layouts/main/`).
+         *
+         * Ties at the same score are broken by document order (lowest index wins)
+         * so the user can prioritise variants for the same language by ordering
+         * them in the JSON.
+         */
+        fun presetFor(locale: Locale): Preset? {
+            var bestScore = -1
+            var best: Preset? = null
+            for (preset in presets) {
+                val score = preset.matchScore(locale)
+                if (score > bestScore) {
+                    bestScore = score
+                    best = preset
+                }
+            }
+            return if (bestScore >= 0) best else null
+        }
+    }
+
+    /** Safe `toLanguageTag` for `Locale` that returns "" rather than "und". */
+    private fun Locale.toLanguageTagOrEmpty(): String {
+        val tag = toLanguageTag()
+        return if (tag == "und") "" else tag
     }
 
     @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
@@ -118,10 +225,21 @@ object CustomKeyboards {
         if (doc.presets.isEmpty()) return "Add at least one preset"
         doc.presets.forEachIndexed { i, p ->
             val label = if (p.name.isNotBlank()) "\"${p.name}\"" else "#$i"
+            p.locales.forEach { entry ->
+                val trimmed = entry.trim()
+                if (trimmed.isEmpty())
+                    return "Preset $label: empty locale entry (use \"$LOCALE_WILDCARD\" for any language)"
+                if (trimmed != LOCALE_WILDCARD && !isPlausibleLocaleTag(trimmed))
+                    return "Preset $label: locale \"$entry\" is not a valid BCP-47 tag " +
+                            "(examples: \"en\", \"en-US\", \"fr\", \"sr-Latn\", or \"$LOCALE_WILDCARD\" for any)"
+            }
             Slot.entries.forEach { slot ->
                 val rows = p.rowsFor(slot)
                 if (rows.isEmpty())
                     return "Preset $label is missing ${slot.jsonKey}"
+                if (rows.size !in ALLOWED_ROW_COUNTS)
+                    return "Preset $label / ${slot.jsonKey} must have 3 or 4 rows (got ${rows.size}). " +
+                            "4 rows = top row is the number row; 3 rows = no number row."
                 rows.forEachIndexed { ri, row ->
                     parseRowTokens(row).forEach { (primary, hint) ->
                         if (primary.isEmpty())
@@ -133,6 +251,19 @@ object CustomKeyboards {
             }
         }
         return null
+    }
+
+    /**
+     * Cheap sanity check for a BCP-47-ish tag. We accept the common `lang`,
+     * `lang-Region`, `lang-Script`, `lang-Script-Region` shapes without trying
+     * to be a full RFC parser; deeper validation would just frustrate the user
+     * when they typed `"en"` and we rejected it for not being canonical.
+     */
+    private fun isPlausibleLocaleTag(tag: String): Boolean {
+        if (tag.isEmpty() || tag.length > 35) return false
+        return tag.all { it.isLetterOrDigit() || it == '-' || it == '_' }
+                && tag.first().isLetter()
+                && tag.last().isLetterOrDigit()
     }
 
     /** Splits a row string into `(primary, hint?)` tuples, honoring `\|` escapes. */
@@ -207,13 +338,24 @@ object CustomKeyboards {
         return parse(raw) ?: parse(Defaults.PREF_CUSTOM_KEYBOARDS_JSON)
     }
 
-    fun activePreset(prefs: SharedPreferences): Preset? = read(prefs)?.activePreset
+    /**
+     * The preset that should drive rendering for the given subtype [locale],
+     * or `null` when the user did not define one (in which case the parser
+     * falls through to the stock per-language asset).
+     */
+    fun presetForLocale(prefs: SharedPreferences, locale: Locale): Preset? =
+        read(prefs)?.presetFor(locale)
+
+    /** Editor-only: the preset that the settings UI is currently highlighting. */
+    fun editorActivePreset(prefs: SharedPreferences): Preset? = read(prefs)?.activePreset
 
     /** Pretty-print a Document, used to round-trip user edits or seed the text field. */
     fun encode(doc: Document): String = json.encodeToString(Document.serializer(), doc)
 
     /**
-     * Returns a one-line description of the active preset for use in summary text.
+     * Returns a one-line description of the editor-highlighted preset for use
+     * in summary text. Rendering-time matching is done per locale via
+     * [presetForLocale]; this helper is just for the settings header.
      */
     fun activePresetName(prefs: SharedPreferences): String? {
         val doc = read(prefs) ?: return null
@@ -221,6 +363,21 @@ object CustomKeyboards {
         val preset = doc.activePreset ?: return null
         val name = preset.name.ifBlank { "#${doc.active}" }
         return if (doc.presets.size > 1) "$name (${doc.active + 1}/${doc.presets.size})" else name
+    }
+
+    /**
+     * One-line summary of which preset will be used for [locale], for the
+     * "Active for current language" line in the settings screen.
+     */
+    fun presetSummaryForLocale(prefs: SharedPreferences, locale: Locale): String? {
+        val doc = read(prefs) ?: return null
+        val preset = doc.presetFor(locale) ?: return null
+        val name = preset.name.ifBlank { "#${doc.presets.indexOf(preset)}" }
+        val scope = when {
+            preset.isUniversal() -> "any language"
+            else -> preset.locales.joinToString(", ")
+        }
+        return "$name ($scope)"
     }
 
     /**
@@ -249,7 +406,7 @@ object CustomKeyboards {
      */
     @Suppress("unused")
     internal fun hasExtraFields(obj: JsonObject): Boolean {
-        val known = setOf("active", "presets")
+        val known = setOf("active", "presets", "name", "locales", "alphabet", "symbols", "more_symbols")
         return obj.keys.any { it !in known && obj[it] is JsonPrimitive }
     }
 }

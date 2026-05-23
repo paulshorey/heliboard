@@ -126,8 +126,6 @@ object Defaults {
     @SuppressLint("RtlHardcoded")
     const val PREF_ONE_HANDED_GRAVITY = Gravity.LEFT
     const val PREF_ONE_HANDED_SCALE = 1f
-    const val PREF_SHOW_NUMBER_ROW = true
-    const val PREF_SHOW_NUMBER_ROW_IN_SYMBOLS = true
     const val PREF_LOCALIZED_NUMBER_ROW = true
     const val PREF_SHOW_NUMBER_ROW_HINTS = false
     const val PREF_CUSTOM_CURRENCY_KEY = ""
@@ -138,39 +136,88 @@ object Defaults {
   "active": 0,
   "presets": [
     {
-      "name": "Default",
+      "name": "English",
+      "locales": ["en"],
       "alphabet": [
-        "q|1 w|2 e|3 r|4 t|5 y|6 u|7 i|8 o|9 p|0",
+        "1 2 3 4 5 6 7 8 9 0",
+        "q w e r t y u i o p",
         "a s d f g h j k l",
         "z x c v b n m"
       ],
       "symbols": [
         "1 2 3 4 5 6 7 8 9 0",
         "@ # $ _ & - + ( ) /",
-        "* \" ' : ; ! ?"
+        "* \" ' : ; ! ?",
+        "< > = { } [ ] \\\\"
       ],
       "more_symbols": [
         "~ ` \\| • √ π ÷ × ¶ Δ",
-        "£ ¢ € ¥ ^ ° = { } \\",
-        "% © ® ™ ✓ [ ]"
+        "£ ¢ € ¥ ^ ° = { } \\\\",
+        "% © ® ™ ✓ [ ] § µ Ω",
+        "α β γ δ ε λ μ π σ ω"
       ]
     },
     {
-      "name": "Programming",
+      "name": "Programming (any language)",
+      "locales": ["*"],
       "alphabet": [
-        "q|1 w|2 e|3 r|4 t|5 y|6 u|7 i|8 o|9 p|0",
+        "1 2 3 4 5 6 7 8 9 0",
+        "q w e r t y u i o p",
         "a|@ s|# d|$ f|_ g|& h|- j|+ k|( l|)",
         "z|* x|\" c|' v|: b|; n|! m|?"
       ],
       "symbols": [
         "1 2 3 4 5 6 7 8 9 0",
         "! @ # $ % ^ & * ( )",
-        "- _ = + [ ] { } / \\"
+        "- _ = + [ ] { } / \\\\",
+        "< > ` ~ \\| : ; , . ?"
       ],
       "more_symbols": [
         "` ~ \\| < > ; : , . ?",
         "\" ' \\\\ / ° ¶ § © ® ™",
-        "α β γ δ ε λ μ π σ Ω"
+        "α β γ δ ε λ μ π σ Ω",
+        "≠ ≤ ≥ ± ÷ × √ ∞ ∂ Δ"
+      ]
+    },
+    {
+      "name": "French AZERTY",
+      "locales": ["fr"],
+      "alphabet": [
+        "1 2 3 4 5 6 7 8 9 0",
+        "a z e r t y u i o p",
+        "q s d f g h j k l m",
+        "w x c v b n"
+      ],
+      "symbols": [
+        "1 2 3 4 5 6 7 8 9 0",
+        "@ # $ _ & - + ( ) /",
+        "* « » ' : ; ! ?",
+        "< > = { } [ ] \\\\"
+      ],
+      "more_symbols": [
+        "~ ` \\| • √ π ÷ × ¶ Δ",
+        "£ € ¥ ¢ ^ ° = { } \\\\",
+        "% © ® ™ ✓ [ ] § µ Ω",
+        "à â ç é è ê ë î ï ô"
+      ]
+    },
+    {
+      "name": "Compact English (no number row)",
+      "locales": ["en"],
+      "alphabet": [
+        "q w e r t y u i o p",
+        "a s d f g h j k l",
+        "z x c v b n m"
+      ],
+      "symbols": [
+        "@ # $ _ & - + ( ) /",
+        "* \" ' : ; ! ?",
+        "< > = { } [ ] \\\\"
+      ],
+      "more_symbols": [
+        "~ ` \\| • √ π ÷ × ¶ Δ",
+        "£ ¢ € ¥ ^ ° = { } \\\\",
+        "% © ® ™ ✓ [ ] § µ Ω"
       ]
     }
   ]

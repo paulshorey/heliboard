@@ -39,16 +39,23 @@ object LayoutParser {
         if (layoutType == LayoutType.FUNCTIONAL && !params.mId.isAlphaOrSymbolKeyboard)
             return mutableListOf(mutableListOf()) // no functional keys
 
-        // Custom-keyboards override path: when the user opts in, replace MAIN,
-        // SYMBOLS and MORE_SYMBOLS with rows generated from the active preset.
-        // The cache key embeds the document fingerprint so edits invalidate
-        // automatically without us having to clear the layout cache by hand
-        // for every keystroke in the JSON editor.
+        // Custom-keyboards override path: when the user opts in AND has a preset
+        // that targets the current subtype's locale, replace MAIN / SYMBOLS /
+        // MORE_SYMBOLS with rows generated from that preset. Subtypes whose
+        // locale matches no preset fall through to the stock per-language
+        // layout below, so the user's existing language list keeps working
+        // when Custom keyboards is enabled.
+        //
+        // The cache key embeds the document fingerprint AND the locale so edits
+        // invalidate automatically and a French preset never leaks into the
+        // English keyboard.
         val customSlot = layoutType.customKeyboardsSlot()
         if (customSlot != null) {
-            val preset = CustomKeyboards.activePreset(context.prefs())
+            val locale = params.mId.mSubtype.locale
+            val preset = CustomKeyboards.presetForLocale(context.prefs(), locale)
             if (preset != null) {
-                val syntheticName = "__custom_keyboards__:${preset.hashCode()}:${customSlot.name}"
+                val syntheticName =
+                    "__custom_keyboards__:${preset.hashCode()}:${locale.toLanguageTag()}:${customSlot.name}"
                 return layoutCache.getOrPut(layoutType.name + syntheticName) {
                     val rendered = CustomKeyboards.toSimpleLayoutText(preset, customSlot)
                     val parsed = parseSimpleString(rendered)

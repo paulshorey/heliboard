@@ -37,7 +37,9 @@ import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.utils.CustomKeyboards
 import helium314.keyboard.latin.utils.Log
+import helium314.keyboard.latin.utils.SubtypeSettings
 import helium314.keyboard.latin.utils.getActivity
+import helium314.keyboard.latin.utils.locale
 import helium314.keyboard.latin.utils.prefs
 import helium314.keyboard.settings.SearchSettingsScreen
 import helium314.keyboard.settings.SettingsActivity
@@ -75,6 +77,20 @@ fun CustomKeyboardsScreen(
     val parsedDoc = remember(draft) { CustomKeyboards.parse(draft) }
     val activeName = remember(draft) {
         parsedDoc?.activePreset?.let { p -> p.name.ifBlank { "#${parsedDoc.active}" } }
+    }
+    // What the keyboard will actually render for the currently-selected
+    // subtype: locale matching is the source of truth for rendering, so the
+    // editor's `active` index might point at a totally different preset.
+    val currentSubtypeLocale = remember(draft) {
+        SubtypeSettings.getSelectedSubtype(prefs).locale()
+    }
+    val activeForCurrentLocale = remember(draft, currentSubtypeLocale) {
+        parsedDoc?.presetFor(currentSubtypeLocale)?.let { p ->
+            val name = p.name.ifBlank { "#${parsedDoc.presets.indexOf(p)}" }
+            val scope = if (p.isUniversal()) context.getString(R.string.custom_keyboards_locale_any)
+                else p.locales.joinToString(", ")
+            "$name ($scope)"
+        }
     }
 
     SearchSettingsScreen(
@@ -115,11 +131,26 @@ fun CustomKeyboardsScreen(
                 }
 
                 Text(
-                    text = if (activeName != null) stringResource(R.string.custom_keyboards_active_label, activeName)
-                    else stringResource(R.string.custom_keyboards_active_none),
+                    text = if (activeForCurrentLocale != null)
+                        stringResource(
+                            R.string.custom_keyboards_active_for_language,
+                            currentSubtypeLocale.displayName,
+                            activeForCurrentLocale
+                        )
+                    else stringResource(
+                        R.string.custom_keyboards_active_for_language_none,
+                        currentSubtypeLocale.displayName
+                    ),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
+                    modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
+                )
+                Text(
+                    text = if (activeName != null) stringResource(R.string.custom_keyboards_active_label, activeName)
+                    else stringResource(R.string.custom_keyboards_active_none),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 4.dp)
                 )
 
                 if (parsedDoc != null && parsedDoc.presets.size > 1) {
