@@ -25,6 +25,7 @@ import androidx.annotation.StringRes;
 
 import helium314.keyboard.compat.ConfigurationCompatKt;
 import helium314.keyboard.keyboard.KeyboardActionListener;
+import helium314.keyboard.keyboard.KeyboardLayoutSet;
 import helium314.keyboard.latin.AudioAndHapticFeedbackManager;
 import helium314.keyboard.latin.InputAttributes;
 import helium314.keyboard.latin.R;
@@ -135,11 +136,17 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
     public static final String PREF_ONE_HANDED_GRAVITY_PREFIX = "one_handed_mode_gravity";
     public static final String PREF_ONE_HANDED_SCALE_PREFIX = "one_handed_mode_scale";
 
-    public static final String PREF_SHOW_NUMBER_ROW = "show_number_row";
-    public static final String PREF_SHOW_NUMBER_ROW_IN_SYMBOLS = "show_number_row_in_symbols";
+    // Whether to display the number row is now driven entirely by the active
+    // Custom keyboards preset (3 rows = no number row, 4 rows = number row).
+    // The legacy global toggle is gone, but the localized-digits toggle and
+    // the per-key hint toggle still apply to layouts that do show a number
+    // row in the non-custom path.
     public static final String PREF_LOCALIZED_NUMBER_ROW = "localized_number_row";
     public static final String PREF_SHOW_NUMBER_ROW_HINTS = "show_number_row_hints";
     public static final String PREF_CUSTOM_CURRENCY_KEY = "custom_currency_key";
+
+    public static final String PREF_USE_CUSTOM_KEYBOARDS = "use_custom_keyboards";
+    public static final String PREF_CUSTOM_KEYBOARDS_JSON = "custom_keyboards_json";
 
     public static final String PREF_SHOW_HINTS = "show_hints";
     public static final String PREF_POPUP_KEYS_ORDER = "popup_keys_order";
@@ -272,6 +279,11 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
         }
         if (PREF_ADDITIONAL_SUBTYPES.equals(key)) {
             SubtypeSettings.INSTANCE.reloadEnabledSubtypes(mContext);
+        }
+        if (PREF_USE_CUSTOM_KEYBOARDS.equals(key) || PREF_CUSTOM_KEYBOARDS_JSON.equals(key)) {
+            // Force the keyboard layout caches to forget the custom synthesized
+            // layout so the next keyboard load picks up the edited preset.
+            KeyboardLayoutSet.onKeyboardThemeChanged();
         }
     }
 

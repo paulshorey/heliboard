@@ -17,10 +17,12 @@ import helium314.keyboard.keyboard.internal.keyboard_parser.floris.TextKeyData
 import helium314.keyboard.latin.common.isEmoji
 import helium314.keyboard.latin.define.DebugFlags
 import helium314.keyboard.latin.settings.Settings
+import helium314.keyboard.latin.utils.CustomKeyboards
 import helium314.keyboard.latin.utils.LayoutType
 import helium314.keyboard.latin.utils.POPUP_KEYS_LAYOUT
 import helium314.keyboard.latin.utils.replaceFirst
 import helium314.keyboard.latin.utils.splitAt
+import helium314.keyboard.latin.utils.prefs
 import helium314.keyboard.latin.utils.sumOf
 import kotlin.math.roundToInt
 
@@ -34,8 +36,17 @@ import kotlin.math.roundToInt
  * requirements of certain non-latin languages.
  */
 class KeyboardParser(private val params: KeyboardParams, private val context: Context) {
+    // True only when the active subtype's locale actually has a matching
+    // Custom keyboards preset. Subtypes whose locale doesn't match any preset
+    // get the stock per-language layout and behave like vanilla HeliBoard,
+    // so language switching keeps working when the feature is enabled.
+    private val customKeyboardsActive = CustomKeyboards.isEnabled(context.prefs())
+            && CustomKeyboards.presetForLocale(context.prefs(), params.mId.mSubtype.locale) != null
     private val defaultLabelFlags = when {
         params.mId.isAlphabetKeyboard -> params.mLocaleKeyboardInfos.labelFlags
+        // Custom keyboards want the small gray hint above the primary on
+        // symbol/more-symbol layouts, so do not disable hint labels there.
+        customKeyboardsActive && params.mId.isAlphaOrSymbolKeyboard -> 0
         // reproduce the no-hints in symbol layouts
         // todo: add setting? or put it in TextKeyData to happen only if no label flags specified explicitly?
         params.mId.isAlphaOrSymbolKeyboard -> Key.LABEL_FLAGS_DISABLE_HINT_LABEL
@@ -106,7 +117,11 @@ class KeyboardParser(private val params: KeyboardParams, private val context: Co
         // Symbol popups are now defined inline in the layout files
         // if (params.mId.isAlphabetKeyboard)
         //     addSymbolPopupKeys(baseKeys)
-        if (params.mId.isAlphabetKeyboard && params.mId.mNumberRowEnabled) {
+        // When custom keyboards is active the preset is the single source of
+        // truth for which rows the alphabet has: 4 rows = top row is the
+        // number row, 3 rows = no number row. Do not prepend the built-in
+        // number row in that case (otherwise we'd get an extra squished row).
+        if (!customKeyboardsActive && params.mId.isAlphabetKeyboard && params.mId.mNumberRowEnabled) {
             val newLabelFlags = defaultLabelFlags or
                     if (Settings.getValues().mShowNumberRowHints) 0 else Key.LABEL_FLAGS_DISABLE_HINT_LABEL
             baseKeys.add(0, numberRow.mapTo(mutableListOf()) { it.copy(newLabelFlags = newLabelFlags) })
@@ -272,6 +287,7 @@ class KeyboardParser(private val params: KeyboardParams, private val context: Co
     }
 
     private fun addNumberRowOrPopupKeys(baseKeys: MutableList<MutableList<KeyData>>, numberRow: MutableList<KeyData>) {
+        if (customKeyboardsActive) return // custom presets control their own hints
         if (!params.mId.mNumberRowEnabled && params.mId.isAlphabetKeyboard && !hasBuiltInNumbers()) {
             baseKeys.first().forEachIndexed { index, keyData -> keyData.popup.numberLabel = numberRow.getOrNull(index)?.label }
         }

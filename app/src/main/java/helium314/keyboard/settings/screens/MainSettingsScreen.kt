@@ -41,6 +41,7 @@ fun MainSettingsScreen(
     onClickAppearance: () -> Unit,
     onClickLanguage: () -> Unit,
     onClickLayouts: () -> Unit,
+    onClickCustomKeyboards: () -> Unit,
     onClickDictionaries: () -> Unit,
     onClickBack: () -> Unit,
 ) {
@@ -92,6 +93,11 @@ fun MainSettingsScreen(
                     icon = R.drawable.ic_ime_switcher
                 ) { NextScreenIcon() }
                 Preference(
+                    name = stringResource(R.string.settings_screen_custom_keyboards),
+                    onClick = onClickCustomKeyboards,
+                    icon = R.drawable.ic_ime_switcher
+                ) { NextScreenIcon() }
+                Preference(
                     name = stringResource(R.string.dictionary_settings_category),
                     onClick = onClickDictionaries,
                     icon = R.drawable.ic_dictionary
@@ -132,7 +138,7 @@ private fun PreviewScreen() {
     initPreview(LocalContext.current)
     Theme(previewDark) {
         Surface {
-            MainSettingsScreen({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
+            MainSettingsScreen({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
         }
     }
 }

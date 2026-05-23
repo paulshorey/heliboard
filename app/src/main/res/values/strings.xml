@@ -570,6 +570,23 @@ language, hence "No language". -->
     <string name="edit_layout">Tap to edit raw layout</string>
     <!-- Settings screen title for secondary layouts (functional keys, symbols, numpad, ...) -->
     <string name="settings_screen_secondary_layouts">Secondary layouts</string>
+    <!-- Custom keyboards (user-edited layout presets) -->
+    <string name="settings_screen_custom_keyboards">Custom keyboards</string>
+    <string name="custom_keyboards_intro">Override the alphabet, ?123 and =\\&lt; layouts per language. Each preset declares the locales it applies to and how many rows it has (4 = top row is the number row, 3 = no number row). When you switch language, the keyboard picks the matching preset; languages with no preset fall back to the built-in HeliBoard layout.</string>
+    <string name="custom_keyboards_enable_label">Use custom keyboards</string>
+    <string name="custom_keyboards_active_label">Editor cursor: %1$s</string>
+    <string name="custom_keyboards_active_none">No valid preset detected</string>
+    <string name="custom_keyboards_active_for_language">Active for %1$s: %2$s</string>
+    <string name="custom_keyboards_active_for_language_none">No custom preset for %1$s — using the built-in layout</string>
+    <string name="custom_keyboards_locale_any">any language</string>
+    <string name="custom_keyboards_cycle">Switch to next preset</string>
+    <string name="custom_keyboards_editor_label">Presets (JSON)</string>
+    <string name="custom_keyboards_apply">Apply</string>
+    <string name="custom_keyboards_reset">Reset to default</string>
+    <string name="custom_keyboards_reset_done">Default preset restored.</string>
+    <string name="custom_keyboards_saved">Saved.</string>
+    <string name="custom_keyboards_error_prefix">Could not save: %1$s</string>
+    <string name="custom_keyboards_format_help">Each preset declares which languages it applies to with a \"locales\" array using BCP-47 tags (e.g. [\"en\"], [\"fr\"], [\"en-US\", \"en-GB\"]). Use [\"*\"] (or omit) for a preset that applies to any language. When you switch language, the keyboard picks the most specific matching preset; if none match, the built-in layout for that language is used.\n\nEach preset has three layouts (alphabet, symbols, more_symbols). Each layout is either 4 rows (top row is the number row) or 3 rows (no number row). Rows are arrays of space-separated keys. Use \"primary|hint\" to add a small hint character above the primary that is inserted on long-press. Use \"primary\" alone for a key with no hint.\n\nSince | is the delimiter, use \\| for a literal pipe character (e.g. \"\\|\" for a pipe key, or \"T|\\|\" for T with pipe hint). Use \\\\ for a literal backslash.</string>
     <!-- Name for functional keys layout -->
     <string name="layout_functional_keys" tools:keep="@string/layout_functional_keys">Functional keys</string>
     <!-- Name for functional keys layout for tablets -->
