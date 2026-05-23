@@ -1,18 +1,26 @@
 # HeliBoard user-editable keyboard layouts — implementation plan
 
+> **Status:** v2 — rewritten to be agent-executable. Use **§10
+> Progress tracking** as the source of truth for "where we are."
+> Every step has a checkbox; tick it with `StrReplace` (`[ ]` →
+> `[x]`) as you complete it, and commit the plan along with the
+> code change so resumability survives across sessions.
+
+---
+
 ## 0. The user goal in one paragraph
 
-A HeliBoard user should be able to **create a new keyboard layout
-of their own** by starting from an existing locale's layout (e.g.
-English/QWERTY, Russian, Bengali, …), then **edit the key
-characters, the long-press popups, the small grey hint label
-above each key, *and* the number row** as one coherent unit. The
-edited layout should appear in the *Languages & Layouts → [language]*
-screen alongside the built-ins, can be selected per subtype, and
-the user can keep multiple custom variants per locale (the globe
-key cycles through them as today).
+A HeliBoard user should be able to **create a new keyboard
+layout of their own** by starting from an existing locale's
+layout (e.g. English/QWERTY, Russian, Bengali, …), then **edit
+the key characters, the long-press popups, the small grey hint
+label above each key, *and* the number row** as one coherent
+unit. The edited layout appears in *Languages & Layouts →
+[language]* alongside the built-ins, can be selected per
+subtype, and the user can keep multiple custom variants per
+locale (the globe key cycles through them as today).
 
-What "edit" means concretely, after this plan ships:
+What "edit" means concretely after this plan ships:
 
 - Every layout slot the user can pick (`MAIN`, `SYMBOLS`,
   `MORE_SYMBOLS`, `FUNCTIONAL`, `NUMBER`, `NUMBER_ROW`,
@@ -20,11 +28,11 @@ What "edit" means concretely, after this plan ships:
   `EMOJI_BOTTOM`, `CLIPBOARD_BOTTOM`) has the same **Add /
   Edit / Delete / Load-from-file / Edit-a-copy** affordances.
   Today only `MAIN` has the full set.
-- "Edit a copy" is one tap: pick any built-in (e.g. `qwerty`),
-  hit a fork icon, and the editor opens pre-filled with that
-  built-in's exact rendered content. Save → a new
-  `custom.<scope>.<base36>.<name>.` file is written and the
-  active subtype switches to it.
+- **Edit-a-copy is one tap.** Pick any built-in (e.g. `qwerty`
+  inside a German subtype), hit a fork icon, and the editor
+  opens pre-filled with that built-in's exact rendered content.
+  Save → a new `custom.<scope>.<base36>.<name>.` file is
+  written and the active subtype switches to it.
 - **The number row is part of that pre-filled content.** Today
   the user edits 3 rows and the keyboard renders 4 because the
   parser silently prepends a number-row asset at render time.
@@ -33,203 +41,247 @@ What "edit" means concretely, after this plan ships:
   renders. A 4-row file renders 4 rows; deleting the first row
   in the editor gives a clean 3-row layout with digit hints
   inferred above the alphabet — no hidden plumbing.
-- Hints are not a separate field; the *first popup* of each key
-  is already what renders as the small grey hint label. So
+- **Hints aren't a separate field.** The first popup of each
+  key is already what renders as the small grey hint label, so
   editing the hint is the same gesture as editing the
   long-press popup — one source of truth.
-
-This file describes a four-PR sequence that delivers that goal,
-verified against `main` at the time of writing (every line number
-and code snippet below was checked in the current tree).
 
 ---
 
 ## Table of contents
 
-1. The user goal in one paragraph (above)
+0. The user goal in one paragraph (above)
+1. Plan conventions — build, test, branching, commits
 2. Architecture on `main` today
 3. The change in one diagram
-4. Implementation: four PRs
+4. Implementation — four PRs
 5. Edge cases and rationale
 6. Test coverage
 7. Out of scope and follow-ups
 8. Open questions
 9. File reference
+10. Progress tracking (resumable checklist)
+- Appendix A — `tools/bake_number_row.py` specification
+- Appendix B — Exhaustive PR-1 file list (74 files)
+- Appendix C — PR-2 deletion-sweep order
+- Appendix D — Manual verification recipe
+
+---
+
+## 1. Plan conventions
+
+### 1.1 Branching
+
+Each PR lives on its own branch off `main`:
+
+| PR  | Branch name                                                |
+| --- | ---------------------------------------------------------- |
+| 1   | `cursor/custom-layouts-pr1-bake-number-row`                |
+| 2   | `cursor/custom-layouts-pr2-parser-cleanup`                 |
+| 3   | `cursor/custom-layouts-pr3-ui-parity`                      |
+| 4   | `cursor/custom-layouts-pr4-rebuild-apk`                    |
+
+Each branch is created from latest `main`. PRs land in order
+(2 depends on 1's assets, 3 doesn't strictly depend on 1+2 but
+it's clearer if they ship sequentially, 4 must be last).
+
+### 1.2 Commit style
+
+Match the existing repo style (verified against recent log):
+
+- Imperative subject ≤72 chars, e.g. `Bake number row into
+  built-in alphabet layouts`.
+- Optional body paragraph wrapped at ~72 chars explaining
+  *why* the change exists and any non-obvious trade-offs.
+- One logical change per commit. PR 1 may use several commits
+  (per asset family), PR 2 should be one commit per phase from
+  Appendix C, PR 3 should be one commit per atomic UI change.
+- Use `HEREDOC` for `git commit -m` so the body formats
+  correctly:
+
+  ```bash
+  git commit -m "$(cat <<'EOF'
+  Subject line.
+
+  Body paragraph.
+  EOF
+  )"
+  ```
+
+### 1.3 Build & test commands
+
+| Step | Command |
+| --- | --- |
+| **JVM unit tests** (default for this plan) | `./gradlew :app:testDebugUnitTest` |
+| **All variants' tests** | `./gradlew test` |
+| **Fast debug build** | `./gradlew :app:assembleDebugNoMinify` |
+| **Canonical install build** | `./gradlew :app:assembleDebug` |
+| **Install on connected device** | `./gradlew installDebug` |
+| **Logcat tail (keyboard)** | `adb logcat -s LatinIME:V` |
+| **Canonical APK (PR 4)** | `./tools/build-dist-apk.sh` → writes `dist/HeliBoard.apk` |
+
+Run `./gradlew :app:testDebugUnitTest` after **every PR** before
+opening it; treat failures as blocking.
+
+Reference: `.cursor/skills/development/SKILL.md` for the broader
+local-dev guide.
+
+### 1.4 Resumability protocol
+
+This plan has a single source of truth for "where we are":
+**§10 Progress tracking**. Whenever you complete a checklist
+item:
+
+1. Edit the plan file: change `- [ ]` to `- [x]`.
+2. `git add .cursor/plans/user-editable-keyboard-layouts.md`
+   in the same commit as the code change it represents (or as
+   a standalone tick commit if the work is across many files).
+
+A new agent picking up an interrupted PR starts by reading §10,
+finds the first unchecked box, and executes from there. Do not
+rely on memory or chat history; rely on the checkboxes.
 
 ---
 
 ## 2. Architecture on `main` today
 
-### 2.1 Layout assets (built-in)
+### 2.1 Layout assets (built-in) — verified counts
 
 Every layout the app can render lives in
-`app/src/main/assets/layouts/<slot>/`. Verified counts on `main`:
+`app/src/main/assets/layouts/<slot>/`. Counts on `main`:
 
 ```
 assets/layouts/
 ├── main/              76 files (48 .txt + 28 .json)
-├── symbols/           symbols.txt, symbols_arabic.txt
-├── more_symbols/      symbols_shifted.txt
-├── number_row/        number_row.json, number_row_basic.txt
-├── functional/        functional_keys.json, *_tablet.json, *_khipro.json
-├── number/, numpad/, numpad_landscape/
+├── symbols/           symbols.txt, symbols_arabic.txt          (2)
+├── more_symbols/      symbols_shifted.txt                       (1)
+├── number_row/        number_row.json, number_row_basic.txt    (2)
+├── functional/, number/, numpad/, numpad_landscape/
 ├── phone/, phone_symbols/
 └── emoji_bottom/, clipboard_bottom/
 ```
 
-Two file formats coexist intentionally:
+Two file formats coexist intentionally and both reach the
+parser as the same `KeyData` model via `LayoutParser`:
 
-- **Simple text** (e.g. `qwerty.txt`, `bepo.txt`, `symbols.txt`):
-  rows separated by blank lines, one key per line. First
-  whitespace-separated token is the primary label; later tokens
-  are popup keys. The first popup is *also* the visible hint
-  label (small grey letter above the primary), via the
-  `POPUP_KEYS_LAYOUT` source in `PopupKeysUtils.getHintLabel`.
+- **Simple text** (e.g. `qwerty.txt`, `bepo.txt`,
+  `symbols.txt`): rows separated by blank lines, one key per
+  line. First whitespace-separated token is the primary label;
+  later tokens are popup keys. The first popup is also the
+  visible hint (`POPUP_KEYS_LAYOUT` source in
+  `PopupKeysUtils.getHintLabel`).
 - **Rich Floris JSON** (e.g. `azerty.json`, `colemak.json`):
-  one JSON array per row, each key is
-  `{ "label": "a", "popup": { … }, … }` with optional shift-state
-  selectors, code overrides, width hints, etc.
+  one JSON array per row; each key is
+  `{ "label": "…", "popup": { … }, … }` with optional
+  shift-state selectors, code overrides, width hints, etc.
 
-Both formats are parsed by `LayoutParser` and reach
-`KeyboardParser` / `KeyboardBuilder` as the same `KeyData` model.
-Existing layouts mix the two formats freely; we don't need to
-convert one to the other.
+### 2.2 Row counts and the "already taller" subset — verified
 
-**Important: not every main layout is 3 rows today.** A spot
-audit found 12 of 76 main layouts already have 4 or 5 rows
-(number row or extra rows baked in):
-
-| File | Rows |
-|------|------|
-| `armenian_phonetic.txt` | 4 |
-| `chuvash.txt` | 4 |
-| `dvorak.json` | 4 |
-| `halmak.txt` | 4 |
-| `hungarian_extended_qwertz.txt` | 4 |
-| `kannada_extended.txt` | **5** |
-| `khmer.json` | 4 |
-| `lao.json` | 4 |
-| `mansi_north.txt` | 4 |
-| `mari.txt` | 4 |
-| `pcqwerty.json` | 4 |
-| `thai.json` | 4 |
-
-`KeyboardParser.hasBuiltInNumbers()` (lines 318–322) already
-special-cases some of these so the parser does not double-prepend
-a number row. PR 1 must therefore *skip* files that already have
-4+ rows (otherwise we'd end up with 5-row qwerty for any layout
-that already includes its own number row).
-
-### 2.2 Custom layouts (user-edited)
-
-The existing custom-layout system stores user-edited layouts as
-plain files under the app's device-protected files dir:
+Running a row-count on `main` today (verbatim output, sorted):
 
 ```
-<filesDir>/layouts/
-├── main/             custom.Latn.<base36>.<name>.,   custom.fr-FR.<base36>.<name>.,   …
-├── symbols/          custom.<base36>.<name>.                                          …
-├── more_symbols/     custom.<base36>.<name>.                                          …
-└── functional/, number/, etc.
+.txt — 48 files:
+3 rows ×42 files
+4 rows: armenian_phonetic, chuvash, halmak,
+        hungarian_extended_qwertz, mansi_north, mari   (6)
+5 rows: kannada_extended                               (1)
+
+.json — 28 files:
+3 rows ×23 files
+4 rows: dvorak, khmer, lao, pcqwerty, thai             (5)
 ```
 
-`LayoutUtilsCustom.kt` owns the naming convention
-(`LayoutUtilsCustom.kt:137–142`):
+Of the **12 already-multi-row files**, only 3 have a number
+row baked in (or numbers in popups):
+`pcqwerty.json`, `lao.json`, `thai.json`. The remaining 9 have
+extra letter rows. Verified via `KeyboardParser.hasBuiltInNumbers()`
+at lines 318–322:
 
-- **MAIN, Latin locale**: `custom.Latn.<base36>.<name>.` — the file
-  is visible to **every subtype whose locale uses Latin script**.
-- **MAIN, non-Latin locale**: `custom.<bcp47>.<base36>.<name>.` —
-  the file is visible only to that exact BCP-47 tag (e.g.
-  `custom.fr-FR.…` for French — note: a non-Latin example would
-  use the locale's actual script tag like `custom.ru-RU.…`).
-- **Non-MAIN slot**: `custom.<base36>.<name>.` — the file is
-  visible to **every subtype, regardless of locale**.
+```kotlin
+private fun hasBuiltInNumbers() = params.mId.mSubtype.mainLayoutName == "pcqwerty"
+        || (Settings.getValues().mPopupKeyTypes.contains(POPUP_KEYS_LAYOUT)
+            && params.mId.mSubtype.mainLayoutName in listOf("lao", "thai"))
+```
 
-The file body uses the same simple-text or Floris-JSON format the
-built-in layouts use. `LayoutParser.getLayoutFileContent`
-(`LayoutParser.kt:101–106`) checks `LayoutUtilsCustom.isCustomLayout(name)`
-and reads from the files dir; otherwise it falls through to
-`context.assets`.
+So today, with default popup-key settings, a Lao or Thai
+keyboard *does* get a prepended Western number row (since the
+condition needs `POPUP_KEYS_LAYOUT` in the user's popup-keys
+list, which may or may not be on). Verify on a clean install
+before relying on it.
 
-The `custom.Latn.*` convention already serves as the implicit
-"applies to any Latin language" wildcard — anything authored
-under that scope appears in every Latin subtype's *Main layout*
-dropdown. Non-MAIN custom layouts are already universal because
-their lookup ignores locale.
+**Consequence for PR 1:** skip exactly 3 files (`pcqwerty.json`,
+`lao.json`, `thai.json`), bake into the other 73 main + 3
+symbol/more_symbols = **74 files** (Appendix B enumerates
+them).
 
-### 2.3 Subtype binding
+### 2.3 Custom layouts (user-edited)
 
-A *subtype* is the unit the user picks via the globe key. It
-carries a `Locale` and an `extraValues` string containing
-`KeyboardLayoutSet=MAIN§<layoutName>§SYMBOLS§<layoutName>§…` that
-maps each `LayoutType` slot to a specific layout name (built-in
-or custom). See `latin/utils/LayoutType.kt:9–11` and
-`latin/settings/SettingsSubtype.kt:37, 58–61` (note: the
-in-source separators are `Separators.KV` / `Separators.ENTRY`
-constants, not the literal `§` glyph — the on-disk format is the
-same shape).
+User-edited layouts live under `<filesDir>/layouts/<slot>/`,
+with the filename encoding the scope (`LayoutUtilsCustom.kt:137–142`):
 
-Three prefs hold the state (`Settings.java`):
+| Scope | Naming | Visibility |
+| --- | --- | --- |
+| MAIN, Latin locale | `custom.Latn.<base36>.<name>.` | every Latin-script subtype |
+| MAIN, non-Latin locale | `custom.<bcp47>.<base36>.<name>.` | exact BCP-47 only |
+| Non-MAIN slot | `custom.<base36>.<name>.` | universal |
 
-- `PREF_ENABLED_SUBTYPES` (line 161) — the user's enabled subtypes.
-- `PREF_ADDITIONAL_SUBTYPES` (line 94) — user-created subtypes
-  that differ from the resource ones. Loaded by
+The file body uses the same simple-text or Floris-JSON format
+the built-in layouts use.
+`LayoutParser.getLayoutFileContent` (`LayoutParser.kt:101–106`)
+checks `LayoutUtilsCustom.isCustomLayout(name)` and reads from
+the files dir; otherwise it falls through to `context.assets`.
+
+### 2.4 Subtype binding
+
+A subtype carries a `Locale` and an `extraValues` string
+containing `KeyboardLayoutSet=MAIN§<layoutName>§SYMBOLS§<layoutName>§…`
+that maps each `LayoutType` slot to a specific layout name
+(built-in or custom). See `latin/utils/LayoutType.kt:9–11` and
+`latin/settings/SettingsSubtype.kt:37, 58–61`. The on-disk
+separators are `Separators.KV` / `Separators.ENTRY` constants
+(`§`-shaped in effect).
+
+Three relevant prefs:
+
+- `PREF_ENABLED_SUBTYPES` (`Settings.java:161`) — enabled set.
+- `PREF_ADDITIONAL_SUBTYPES` (`Settings.java:94`) — user-created
+  subtypes, loaded by
   `SubtypeUtilsAdditional.createAdditionalSubtypes`
   (`SubtypeUtilsAdditional.kt:113–117`).
-- `PREF_SELECTED_SUBTYPE` (line 162) — currently active subtype
-  (cycled by the globe key).
+- `PREF_SELECTED_SUBTYPE` (`Settings.java:162`) — current active
+  subtype, cycled by the globe key.
 
 The globe key already cycles every enabled subtype. To get
 "multiple alphabet variants per locale" today, the user creates
-two additional subtypes for the same locale, each pointing at a
+additional subtypes for the same locale, each pointing at a
 different MAIN layout. The system supports this end-to-end —
 this plan does not change subtype plumbing.
 
-### 2.4 Settings UI today
+### 2.5 Settings UI today
 
 `settings/screens/LanguageScreen.kt` (the *Languages & Layouts*
-list) shows every available subtype with a toggle. Tapping a row
-navigates to `settings/screens/SubtypeScreen.kt` (the *Subtype
-detail* page). This page currently has:
+list) shows every available subtype with a toggle. Tapping a
+row navigates to `settings/screens/SubtypeScreen.kt`. This page
+currently has:
 
-- A **Main layout** dropdown (`MainLayoutRow`, lines **401–504**).
-  For `MAIN` this dropdown has:
-  - A `+` button to **add** a custom layout (from blank or by
-    file-picker import, lines 424–426, 484–502).
-  - An inline pencil to **edit** any selected layout (custom or
-    built-in). When the selected entry is a built-in, the dialog
-    opens pre-filled with `LayoutUtils.getContentWithPlus`
-    (lines 437, 464–482) — this is the implicit "edit a copy"
-    path, currently quite hidden in the UI.
-  - A bin to **delete** the selected custom layout, with a
-    confirmation when other subtypes still use it (lines 438–461).
-- Per-slot **secondary** dropdowns for every other `LayoutType`
-  (`SubtypeScreen.kt:241–289`). These have:
-  - The dropdown of built-in + custom files for that slot
-    (lines 248–249).
-  - A *DefaultButton* "reset to subtype default" that clears the
-    per-subtype layout override (lines 254–258).
-  - An inline pencil that opens `LayoutEditDialog` for
-    **existing custom** entries only (lines 270–286).
-  - **No `+` button** to create a new custom layout for that slot.
-  - **No bin** for delete.
-  - **No "edit a copy"** for built-in entries.
-- A **Hint source** order/priority setting (lines **171–192**).
-  Per-subtype reorder/toggle of which popup source supplies the
-  hint label (matches `params.mPopupKeyLabelSources` priority).
-- A **Localised number row** Switch (lines **212–235**) bound to
-  the per-subtype `LOCALIZED_NUMBER_ROW` extra value (only
-  visible for locales whose `[number_row]` differs from Western
-  `1234567890`).
+- A **Main layout** dropdown (`MainLayoutRow`, lines **401–504**):
+  - `+` to **add** a custom layout (blank or via file-picker
+    import, lines 424–426, 484–502).
+  - Pencil to **edit** any selected layout; built-ins open
+    pre-filled via `LayoutUtils.getContentWithPlus` (lines 437,
+    464–482). This is today's implicit "edit a copy" — hidden.
+  - Bin to **delete** a selected custom layout (lines 438–461).
+- Per-slot **secondary** dropdowns (`SubtypeScreen.kt:241–289`):
+  - Dropdown + DefaultButton to reset to subtype default.
+  - Pencil edits **only existing custom** entries; no `+`, no
+    bin, no edit-a-copy on built-ins.
+- **Hint source** order/priority dialog (lines **171–192**).
+- **Localised number row** Switch (lines **212–235**) bound to
+  the per-subtype `LOCALIZED_NUMBER_ROW` extra (only shown for
+  locales whose `[number_row]` differs from Western).
 
-So MAIN is fully managed and non-MAIN slots are stuck halfway:
-you can pick a layout and edit an existing custom one, but you
-can't create a new one or delete one from this UI, and there is
-no one-tap fork of a built-in.
-
-The edit dialog (`settings/dialogs/LayoutEditDialog.kt:45–54`) is
-a multi-line text editor that accepts both layout formats. Its
-signature is:
+The edit dialog (`settings/dialogs/LayoutEditDialog.kt:45–54`)
+signature:
 
 ```kotlin
 fun LayoutEditDialog(
@@ -243,46 +295,28 @@ fun LayoutEditDialog(
 )
 ```
 
-It validates by re-parsing via `LayoutUtilsCustom.checkLayout`
-(line 104), writes the result via `LayoutUtilsCustom.getLayoutFile(...)`
-(line 81), calls `SubtypeSettings.onRenameLayout` to keep prefs
-consistent (line 79), calls `LayoutUtilsCustom.onLayoutFileChanged()`
-(line 82) and `KeyboardSwitcher.getInstance().setThemeNeedsReload()`
-(line 85).
+It validates via `LayoutUtilsCustom.checkLayout` (line 104),
+writes via `LayoutUtilsCustom.getLayoutFile(...)` (line 81),
+calls `SubtypeSettings.onRenameLayout` (line 79),
+`LayoutUtilsCustom.onLayoutFileChanged()` (line 82), and
+`KeyboardSwitcher.getInstance().setThemeNeedsReload()` (line 85).
 
-### 2.5 Hint labels
+### 2.6 Hint labels
 
-The grey hint character drawn above each key is **not** declared
-in a dedicated field. It's derived from the key's popup set by
-`latin/utils/PopupKeysUtils.kt:63–82 → getHintLabel(...)`, which
-iterates `params.mPopupKeyLabelSources` and stops at the first
-hit. The default priority order is `POPUP_KEYS_LABEL_DEFAULT`
+Hints are derived from the key's popup set by
+`latin/utils/PopupKeysUtils.kt:63–82 → getHintLabel(...)`,
+which iterates `params.mPopupKeyLabelSources` and stops at the
+first hit. The default priority is `POPUP_KEYS_LABEL_DEFAULT`
 (`PopupKeysUtils.kt:16–18`):
 
 ```
 number=true, language_priority=false, layout=true, symbols=true, language=false
 ```
 
-So in priority order: `POPUP_KEYS_NUMBER` first (when present
-and enabled), then `POPUP_KEYS_LAYOUT` ("the first popup
-declared by the layout file itself"), then `POPUP_KEYS_SYMBOLS`,
-then language sources. (The plan's earlier draft listed only
-two sources — the actual default has five.)
+So `POPUP_KEYS_NUMBER` wins over `POPUP_KEYS_LAYOUT` by default
+— see §5.1 for the implication on 3-row custom layouts.
 
-In practice this means:
-
-- A simple-text line `a @` (primary `a`, popup `@`) renders as
-  *primary `a`, hint `@`*. The popup IS the hint.
-- A JSON `{ "label": "a", "popup": { "main": { "label": "@" } } }`
-  renders identically.
-- A simple-text line `i - –` (primary `i`, popups `-` and `–`)
-  renders as *primary `i`, hint `-`, additional popup `–`*. The
-  first popup wins.
-
-**A layout author writes a hint by writing a popup.** No separate
-`hint` field needs to exist.
-
-### 2.6 The number row, today
+### 2.7 The number row, today
 
 Today the number row is **prepended at runtime** to alphabet
 keyboards from `assets/layouts/number_row/number_row.json`
@@ -306,27 +340,22 @@ if (params.mId.isAlphabetKeyboard && params.mId.mNumberRowEnabled) {
 through `KeyboardLayoutSet.Builder.setNumberRowEnabled`
 (`KeyboardLayoutSet.java:258–264`) → `KeyboardParams.mNumberRowEnabled`
 → `KeyboardId.mNumberRowEnabled` (`KeyboardId.java:78–79`). On
-`main`, `SettingsValues.mShowsNumberRow` is **hardcoded** to
-`true` (`SettingsValues.java:191`):
+`main`, `SettingsValues.mShowsNumberRow` is hardcoded to `true`
+at `SettingsValues.java:191`:
 
 ```java
 mShowsNumberRow = true;
 ```
 
-(There is no comment on that line; the field is simply assigned
-`true` and the pref `PREF_SHOW_NUMBER_ROW` declared at
-`Settings.java:138` with its default at `Defaults.kt:129` is
-**never read** anywhere.)
+The pref `PREF_SHOW_NUMBER_ROW` (`Settings.java:138`, default at
+`Defaults.kt:129`) is **never read**.
 
-`PREF_SHOW_NUMBER_ROW_IN_SYMBOLS` *is* read into
-`SettingsValues.mShowsNumberRowInSymbols` (`SettingsValues.java:192`),
-passed through `KeyboardSwitcher.java:157–158, 174–175` and
-`KeyboardLayoutSet.Builder` into `KeyboardId.mNumberRowInSymbols`
-(`KeyboardId.java:98–99`) — but **nothing downstream reads
-`mNumberRowInSymbols`** to make a rendering decision. Also dead.
+`PREF_SHOW_NUMBER_ROW_IN_SYMBOLS` is read into
+`SettingsValues.mShowsNumberRowInSymbols` and passed all the
+way through to `KeyboardId.mNumberRowInSymbols` — but **nothing
+downstream consumes it** for any rendering decision. Also dead.
 
-The 3-row branch already exists too, at
-`KeyboardParser.kt:274–278`:
+The 3-row branch already exists, at `KeyboardParser.kt:274–278`:
 
 ```kotlin
 private fun addNumberRowOrPopupKeys(baseKeys, numberRow) {
@@ -338,23 +367,22 @@ private fun addNumberRowOrPopupKeys(baseKeys, numberRow) {
 }
 ```
 
-When the number row is *not* prepended (`!mNumberRowEnabled`),
-this sets `popup.numberLabel` on each top-row key from the
-locale's number-row asset. That `numberLabel` is read by
-`PopupKeysUtils.getHintLabel` via the `POPUP_KEYS_NUMBER` source
-and shows as the grey digit hint above each top-row key.
+When the number row isn't prepended, this sets
+`popup.numberLabel` on each top-row key from the locale's
+number-row asset. `PopupKeysUtils.getHintLabel` reads that
+field via the `POPUP_KEYS_NUMBER` source and shows it as the
+grey digit hint.
 
 In other words: **the parser already does the right thing for
-both 3-row and 4-row layouts**. The only thing keeping it stuck
-in "prepend a number row at runtime" mode is the
-`mNumberRowEnabled` guard. Flip that guard to look at the parsed
-row count, bake the number row into every layout file, and the
-whole runtime-prepend path becomes dead code.
+both 3-row and 4-row layouts**. The only thing keeping it in
+"prepend at runtime" mode is the `mNumberRowEnabled` guard.
+Flip that guard to look at parsed row count, bake the number
+row into every layout file, and the whole runtime-prepend path
+becomes dead code.
 
-`PREF_LOCALIZED_NUMBER_ROW` (live) controls a digit-swap inside
-`getNumberRow()` — when on, Western `1234567890` is replaced by
-the locale's localised digits (Persian, Arabic, Devanagari, …).
-**The per-locale digit set is not a static Kotlin map.** It is
+### 2.8 Localised digits — where they actually live
+
+The per-locale digit set is **not** a static Kotlin map. It is
 parsed from `assets/locale_key_texts/<lang>.txt` under the
 `[number_row]` section by `LocaleKeyboardInfos.kt`. Example
 (`assets/locale_key_texts/fa.txt`):
@@ -364,18 +392,23 @@ parsed from `assets/locale_key_texts/<lang>.txt` under the
 ۱ ۲ ۳ ۴ ۵ ۶ ۷ ۸ ۹ ۰
 ```
 
-These files (81 of them) are the source of truth that PR 1's
-generator script must read to bake the correct digit row per
-locale.
+81 such files exist. The runtime swap is implemented by
+`convertToLocalizedNumbers` (`KeyboardParser.kt:~290–303`),
+which today **runs only on the prepended number row asset**.
 
-`LocaleKeyboardInfos` also owns `getExtraKeys(rowIdx)` (lines
-109–111), used for the `+` extras mechanism (see 2.7).
+**Important consequence for PR 1's "bake Western digits
+everywhere" plan**: after baking, `convertToLocalizedNumbers`
+no longer runs (because nothing is prepended). PR 2 must extend
+the localization pass to the top row of the parsed layout file
+when the locale has localized digits. Without that, a Persian
+user's farsi.txt would show Western `1234567890` after the
+bake. **This is an essential PR-2 work item, not a follow-up.**
 
-### 2.7 The `+` extras mechanism (relevant to PR 2)
+### 2.9 The `+` extras mechanism
 
 Layouts named with a trailing `+` in `method.xml` (e.g.
-`qwerty+` for Catalan) get locale-specific extra keys appended
-at runtime. Verbatim from `LayoutParser.kt:91–97`:
+`qwerty+` for Catalan) get locale-specific extra keys appended.
+`LayoutParser.kt:91–97`:
 
 ```kotlin
 return { params ->
@@ -388,15 +421,12 @@ return { params ->
 }
 ```
 
-Today (3-row files) the indices are `i = 0,1,2` → extras for
-alphabet rows 1, 2, 3. After PR 1's baked number row a 4-row
-file gives `i = 0,1,2,3` → asks `getExtraKeys` at row 1 for the
-*number* row (wrong) and at rows 2–4 for the alphabet (also
-wrong). PR 2 fixes this off-by-one.
-
-Same pattern lives in `LayoutUtils.getContentWithPlus`
-(`LayoutUtils.kt:48–49`) for the "edit a copy" pre-fill — PR 2
-must fix that too.
+Today (3-row files): `i = 0,1,2` → extras for alphabet rows
+1,2,3. After PR 1 bakes a number row, `i = 0,1,2,3` → asks for
+extras at row 1 for the *number* row (wrong) and at 2,3,4 for
+the alphabet (also wrong). PR 2 fixes this off-by-one. Same
+pattern in `LayoutUtils.getContentWithPlus`
+(`LayoutUtils.kt:48–49`).
 
 ---
 
@@ -430,196 +460,188 @@ must fix that too.
     +--------------------+     rendered.      │ z x c v b n m      │    rendered.
                                               +--------------------+
                                                        WYSIWYG.
-
-    To hide the number row?                   Save a 3-row custom file:
-    Need a global toggle that                 +--------------------+
-    isn't wired to any UI.                    │ q w e r t y u i o p│
-                                              │ a s d f g h j k l  │
-                                              │ z x c v b n m      │
-                                              +--------------------+
-                                              Parser renders 3 rows
-                                              and adds digit hints
-                                              (popup.numberLabel) on
-                                              the top alphabet row
-                                              automatically.
 ```
 
-The user-facing model becomes:
+User-facing model after the plan:
 
-| Layout file row count | Renders as | Top-row hints |
+| File row count | Renders as | Top-row hints |
 | --- | --- | --- |
-| **4** (number row baked in as row 1) | 4 rows; row 1 is the number row | First popup of each digit in the file (just like every other key) |
-| **3** (no number row) | 3 rows; alphabet only | Digit hints auto-appear above the top alphabet row, sourced from the locale's `[number_row]` in `assets/locale_key_texts/`. If the user authored their own popups on top-row keys, those take precedence per `POPUP_KEYS_LABEL_DEFAULT` source priority (`POPUP_KEYS_LAYOUT` is later in the default order — see 5.1). |
+| **4** (number row baked) | 4 rows; row 1 is the number row | First popup of each digit in the file |
+| **3** (no number row) | 3 rows; alphabet only | Digit hints auto-appear on the top alphabet row from `[number_row]`. If the user authored an in-file popup on a top-row key, it preserves that — see §5.1 |
 
-To opt out of the number row, the user either picks a 3-row
-variant from the *Main layout* dropdown, or authors a 3-row
-custom layout (fork a 4-row built-in, delete the first row in
-the editor, save).
+To opt out of the number row, the user forks a 4-row built-in,
+deletes the first row in the editor, and saves.
 
 ---
 
-## 4. Implementation: four PRs
-
-Each PR is independently shippable and rolls back independently.
+## 4. Implementation — four PRs
 
 ### 4.1 PR 1 — Bake the number row into every built-in layout
 
-**Scope:**
+**Branch:** `cursor/custom-layouts-pr1-bake-number-row`
 
-- Edit files under `app/src/main/assets/layouts/main/*.{txt,json}`
-  to add a number row as the new first row, **only for files
-  that currently have 3 rows** (64 of 76 — the 12 listed in 2.1
-  are skipped because they already include a number row or
-  extras).
-- Edit `app/src/main/assets/layouts/symbols/symbols.txt`,
-  `symbols/symbols_arabic.txt`, and
-  `more_symbols/symbols_shifted.txt` to add a number row as the
-  new first row of each.
-- Add a JVM test that asserts every alphabet/symbol layout file
-  has **3, 4, or 5** rows (so future changes can't accidentally
-  ship a 1-row or 6-row file).
-- Update `app/src/main/assets/layouts/AGENTS.md` to document the
-  new "row 1 is the number row (unless explicitly omitted)"
-  convention.
+**Goal:** make built-in layout files WYSIWYG without changing
+any rendering behavior. Pure asset edits + one new test.
 
-**Digit set per locale.** The shipped per-locale digit choice
-must match what users see today (which is `getNumberRow()` with
-`PREF_LOCALIZED_NUMBER_ROW = true` by default). The mapping is
-**not** a static Kotlin map — it is sourced from per-locale
-`[number_row]` sections in `app/src/main/assets/locale_key_texts/<lang>.txt`.
-For each layout file under `main/`, the generator script:
+**Approach:** A generator script (`tools/bake_number_row.py`,
+specced in Appendix A) walks the 74 layout files enumerated in
+Appendix B, prepending a number row in the file's existing
+format. Western digits 1–0 are baked universally; PR 2 ports
+the locale-digit swap to apply to the file's top row.
 
-1. Reads the layout filename → derives the candidate locale
-   (cross-referenced against `app/src/main/res/xml/method.xml`
-   subtype entries that point at this layout).
-2. Looks up `[number_row]` in that locale's
-   `locale_key_texts/<lang>.txt`.
-3. Falls back to Western `1 2 3 4 5 6 7 8 9 0` if the locale
-   has no `[number_row]` entry.
+**Format spec for the baked number row:**
 
-So Latin/Cyrillic/Greek/Hebrew/Armenian → Western digits;
-Arabic, Persian, Bengali, Devanagari, Thai, Khmer, Lao, Myanmar,
-… → their native digits per their locale text file.
+- **Simple-text (`.txt`) files** — prepend exactly these 10
+  lines followed by one blank-line separator before the
+  original first row:
 
-**Number-row popups (hints).** Today the number-row asset
-`assets/layouts/number_row/number_row.json` declares popups for
-each digit (e.g. the `1` key has `!` as its hint, `2` has `@`,
-etc.). Carry those popups verbatim into each baked-in number row.
-For simple-text format that's:
+  ```
+  1 ! ¹ ½ ⅓ ¼ ⅛
+  2 @ ²
+  3 # ³ ¾ ⅜
+  4 $ ⁴
+  5 % ⁵ ⅝
+  6 ^ ⁶
+  7 & ⁷
+  8 * ⁸
+  9 ( ⁹
+  0 ) ⁰ ⁿ ∅
+  ```
 
-```
-1 ! ¹ ½ ⅓ ⅛
-2 @ ² ⅔
-3 # ³ ¾ ⅜
-…
-```
+  These are derived from `number_row.json`'s `default`
+  shift-state. Whitespace-separated; the first token (`1`,
+  `2`, …) is the primary label, the second token is the hint
+  (`POPUP_KEYS_LAYOUT`), the rest are extra long-press popups.
 
-The first token after `1` (`!`) becomes the hint; the rest stay
-as long-press popup options.
+  **Known trade-off:** `number_row.json` declares
+  `shift_state_selector` so holding shift swaps `1` → `!` on
+  the key itself. The simple-text format can't encode that, so
+  baking into `.txt` files **drops the shift-swap behavior** on
+  the number row. Long-press for `!` is preserved. Listed as
+  Open Question §8.
 
-For JSON layouts, generate equivalent JSON. Either:
+- **JSON (`.json`) files** — prepend this exact array element
+  as the new index-0 row, preserving the existing
+  shift-state-selector fidelity:
 
-```json
-{ "label": "1", "popup": { "main": { "label": "!" }, "relevant": [...] } }
-```
+  ```json
+  [
+    { "$": "shift_state_selector",
+      "manualOrLocked": { "label": "!" },
+      "default": { "label": "1", "popup": { "main": { "label": "!" }, "relevant": [{ "label": "¹" }, { "label": "½" }, { "label": "⅓" }, { "label": "¼" }, { "label": "⅛" }] } } },
+    { "$": "shift_state_selector",
+      "manualOrLocked": { "label": "@" },
+      "default": { "label": "2", "popup": { "main": { "label": "@" }, "relevant": [{ "label": "²" }, { "label": "⅔" }] } } },
+    { "$": "shift_state_selector",
+      "manualOrLocked": { "label": "#" },
+      "default": { "label": "3", "popup": { "main": { "label": "#" }, "relevant": [{ "label": "³" }, { "label": "¾" }, { "label": "⅜" }] } } },
+    { "$": "shift_state_selector",
+      "manualOrLocked": { "label": "$" },
+      "default": { "label": "4", "popup": { "main": { "label": "$" }, "relevant": [{ "label": "⁴" }] } } },
+    { "$": "shift_state_selector",
+      "manualOrLocked": { "label": "%" },
+      "default": { "label": "5", "popup": { "main": { "label": "%" }, "relevant": [{ "label": "⁵" }, { "label": "⅝" }] } } },
+    { "$": "shift_state_selector",
+      "manualOrLocked": { "label": "^" },
+      "default": { "label": "6", "popup": { "main": { "label": "^" }, "relevant": [{ "label": "⁶" }] } } },
+    { "$": "shift_state_selector",
+      "manualOrLocked": { "label": "&" },
+      "default": { "label": "7", "popup": { "main": { "label": "&" }, "relevant": [{ "label": "⁷" }, { "label": "⅞" }] } } },
+    { "$": "shift_state_selector",
+      "manualOrLocked": { "label": "*" },
+      "default": { "label": "8", "popup": { "main": { "label": "*" }, "relevant": [{ "label": "⁸" }] } } },
+    { "$": "shift_state_selector",
+      "manualOrLocked": { "label": "(" },
+      "default": { "label": "9", "popup": { "main": { "label": "(" }, "relevant": [{ "label": "⁹" }] } } },
+    { "$": "shift_state_selector",
+      "manualOrLocked": { "label": ")" },
+      "default": { "label": "0", "popup": { "main": { "label": ")" }, "relevant": [{ "label": "⁰" }, { "label": "ⁿ" }, { "label": "∅" }] } } }
+  ]
+  ```
 
-…or fall back to the simple-text format throughout (cheaper and
-the parser handles both). A small generator script under `tools/`
-makes the 64+3 edits mechanical and reviewable. The script reads
-`number_row.json` and the per-locale `locale_key_texts/<lang>.txt`,
-then prepends the row to each existing file (with the appropriate
-blank-line separator for simple-text format, or as a new top-level
-array element for JSON).
+  The element is inserted as the new first array entry; the
+  rest of the file is unchanged. Run the result through
+  `python3 -m json.tool` to verify syntax.
 
-**Symbols / More-symbols.** Today `symbols.txt` and
-`symbols_shifted.txt` have 3 rows. The runtime prepend adds the
-same number row. After this PR, both files have 4 rows starting
-with `1 2 3 4 5 6 7 8 9 0`. `symbols_arabic.txt` similarly gets
-its baked number row using Eastern Arabic-Indic digits.
+**Test (new, JVM):** `app/src/test/java/helium314/keyboard/LayoutAssetsTest.kt`.
+Assertions:
+
+1. Every file under `assets/layouts/main/*.{txt,json}` parses
+   via `LayoutParser` and has **3, 4, 5, or 6 rows**
+   (`kannada_extended.txt` will be 6 after baking).
+2. Every file under `assets/layouts/{symbols,more_symbols}/*.txt`
+   parses and has 4 rows.
+3. The 3 skipped files (`pcqwerty.json`, `lao.json`,
+   `thai.json`) have unchanged row counts (4).
+4. The first row of every non-skipped file contains 10 keys.
+
+Pattern off `app/src/test/java/helium314/keyboard/KeyboardParserTest.kt`
+for setup.
 
 **Acceptance:**
 
-- Diff: ~70 asset files touched.
-- Build and run: every alphabet keyboard still shows the number
-  row at the top, with the same digits and hints as before.
-- JVM test passes: every `main/*.{txt,json}` and
-  `{symbols,more_symbols}/*.{txt,json}` has 3, 4, or 5 rows.
-- The 12 already-4-or-5-row layouts from 2.1 are unchanged.
+- `./gradlew :app:testDebugUnitTest` is green.
+- Manual smoke test (`./gradlew installDebug`, see Appendix D):
+  English QWERTY still shows the number row at the top with the
+  same digits and popups as before. Persian (`farsi.txt`) shows
+  the Western number row baked in — **not yet Persian digits**;
+  this regression is fixed in PR 2.
 
-This PR is the *only* one where the asset-level change is large
-but the code change is zero (except for the new test). Land it
-first.
+**Files touched in this PR:** see Appendix B.
 
-### 4.2 PR 2 — Parser cleanup: layout file is the source of truth
+### 4.2 PR 2 — Parser cleanup; layout file is the source of truth
 
-**Scope:**
+**Branch:** `cursor/custom-layouts-pr2-parser-cleanup`
 
-This PR makes `KeyboardParser` stop prepending the number row,
-flip the 3-row digit-hint trigger to the layout's actual row
-count, fix the `+` extras-index for 4-row files, and deletes the
-dead toggle plumbing.
+**Goal:** make the parser stop prepending the number row, port
+locale-digit swap to bake top rows, fix the `+` extras
+off-by-one, and delete the dead toggle plumbing. After this PR,
+the layout file's row count is the *only* source of truth for
+whether a number row is present.
 
-**Files touched (verified paths and line numbers):**
+**Execution order matters** — see Appendix C for the safe
+deletion sweep. Doing this in the wrong order produces large
+red builds.
 
-- `app/src/main/java/helium314/keyboard/keyboard/internal/keyboard_parser/KeyboardParser.kt`
-  (lines 37–43, 67, 104–113, 274–278, etc.)
-- `app/src/main/java/helium314/keyboard/keyboard/internal/keyboard_parser/LayoutParser.kt`
-  (lines 91–97)
-- `app/src/main/java/helium314/keyboard/latin/utils/LayoutUtils.kt`
-  (lines 40–58 — `getContentWithPlus`)
-- `app/src/main/java/helium314/keyboard/keyboard/KeyboardLayoutSet.java`
-  (lines 258–264)
-- `app/src/main/java/helium314/keyboard/keyboard/KeyboardSwitcher.java`
-  (lines 157–158, 174–175, 824–837)
-- `app/src/main/java/helium314/keyboard/keyboard/KeyboardId.java`
-  (lines 78–79, 98–99)
-- `app/src/main/java/helium314/keyboard/keyboard/internal/KeyboardBuilder.kt`
-  (line 116)
-- `app/src/main/java/helium314/keyboard/keyboard/emoji/EmojiLayoutParams.kt`
-  (line 39)
-- `app/src/main/java/helium314/keyboard/keyboard/clipboard/ClipboardLayoutParams.kt`
-  (line 43)
-- `app/src/main/java/helium314/keyboard/latin/settings/SettingsValues.java`
-  (lines 191–192)
-- `app/src/main/java/helium314/keyboard/latin/settings/Settings.java`
-  (line 138 — `PREF_SHOW_NUMBER_ROW` constant)
-- `app/src/main/java/helium314/keyboard/latin/settings/Defaults.kt`
-  (line 129)
-- `app/src/main/java/helium314/keyboard/latin/utils/ResourceUtils.java`
-  (line 84)
-- `app/src/main/java/helium314/keyboard/keyboard/internal/keyboard_parser/AGENTS.md`
-- `app/src/main/java/helium314/keyboard/latin/settings/AGENTS.md`
-- `app/src/main/res/values/strings.xml` (localised-number-row toggle copy)
-- `app/src/main/java/helium314/keyboard/settings/screens/SubtypeScreen.kt`
-  (lines 212–235 — Switch description)
+**Concrete edits, in safe order:**
 
-**Concrete edits:**
+1. **`KeyboardParser.kt`** — replace `mNumberRowEnabled` guards
+   and extend the digit-localization pass:
 
-1. **`KeyboardParser.kt`** — replace the `mNumberRowEnabled`
-   guards.
-   - Remove the `baseKeys.add(0, numberRow.mapTo(...))`
-     injection at lines 109–112. The number row now lives in
-     the parsed file.
-   - In `addNumberRowOrPopupKeys` (lines 274–278), flip the
-     guard from `!params.mId.mNumberRowEnabled` to
-     `baseKeys.size == 3`. Concretely:
+   - **Lines 109–112:** remove the
+     `baseKeys.add(0, numberRow.mapTo(...))` injection.
+   - **Lines 274–278:** change `addNumberRowOrPopupKeys` to fire
+     on `baseKeys.size == 3` instead of `!mNumberRowEnabled`,
+     and add the null-check from §5.1 so user-authored popups
+     win over auto-digit hints:
      ```kotlin
      private fun addNumberRowOrPopupKeys(baseKeys, numberRow) {
          if (params.mId.isAlphabetKeyboard
                  && baseKeys.size == 3
                  && !hasBuiltInNumbers()) {
              baseKeys.first().forEachIndexed { i, keyData ->
-                 keyData.popup.numberLabel = numberRow.getOrNull(i)?.label
+                 if (keyData.popup.getPopupKeyLabels(params).isNullOrEmpty())
+                     keyData.popup.numberLabel = numberRow.getOrNull(i)?.label
              }
          }
      }
      ```
-     The function continues to use `getNumberRow()` (which
-     respects `PREF_LOCALIZED_NUMBER_ROW`) so 3-row layouts get
-     locale-appropriate digit hints automatically.
-   - In `defaultLabelFlags` (lines 37–43), change the
-     symbol-layer hint-flag carve-out so user-edited symbol
-     layouts show authored popups as hints:
+   - **New: extend `convertToLocalizedNumbers` to apply to the
+     baked top row.** After PR 1 the digits are in the parsed
+     layout, not in the `getNumberRow()` asset. Add a call site
+     just after `LayoutParser` produces `baseKeys`:
+     ```kotlin
+     if (params.mId.isAlphabetKeyboard
+             && baseKeys.size >= 4
+             && Settings.getValues().mLocalizedNumberRow
+             && params.mLocaleKeyboardInfos.localizedNumberKeys != null) {
+         convertToLocalizedNumbers(baseKeys.first())
+     }
+     ```
+     This restores the Persian-digits-on-farsi-keyboard
+     behavior that PR 1 temporarily breaks.
+   - **Lines 37–43:** widen the symbol-layer carve-out so
+     user-edited symbol layouts show authored popups as hints:
      ```kotlin
      private val defaultLabelFlags = when {
          params.mId.isAlphabetKeyboard -> params.mLocaleKeyboardInfos.labelFlags
@@ -629,35 +651,12 @@ dead toggle plumbing.
          else -> 0
      }
      ```
-     `layoutNameFor(params.mId)` reads the active subtype's
-     layout name for the current `elementId` (MAIN, SYMBOLS,
-     MORE_SYMBOLS). Built-in symbols layouts still hide the
-     hints by default — their popups (`≠ ≈ ≡`) aren't meant as
-     hints. User-edited symbol layouts show them because the
-     user explicitly authored them.
 
-2. **`LayoutParser.kt`** — fix the `+` extras index for 4-row
-   layouts. The current code at lines 91–97:
-   ```kotlin
-   return { params ->
-       simpleKeyData.mapIndexedTo(mutableListOf()) { i, row ->
-           val newRow = row.toMutableList()
-           if (params.mId.isAlphabetKeyboard && layoutName.endsWith("+"))
-               params.mLocaleKeyboardInfos.getExtraKeys(i+1)?.let { newRow.addAll(it) }
-           newRow
-       }
-   }
-   ```
-   asks `LocaleKeyboardInfos.getExtraKeys(i+1)` for each row.
-   Today a 3-row file gives `i = 0,1,2` → extras for alphabet
-   rows 1, 2, 3. After PR 1 a 4-row file gives `i = 0,1,2,3` →
-   asks for extras at row 1 for the number row (wrong) and at
-   rows 2–4 for the alphabet (also wrong).
-
-   Fix:
+2. **`LayoutParser.kt:91–97`** — fix the `+` extras index for
+   4-row files:
    ```kotlin
    val firstAlphabetRowIndex = if (simpleKeyData.size == 4) 1 else 0
-   simpleKeyData.mapIndexedTo(...) { i, row ->
+   simpleKeyData.mapIndexedTo(mutableListOf()) { i, row ->
        val newRow = row.toMutableList()
        if (params.mId.isAlphabetKeyboard
                && layoutName.endsWith("+")
@@ -669,108 +668,65 @@ dead toggle plumbing.
    }
    ```
    Apply the same fix to `LayoutUtils.getContentWithPlus`
-   (`LayoutUtils.kt:48–49`) so the "edit a copy" pre-fill is
-   correct too. Both row counts work correctly: 3-row → extras
-   at 1,2,3; 4-row → extras at 1,2,3 (for the alphabet rows,
-   skipping the number row).
+   (`LayoutUtils.kt:48–49`).
 
-3. **Delete dead toggle plumbing.** None of the following are
-   actually read by any rendering path on `main`. Compiler will
-   guide every deletion.
-   - `Settings.java:138`: remove `PREF_SHOW_NUMBER_ROW` constant.
-   - `Settings.java`: remove `PREF_SHOW_NUMBER_ROW_IN_SYMBOLS`
-     constant.
-   - `Defaults.kt:129`: remove `PREF_SHOW_NUMBER_ROW` default.
-   - `Defaults.kt`: remove `PREF_SHOW_NUMBER_ROW_IN_SYMBOLS`
-     default.
-   - `SettingsValues.java:191–192`: remove `mShowsNumberRow`
-     and `mShowsNumberRowInSymbols`. Replace remaining call
-     sites (`KeyboardParser.kt:67`, `EmojiLayoutParams.kt:39`,
-     `ClipboardLayoutParams.kt:43`, `ResourceUtils.java:84`,
-     `KeyboardBuilder.kt:116`) with a constant `true` literal,
-     or drop the conditional entirely — every alphabet/symbol
-     keyboard now always has at least one row of number/symbol
-     keys at the top.
-   - `KeyboardLayoutSet.Builder` (lines 258–264): remove
-     `setNumberRowEnabled`, `setNumberRowInSymbolsEnabled`,
-     and the corresponding `mNumberRowEnabled`,
-     `mNumberRowInSymbols` fields.
-   - `KeyboardSwitcher.java:157–158, 174–175`: remove the
-     four `.setNumberRow…` calls.
-   - `KeyboardId.java:78–79, 98–99`: remove `mNumberRowEnabled`
-     and `mNumberRowInSymbols` fields, remove them from
-     constructor, `equals`, `hashCode`, `toString`. (`KeyboardId`
-     instances will collide more readily — a small perf win.)
-   - `KeyboardBuilder.kt:116`: drop the conditional top-padding
-     branch on `mShowsNumberRow`; reserve top padding
-     unconditionally.
-   - `EmojiLayoutParams.kt:39` /
-     `ClipboardLayoutParams.kt:43`: row-count math that
-     branches on `mShowsNumberRow` becomes unconditional. The
-     existing `heightRescale = if (keysInRows.size != 4) 4f /
-     keysInRows.size else 1f` (`KeyboardParser.kt:77–78`)
-     already handles 3- and 5-row variants gracefully.
-   - `ResourceUtils.java:84`: same — drop any branches on
-     `mShowsNumberRow`.
+3. **Delete dead toggle plumbing** — follow Appendix C's
+   ordering. Removed: `PREF_SHOW_NUMBER_ROW`,
+   `PREF_SHOW_NUMBER_ROW_IN_SYMBOLS`,
+   `SettingsValues.mShowsNumberRow`,
+   `SettingsValues.mShowsNumberRowInSymbols`,
+   `KeyboardLayoutSet.Builder.setNumberRowEnabled`,
+   `KeyboardLayoutSet.Builder.setNumberRowInSymbolsEnabled`,
+   `KeyboardId.mNumberRowEnabled`,
+   `KeyboardId.mNumberRowInSymbols`, and all their call sites.
 
-4. **Narrow `PREF_LOCALIZED_NUMBER_ROW`'s description.** The
-   pref stays — it's still consulted inside `getNumberRow()` for
-   the 3-row digit-hint fallback. But its scope narrows: 4-row
-   layouts now bake their digits in directly, so the toggle has
-   no effect on those. Update:
-   - The summary string for the Switch UI in
-     `SubtypeScreen.kt:212–235` to *"Show localised digits as
-     number hints when the keyboard has no number row"*.
-   - Any matching string in `res/values/strings.xml`.
+4. **Narrow `PREF_LOCALIZED_NUMBER_ROW` scope** — it stays alive
+   for the new "convert baked top row" pass plus the 3-row
+   `popup.numberLabel` fallback. Update the Switch description
+   in `SubtypeScreen.kt:212–235` to:
+   *"Show localised digits in the number row when this language
+   has its own digits"*. Mirror change in
+   `res/values/strings.xml`.
 
-5. **AGENTS.md updates.** In
-   `keyboard/internal/keyboard_parser/AGENTS.md` and
-   `latin/settings/AGENTS.md`, add a note that the layout file's
-   row count is the single source of truth for whether a number
-   row is present, and that `PREF_LOCALIZED_NUMBER_ROW` only
-   affects the 3-row digit-hint fallback now.
+5. **AGENTS.md updates:**
+   - `keyboard/internal/keyboard_parser/AGENTS.md` — note that
+     the layout file is the single source of truth for row
+     count; the digit-localization pass now runs on the baked
+     top row.
+   - `latin/settings/AGENTS.md` — note that
+     `PREF_SHOW_NUMBER_ROW*` are removed.
 
-**Acceptance:**
+**Tests:**
 
-- App builds with the compiler having been guided through every
-  removed field.
-- Every built-in alphabet keyboard renders the same number row
-  as before PR 1.
-- Saving a 3-row custom layout via the existing edit flow on
-  `SubtypeScreen` renders 3 rows with digit hints on the top.
-- Saving a 4-row custom layout (which is what "Edit a copy" of
-  a built-in will produce in PR 3) renders 4 rows where the
-  top row keys carry their digit labels directly.
-- A built-in `qwerty+` subtype still appends the locale's extra
-  keys to alphabet rows 1, 2, 3 (not to the number row).
+- Extend `KeyboardParserTest.kt` with the cases listed in §6.
+- Re-run `./gradlew :app:testDebugUnitTest`.
+
+**Acceptance:** see §6 plus Appendix D's full manual recipe.
 
 ### 4.3 PR 3 — UI parity for non-MAIN slots and a discoverable "Edit a copy"
 
-**This is the PR that directly delivers the user goal.** PR 1
-and PR 2 make the layout files honest; PR 3 puts the editing
-affordances in front of the user.
+**Branch:** `cursor/custom-layouts-pr3-ui-parity`
 
-**Scope:**
-
-Extract the existing `MainLayoutRow` from `SubtypeScreen.kt`
-(lines 401–504) into a reusable `LayoutSlotEditor` composable
-and wire it for every `LayoutType` slot, then add a
-"pencil-with-plus" icon next to built-in entries for the
-copy-and-edit flow.
+**Goal:** this is the PR that **directly delivers the user
+goal**. After this PR, every layout slot has Add / Edit /
+Delete / Load / Fork affordances, and forking is a one-tap
+discoverable button rather than the hidden "edit a built-in"
+path.
 
 **Files touched:**
 
 - `app/src/main/java/helium314/keyboard/settings/screens/SubtypeScreen.kt`
 - `app/src/main/java/helium314/keyboard/settings/dialogs/LayoutEditDialog.kt`
-  (small caption addition)
+  (caption only)
 - `app/src/main/java/helium314/keyboard/settings/screens/LanguageScreen.kt`
-  (one hint string for empty-search state)
+  (empty-search hint only)
 - `app/src/main/res/values/strings.xml`
+- `app/src/main/java/helium314/keyboard/settings/screens/AGENTS.md`
 
 **Concrete edits:**
 
 1. **Extract `LayoutSlotEditor`** from `SubtypeScreen.kt`'s
-   `MainLayoutRow` composable. Signature:
+   `MainLayoutRow` (lines 401–504). Signature:
    ```kotlin
    @Composable
    fun LayoutSlotEditor(
@@ -781,99 +737,84 @@ copy-and-edit flow.
        customLayouts: Collection<String>,
    )
    ```
-   The composable is the existing `MainLayoutRow` body minus
-   the MAIN-specific bits. Per-slot differences live in two
-   lookups:
-   - `MAIN`: filter custom files by locale/script
-     (`LayoutUtilsCustom.getLayoutFiles(MAIN, ctx, locale)`)
-     and built-in files by locale
-     (`LayoutUtils.getAvailableLayouts(MAIN, ctx, locale)`).
-   - Every other slot: no locale filter
-     (`LayoutUtilsCustom.getLayoutFiles(type, ctx)` and
-     `LayoutUtils.getAvailableLayouts(type, ctx)` — matches
-     what the existing secondary-slot dropdown already does at
+   Per-slot differences:
+   - MAIN: `LayoutUtilsCustom.getLayoutFiles(MAIN, ctx, locale)`
+     + `LayoutUtils.getAvailableLayouts(MAIN, ctx, locale)`.
+   - Others: `LayoutUtilsCustom.getLayoutFiles(type, ctx)` +
+     `LayoutUtils.getAvailableLayouts(type, ctx)` (matches what
+     the existing secondary-slot dropdown does at
      `SubtypeScreen.kt:246–247`).
 
-2. **Wire it for every slot in `SubtypeScreen`.** Replace the
-   current MAIN-row composable call (line 157) with the new
-   `LayoutSlotEditor` call. Replace the inline per-slot
-   `DropDownField` blocks at lines 241–289 with
-   `LayoutSlotEditor` calls. The result: every slot gets
-   Add / Edit / Delete / Load-from-file affordances, with no
-   duplicated logic.
+2. **Wire `LayoutSlotEditor` for every slot.** Replace the
+   current MAIN-row call (line 157) and the secondary-slot
+   blocks (lines 241–289) with a single `forEach` over
+   `LayoutType.entries`. Result: every slot has identical
+   affordances.
 
-3. **Add "Edit a copy" to the dropdown row.** When the currently
-   highlighted entry is a built-in (i.e.
-   `!LayoutUtilsCustom.isCustomLayout(name)`), render a
-   *pencil-with-plus* icon button that:
-   - Reads the built-in file's content via
-     `LayoutUtils.getContentWithPlus(name, locale, ctx)` (for
-     MAIN, currently `LayoutUtils.kt:40–58`) or
-     `LayoutUtils.getContent(slotType, name, ctx)` (for
-     non-MAIN, `LayoutUtils.kt:32–38`).
+3. **Add the fork icon to the dropdown row.** Within
+   `LayoutSlotEditor`, when the row's layout is built-in
+   (`!LayoutUtilsCustom.isCustomLayout(name)`), render a
+   pencil-with-plus `IconButton` whose `onClick`:
+   - For MAIN: reads
+     `LayoutUtils.getContentWithPlus(name, currentSubtype.locale, ctx)`.
+   - For other slots: reads
+     `LayoutUtils.getContent(slotType, name, ctx)`.
    - Opens `LayoutEditDialog` with
-     `initialLayoutName = "<name> (copy)"`,
+     `initialLayoutName = "<name>-copy"`,
      `startContent = <that content>`,
      `isNameValid = { it !in customLayouts }`.
-   - On save, the existing `LayoutEditDialog` save flow writes
-     the new file via
-     `LayoutUtilsCustom.getLayoutFile(...).writeText(...)`
-     (`LayoutEditDialog.kt:81`) and the `onEdited` callback
-     calls `setCurrentSubtype(currentSubtype.withLayout(slotType, newName))`.
+   - In `onEdited`, calls
+     `setCurrentSubtype(currentSubtype.withLayout(slotType, newName))`.
 
-   The "edit a copy" affordance is what the user thinks of as
-   "start a new keyboard layout from English/Russian/etc." —
-   tapping the icon on a `qwerty` row inside a German subtype
-   yields a new German-specific (or Latin-scope) custom layout
-   pre-loaded with the qwerty content, ready to edit.
+   This is the single tap that the user thinks of as "start a
+   new keyboard layout from English/Russian/etc."
 
-4. **`LayoutEditDialog` caption for `+` forks.** When the
-   built-in layout name ends with `+`, add a one-line
-   `supportingText` to the dialog:
-   *"Locale-specific extra keys are frozen into this copy. They
-   won't change if you later use this layout in a different
-   language."* This addresses the implicit foot-gun where
-   `LayoutUtils.getContentWithPlus` materialises the locale
-   extras into the file body.
+4. **Caption in `LayoutEditDialog` for `+` forks.** When the
+   `initialLayoutName` ends with `+`, render a one-line
+   `supportingText`:
+   *"Locale-specific extra keys are baked into this copy. They
+   won't update if you later use this layout in a different
+   language."*
+   This warns about the foot-gun in
+   `LayoutUtils.getContentWithPlus` (which materializes locale
+   extras into the file body — §5.4).
 
-5. **`LanguageScreen` empty-search hint.** When the search box
-   (`LanguageScreen.kt:63–82` via `SearchScreen`) yields no
-   results, render a single muted line beneath the search
-   field:
-   *"To customise a layout, tap a language above, then use the
-   **+** on any layout dropdown."* No new wizard. Discovery
-   lives on the subtype detail page where the locale is already
-   chosen.
+5. **Empty-search hint on `LanguageScreen`.** When the search
+   yields no results, render a muted line:
+   *"To customise a layout, tap a language above and use the
+   **+** or the fork icon on any layout."*
 
-6. **Strings.** All new user-visible text lives in
-   `res/values/strings.xml`. Translators will need an update;
-   that's standard.
+6. **Strings.** All new user-visible text in
+   `res/values/strings.xml`. Translators will need an update.
 
 **Acceptance:**
 
-- Every layout slot on the subtype detail screen has the same
-  set of controls: dropdown, `+` add, pencil edit, bin delete,
-  load-from-file, and (for built-ins) a fork-and-edit icon.
-- Tapping the "Edit a copy" icon on any built-in opens
-  `LayoutEditDialog` pre-filled with the built-in's content (4
-  rows for the post-PR-1 layouts).
-- Saving the copy creates a new custom layout, selects it in
-  the dropdown, and the keyboard renders the new layout
-  immediately.
-- For a `qwerty+` subtype, the copy dialog shows the caption
-  about frozen extras.
-- Searching for a non-existent language on `LanguageScreen`
-  shows the discoverability hint.
-- A power user can fork English qwerty, delete the first row,
-  reorder a few hint popups, and save — and the result renders
-  exactly as authored, with no surprise number row.
+- Every layout slot on the subtype detail screen exposes the
+  same five controls: select, add, edit, delete, fork.
+- Tapping fork on `qwerty` inside a German subtype creates a
+  new `custom.Latn.<base36>.qwerty-copy.` file (4 rows after
+  PR 1) and selects it.
+- Tapping fork on `russian.txt` inside a Russian subtype creates
+  `custom.ru-RU.<base36>.russian-copy.` and selects it.
+- `qwerty+` forks show the caption.
+- Empty-search shows the hint.
+- A user can fork English qwerty, delete the first row in the
+  editor, change a couple of hint popups, and save — the result
+  renders exactly as authored.
 
 ### 4.4 PR 4 — Rebuild the canonical APK
 
-Run `./tools/build-dist-apk.sh` and commit the resulting
-`dist/HeliBoard.apk`. Per the existing repo convention (root
-`AGENTS.md`: *"Build the canonical installable artifact with
-./tools/build-dist-apk.sh, which writes dist/HeliBoard.apk."*).
+**Branch:** `cursor/custom-layouts-pr4-rebuild-apk`
+
+**Goal:** publish a working artifact for download/install.
+
+**Steps:**
+
+1. Branch from `main` after PRs 1, 2, 3 have all merged.
+2. Run `./tools/build-dist-apk.sh`. This writes
+   `dist/HeliBoard.apk`.
+3. Verify the APK installs cleanly (Appendix D).
+4. `git add dist/HeliBoard.apk && git commit -m "Rebuild canonical APK for user-editable layouts"`.
 
 ---
 
@@ -884,270 +825,192 @@ Run `./tools/build-dist-apk.sh` and commit the resulting
 The parser supports both 3-row and 4-row MAIN files after PR 2.
 A user who wants a 3-row keyboard:
 
-- Picks an existing 3-row variant from the *Main layout*
-  dropdown (none ship today; we can add `qwerty_compact` etc.
-  in a follow-up if there's demand), **or**
-- Forks a 4-row built-in with "Edit a copy", deletes the first
-  row in the editor, saves. The parser renders 3 rows with
-  digit hints automatically.
+- Picks an existing 3-row variant from the dropdown (none ship
+  today), **or**
+- Forks a 4-row built-in via PR 3, deletes the first row,
+  saves. The parser renders 3 rows with digit hints
+  automatically.
 
-The 3-row case has a useful property: explicit user popups on
-top-row keys win over the auto-digit hint, **subject to the
-`POPUP_KEYS_LABEL_DEFAULT` source order**. The default order
-(`PopupKeysUtils.kt:16–18`) is:
+**Source-order subtlety.** `POPUP_KEYS_LABEL_DEFAULT`
+(`PopupKeysUtils.kt:16–18`) is
+`number=true, language_priority=false, layout=true, symbols=true, language=false`.
+`POPUP_KEYS_NUMBER` therefore wins over `POPUP_KEYS_LAYOUT` by
+default. Without intervention, a user who authored `q !` on
+their 3-row top row would still see `1` (not `!`) as the hint
+because the parser sets `popup.numberLabel = "1"` and that wins.
 
-```
-number=true, language_priority=false, layout=true, symbols=true, language=false
-```
-
-In words: when both a `popup.numberLabel` *and* an in-file popup
-exist, the number hint wins by default. This is the inverse of
-what was stated in earlier drafts. **For the 3-row case, the
-plan should explicitly disable `POPUP_KEYS_NUMBER` on the top
-alphabet row when the file declares an in-file popup for that
-key**, so that authored hints don't get silently overridden.
-Easiest implementation: only set `keyData.popup.numberLabel`
-when the existing `popup.getPopupKeyLabels(params).firstOrNull()`
-is null. One extra null-check in `addNumberRowOrPopupKeys`. The
-user can still rely on the per-subtype *Hint source* setting
-(`SubtypeScreen.kt:171–192`) for fine-grained control.
+**Fix:** in PR 2's revised `addNumberRowOrPopupKeys`, only set
+`popup.numberLabel` when the key has no in-file popup label
+(see PR 2 step 1 above). This makes authored hints win for
+top-row keys while preserving the digit-hint default for
+unauthored ones.
 
 ### 5.2 Localised digits
 
-For 4-row layouts, the digits are baked into the file directly
-per locale (PR 1). For 3-row layouts, digit hints come from
-`getNumberRow()`, which honours `PREF_LOCALIZED_NUMBER_ROW` and
-the per-subtype `LOCALIZED_NUMBER_ROW` extra value
-(`SubtypeScreen.kt:212–235`).
+For 4-row layouts the digits are in the file (PR 1 bakes
+Western universally). PR 2 ports `convertToLocalizedNumbers` to
+apply to baked top rows, so the user's per-subtype
+`LOCALIZED_NUMBER_ROW` extra still produces Persian, Bengali,
+Devanagari, … digits on screen. For 3-row layouts the digit
+hint comes from `getNumberRow()` as today.
 
-This means localised-digit logic ends up in two places after PR
-2 — the per-locale layout file and the runtime swap for hints —
-which is slightly more surface area than I'd like. The simpler
-alternative is to drop `PREF_LOCALIZED_NUMBER_ROW` entirely and
-let 3-row users fork a custom layout if they want digit hints
-in non-Western scripts. The recommendation is **keep the pref**,
-because the bilingual-user case (e.g. Farsi keyboard with
-`1234…` hints, or English keyboard with `٠١٢٣…` hints) is real
-and the runtime swap is one line in `getNumberRow()`.
+### 5.3 The `+` extras mechanism
 
-### 5.3 The `+` (extra keys) mechanism
-
-Layouts named with a trailing `+` in `method.xml` (e.g.
-`qwerty+` for Catalan) get locale-specific extra keys appended
-at runtime via `LocaleKeyboardInfos.getExtraKeys`
-(`LocaleKeyboardInfos.kt:109–111`; populated from `[extra_keys]`
-in `locale_key_texts/<lang>.txt` at lines 137–144). After PR 1
-the layout file has 4 rows (number + alphabet × 3), but the
-extras only apply to alphabet rows. The `+` extras-index fix in
-PR 2 (see 4.2 item 2) shifts the index by 1 when the parsed
-layout has 4 rows so extras still land on the right rows.
-
-A consequence: the `+` mechanism continues to share one
-`qwerty.txt` across many locales, with locale-specific extras
-appended dynamically. This stays exactly the same — we just fix
-the off-by-one introduced by the number-row baked into row 0.
+After PR 1's bake + PR 2's index fix, `qwerty+` for Catalan
+appends `ç` to alphabet row 3 (not the number row). One
+`qwerty.txt` continues to serve many locales — locale-specific
+extras attached dynamically. No semantic change, just the
+off-by-one fix.
 
 ### 5.4 Forking from a `+` layout
 
-When the user taps "Edit a copy" on a `qwerty+` subtype, the new
-custom file gets *materialised* extras for the **current locale**
-(via `LayoutUtils.getContentWithPlus`,
-`LayoutUtils.kt:40–58`). The fork is no longer locale-
-parameterised. If the user later switches to a different locale
-and picks the same custom layout, the extras are wrong (they're
-for the original locale). The `LayoutEditDialog` caption added
-in 4.3 item 4 warns the user about this. Documented behaviour,
-not a bug.
+When the user taps the fork icon on a `qwerty+` subtype, the
+new custom file gets the **current locale's extras materialized
+into the file body** via `LayoutUtils.getContentWithPlus`
+(`LayoutUtils.kt:40–58`). Switching to a different locale
+afterwards keeps the original extras. The PR 3 caption warns
+the user. Documented behavior, not a bug.
 
 ### 5.5 Subtype name override
 
-`SubtypeUtilsAdditional.createAdditionalSubtype:46–47` already
-does:
+`SubtypeUtilsAdditional.createAdditionalSubtype:46–47`
+already calls `setSubtypeNameOverride(LayoutUtilsCustom.getDisplayName(mainLayoutName))`
+on Android 14+ when MAIN is a custom layout. So a row using a
+custom *PS-mod* layout under `en` shows up as *English
+(PS-mod)*. No new code needed.
 
-```java
-if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && LayoutUtilsCustom.isCustomLayout(mainLayoutName))
-    builder.setSubtypeNameOverride(LayoutUtilsCustom.getDisplayName(mainLayoutName))
-```
+### 5.6 Dictionary availability
 
-So on Android 14+ a *Languages & Layouts* row using a custom
-*PS-mod* layout under `en` shows up as *English (PS-mod)*
-automatically. No new code needed.
-
-### 5.6 Dictionary availability for new subtypes
-
-The existing `dictsAvailable(locale, ctx)` check in
-`LanguageScreen.kt:126–129` shows `MissingDictionaryDialog`
-(lines 115–116, 121–122) when a user enables a subtype for a
-locale that has no bundled dictionary. This continues to work;
-nothing in this plan changes the dictionary system.
+`dictsAvailable(locale, ctx)` (`LanguageScreen.kt:126–129`)
+plus `MissingDictionaryDialog` (lines 115–116, 121–122) continue
+to work. This plan does not change the dictionary system.
 
 ### 5.7 Cache invalidation
 
-Existing `LayoutUtilsCustom.onLayoutFileChanged()`
+`LayoutUtilsCustom.onLayoutFileChanged()`
 (`LayoutUtilsCustom.kt:115–117`) +
 `KeyboardSwitcher.setThemeNeedsReload()`
 (`KeyboardSwitcher.java:824–837`) are already called by
-`LayoutEditDialog`'s save flow (`LayoutEditDialog.kt:82, 85`)
-and by `LayoutUtilsCustom.deleteLayout`
-(`LayoutUtilsCustom.kt:119–123`). Every code path that creates,
-renames, or deletes a custom layout already triggers
-invalidation. No new hooks needed.
+`LayoutEditDialog`'s save flow and by `deleteLayout`
+(`LayoutUtilsCustom.kt:119–123`). PR 3's new fork path goes
+through the same `LayoutEditDialog`, so no new hooks needed.
 
 ### 5.8 Validation
 
 `LayoutUtilsCustom.checkLayout` (`LayoutUtilsCustom.kt:64–76`)
-already validates row counts (≥1, ≤8) and keys per row (≤20).
-After PR 1, add two soft checks (warning, not rejection — power
-users may have legitimate reasons):
+validates row counts (≥1, ≤8) and keys/row (≤20). PR 1 doesn't
+change these; PR 3 adds two soft warnings inline in the dialog:
 
-- **MAIN / SYMBOLS / MORE_SYMBOLS prefer 3 or 4 rows.** A 5-row
-  file renders with `heightRescale = 4f/5` and looks fine, just
-  smaller (and `kannada_extended.txt` ships at 5 rows today, so
-  the validator must accept it). Show a yellow note: *"This
-  layout has 5 rows. Most keyboards have 3 or 4. Continue
-  anyway?"*.
-- **Top-row popup-as-hint length ≤ 5 visual chars.** Hint
-  labels render single-line and clip beyond ~5 chars (see
-  `.cursor/skills/key-hint-sizing/SKILL.md`). Show a yellow
-  note when a top-row popup exceeds this. Non-Latin scripts
-  may have wider glyphs that look fine at 1-2 chars, so don't
-  reject — warn.
-
-Both warnings appear inline in `LayoutEditDialog`.
+- *"This layout has 5 rows. Most keyboards have 3 or 4.
+  Continue?"* (only for MAIN / SYMBOLS / MORE_SYMBOLS slots;
+  `kannada_extended.txt` ships at 6 rows after PR 1, so the
+  validator must still accept that — only warn.)
+- *"Hint glyph longer than 5 characters may clip."* (Top-row
+  popup-as-hint length warning, per
+  `.cursor/skills/key-hint-sizing/SKILL.md`.)
 
 ---
 
 ## 6. Test coverage
 
-JVM tests under `app/src/test/`. No Robolectric needed for any
-of these.
+JVM tests under `app/src/test/`. No Robolectric needed.
 
-**Asset shape (PR 1):**
+**PR 1 (assets):** see test added in §4.1.
 
-- Every file under `assets/layouts/main/*.{txt,json}` parses
-  successfully and has 3, 4, or 5 rows.
-- Every file under
-  `assets/layouts/{symbols,more_symbols}/*.{txt,json}` parses
-  successfully and has 3 or 4 rows.
-- For each locale tag in `method.xml` that uses a non-Western
-  digit set, the baked number-row digits in the locale's MAIN
-  file match the `[number_row]` section in the locale's
-  `assets/locale_key_texts/<lang>.txt`.
+**PR 2 (parser):** extend
+`app/src/test/java/helium314/keyboard/KeyboardParserTest.kt`:
 
-**Parser (PR 2):**
-
-- A 4-row MAIN custom layout renders 4 rows where the top row's
-  `KeyParams.mLabel` carries digits literally (no
+- A 4-row MAIN custom layout renders 4 rows where the top
+  row's `KeyParams.mLabel` carries digits literally (no
   `popup.numberLabel` injection).
 - A 3-row MAIN custom layout renders 3 rows where the parser
   sets `popup.numberLabel` on each top-row key via the new
-  `baseKeys.size == 3` trigger in `addNumberRowOrPopupKeys`.
+  `baseKeys.size == 3` trigger.
 - A 3-row MAIN custom layout where the top row keys have
-  explicit popups (`q !`, `w @`) preserves the user's popups as
-  hints — verified by the null-check from 5.1 keeping
+  explicit popups (`q !`, `w @`) preserves the user's popups
+  as hints (the new null-check from §5.1 keeps
   `popup.numberLabel` unset for keys that already declare an
-  in-file popup.
-- A built-in `qwerty+` subtype for Catalan still appends `ç` to
-  alphabet row 3, not to the number row.
+  in-file popup).
+- A built-in `qwerty+` subtype for Catalan still appends `ç`
+  to alphabet row 3, not to the number row, on the new 4-row
+  base layout.
 - The deletion of `PREF_SHOW_NUMBER_ROW`,
   `PREF_SHOW_NUMBER_ROW_IN_SYMBOLS`, and their downstream
   fields doesn't change any observable rendering for a stock
   English subtype on a 4-row built-in layout.
-- A built-in symbol layout (e.g. `symbols.txt`) keeps
-  `LABEL_FLAGS_DISABLE_HINT_LABEL` on its keys.
-- A user-edited custom symbol layout has the hint flag cleared
-  via the `isCustomLayout` branch — its first popup shows as a
+- A Persian subtype on `farsi.txt` with
+  `LOCALIZED_NUMBER_ROW` on renders Persian digits in the
+  baked top row (proves the localization-pass extension works).
+- A built-in `symbols.txt` keeps `LABEL_FLAGS_DISABLE_HINT_LABEL`
+  on its keys.
+- A user-edited custom symbol layout has the flag cleared via
+  the `isCustomLayout` branch — its first popup shows as a
   hint above each key.
 
-**UI (PR 3):**
+**PR 3 (UI):** add
+`app/src/test/java/helium314/keyboard/settings/LayoutSlotEditorTest.kt`:
 
-- A `LayoutSlotEditor` instance for a non-MAIN slot has Add /
-  Edit / Delete buttons rendered.
-- Tapping "Edit a copy" on a built-in opens the edit dialog
-  with the expected content.
-- Saving a copy of `qwerty` from an English subtype produces a
-  new `custom.Latn.<base36>.<chosen-name>.` file in
-  `<filesDir>/layouts/main/`.
-- Saving a copy of `qwerty` from a Russian subtype produces a
-  `custom.ru-RU.<base36>.<chosen-name>.` file scoped to that
-  locale.
-- A `qwerty+` fork shows the locale-extras-frozen caption.
+- For a non-MAIN slot, the composable renders Add / Edit /
+  Delete / Fork buttons.
+- Tapping fork on a built-in opens the edit dialog with the
+  expected content.
+- Saving a fork from a German subtype produces a Latin-scope
+  custom file in `<filesDir>/layouts/main/`.
+- Saving a fork from a Russian subtype produces a ru-RU-scope
+  custom file.
+- A `qwerty+` fork shows the locale-extras caption.
+
+**PR 4:** smoke test only (Appendix D's recipe on a real
+device).
 
 ---
 
 ## 7. Out of scope and follow-ups
 
-The following are *not* part of this plan but are reasonable
-follow-ups once the core merge ships:
-
-- **Compact 3-row built-in variants.** After PR 1 most built-ins
-  are 4 rows. Adding e.g. `qwerty_compact` (3 rows, no number
-  row) as a shipped variant would give users a no-fork path to
-  the no-number-row layout. One asset file per script family.
-- **Functional-row editing.** The plan extends per-slot Add /
-  Edit / Delete to non-MAIN slots, including `FUNCTIONAL`. The
-  functional row's interaction with shift, space, etc. is more
-  delicate; ship the parity work first and iterate on
-  functional-row UX once we see what users do.
-- **Export / import all custom layouts.** A single button that
-  zips `<filesDir>/layouts/` for backup. Trivial; not in PR 3.
-- **Toolbar button to cycle alphabets within a locale.** The
-  globe key cycles enabled subtypes; a dedicated "next variant
-  for this language" button would be a small follow-up.
-- **A separate `LABEL_FLAGS_HAS_HINT_LABEL_EXPLICIT` mode** for
-  power users who want hint visibility controlled at the
-  layout-file level rather than the subtype level. Today the
-  per-subtype *Hint source* setting in
-  `SubtypeScreen.kt:171–192` is the only fine-grained control.
+- **Compact 3-row built-in variants** as shipped layouts.
+- **Functional-row editing UX polish** — parity ships in PR 3
+  but the functional row's shift/space behavior deserves
+  iteration once we see how users edit it.
+- **Export / import all custom layouts** as a single zip.
+- **Toolbar button to cycle alphabets within a locale.**
+- **A `LABEL_FLAGS_HAS_HINT_LABEL_EXPLICIT` mode** for power
+  users who want layout-file-level hint visibility control.
 
 ---
 
 ## 8. Open questions
 
-- **Should we keep `PREF_LOCALIZED_NUMBER_ROW`?** Section 5.2
-  recommends keep with a narrowed scope. Alternative: drop and
-  have 3-row users fork a custom layout when they want
-  non-Western digit hints. Drop is simpler; keep is friendlier
-  to bilingual users. Default: keep.
-- **Should we delete `LayoutUtils.getContentWithPlus`'s extras-
-  materialisation when forking a `+` layout?** Section 5.4
-  documents the foot-gun. The alternative is to fork without
-  extras (a clean `qwerty.txt` content) and let the user re-add
-  what they need. Friendlier for "I want qwerty without the
-  Catalan-specific keys" but worse for "I want qwerty exactly
-  as I see it, only with the bottom row tweaked". Default:
-  keep the current behaviour, add the caption from 4.3 item 4.
-- **Should built-in symbols keep `LABEL_FLAGS_DISABLE_HINT_LABEL`?**
-  Section 4.2 item 1c says yes (the built-in symbol popups
-  `≠ ≈ ≡` aren't really hints). But after the merge, a curious
-  user might wonder why their *custom* symbol layout shows
-  hints and the built-in doesn't. Document this in
+- **Should we keep `PREF_LOCALIZED_NUMBER_ROW`?** Recommended:
+  keep. Bilingual users want runtime digit swaps without
+  forking.
+- **Should we drop extras materialization in
+  `LayoutUtils.getContentWithPlus`?** Recommended: keep + the
+  PR-3 caption. Friendlier for "fork qwerty exactly as I see
+  it" users.
+- **Should built-in symbols layouts keep
+  `LABEL_FLAGS_DISABLE_HINT_LABEL`?** Recommended: yes — their
+  popups (`≠ ≈ ≡`) aren't real hints. Document the asymmetry
+  with custom symbol layouts in
   `keyboard/internal/keyboard_parser/AGENTS.md`.
-- **Should the 12 already-4+-row built-in main layouts get
-  their popup hints normalised in PR 1?** Today they each have
-  their own digit row with whatever popups the original author
-  chose, which differ from `number_row.json`'s
-  `! @ # $ % ^ & * ( )` set. Normalising would unify the UX;
-  leaving them alone preserves any locale-specific intent. The
-  conservative default is **leave them alone** and document the
-  divergence in `assets/layouts/AGENTS.md`.
+- **Should the 9 already-4+-row layouts have their popup hints
+  normalized in PR 1?** Recommended: no — leave them alone.
+  They have locale-specific intent.
+- **Simple-text shift-state regression on the baked number
+  row.** PR 1's `.txt` files lose the "shift swaps `1` → `!`
+  on the key itself" behavior because simple-text format can't
+  encode shift-state selectors. Long-press for `!` is
+  preserved. Options:
+  - (A) Accept the regression and document. *Default.*
+  - (B) Convert all 41 affected `.txt` files to `.json` for
+    full fidelity. Much bigger churn.
+  - (C) Teach the parser a simple-text shift-state syntax
+    (e.g. `1=! ¹ …`). Schema invention; defer.
 
 ---
 
 ## 9. File reference
 
-Files this plan touches, grouped by PR:
-
-**PR 1 (assets):**
-
-- `app/src/main/assets/layouts/main/*.{txt,json}` — ~64 files
-  (the 12 already-4-or-5-row layouts from §2.1 are skipped)
-- `app/src/main/assets/layouts/symbols/*.txt` — 2 files
-- `app/src/main/assets/layouts/more_symbols/*.txt` — 1 file
-- `app/src/main/assets/layouts/AGENTS.md`
-- `tools/<new>.{py,sh,kt}` — optional generator script that
-  reads `assets/locale_key_texts/<lang>.txt` [number_row]
-- `app/src/test/.../LayoutAssetsTest.kt` — new test
+**PR 1 (assets):** 74 files — see Appendix B.
 
 **PR 2 (parser cleanup):**
 
@@ -1166,9 +1029,10 @@ Files this plan touches, grouped by PR:
 - `app/src/main/java/helium314/keyboard/latin/utils/ResourceUtils.java`
 - `app/src/main/java/helium314/keyboard/keyboard/internal/keyboard_parser/AGENTS.md`
 - `app/src/main/java/helium314/keyboard/latin/settings/AGENTS.md`
-- `app/src/main/res/values/strings.xml` — description text for
-  the localised-number-row toggle
-- `app/src/test/.../KeyboardParserTest.kt` — new tests
+- `app/src/main/res/values/strings.xml`
+- `app/src/main/java/helium314/keyboard/settings/screens/SubtypeScreen.kt`
+  (Switch description string only)
+- `app/src/test/java/helium314/keyboard/KeyboardParserTest.kt`
 
 **PR 3 (UI):**
 
@@ -1176,34 +1040,357 @@ Files this plan touches, grouped by PR:
 - `app/src/main/java/helium314/keyboard/settings/screens/LanguageScreen.kt`
 - `app/src/main/java/helium314/keyboard/settings/dialogs/LayoutEditDialog.kt`
 - `app/src/main/java/helium314/keyboard/settings/screens/AGENTS.md`
-- `app/src/main/res/values/strings.xml` — new strings for
-  "Edit a copy", caption, empty-search hint
-- `app/src/test/.../LayoutSlotEditorTest.kt` — new tests
+- `app/src/main/res/values/strings.xml`
+- `app/src/test/java/helium314/keyboard/settings/LayoutSlotEditorTest.kt`
 
-**PR 4 (release):**
+**PR 4 (release):** `dist/HeliBoard.apk`.
 
-- `dist/HeliBoard.apk` — rebuilt artifact
-
-**Key existing files the next agent should read first:**
+**Read these first if you've never touched this code:**
 
 1. `app/src/main/java/helium314/keyboard/keyboard/internal/keyboard_parser/KeyboardParser.kt`
-   — parser entry point, the file PR 2 mostly edits.
 2. `app/src/main/java/helium314/keyboard/keyboard/internal/keyboard_parser/LayoutParser.kt`
-   — asset loader, parses simple-text and JSON.
 3. `app/src/main/java/helium314/keyboard/latin/utils/LayoutUtilsCustom.kt`
-   — custom-layout file conventions.
 4. `app/src/main/java/helium314/keyboard/settings/screens/SubtypeScreen.kt`
-   — the subtype detail UI, contains `MainLayoutRow` and the
-   per-slot dropdowns.
 5. `app/src/main/java/helium314/keyboard/settings/dialogs/LayoutEditDialog.kt`
-   — the editor.
 6. `app/src/main/java/helium314/keyboard/latin/utils/SubtypeSettings.kt`
-   — subtype state and `onRenameLayout`.
 7. `app/src/main/java/helium314/keyboard/latin/utils/PopupKeysUtils.kt`
-   — hint-label derivation.
 8. `app/src/main/assets/layouts/AGENTS.md` and
    `app/src/main/java/helium314/keyboard/keyboard/internal/keyboard_parser/AGENTS.md`
-   — pre-existing conventions.
-9. `app/src/main/assets/locale_key_texts/<lang>.txt` and
-   `LocaleKeyboardInfos.kt` — per-locale `[number_row]` and
-   `[extra_keys]` data PR 1's generator script must consume.
+9. `app/src/main/assets/locale_key_texts/<lang>.txt` +
+   `LocaleKeyboardInfos.kt` — `[number_row]` and `[extra_keys]`
+   data PR 2 must keep working with the baked top row.
+
+---
+
+## 10. Progress tracking
+
+> **How to use.** Tick a box (`[ ]` → `[x]`) when the work is
+> done **and committed**. If a box can't be ticked because of
+> a blocker, leave it unchecked and add a `> blocked: <why>`
+> note immediately below it. The "currently in progress" PR is
+> the first one with at least one unchecked box.
+
+### PR 1 — Bake the number row
+
+- [ ] PR 1.1 Create branch `cursor/custom-layouts-pr1-bake-number-row` off `main`.
+- [ ] PR 1.2 Write `tools/bake_number_row.py` per Appendix A; commit standalone.
+- [ ] PR 1.3 Dry-run (`python3 tools/bake_number_row.py --dry-run`) and inspect diff for at least: `qwerty.txt`, `azerty.json`, `farsi.txt`, `bengali_unijoy.json`, `symbols.txt`.
+- [ ] PR 1.4 Run the script for real on every file in Appendix B; commit "Bake number row into built-in alphabet layouts" (one or more commits, split by directory if convenient).
+- [ ] PR 1.5 Add `app/src/test/java/helium314/keyboard/LayoutAssetsTest.kt` with the four assertions from §4.1.
+- [ ] PR 1.6 `./gradlew :app:testDebugUnitTest` — all green.
+- [ ] PR 1.7 Update `app/src/main/assets/layouts/AGENTS.md` to document "row 1 is the number row in most files".
+- [ ] PR 1.8 Manual smoke test per Appendix D's PR-1 section.
+- [ ] PR 1.9 Push and open PR.
+- [ ] PR 1.10 Merge to `main`.
+
+### PR 2 — Parser cleanup
+
+- [ ] PR 2.1 Create branch `cursor/custom-layouts-pr2-parser-cleanup` off `main`.
+- [ ] PR 2.2 Phase A from Appendix C: replace `mNumberRowEnabled` reads with `true` at every consumer. Build green.
+- [ ] PR 2.3 Phase B: remove `KeyboardParser.kt:109–112` number-row injection; flip `addNumberRowOrPopupKeys` guard; add the in-file-popup null-check. Build green.
+- [ ] PR 2.4 Phase C: extend `convertToLocalizedNumbers` to baked top rows. Build green.
+- [ ] PR 2.5 Phase D: fix `+` extras off-by-one in `LayoutParser.kt:91–97` *and* `LayoutUtils.kt:48–49`. Build green.
+- [ ] PR 2.6 Phase E: widen `defaultLabelFlags` carve-out for custom symbol layouts. Build green.
+- [ ] PR 2.7 Phase F: delete `mShowsNumberRow`, `mShowsNumberRowInSymbols`, `Builder` setters, `KeyboardId` fields and references, prefs + defaults. Build green at each sub-step.
+- [ ] PR 2.8 Update `keyboard/internal/keyboard_parser/AGENTS.md` and `latin/settings/AGENTS.md`.
+- [ ] PR 2.9 Update `SubtypeScreen.kt` localised-number-row Switch description + matching `strings.xml`.
+- [ ] PR 2.10 Extend `KeyboardParserTest.kt` with the 8 cases from §6.
+- [ ] PR 2.11 `./gradlew :app:testDebugUnitTest` — all green.
+- [ ] PR 2.12 Manual smoke test per Appendix D's PR-2 section (Persian digits, Catalan extras, custom symbol hints).
+- [ ] PR 2.13 Push and open PR.
+- [ ] PR 2.14 Merge to `main`.
+
+### PR 3 — UI parity for non-MAIN slots and "Edit a copy"
+
+- [ ] PR 3.1 Create branch `cursor/custom-layouts-pr3-ui-parity` off `main`.
+- [ ] PR 3.2 Extract `LayoutSlotEditor` composable from `MainLayoutRow`. Wire MAIN through it (still only MAIN). Build + visual smoke. Commit.
+- [ ] PR 3.3 Wire every other `LayoutType` through `LayoutSlotEditor`. Build + visual smoke. Commit.
+- [ ] PR 3.4 Add the fork (pencil-with-plus) icon and its `LayoutEditDialog` invocation per §4.3 step 3. Commit.
+- [ ] PR 3.5 Add the `+`-fork caption to `LayoutEditDialog`. Commit.
+- [ ] PR 3.6 Add the empty-search hint to `LanguageScreen`. Commit.
+- [ ] PR 3.7 Add new strings to `res/values/strings.xml`.
+- [ ] PR 3.8 Update `app/src/main/java/helium314/keyboard/settings/screens/AGENTS.md`.
+- [ ] PR 3.9 Add `LayoutSlotEditorTest.kt` (§6 cases).
+- [ ] PR 3.10 `./gradlew :app:testDebugUnitTest` — all green.
+- [ ] PR 3.11 Manual end-to-end per Appendix D's PR-3 section.
+- [ ] PR 3.12 Push and open PR.
+- [ ] PR 3.13 Merge to `main`.
+
+### PR 4 — Rebuild canonical APK
+
+- [ ] PR 4.1 Branch `cursor/custom-layouts-pr4-rebuild-apk` off latest `main` (after PRs 1–3 merge).
+- [ ] PR 4.2 Run `./tools/build-dist-apk.sh`; confirm `dist/HeliBoard.apk` exists and is non-zero size.
+- [ ] PR 4.3 Sideload to a real device and run Appendix D's full recipe.
+- [ ] PR 4.4 Commit `dist/HeliBoard.apk`.
+- [ ] PR 4.5 Push and open PR.
+- [ ] PR 4.6 Merge to `main`.
+
+---
+
+## Appendix A — `tools/bake_number_row.py` specification
+
+**Location:** `tools/bake_number_row.py`. Add a brief mention
+in `tools/AGENTS.md` after it lands.
+
+**Invocation:**
+
+```bash
+python3 tools/bake_number_row.py [--dry-run] [--root PATH]
+```
+
+- No arguments → edits files in place under
+  `app/src/main/assets/layouts/`.
+- `--dry-run` → prints a unified diff to stdout per file; does
+  not write.
+- `--root PATH` → use a different repo root (defaults to the
+  script's parent's parent).
+
+**Behavior:**
+
+1. Build the target file list from Appendix B (or compute it:
+   every file in `main/`, `symbols/`, `more_symbols/` minus the
+   3 skip-set entries).
+2. For each target file:
+   - Detect format by extension (`.txt` vs `.json`).
+   - For `.txt`: prepend the 10 lines from §4.1's simple-text
+     spec, plus one blank line, plus the original content.
+   - For `.json`: parse with `json.loads`, insert the
+     §4.1's JSON object as the new `result[0]`, and write with
+     `json.dumps(..., indent=2, ensure_ascii=False)`. Match the
+     existing trailing-newline convention of the original file.
+3. Print a per-file `OK` or `SKIPPED` summary at end.
+
+**Refuses to act on:**
+
+- `pcqwerty.json`, `lao.json`, `thai.json` (numbers already
+  in-file via `hasBuiltInNumbers()`).
+- Any file whose first non-blank row already starts with a
+  primary label that matches `[0-9]|[١-٩]|[०-९]|[০-৯]|[๐-๙]`
+  (rough number-row sniffer; if matched, log a warning and
+  skip — likely already baked).
+
+**Failure modes:**
+
+- Exit 2 if JSON parse fails (file path printed).
+- Exit 3 if the target file already has ≥6 rows (avoid runaway
+  baking on `kannada_extended.txt` — it already has 5, baking
+  would make 6 which is the agreed cap; the script should
+  succeed for exactly that file but reject anything that would
+  result in ≥7).
+
+**Idempotency:** running the script twice is a no-op (the
+number-row sniffer detects the baked row and skips).
+
+---
+
+## Appendix B — Exhaustive PR-1 file list (74 files)
+
+> Verified against `main` at the time this plan was written.
+> Three skip entries (`pcqwerty.json`, `lao.json`,
+> `thai.json`) are listed at the bottom for completeness.
+
+### `app/src/main/assets/layouts/main/` — 73 files
+
+`.txt` (48 total, all included):
+
+```
+akan.txt              arabic.txt            arabic_hijai.txt
+arabic_pc.txt         armenian_phonetic.txt belarusian.txt
+bemba.txt             bepo.txt              bulgarian.txt
+bulgarian_bds.txt     bulgarian_bekl.txt    central_kurdish.txt
+chuvash.txt           dagbani.txt           dargwa_urakhi.txt
+esperanto.txt         ewe.txt               farsi.txt
+ga.txt                halmak.txt            hausa.txt
+hungarian_extended_qwertz.txt               igbo.txt
+kaitag.txt            kannada.txt           kannada_extended.txt
+kikuyu.txt            lingala.txt           luganda.txt
+macedonian.txt        malayalam.txt         mansi_north.txt
+mari.txt              mongolian.txt         qwerty.txt
+qwertz.txt            russian.txt           russian_extended.txt
+russian_student.txt   serbian.txt           sesotho.txt
+tamil.txt             telugu.txt            turkish.txt
+ukrainian.txt         ukrainian_extended.txt                workman.txt
+yoruba.txt
+```
+
+`.json` (25 of 28 — minus the 3 skips):
+
+```
+azerty.json           bengali_akkhor.json   bengali_baishakhi.json
+bengali_inscript.json bengali_probhat.json  bengali_unijoy.json
+colemak.json          colemak_dh.json       dvorak.json
+georgian.json         greek.json            gujarati.json
+hebrew.json           hebrew_1452_2.json    hindi.json
+hindi_compact.json    hindi_phonetic.json   kabyle.json
+khmer.json            marathi.json          nepali_romanized.json
+nepali_traditional.json                     sinhala.json
+urdu.json             uzbek.json
+```
+
+### `app/src/main/assets/layouts/symbols/` — 2 files
+
+```
+symbols.txt           symbols_arabic.txt
+```
+
+### `app/src/main/assets/layouts/more_symbols/` — 1 file
+
+```
+symbols_shifted.txt
+```
+
+### **SKIPPED** — do not touch in PR 1
+
+```
+app/src/main/assets/layouts/main/pcqwerty.json   # numbers already in row 1
+app/src/main/assets/layouts/main/lao.json        # Lao digits in popups; hasBuiltInNumbers() = true
+app/src/main/assets/layouts/main/thai.json       # Thai digits in popups; hasBuiltInNumbers() = true
+```
+
+**Sanity check before PR 1 merge:** `find app/src/main/assets/layouts/{main,symbols,more_symbols} -type f \( -name '*.txt' -o -name '*.json' \) | wc -l` should output `77` (74 baked + 3 skipped).
+
+---
+
+## Appendix C — PR-2 deletion-sweep order
+
+The fields and prefs listed below are interdependent. Removing
+the field declaration first will produce dozens of unresolved-
+reference errors. Follow this phase order; each phase ends with
+a green `./gradlew :app:assembleDebugNoMinify`.
+
+### Phase A — pin reads to `true` first
+
+For each consumer below, **replace the read with the constant
+`true`**, do not delete the field yet.
+
+| Consumer | Field read |
+| --- | --- |
+| `KeyboardParser.kt:67` | `Settings.getValues().mShowsNumberRow` |
+| `KeyboardParser.kt:109` (inside the to-be-removed block) | `params.mId.mNumberRowEnabled` |
+| `KeyboardParser.kt:275` | `params.mId.mNumberRowEnabled` |
+| `KeyboardBuilder.kt:116` | `Settings.getValues().mShowsNumberRow` |
+| `EmojiLayoutParams.kt:39` | `Settings.getValues().mShowsNumberRow` |
+| `ClipboardLayoutParams.kt:43` | `Settings.getValues().mShowsNumberRow` |
+| `ResourceUtils.java:84` | `Settings.getValues().mShowsNumberRow` |
+
+After this phase, build green.
+
+### Phase B — remove KeyboardParser.kt prepend + flip guard
+
+Remove lines 109–112 (`baseKeys.add(0, …)`) and update
+`addNumberRowOrPopupKeys` per PR 2 step 1.
+
+### Phase C — port `convertToLocalizedNumbers`
+
+Add the call site from PR 2 step 1.
+
+### Phase D — fix `+` extras index
+
+`LayoutParser.kt:91–97` and `LayoutUtils.kt:48–49`.
+
+### Phase E — widen `defaultLabelFlags` carve-out
+
+`KeyboardParser.kt:37–43`.
+
+### Phase F — delete dead fields in safe order
+
+Bottom-up dependency order. Each sub-phase ends with a green
+build.
+
+1. **`KeyboardId.java:78–79, 98–99`** — remove
+   `mNumberRowEnabled`, `mNumberRowInSymbols` fields,
+   constructor parameters, `equals`, `hashCode`, `toString`,
+   and any call sites that construct a `KeyboardId`.
+2. **`KeyboardLayoutSet.java:258–264`** — remove
+   `setNumberRowEnabled`, `setNumberRowInSymbolsEnabled`, and
+   the corresponding `mNumberRowEnabled`,
+   `mNumberRowInSymbols` builder fields.
+3. **`KeyboardSwitcher.java:157–158, 174–175`** — remove the
+   four `.setNumberRow…(...)` calls.
+4. **`SettingsValues.java:191–192`** — remove the
+   `mShowsNumberRow` and `mShowsNumberRowInSymbols` field
+   declarations (now no readers remain).
+5. **`Settings.java`** — remove `PREF_SHOW_NUMBER_ROW` (line
+   138) and `PREF_SHOW_NUMBER_ROW_IN_SYMBOLS` constants.
+6. **`Defaults.kt:129`** — remove the matching default entries.
+
+### Phase G — narrow `PREF_LOCALIZED_NUMBER_ROW` description
+
+`SubtypeScreen.kt:212–235` Switch text + `strings.xml`.
+
+### Phase H — AGENTS.md updates
+
+`keyboard/internal/keyboard_parser/AGENTS.md`,
+`latin/settings/AGENTS.md`.
+
+### Phase I — tests
+
+Add the 8 cases from §6 to `KeyboardParserTest.kt`. Run
+`./gradlew :app:testDebugUnitTest`.
+
+---
+
+## Appendix D — Manual verification recipe
+
+Use a real Android device or emulator (API 30+). Install via
+`./gradlew installDebug` (or sideload `dist/HeliBoard.apk` for
+PR 4 verification). Enable HeliBoard as the active IME. The
+test app can be any text field (e.g. Chrome's URL bar, Notes).
+
+### PR 1 manual smoke
+
+- [ ] English (US) — open keyboard, verify number row at top:
+      `1 2 3 4 5 6 7 8 9 0` with hints `! @ # $ % ^ & * ( )`.
+- [ ] Long-press `1` shows `! ¹ ½ ⅓ ¼ ⅛` popups. Match against
+      the pre-bake screenshot/memory.
+- [ ] Russian — number row visible, layout otherwise identical.
+- [ ] Bengali (any variant) — keyboard renders without crashes.
+      Number row shows Western digits (PR 2 fixes localization).
+- [ ] Symbols layer (`?123`) — top row shows `1 2 3 …`.
+
+### PR 2 manual smoke
+
+- [ ] Same checks as PR 1.
+- [ ] Persian (Farsi) — number row now shows `۱۲۳۴۵۶۷۸۹۰`
+      Persian digits (proves the
+      `convertToLocalizedNumbers` extension works).
+- [ ] Catalan (`qwerty+`) — long-press `c` shows `ç` as a
+      popup; the `ç` is on alphabet row 3, not row 1 (number
+      row).
+- [ ] Settings → Languages → English → edit `qwerty` (pencil) →
+      modify a key → save → open keyboard → change is visible.
+- [ ] Settings → Languages → English → SYMBOLS slot → edit an
+      existing custom symbol layout (if any; create one first
+      if not) → first popup shows as hint label (the new
+      `isCustomLayout` carve-out behavior).
+
+### PR 3 manual smoke (the user-goal verification)
+
+- [ ] Settings → Languages → tap "English (US)" → subtype
+      detail page loads.
+- [ ] On the MAIN row, fork icon (pencil-with-plus) visible
+      next to `qwerty`. Tap it → editor opens with 4 rows of
+      qwerty content, name pre-filled as `qwerty-copy`.
+- [ ] Delete row 1 (the number row) in the editor. Save.
+- [ ] Open keyboard → renders 3 rows of alphabet only, with
+      digit hints `1 2 3 …` above the top row.
+- [ ] Re-enter edit dialog, change hint popup `q !` →
+      `q Q!`. Save. Re-open keyboard → hint above `q` shows
+      `Q` (the new first popup), per §5.1's null-check.
+- [ ] SYMBOLS slot now shows the same five controls (select,
+      add, edit, delete, fork). Tap fork on `symbols` →
+      editor opens pre-filled with the baked 4-row symbol
+      layout. Save without changes → new custom symbol layout
+      appears in the dropdown and is selected.
+- [ ] Switch active subtype to Russian via globe key →
+      Russian layout still renders correctly (custom English
+      layouts don't bleed across non-Latin scope).
+- [ ] Open Settings → Languages → search "zzz" (no match) →
+      empty-search hint appears beneath the search field.
+- [ ] Fork `qwerty+` (Catalan or Danish subtype) → caption
+      appears warning about frozen extras.
+
+### PR 4 manual smoke
+
+- [ ] `dist/HeliBoard.apk` installs cleanly on a fresh device.
+- [ ] Repeat the PR-3 recipe end-to-end on the installed APK.
