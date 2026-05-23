@@ -755,12 +755,20 @@ implementation would add a new `LayoutUtilsCustom.SCRIPT_ANY` token
 and one extra union in `getLayoutFiles`. Not worth doing
 preemptively.
 
-## A.3 Resolved — number row becomes part of every layout file
+## A.3 Resolved — number row becomes part of every layout file; **3-row layouts are first-class**
 
-**Maintainer feedback: don't restore the global toggle. Bake the
-number row into every locale's MAIN layout file so users can edit
-those keys when they fork it. The trade-off — every keyboard now
-has a number row by default — is acceptable.**
+**Maintainer feedback (round 1): bake the number row into every
+locale's MAIN layout file so users can edit those keys when they
+fork it. Don't restore the global toggle.**
+
+**Maintainer feedback (round 2): a user must still be able to opt
+out of the number row by saving a 3-row custom layout, just like
+PR #113 supported 3-row presets. In that case the digits should
+become hints on the top alphabet row.**
+
+Both are satisfied by the same plan: the *layout file's row count*
+becomes the source of truth, and the parser already handles both
+3 and 4 rows correctly today.
 
 ### Why this is the right call
 
@@ -775,6 +783,41 @@ at render time. PR #113 already moved this responsibility into the
 preset itself ("4 rows = top row is the number row, 3 rows = no
 number row"). After the merge, that rule extends to every layout,
 built-in and custom.
+
+### The user-facing model
+
+A MAIN layout file decides its own row count. Rendering is:
+
+| Row count in the file | Renders as | Hints on top row |
+| --- | --- | --- |
+| 4 (number row baked in as row 1) | 4 rows; top row is the number row | Same hints as any other row — sourced from each key's first popup in the file (`POPUP_KEYS_LAYOUT`) |
+| 3 (no number row) | 3 rows; alphabet only | Digit hints auto-appear above the top alphabet row, sourced from the locale's number-row asset (`POPUP_KEYS_NUMBER`). If the user authored their own popups on top-row keys, those take precedence over the auto-digit (per `params.mPopupKeyLabelSources` priority) |
+| Any other count | Renders that many rows with proportional heights (existing `heightRescale` behaviour) | No special handling |
+
+This is exactly what PR #113 was simulating with its `4 rows` /
+`3 rows` preset rule, plus an automatic digit-as-hint behaviour for
+the 3-row case that the new feature did not support.
+
+The mechanism for the 3-row case already exists at
+`KeyboardParser.kt:289-294`:
+
+```kotlin
+private fun addNumberRowOrPopupKeys(baseKeys, numberRow) {
+    if (customKeyboardsActive) return
+    if (!params.mId.mNumberRowEnabled && params.mId.isAlphabetKeyboard && !hasBuiltInNumbers()) {
+        baseKeys.first().forEachIndexed { i, keyData ->
+            keyData.popup.numberLabel = numberRow.getOrNull(i)?.label
+        }
+    }
+}
+```
+
+`numberLabel` is read by `PopupKeysUtils.getHintLabel` (the
+`POPUP_KEYS_NUMBER` branch) as a hint source, so the digits show
+up small and grey above each top-row key with no other work
+needed. The only change is the *trigger*: instead of "global
+`mNumberRowEnabled` toggle is off", it becomes "the parsed layout
+has 3 rows".
 
 ### What this requires (replaces the previous A.3 plan)
 
@@ -825,19 +868,25 @@ built-in and custom.
    appear as the first row of every alphabet/symbol layer of every
    locale.
 
-3. **Delete the runtime number-row prepend.** In
-   `KeyboardParser.kt`:
+3. **Delete the runtime number-row prepend; keep the
+   digit-hint fallback.** In `KeyboardParser.kt`:
    - Remove the `customKeyboardsActive` check and its branches at
      lines 43-54, 124, 290.
    - Remove the `baseKeys.add(0, numberRow.mapTo(...))` injection
-     in the `mNumberRowEnabled` branch.
-   - Remove `addNumberRowOrPopupKeys` calls that prepend the
-     number row.
-   - Keep the `popup.numberLabel = numberRow[i].label` *fallback
-     hint* mechanism around for the `!mNumberRowEnabled` legacy
-     case **only if** any layout files end up actually missing a
-     number row (none should, after step 1). Otherwise delete it
-     too.
+     in the `mNumberRowEnabled` branch — the number row is now in
+     the file when it's there at all, never prepended.
+   - **Keep `addNumberRowOrPopupKeys` (the function that sets
+     `popup.numberLabel`).** Flip its guard from
+     `!params.mId.mNumberRowEnabled` to *"the parsed alphabet
+     layout has 3 rows"* (i.e. `baseKeys.size == 3` for
+     `params.mId.isAlphabetKeyboard`). The locale number-row
+     asset under `assets/layouts/number_row/` stays in the
+     codebase exactly so this fallback can read it. Drop the
+     `customKeyboardsActive` early-return.
+   - The `getNumberRow()` helper that loads
+     `assets/layouts/number_row/` and optionally swaps in
+     localised digits stays as-is. It's now only called from the
+     `numberLabel`-fallback path, not from the prepend path.
 4. **Drop `PREF_SHOW_NUMBER_ROW`, `mShowsNumberRow`,
    `setNumberRowEnabled`, `mNumberRowEnabled`.** Since every layout
    file always has a number row, the parameter is redundant.
@@ -854,27 +903,33 @@ built-in and custom.
      test `mShowsNumberRow` to decide how much vertical space to
      reserve. Since the answer is now *always reserved for 4
      rows*, drop the conditional.
-5. **`PREF_LOCALIZED_NUMBER_ROW` becomes redundant for users who
-   accept the baked-in defaults.** Two options:
+5. **`PREF_LOCALIZED_NUMBER_ROW` survives, with a narrower scope.**
+   After step 1 the digit characters for 4-row layouts live in
+   the file directly, so the toggle has no effect there. But the
+   3-row → digit-hint mechanism in `addNumberRowOrPopupKeys`
+   calls `getNumberRow()` (lines 306-320 of `KeyboardParser.kt`),
+   which respects `PREF_LOCALIZED_NUMBER_ROW`/the per-subtype
+   `LOCALIZED_NUMBER_ROW` extra value to decide whether to swap
+   in localised digits.
 
-   - **Keep it as a per-subtype override** that swaps the layout
-     file's first row out for the Western (`1 2 3 4 5 6 7 8 9 0`)
-     digits even when the locale's baked-in row uses localized
-     digits. This is a one-line replacement at render time
-     (`baseKeys[0] = westernNumberRow` when the toggle is on).
-     Useful for bilingual users.
-   - **Drop it.** Users who want different digits create a custom
-     layout. Simpler.
+   - **Keep the pref.** It still affects 3-row layouts.
+   - **Keep the per-subtype `LOCALIZED_NUMBER_ROW` extra value
+     and the UI in `SubtypeScreen.kt:212-235`.** Update the
+     label/description so users understand it controls the
+     *3-row hint digits*, not the *4-row number-row keys*.
+     Example string: *"Show localised digits as number hints
+     when the keyboard has no number row"*.
 
-   Recommendation: **drop it** to match the maintainer's stated
-   goal of "fewer hidden runtime behaviours". The number row lives
-   in the file. If the user wants it different, they edit the file
-   (or fork it).
+   If the maintainer prefers absolute simplicity and is willing
+   to drop bilingual digit-hint customisation, this whole bullet
+   can collapse to "remove the pref and the extra value, let
+   `getNumberRow()` always return the Latin digits". But the
+   3-row use case is real (Persian/Arabic users who want their
+   3-row alphabet keyboard to show `٠١٢٣...` hints rather than
+   `1234...`), so the recommendation is **keep**.
 
-6. **Per-subtype `extraValues` `LOCALIZED_NUMBER_ROW=...` and the
-   `hasLocalizedNumberRow(...)` UI in `SubtypeScreen.kt` (lines
-   212-235) follow the same fate as step 5.** Drop or keep
-   together.
+6. **The `hasLocalizedNumberRow(...)` UI in `SubtypeScreen.kt`
+   stays.** Same fate as step 5.
 
 7. **The `+` layout system (`qwerty+`, `azerty+`, etc.) is
    unaffected.** `+` appends locale extra keys to specific rows
@@ -893,37 +948,50 @@ built-in and custom.
      extras at index 1, which is the alphabet top row's extras.
      Re-check the math when implementing.
 
+### How the user opts out of the number row
+
+Two paths, both already supported by the parser after the changes
+above:
+
+1. **Per-subtype, by switching the layout.** In *Languages &
+   Layouts → [language] → Main layout*, pick a 3-row variant from
+   the dropdown (built-in or custom). The selected subtype renders
+   3 rows with digit hints. Other subtypes for the same locale
+   that picked a 4-row variant are unaffected.
+
+2. **Author a 3-row custom layout.** From a 4-row built-in, tap
+   *Edit a copy*, delete the first row in `LayoutEditDialog`,
+   save. The parser will render that custom layout as 3 rows and
+   add digit hints automatically.
+
+There is no global "show/hide number row" toggle. The decision is
+encoded in whichever MAIN layout file the subtype is pointing at.
+This matches PR #113's row-count-as-source-of-truth design but
+applies it uniformly across built-in and custom layouts.
+
 ### Trade-offs the maintainer has accepted
 
-- **Every keyboard now shows a number row.** No global toggle to
-  hide it. Users who don't want one: fork the layout and delete
-  the first row from their copy. (We could add a "remove number
-  row" button to the Edit dialog as sugar.)
+- **Default user experience is 4 rows.** All shipped MAIN
+  layouts include a number row. A user who prefers 3 rows
+  authors (or picks) a custom layout. We can later ship a few
+  3-row built-ins (e.g. `qwerty_compact`) if there's demand.
 - **76 built-in layout files have to be edited.** Mechanical and
-  scriptable. A small generator can read
-  `LocaleKeyboardInfos`-style digit mapping and emit the new top
-  rows. Add a CI check that asserts every `main/*.{txt,json}` has
-  4 rows.
-- **Localised digit support becomes baked-in per layout file
-  instead of a runtime decision.** Users who want a different
-  digit set for their language fork the file. Bilingual users
-  lose the runtime toggle unless we keep `PREF_LOCALIZED_NUMBER_ROW`
-  per step 5 option 1.
+  scriptable. A small generator can read the locale → digit-set
+  mapping and emit the new top rows. CI check: every
+  `main/*.{txt,json}` has either 3 or 4 rows (not 1, 2, or 5+).
+- **Localised digit support persists in two places now.** For
+  4-row layouts, the digits are baked into the file directly per
+  locale. For 3-row layouts, the digit-hint fallback honours
+  `PREF_LOCALIZED_NUMBER_ROW` / the per-subtype extra value.
+  Slightly more surface area than I'd like but each piece does
+  one clear thing.
 - **`KeyboardId` no longer carries `mNumberRowEnabled`.** Cache
   keys collapse — fewer distinct keyboard instances cached.
   Probably a tiny perf win.
 
 ### What the merged step list looks like for A.3
 
-Replace step 3-4 in A.15 with:
-
-- *3.* Bake the number row into every built-in MAIN, SYMBOLS, and
-  MORE_SYMBOLS layout file under `assets/layouts/`. Add a generator
-  script under `tools/` if helpful, plus a JVM test that asserts
-  every alphabet/symbol layout has exactly 4 rows.
-- *4.* Delete the runtime number-row prepend and the
-  `mShowsNumberRow`/`mNumberRowEnabled` plumbing. Decide
-  `PREF_LOCALIZED_NUMBER_ROW`'s fate (recommend: drop).
+Replaces step 3-4 in A.15. See A.15 below for the final wording.
 
 ## A.4 Significant — Migration is more delicate than Section 4 step 6 implies
 
@@ -1134,14 +1202,35 @@ same locale and selecting the next one via
 
 ## A.13 Minor — Validation surface area
 
-`LayoutUtilsCustom.checkLayout` already validates row counts, key
-count, label/popup string length, etc. Tests we should add
-alongside the migration:
+`LayoutUtilsCustom.checkLayout` already validates row counts (>=1,
+<=8), key count per row (<=20), label/popup string length, etc.
+After the merge:
 
-- A 4-row MAIN layout file with the top row being numbers triggers
-  the "no number row injection" branch in A.3 step 2.
-- A `hint`-bearing JSON file round-trips through `LayoutEditDialog`.
-- A `hint` value that is more than 5 characters long is rejected.
+- **MAIN / SYMBOLS / MORE_SYMBOLS must have 3 or 4 rows.** Either
+  the file declares the number row (4 rows) or it omits it and
+  the parser supplies digit hints (3 rows). Other row counts are
+  parser-supported but UX-confusing for these slots; treat as a
+  soft warning rather than a hard error so power users aren't
+  blocked.
+- **Reject extreme cases.** 0 rows, > 6 rows, > 15 keys per row
+  for MAIN should remain hard errors.
+- **Per-key popup-as-hint length.** When `KeyboardView` draws the
+  hint label, the string is single-line and clipped to roughly 5
+  visual characters (see `.cursor/skills/key-hint-sizing/SKILL.md`).
+  Add a soft warning in `LayoutEditDialog` when any top-row
+  popup-as-hint is longer than 5 chars. Don't reject — non-Latin
+  scripts can have wider glyphs that look fine at 1-2 chars but
+  trigger Latin-length intuitions.
+
+Tests to add:
+
+- 4-row MAIN custom layout renders 4 rows, top row keys carry the
+  digit labels themselves.
+- 3-row MAIN custom layout renders 3 rows with `popup.numberLabel`
+  set on the top row via `addNumberRowOrPopupKeys`.
+- 5-row MAIN custom layout is accepted with a soft warning and
+  renders with `heightRescale = 4f/5`.
+- Round-trip a custom JSON layout through `LayoutEditDialog`.
 
 ## A.14 Minor — Test coverage expectations
 
@@ -1166,29 +1255,44 @@ review of A.1, A.2, A.3. Each step is independently shippable.
    `app/src/main/assets/layouts/`. Use the locale-appropriate
    digit set (table in A.3 step 1). Carry the locale's current
    number-row hints (first popup per key) into the file as the
-   first popup of each digit. Add a JVM test that asserts every
-   `main/*.{txt,json}` and `{symbols,more_symbols}/*` has exactly
-   4 rows.
+   first popup of each digit. Built-ins default to 4 rows; 3-row
+   layouts remain supported and may be added later as compact
+   variants. JVM test: every `main/*.{txt,json}` and
+   `{symbols,more_symbols}/*` has **3 or 4** rows (default 4).
 
-2. **(parser) Delete the runtime number-row prepend.** Remove the
-   `customKeyboardsActive` branches and the
-   `baseKeys.add(0, numberRow.mapTo(...))` injection in
-   `KeyboardParser.kt`. Replace the `customKeyboardsActive`
-   hint-flag branch with
-   `LayoutUtilsCustom.isCustomLayout(layoutName)` so user-edited
-   symbol layouts show their popups as hints. Drop
-   `mShowsNumberRow`, `mNumberRowEnabled`, `setNumberRowEnabled`,
-   and their callers in `KeyboardLayoutSet`, `KeyboardSwitcher`,
-   `KeyboardId`, `KeyboardBuilder`, `EmojiLayoutParams`,
-   `ClipboardLayoutParams`, `SettingsValues`.
+2. **(parser) Delete the runtime number-row prepend; flip the
+   3-row fallback trigger; flip the symbol hint flag.** In
+   `KeyboardParser.kt`:
+   - Remove the `customKeyboardsActive` branches and the
+     `baseKeys.add(0, numberRow.mapTo(...))` injection in the
+     `mNumberRowEnabled` branch.
+   - Flip `addNumberRowOrPopupKeys`'s guard from
+     `!params.mId.mNumberRowEnabled` to `baseKeys.size == 3`
+     (for alphabet boards). Drop its `customKeyboardsActive`
+     early-return. The function continues to set
+     `popup.numberLabel` so 3-row layouts get digit hints.
+   - Replace the `customKeyboardsActive` hint-flag branch (line
+     49) with `LayoutUtilsCustom.isCustomLayout(layoutName)` so
+     user-edited symbol layouts show their first popup as a hint.
+   - Drop `mShowsNumberRow`, `mNumberRowEnabled`,
+     `setNumberRowEnabled`, and their callers in
+     `KeyboardLayoutSet`, `KeyboardSwitcher`, `KeyboardId`,
+     `KeyboardBuilder`, `EmojiLayoutParams`,
+     `ClipboardLayoutParams`, `SettingsValues`. Touching all
+     these is mostly delete-and-let-the-compiler-find-the-callers.
+   - Keep `getNumberRow()` and the
+     `assets/layouts/number_row/` assets. They are still the
+     content source for the 3-row digit-hint fallback.
 
-3. **(prefs) Drop `PREF_LOCALIZED_NUMBER_ROW` and the per-subtype
-   `LOCALIZED_NUMBER_ROW` extra value.** Remove the toggle in
-   `SubtypeScreen.kt` lines 212-235 and the
-   `hasLocalizedNumberRow(...)` helper. Users who want different
-   digits fork the layout file. (Alternative: keep this toggle as
-   a render-time first-row substitution — see A.3 step 5. Default
-   recommendation is drop.)
+3. **(prefs) `PREF_LOCALIZED_NUMBER_ROW` stays, scope narrowed.**
+   The toggle continues to swap Western → localised digits, but
+   only on the 3-row digit-hint fallback (since 4-row layouts
+   bake their digits into the file). Update the description
+   string in `SubtypeScreen.kt:212-235` to match the new
+   narrower behaviour, e.g. *"Show localised digits as number
+   hints when the keyboard has no number row"*. The per-subtype
+   `LOCALIZED_NUMBER_ROW` extra value and the
+   `hasLocalizedNumberRow(...)` helper survive unchanged.
 
 4. **(UI) Extract `MainLayoutRow` into `LayoutSlotEditor` and
    reuse for every slot in `SubtypeScreen`.** Adds Add / Edit /
@@ -1205,12 +1309,11 @@ review of A.1, A.2, A.3. Each step is independently shippable.
 6. **(migration) One-shot migration in `AppUpgrade.kt`.** Guarded
    by `PREF_CUSTOM_KEYBOARDS_MIGRATED`. For each preset:
    - Call `CustomKeyboards.toSimpleLayoutText(preset, slot)` to
-     produce a plain simple-text body (number row already on
-     top, per A.3).
-   - For 3-row presets (no number row), prepend the locale's
-     default number row before writing, so the migrated file
-     matches the new "every layout has a number row" invariant.
-     Document this clearly in the upgrade notice the user sees.
+     produce a plain simple-text body. **Preserve the preset's
+     original row count** — a 3-row preset becomes a 3-row
+     custom layout file (parser will supply digit hints), a
+     4-row preset becomes a 4-row layout file. Do **not** pad
+     up or trim.
    - Write the file to
      `<filesDir>/layouts/<slot>/custom.<scope>.<base36>.`
      using `Latn` as the scope for `["*"]` presets, `Latn` for
@@ -1244,7 +1347,15 @@ review of A.1, A.2, A.3. Each step is independently shippable.
    `settings/screens`, `assets/layouts`.
 
 8. **(tests) JVM tests** covering:
-   - Every built-in alphabet/symbol layout has 4 rows.
+   - Every built-in alphabet/symbol layout has 3 or 4 rows.
+   - A 4-row MAIN custom layout renders 4 rows where the top row
+     keys carry the digit labels themselves.
+   - A 3-row MAIN custom layout renders 3 rows where the parser
+     sets `popup.numberLabel` on the top row via the new
+     `baseKeys.size == 3` trigger in `addNumberRowOrPopupKeys`.
+   - The compact `Compact English (no number row)` preset from
+     PR #113 round-trips through migration as a 3-row custom
+     layout and still renders 3 rows with digit hints.
    - Migration of the seeded 4-preset JSON produces deterministic
      filenames and the expected file contents.
    - Migration handles `\|` and `\\` escapes correctly.
@@ -1280,11 +1391,18 @@ review are resolved as follows:
   convention already serves as the wildcard for every Latin
   subtype, and non-MAIN custom layouts are already universal by
   construction.
-- **A.3 (number row):** baked into every built-in MAIN / SYMBOLS /
-  MORE_SYMBOLS layout file. The runtime prepend logic and the
-  global `mShowsNumberRow` plumbing are deleted. Users who want a
-  different digit set fork the file. `PREF_LOCALIZED_NUMBER_ROW`
-  recommendation: drop (with a fallback escape hatch documented).
+- **A.3 (number row):** the layout file is the source of truth.
+  Built-ins are baked to 4 rows so a fork has a number row to
+  edit. The parser supports **both** 3-row and 4-row MAIN files:
+  4 rows = top row is the number row; 3 rows = top alphabet row
+  gets auto-generated digit hints via the existing
+  `addNumberRowOrPopupKeys` mechanism (whose trigger flips from
+  `!mNumberRowEnabled` to `baseKeys.size == 3`). The runtime
+  prepend logic and the global `mShowsNumberRow`/`mNumberRowEnabled`
+  plumbing are deleted. `PREF_LOCALIZED_NUMBER_ROW` survives with
+  a narrowed scope — it still applies to the 3-row digit-hint
+  fallback. Users who want no number row fork to 3 rows; users
+  who want different digits fork the file.
 
 Section 5's open questions and A.4-A.14 minor items still apply.
 Recommendations for those follow in A.17.
@@ -1381,9 +1499,12 @@ sensible order (each PR shippable on its own):
    simplest is to land 1 and 2 together.
 
 2. **PR #X+1:** A.15 steps 2, 3 (parser cleanup). Delete the
-   runtime number-row prepend and `mShowsNumberRow` plumbing.
-   Drop `PREF_LOCALIZED_NUMBER_ROW`. This is the
-   "remove machinery" PR.
+   runtime number-row prepend and `mShowsNumberRow` /
+   `mNumberRowEnabled` plumbing; flip
+   `addNumberRowOrPopupKeys`'s trigger to `baseKeys.size == 3`;
+   flip the symbol hint flag to `isCustomLayout(layoutName)`.
+   Narrow `PREF_LOCALIZED_NUMBER_ROW`'s scope and description.
+   This is the "remove machinery" PR.
 
 3. **PR #X+2:** A.15 step 4, 5 (UI). Extract `LayoutSlotEditor`,
    wire it into every slot, add empty-search hint on
