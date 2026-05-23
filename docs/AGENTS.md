@@ -3,6 +3,7 @@
 Longer-form architecture notes that complement the shorter folder-local AGENTS files.
 
 ## Direct files
+- `custom-keyboards-merge-plan.md` - plan for folding the Custom keyboards JSON-prefs feature (PR #113) into the existing per-locale `LayoutUtilsCustom` / `SubtypeScreen` editor pipeline so both share one storage layer, one parser, and one UI tree.
 - `input-simplified.md` - explains the mirror-based current-word architecture and why the host editor is treated as a committed-text sink.
 - `soniox-transcription.md` - end-to-end Soniox voice pipeline and configuration notes.
 
