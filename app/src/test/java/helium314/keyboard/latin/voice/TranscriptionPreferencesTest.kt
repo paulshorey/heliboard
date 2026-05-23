@@ -2,6 +2,7 @@ package helium314.keyboard.latin.voice
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.settings.TranscriptionPreferences
 import kotlin.test.assertEquals
@@ -36,6 +37,21 @@ class TranscriptionPreferencesTest {
 
         assertEquals("soniox-key", TranscriptionPreferences.readSonioxApiKey(prefs))
         assertFalse(prefs.contains("speechmatics_api_key"))
+    }
+
+    @Test
+    fun readSonioxMaxEndpointDelayMs_defaultsToPauseTolerantValue() {
+        val prefs = newPrefs()
+        assertEquals(
+            Defaults.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS,
+            TranscriptionPreferences.readSonioxMaxEndpointDelayMs(prefs)
+        )
+    }
+
+    @Test
+    fun sanitizeMaxEndpointDelayMs_clampsToSonioxBounds() {
+        assertEquals(500, TranscriptionPreferences.sanitizeMaxEndpointDelayMs(100))
+        assertEquals(3000, TranscriptionPreferences.sanitizeMaxEndpointDelayMs(9999))
     }
 
     @Test
