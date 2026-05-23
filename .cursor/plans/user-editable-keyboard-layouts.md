@@ -62,7 +62,7 @@ What "edit" means concretely after this plan ships:
 9. File reference
 10. Progress tracking (resumable checklist)
 - Appendix A — `tools/bake_number_row.py` specification
-- Appendix B — Exhaustive PR-1 file list (74 files)
+- Appendix B — Exhaustive PR-1 file list (76 files)
 - Appendix C — PR-2 deletion-sweep order
 - Appendix D — Manual verification recipe
 
@@ -211,7 +211,7 @@ before relying on it.
 
 **Consequence for PR 1:** skip exactly 3 files (`pcqwerty.json`,
 `lao.json`, `thai.json`), bake into the other 73 main + 3
-symbol/more_symbols = **74 files** (Appendix B enumerates
+symbol/more_symbols = **76 files** (Appendix B enumerates
 them).
 
 ### 2.3 Custom layouts (user-edited)
@@ -230,6 +230,10 @@ the built-in layouts use.
 `LayoutParser.getLayoutFileContent` (`LayoutParser.kt:101–106`)
 checks `LayoutUtilsCustom.isCustomLayout(name)` and reads from
 the files dir; otherwise it falls through to `context.assets`.
+
+**Strategic Alignment with User Goal:** This scoped naming system fits the requirement of starting a custom layout from an existing locale perfectly:
+- Starting from a **Latin locale layout** (e.g. English/QWERTY, German/QWERTZ) saves with the `custom.Latn.` scope. This ensures that the user can reuse their custom Latin layouts across other Latin subtypes (e.g. they can switch English, French, and Spanish subtypes to use their custom QWERTY layout).
+- Starting from a **non-Latin locale layout** (e.g. Russian, Persian, Bengali) saves with the BCP-47 locale-specific scope (e.g. `custom.ru-RU.`). This keeps script-specific layouts bound to the correct languages, preventing non-Latin custom layouts from cluttering the list of options in irrelevant subtypes.
 
 ### 2.4 Subtype binding
 
@@ -484,7 +488,7 @@ deletes the first row in the editor, and saves.
 any rendering behavior. Pure asset edits + one new test.
 
 **Approach:** A generator script (`tools/bake_number_row.py`,
-specced in Appendix A) walks the 74 layout files enumerated in
+specced in Appendix A) walks the 76 layout files enumerated in
 Appendix B, prepending a number row in the file's existing
 format. Western digits 1–0 are baked universally; PR 2 ports
 the locale-digit swap to apply to the file's top row.
@@ -653,9 +657,9 @@ red builds.
      ```
 
 2. **`LayoutParser.kt:91–97`** — fix the `+` extras index for
-   4-row files:
+   layouts with a baked number row. Use `>= 4` instead of `== 4` to be fully robust for non-standard multi-row layouts (like `kannada_extended.txt` which has 5 rows on main today and will have 6 after baking):
    ```kotlin
-   val firstAlphabetRowIndex = if (simpleKeyData.size == 4) 1 else 0
+   val firstAlphabetRowIndex = if (simpleKeyData.size >= 4) 1 else 0
    simpleKeyData.mapIndexedTo(mutableListOf()) { i, row ->
        val newRow = row.toMutableList()
        if (params.mId.isAlphabetKeyboard
@@ -668,7 +672,7 @@ red builds.
    }
    ```
    Apply the same fix to `LayoutUtils.getContentWithPlus`
-   (`LayoutUtils.kt:48–49`).
+   (`LayoutUtils.kt:48–49`) using `rows.size >= 4`.
 
 3. **Delete dead toggle plumbing** — follow Appendix C's
    ordering. Removed: `PREF_SHOW_NUMBER_ROW`,
@@ -1010,7 +1014,7 @@ device).
 
 ## 9. File reference
 
-**PR 1 (assets):** 74 files — see Appendix B.
+**PR 1 (assets):** 76 files — see Appendix B.
 
 **PR 2 (parser cleanup):**
 
@@ -1183,7 +1187,7 @@ number-row sniffer detects the baked row and skips).
 
 ---
 
-## Appendix B — Exhaustive PR-1 file list (74 files)
+## Appendix B — Exhaustive PR-1 file list (76 files)
 
 > Verified against `main` at the time this plan was written.
 > Three skip entries (`pcqwerty.json`, `lao.json`,
@@ -1247,7 +1251,7 @@ app/src/main/assets/layouts/main/lao.json        # Lao digits in popups; hasBuil
 app/src/main/assets/layouts/main/thai.json       # Thai digits in popups; hasBuiltInNumbers() = true
 ```
 
-**Sanity check before PR 1 merge:** `find app/src/main/assets/layouts/{main,symbols,more_symbols} -type f \( -name '*.txt' -o -name '*.json' \) | wc -l` should output `77` (74 baked + 3 skipped).
+**Sanity check before PR 1 merge:** `find app/src/main/assets/layouts/{main,symbols,more_symbols} -type f \( -name '*.txt' -o -name '*.json' \) | wc -l` should output `79` (76 baked + 3 skipped).
 
 ---
 
