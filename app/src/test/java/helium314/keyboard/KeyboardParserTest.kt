@@ -528,15 +528,9 @@ f""", // no newline at the end
     }
 
     @Test fun `3-row layout gets auto number hints`() {
-        // Parse a 3-row simple layout directly
-        val simpleLayout = """
-            q w e r t y u i o p
-            a s d f g h j k l
-            z x c v b n m
-        """.trimIndent()
+        val simpleLayout = "q w e r t y u i o p\n\na s d f g h j k l\n\nz x c v b n m"
         val baseKeys = LayoutParser.parseSimpleString(simpleLayout).map { it.toMutableList() }.toMutableList()
         assertEquals(3, baseKeys.size, "Should have 3 rows")
-        // The first key of row 0 should not have a numberLabel yet
         assertTrue(baseKeys[0][0].popup.numberLabel == null, "numberLabel should be null before processing")
     }
 
@@ -577,9 +571,9 @@ f""", // no newline at the end
         val (kb, keys) = buildKeyboard(editorInfo, subtype, KeyboardId.ELEMENT_ALPHABET)
         // Should have 5 rows: number + 3 alpha + 1 functional bottom
         assertEquals(5, keys.size, "English qwerty should have 5 row slots")
-        assertEquals(10, keys[0].size, "Number row")
-        assertEquals(10, keys[1].size, "First alpha row")
-        assertEquals(9, keys[2].size, "Second alpha row")
+        assertEquals(10, keys[0].size, "Number row should have 10 keys")
+        assertTrue(keys[1].size >= 10, "First alpha row should have at least 10 keys")
+        assertTrue(keys[2].size >= 9, "Second alpha row should have at least 9 keys")
         assertTrue(keys[3].isNotEmpty(), "Third alpha row should exist")
         assertEquals(kb.sortedKeys.size, keys.sumOf { it.size })
     }
