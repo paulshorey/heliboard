@@ -559,172 +559,371 @@ treated as the "Why" while this appendix is the "How".
 
 The findings are grouped by severity.
 
-## A.1 Blocker — `|` is already overloaded in the simple-text format
+## A.1 Resolved — the existing format already encodes hints, just implicitly
 
-**Body claim being revised:** Section 3.2 item 1 and Section 4 step 1
-propose extending the simple-text row format with a `primary|hint`
-token convention by lifting `CustomKeyboards.splitKeyToken` into
-`LayoutParser.parseKey`.
+**This subsection is revised after maintainer feedback. The earlier
+JSON-`hint`-field proposal is dropped — it is not needed.**
 
-**Why it's wrong:** The vertical bar is *already* the canonical
-delimiter inside a single key spec, parsed by
-`keyboard/internal/KeySpecParser.java`:
+### How hints actually work in the existing system
 
-> Each key specification is one of the following:
-> - Label optionally followed by keyOutputText (`keyLabel|keyOutputText`).
-> - Label optionally followed by code point (`keyLabel|!code/code_name`).
-> - Icon followed by keyOutputText (`!icon/icon_name|keyOutputText`).
-> - Icon followed by code point (`!icon/icon_name|!code/code_name`).
-> Special character, comma ',' backslash '\\', and bar '|' can be
-> escaped by '\\' character.
+The existing simple-text and rich-JSON layout formats **already
+encode hints**, they just do it without a dedicated `hint` field. The
+hint above a key is derived from the key's popup set by
+`latin/utils/PopupKeysUtils.kt → getHintLabel(...)`:
 
-Stock built-in layouts use this all over the place:
-
-```
-app/src/main/assets/layouts/main/qwerty.txt:
-  q Tab|!code/key_tab          # primary q, popup labelled Tab that emits a Tab
-  t |                          # primary t, popup is a literal '|' character
-app/src/main/assets/layouts/main/central_kurdish.txt:
-  ھ|ه                          # primary 'ھ' with a code/output spec
-app/src/main/assets/layouts/symbols/symbols_arabic.txt:
-  |                            # a key whose label is a literal '|'
+```kotlin
+fun getHintLabel(popupSet, params, label): String? {
+    for (type in params.mPopupKeyLabelSources) {
+        when (type) {
+            POPUP_KEYS_NUMBER -> popupSet?.numberLabel?.let { hintLabel = it }
+            POPUP_KEYS_LAYOUT -> popupSet?.getPopupKeyLabels(params)?.let { hintLabel = it.firstOrNull() }
+            POPUP_KEYS_SYMBOLS -> popupSet?.symbol?.let { hintLabel = it }
+            POPUP_KEYS_LANGUAGE -> ...
+            POPUP_KEYS_LANGUAGE_PRIORITY -> ...
+        }
+        if (hintLabel != null) break
+    }
+    ...
+}
 ```
 
-`TextKeyData.getPopupLabel` then *generates* `label|!code/...` strings
-when computing popup keys
-(`TextKeyData.kt` lines 246-252, `POPUP_KEYS_NAVIGATE_*`,
-`createActionPopupKeys`, etc.). Reusing `|` as a primary/hint
-separator in the same format would silently re-route every one of
-these into the hint path and break every layout that uses a popup
-spec with a label.
+The default priority order (`POPUP_KEYS_LABEL_DEFAULT` in
+`PopupKeysUtils.kt`) makes `POPUP_KEYS_LAYOUT` — *"the first popup
+declared by the layout file itself"* — the primary hint source for
+alphabet keyboards once the auto-generated number-row hint is taken
+out. So:
 
-**Replacement plan (this supersedes Section 4 step 1):**
+| Format | How the user writes "primary `a`, hint `@`" |
+| --- | --- |
+| Simple-text | `a @` (popup `@` → hint `@`) |
+| Rich JSON | `{ "label": "a", "popup": { "main": { "label": "@" } } }` |
+| PR #113 row | `a\|@` |
 
-1. **Do not change the simple-text grammar.** Built-in `.txt` layouts
-   and `LayoutParser.parseSimpleString` stay exactly as they are.
-   The `KeySpecParser` semantics of `label|output` stay exactly as
-   they are.
-2. **Add an explicit `hint` field to rich JSON layouts.** In
-   `keyboard/internal/keyboard_parser/floris/TextKeyData.kt`, extend
-   the `TextKeyData` data class with `val hint: String? = null`
-   (`@SerialName("hint")`). Propagate it through `copy(...)`,
-   `compute(params)`, and `toKeyParams(params, ...)` so that
-   `Key.KeyParams.mHintLabel` is set when `hint != null`. Make sure
-   `LABEL_FLAGS_DISABLE_HINT_LABEL` is *not* applied when the layout
-   explicitly declared a hint (this replaces the conditional
-   `customKeyboardsActive` branch at `KeyboardParser.kt:49` with a
-   per-key check).
-3. **The migration writes JSON, not extended simple-text.**
-   `AppUpgrade.kt` converts each PR-#113 preset slot into one rich
-   JSON file under `<filesDir>/layouts/<slot>/custom.<scope>.<base36>.`:
+These are all **the same key** at render time. `qwerty.txt` already
+uses this convention everywhere — `i - –` means *primary `i`, hint
+`-`, additional popup `–`*. `colemak.json` does the same with
+`{ "label": "o", "popup": { "main": { "label": "…" } } }`.
 
-```json
-[
-  [ { "label": "1" }, { "label": "2" }, ... ],
-  [ { "label": "q" }, { "label": "w" }, ... ],
-  [ { "label": "a", "hint": "@", "popup": { "main": { "label": "@" } } },
-    { "label": "s", "hint": "#", "popup": { "main": { "label": "#" } } }, ... ],
-  ...
-]
-```
+### What this means for the merge
 
-   The user-facing "primary|hint" ergonomics survive (they edit the
-   compact form, the migration writes the rich form). New custom
-   layouts created from the *Add custom layout* wizard get the same
-   rich JSON shape on save.
-4. **Editor authoring affordance (optional, deferred):** if we still
-   want the compact "primary|hint" authoring syntax inside
-   `LayoutEditDialog`, expose it as a *third* format **layered
-   above** the existing parser — i.e. a "compact hints" parse pass
-   that lives next to `parseJsonString`/`parseSimpleString`, has its
-   own file-content header (e.g. a magic first line like
-   `// format: hint-rows-v1`), and is only chosen when that header
-   is present. It is *never* picked by accident on a stock
-   layout. This is strictly optional; the JSON form is the source
-   of truth.
+1. **No parser changes for hint support.** No `TextKeyData.hint`
+   field, no simple-text grammar extension, no `|` overload, no
+   `// format:` magic header. The existing
+   *first-popup-becomes-the-hint* rule is already what users want.
 
-Net effect: no built-in layout's parsing changes, no existing custom
-layout breaks on upgrade, and the new feature's hint ergonomics are
-preserved through migration to JSON. The body of the doc should be
-read as "we want hints to survive"; *this appendix* defines the
-mechanism.
+2. **The new feature's `primary|hint` syntax is a pure user-input
+   sugar that we can drop on the floor.** PR #113's
+   `CustomKeyboards.splitKeyToken` turns `a|@` into `"a"` +
+   `"@"`, and `CustomKeyboards.toSimpleLayoutText` then emits
+   simple-text rows where the popup is `@`. That output is already
+   parseable by the existing pipeline — the only reason this whole
+   detour exists is that the user typed `|` for ergonomic reasons.
 
-## A.2 Major — The "any" scope is mostly redundant
+3. **Migration is trivial.** `AppUpgrade.kt` calls
+   `CustomKeyboards.toSimpleLayoutText(preset, slot)` (the same
+   function PR #113 already ships) for each slot and writes the
+   result to
+   `<filesDir>/layouts/<slot>/custom.<scope>.<base36>.` as plain
+   simple-text. No JSON construction, no new schema. The resulting
+   file is indistinguishable from a hand-written custom layout the
+   user could have created via *SubtypeScreen → Main layout → +*.
 
-**Body claim being revised:** Section 3.2 item 2 and Section 4 step 2
-propose adding an `any` scope to `LayoutUtilsCustom` so a custom
-layout can apply to "any language".
+   Escape handling: `splitKeyToken` already unescapes `\|` to `|`
+   and `\\` to `\`. Free literal `|` keys end up as a single-
+   character token in the simple-text output, which
+   `KeySpecParser.indexOfLabelEnd` already special-cases as "sole
+   vertical bar as a special case of key label" (line 87). Free
+   `\\` keys end up as `\` in the simple-text output, which is the
+   `KeySpecParser` escape char — so the migrator must write `\\`
+   (a literal backslash-as-key-label needs to be `\\` in the
+   simple-text format because `KeySpecParser.parseEscape` strips
+   one level). Add a regression test for both.
 
-**What's already true:**
-`LayoutUtilsCustom.getLayoutFiles(LayoutType.MAIN, ctx, locale)`
-already returns *all* `custom.Latn.*` layouts when the locale is any
-Latin-script locale. So a Latin custom layout already behaves as a
-wildcard for every Latin-script subtype the user enables. The new
-feature's `"*"` wildcard mainly differs by also being eligible for
-non-Latin scripts — but a *Programming* keyboard with Latin labels
-doesn't actually make sense to expose under e.g. Bengali or Khmer.
+4. **One small parser tweak (replaces the `customKeyboardsActive`
+   branch in `KeyboardParser.kt`).** Today, alphabet keyboards
+   show hints by default and symbol/more-symbols keyboards apply
+   `Key.LABEL_FLAGS_DISABLE_HINT_LABEL` (line 52). PR #113 clears
+   that flag on the symbol layouts when a preset is active so the
+   user's authored popups become visible hints. After the merge,
+   replace the preset-driven conditional with a check on the
+   *layout source*:
 
-**Replacement plan:**
+   ```kotlin
+   params.mId.isAlphabetKeyboard -> params.mLocaleKeyboardInfos.labelFlags
+   params.mId.isAlphaOrSymbolKeyboard
+     && LayoutUtilsCustom.isCustomLayout(layoutNameFor(params.mId)) -> 0
+   params.mId.isAlphaOrSymbolKeyboard -> Key.LABEL_FLAGS_DISABLE_HINT_LABEL
+   else -> 0
+   ```
 
-- Do **not** add a new `any` sentinel. Instead, document the
-  existing Latin-wildcard behavior in the *Add custom layout*
-  wizard so the user knows that creating a Latin-script custom
-  layout makes it available in all their Latin subtypes.
-- For SYMBOLS, MORE_SYMBOLS, FUNCTIONAL, NUMBER, NUMBER_ROW,
-  PHONE, etc., `getLayoutFiles` already ignores locale — the
-  layout file is unfiltered. So a user-created `custom.<base36>.`
-  in any of those slots is already "any language" by construction.
-  No code change required.
-- Migration translates `"locales": ["*"]` presets in PR #113's JSON
-  to a Latin-script MAIN file (since the seeded *Programming*
-  preset uses Latin characters). Skip migrating the wildcard for
-  non-Latin subtypes; if the user wants the Programming layout on
-  a non-Latin subtype, they can re-create it.
+   In other words: built-in symbol layouts keep their no-hint
+   default (because files like `symbols.txt` use the
+   `≠ ≈ ≡` row format where the secondary chars are alternates,
+   not hints). User-edited custom symbol layouts get hints
+   enabled, because the user is authoring popups that they
+   probably want to see.
 
-This removes Section 4 step 2 entirely and removes the `LayoutUtilsCustom`
-schema extension.
+5. **No need for the optional `// format: hint-rows-v1` editor
+   sugar from the previous appendix revision.** The user is going
+   to type `a @` directly in `LayoutEditDialog` — same five
+   characters as `a|@`, two of them keys.
 
-## A.3 Major — Number-row regression after deletion of PR #113
+### Net effect
 
-**Body claim being revised:** Section 5 lists this as an open
-question.
+- One asset-pipeline conversion in the migrator: `CustomKeyboards.toSimpleLayoutText`
+  → write to file. The function already exists.
+- One conditional in `KeyboardParser`: switch the
+  `customKeyboardsActive` branch to `isCustomLayout(layoutName)`.
+- Everything else (`TextKeyData`, `LayoutParser`, every built-in
+  asset, `KeySpecParser`, the rich-JSON schema, all hint-source
+  configuration) is untouched.
 
-**Concrete situation:** PR #113 deleted `PREF_SHOW_NUMBER_ROW` (and
-the related `PREF_SHOW_NUMBER_ROW_IN_SYMBOLS`) and hardcoded
-`SettingsValues.mShowsNumberRow = true`. Today, the only way for a
-user to hide the number row on a given alphabet keyboard is to use a
-3-row Custom-keyboards preset, because there is no longer a global
-or per-subtype "hide number row" toggle that applies to the stock
-path. After the merge deletes the preset path, every alphabet
-keyboard will *always* show the number row.
+This subsection supersedes Section 3.2 item 1, Section 3.5 "Editor
+authoring", Section 4 step 1, *and* the earlier (now superseded)
+"add `hint` field to JSON" plan.
 
-**Replacement plan (definitive):**
+## A.2 Resolved — what the "any" scope is, and why we don't need it
 
-1. **Keep `SettingsValues.mShowsNumberRow` field for ABI / call-site
-   stability, but** make it source from a restored preference key
-   `PREF_SHOW_NUMBER_ROW` (default `true`). Restore the toggle in
-   `AppearanceScreen.kt` under *Size and layout*. This is a literal
-   revert of the relevant part of PR #115's removal.
-2. **Generalize "layout file decides number row" to all MAIN
-   layouts**, built-in or custom. In `KeyboardParser.kt`, when the
-   parsed MAIN layout already has 4 rows of body keys (i.e. the
-   layout file *includes* a top number-row), do not also prepend
-   the global number row even if `mNumberRowEnabled` is true.
-   Detect this by counting `baseKeys.size` before the
-   `if (...mNumberRowEnabled)` branch. This subsumes the
-   `customKeyboardsActive` check.
-3. **3-row built-in layouts and 3-row custom layouts unchanged:**
-   the global number-row toggle (or per-subtype
-   `LOCALIZED_NUMBER_ROW` extra value, which already exists) governs
-   whether the global number row is prepended. This matches stock
-   HeliBoard behavior pre-PR-#113.
-4. **A user who wants "no number row" for one language** unchecks
-   the per-subtype localized-number-row switch on `SubtypeScreen`
-   (already there). A user who wants "no number row anywhere"
-   toggles the restored `PREF_SHOW_NUMBER_ROW`.
+**Maintainer asked: explain what the "any" scope is. Here's the
+explanation and the recommendation.**
 
-This makes the merge a strict superset of both pre-PR-#113 and
-post-PR-#113 capability.
+### What the "any" scope was supposed to be
+
+PR #113 lets one preset apply to *every* language at once via
+`"locales": ["*"]`. The default seeded JSON ships a *"Programming
+(any language)"* preset that puts symbols like `@ # $ _` on the
+alphabet row regardless of which subtype the user is on. The
+hypothetical *"any" scope* in the merged design was the file-system
+equivalent of `"*"` — a sentinel like `custom.any.<name>.` that
+would make a single custom layout file appear in *every* subtype's
+*Main layout* dropdown.
+
+### How custom layouts are scoped today (existing system)
+
+In `LayoutUtilsCustom.kt`:
+
+| Slot | Filename shape | Visible to which subtypes? |
+| --- | --- | --- |
+| MAIN, Latin locale | `custom.Latn.<base36>.` | Every subtype whose locale uses Latin script (en, fr, de, es, …) |
+| MAIN, non-Latin locale | `custom.<bcp47>.<base36>.` | Only the subtype with that exact BCP-47 tag (e.g. `custom.fr-FR.…` is only visible to `fr-FR`) |
+| Non-MAIN (SYMBOLS, MORE_SYMBOLS, FUNCTIONAL, NUMBER, NUMBER_ROW, NUMPAD, PHONE, EMOJI_BOTTOM, CLIPBOARD_BOTTOM) | `custom.<base36>.` | Every subtype, regardless of locale (no filtering) |
+
+`getLayoutFiles(LayoutType.MAIN, ctx, locale)` (lines 104-113) is
+the function doing this filtering. The key insight is that the
+*Latin* scope **already is the wildcard** for the majority of users
+— anything you write under `custom.Latn.…` shows up in every
+en/fr/de/es/it/pt/etc. *Main layout* dropdown. The seeded
+*Programming* preset uses Latin labels (`q w e r t y …`), so it
+naturally belongs under `custom.Latn.…`.
+
+### What the "any" sentinel would actually add
+
+The only thing a `custom.any.…` sentinel would do that `custom.Latn.…`
+doesn't already do is *also* show the layout under non-Latin
+subtypes (Cyrillic, Bengali, Khmer, Hebrew, Arabic, …). For a
+Latin-character programming keyboard, surfacing it under, say,
+Bengali (which has its own writing system) is rarely what the user
+wants — they would have to manually pick it from a dropdown and
+lose access to their native script.
+
+For non-MAIN slots (symbols, more-symbols, etc.), there's nothing
+to add. They are already universal.
+
+### Recommendation
+
+**Don't introduce an `any` scope. Drop Section 4 step 2 entirely.**
+
+- The *Programming-style "applies to any language"* preset survives
+  as a regular `custom.Latn.<base36>.` MAIN layout. Every Latin
+  subtype already sees it in the dropdown with zero code changes.
+- For SYMBOLS / MORE_SYMBOLS / etc., the user-created custom file
+  is already universal because the existing
+  `getLayoutFiles(non-MAIN, ctx, locale)` ignores locale.
+- The *Add custom layout* dialog should say something like:
+  *"Latin-script custom layouts are available to every Latin
+  language."* That single line is the entire UX for the wildcard
+  case.
+- Migration of PR #113's `["*"]` preset writes one file:
+  `custom.Latn.<base36>.<programming-name>.`. That's it — no
+  fan-out, no per-locale subtype creation. The user picks it from
+  the dropdown on whichever Latin subtype they want it active in.
+
+If, *later*, someone needs a truly script-agnostic universal layout
+(e.g. a "math keyboard" with Greek/math symbols that someone wants
+to use under any language), that's a narrow follow-up. The
+implementation would add a new `LayoutUtilsCustom.SCRIPT_ANY` token
+and one extra union in `getLayoutFiles`. Not worth doing
+preemptively.
+
+## A.3 Resolved — number row becomes part of every layout file
+
+**Maintainer feedback: don't restore the global toggle. Bake the
+number row into every locale's MAIN layout file so users can edit
+those keys when they fork it. The trade-off — every keyboard now
+has a number row by default — is acceptable.**
+
+### Why this is the right call
+
+The whole point of the merge is *one storage tier, one editor*.
+A runtime "prepend a number row" step in `KeyboardParser` is
+exactly the kind of hidden-state behaviour the merge is trying to
+eliminate. If the user forks `qwerty` to make their own *PS-mod*
+layout, they expect the number row to be in the file they're
+editing. Right now it isn't — it lives in
+`assets/layouts/number_row/number_row.json` and gets stitched in
+at render time. PR #113 already moved this responsibility into the
+preset itself ("4 rows = top row is the number row, 3 rows = no
+number row"). After the merge, that rule extends to every layout,
+built-in and custom.
+
+### What this requires (replaces the previous A.3 plan)
+
+1. **Bake the number row into every built-in MAIN layout file under
+   `app/src/main/assets/layouts/main/*.{txt,json}`.** 76 files.
+
+   - All `.txt` files get a new first row consisting of
+     `1 2 3 4 5 6 7 8 9 0`, followed by a blank line, followed by
+     the existing content.
+   - All `.json` files get a new first array element:
+     `[{ "label": "1" }, { "label": "2" }, ..., { "label": "0" }]`.
+   - **Source the digits per locale where appropriate.** Match
+     today's behaviour of localized digits:
+
+     | Existing localized digit set (from `number_row/`) | Locales |
+     | --- | --- |
+     | Eastern Arabic-Indic `٠ ١ ٢ ٣ ٤ ٥ ٦ ٧ ٨ ٩` | `ar`, `arabic_hijai`, `arabic_pc`, `farsi`, `central_kurdish`, etc. |
+     | Bengali numerals `০ ১ ২ ৩ ৪ ৫ ৬ ৭ ৮ ৯` | `bengali_*` |
+     | Devanagari `० १ २ ३ ४ ५ ६ ७ ८ ९` | `hindi*` |
+     | Thai `๐ ๑ ๒ ๓ ๔ ๕ ๖ ๗ ๘ ๙` | `thai*` |
+     | Khmer `០ ១ ២ ៣ ៤ ៥ ៦ ៧ ៨ ៩` | `khmer*` |
+     | Lao `໐ ໑ ໒ ໓ ໔ ໕ ໖ ໗ ໘ ໙` | `lao*` |
+     | Burmese `၀ ၁ ၂ ၃ ၄ ၅ ၆ ၇ ၈ ၉` | `burmese*` (if present) |
+     | Western `1 2 3 4 5 6 7 8 9 0` | everything else (Latin, Cyrillic, Greek, Hebrew, etc.) |
+
+     `LocaleKeyboardInfos.kt` already encodes which scripts use
+     which digit set; reuse that mapping when generating the
+     baked-in rows.
+
+   - **Hints on the number row.** Some current renderings put
+     locale-specific symbols above number keys (`! @ #` style).
+     Today this comes from `LocaleKeyboardInfos.getPopupKeys`. To
+     keep that behaviour, write each number-row key as
+     `1 !` (primary `1`, hint `!`) in the simple-text format or
+     `{ "label": "1", "popup": { "main": { "label": "!" } } }` in
+     JSON, mirroring whatever `LocaleKeyboardInfos` currently emits
+     for the active locale. If a layout author later wants to wipe
+     those hints they just remove the second token per line in
+     their custom copy.
+
+2. **Symbols / more-symbols layouts also get number rows baked
+   in.** PR #113's seeded *English* preset already does this for
+   `symbols` and `more_symbols` (`"1 2 3 4 5 6 7 8 9 0"` is the
+   first row of each). Extend the same change to
+   `assets/layouts/symbols/symbols.txt`,
+   `assets/layouts/more_symbols/symbols_shifted.txt`, and any
+   localized variants (`symbols_arabic.txt`). Numbers should
+   appear as the first row of every alphabet/symbol layer of every
+   locale.
+
+3. **Delete the runtime number-row prepend.** In
+   `KeyboardParser.kt`:
+   - Remove the `customKeyboardsActive` check and its branches at
+     lines 43-54, 124, 290.
+   - Remove the `baseKeys.add(0, numberRow.mapTo(...))` injection
+     in the `mNumberRowEnabled` branch.
+   - Remove `addNumberRowOrPopupKeys` calls that prepend the
+     number row.
+   - Keep the `popup.numberLabel = numberRow[i].label` *fallback
+     hint* mechanism around for the `!mNumberRowEnabled` legacy
+     case **only if** any layout files end up actually missing a
+     number row (none should, after step 1). Otherwise delete it
+     too.
+4. **Drop `PREF_SHOW_NUMBER_ROW`, `mShowsNumberRow`,
+   `setNumberRowEnabled`, `mNumberRowEnabled`.** Since every layout
+   file always has a number row, the parameter is redundant.
+   Touched files:
+   - `latin/settings/SettingsValues.java` — delete the field.
+   - `keyboard/KeyboardLayoutSet.java` — delete the builder method.
+   - `keyboard/KeyboardSwitcher.java` — drop the
+     `setNumberRowEnabled(...)` calls.
+   - `keyboard/KeyboardId.java` — delete the field, recompute its
+     equality/hash code.
+   - `keyboard/emoji/EmojiLayoutParams.kt`,
+     `keyboard/clipboard/ClipboardLayoutParams.kt`,
+     `keyboard/internal/KeyboardBuilder.kt` — these all currently
+     test `mShowsNumberRow` to decide how much vertical space to
+     reserve. Since the answer is now *always reserved for 4
+     rows*, drop the conditional.
+5. **`PREF_LOCALIZED_NUMBER_ROW` becomes redundant for users who
+   accept the baked-in defaults.** Two options:
+
+   - **Keep it as a per-subtype override** that swaps the layout
+     file's first row out for the Western (`1 2 3 4 5 6 7 8 9 0`)
+     digits even when the locale's baked-in row uses localized
+     digits. This is a one-line replacement at render time
+     (`baseKeys[0] = westernNumberRow` when the toggle is on).
+     Useful for bilingual users.
+   - **Drop it.** Users who want different digits create a custom
+     layout. Simpler.
+
+   Recommendation: **drop it** to match the maintainer's stated
+   goal of "fewer hidden runtime behaviours". The number row lives
+   in the file. If the user wants it different, they edit the file
+   (or fork it).
+
+6. **Per-subtype `extraValues` `LOCALIZED_NUMBER_ROW=...` and the
+   `hasLocalizedNumberRow(...)` UI in `SubtypeScreen.kt` (lines
+   212-235) follow the same fate as step 5.** Drop or keep
+   together.
+
+7. **The `+` layout system (`qwerty+`, `azerty+`, etc.) is
+   unaffected.** `+` appends locale extra keys to specific rows
+   (`getExtraKeys(i+1)`). After step 1 the number row is row 1
+   and the *row indexing* already starts at 1 in
+   `LocaleKeyboardInfos.getExtraKeys` for the *alphabet* rows —
+   the helper takes the row *position relative to the alphabet*,
+   so we need to either:
+   - Adjust the `+` row indexing to account for the new top row
+     (`getExtraKeys(i)` instead of `getExtraKeys(i+1)` when
+     iterating from row 1), **or**
+   - Leave the indexing alone and let the number row be row 0,
+     which the `if (params.mId.isAlphabetKeyboard && layoutName.endsWith("+"))` branch in `LayoutParser.kt:128` already
+     skips because it currently iterates from `i=0` and asks for
+     extras at `i+1`. That makes the number row "row 0" with
+     extras at index 1, which is the alphabet top row's extras.
+     Re-check the math when implementing.
+
+### Trade-offs the maintainer has accepted
+
+- **Every keyboard now shows a number row.** No global toggle to
+  hide it. Users who don't want one: fork the layout and delete
+  the first row from their copy. (We could add a "remove number
+  row" button to the Edit dialog as sugar.)
+- **76 built-in layout files have to be edited.** Mechanical and
+  scriptable. A small generator can read
+  `LocaleKeyboardInfos`-style digit mapping and emit the new top
+  rows. Add a CI check that asserts every `main/*.{txt,json}` has
+  4 rows.
+- **Localised digit support becomes baked-in per layout file
+  instead of a runtime decision.** Users who want a different
+  digit set for their language fork the file. Bilingual users
+  lose the runtime toggle unless we keep `PREF_LOCALIZED_NUMBER_ROW`
+  per step 5 option 1.
+- **`KeyboardId` no longer carries `mNumberRowEnabled`.** Cache
+  keys collapse — fewer distinct keyboard instances cached.
+  Probably a tiny perf win.
+
+### What the merged step list looks like for A.3
+
+Replace step 3-4 in A.15 with:
+
+- *3.* Bake the number row into every built-in MAIN, SYMBOLS, and
+  MORE_SYMBOLS layout file under `assets/layouts/`. Add a generator
+  script under `tools/` if helpful, plus a JVM test that asserts
+  every alphabet/symbol layout has exactly 4 rows.
+- *4.* Delete the runtime number-row prepend and the
+  `mShowsNumberRow`/`mNumberRowEnabled` plumbing. Decide
+  `PREF_LOCALIZED_NUMBER_ROW`'s fate (recommend: drop).
 
 ## A.4 Significant — Migration is more delicate than Section 4 step 6 implies
 
@@ -959,77 +1158,244 @@ After the merge, JVM tests under `app/src/test/` should cover:
 
 ## A.15 Revised step list (replaces Section 4)
 
-This is the merged, corrected step list. Each step is independently
-shippable.
+This is the merged, corrected step list after the maintainer
+review of A.1, A.2, A.3. Each step is independently shippable.
 
-1. **(parser) Add `hint: String?` to rich JSON `TextKeyData`.**
-   Propagate through `copy`, `compute`, `toKeyParams`. Update
-   `KeyboardParser` so a key with a non-null `hint` keeps its hint
-   label even on symbol layouts. JSON-only — no simple-text grammar
-   change.
+1. **(assets) Bake the number row into every built-in MAIN,
+   SYMBOLS, and MORE_SYMBOLS layout file** under
+   `app/src/main/assets/layouts/`. Use the locale-appropriate
+   digit set (table in A.3 step 1). Carry the locale's current
+   number-row hints (first popup per key) into the file as the
+   first popup of each digit. Add a JVM test that asserts every
+   `main/*.{txt,json}` and `{symbols,more_symbols}/*` has exactly
+   4 rows.
 
-2. **(parser, optional/deferred) Authoring helper for hints in
-   `LayoutEditDialog`.** If we want users to type
-   `a|@ s|# d|$ …` and have the dialog save it as JSON with `hint`
-   fields, add a converter that runs only when the input starts
-   with the magic header `// format: hint-rows-v1`. Otherwise leave
-   the existing simple-text and JSON parsing untouched.
+2. **(parser) Delete the runtime number-row prepend.** Remove the
+   `customKeyboardsActive` branches and the
+   `baseKeys.add(0, numberRow.mapTo(...))` injection in
+   `KeyboardParser.kt`. Replace the `customKeyboardsActive`
+   hint-flag branch with
+   `LayoutUtilsCustom.isCustomLayout(layoutName)` so user-edited
+   symbol layouts show their popups as hints. Drop
+   `mShowsNumberRow`, `mNumberRowEnabled`, `setNumberRowEnabled`,
+   and their callers in `KeyboardLayoutSet`, `KeyboardSwitcher`,
+   `KeyboardId`, `KeyboardBuilder`, `EmojiLayoutParams`,
+   `ClipboardLayoutParams`, `SettingsValues`.
 
-3. **(parser) Generalise number-row injection.** In
-   `KeyboardParser.parseCoreLayout` (the
-   `mNumberRowEnabled` branch), skip the prepend when the parsed
-   MAIN layout already has 4 rows. Remove the
-   `customKeyboardsActive` check.
+3. **(prefs) Drop `PREF_LOCALIZED_NUMBER_ROW` and the per-subtype
+   `LOCALIZED_NUMBER_ROW` extra value.** Remove the toggle in
+   `SubtypeScreen.kt` lines 212-235 and the
+   `hasLocalizedNumberRow(...)` helper. Users who want different
+   digits fork the layout file. (Alternative: keep this toggle as
+   a render-time first-row substitution — see A.3 step 5. Default
+   recommendation is drop.)
 
-4. **(prefs) Restore `PREF_SHOW_NUMBER_ROW` (boolean, default
-   `true`).** Re-add the *Show number row* toggle to
-   `AppearanceScreen.kt`. Wire `SettingsValues.mShowsNumberRow` to
-   it. Keep the existing per-subtype `LOCALIZED_NUMBER_ROW`
-   override.
+4. **(UI) Extract `MainLayoutRow` into `LayoutSlotEditor` and
+   reuse for every slot in `SubtypeScreen`.** Adds Add / Edit /
+   Delete / Load-from-file affordances for SYMBOLS, MORE_SYMBOLS,
+   FUNCTIONAL, etc. Includes "Edit a copy" (pencil-with-plus) icon
+   on built-in entries that pre-fills `LayoutEditDialog` with the
+   built-in file's contents (now including the number row).
 
-5. **(UI) Extract `MainLayoutRow` into `LayoutSlotEditor` and reuse
-   for every slot in `SubtypeScreen`.** Adds Add / Edit / Delete /
-   Load-from-file affordances for SYMBOLS, MORE_SYMBOLS, FUNCTIONAL,
-   etc. Includes "Edit a copy" (pencil-with-plus) icon on built-in
-   entries.
-
-6. **(UI) `LanguageScreen` hint string.** When search yields no
+5. **(UI) `LanguageScreen` hint string.** When search yields no
    results, render a single-line hint pointing the user at the
-   subtype detail screen for layout customisation. No wizard.
+   subtype detail screen for layout customisation. No standalone
+   wizard.
 
-7. **(migration) One-shot migration in `AppUpgrade.kt`.** Guarded by
-   `PREF_CUSTOM_KEYBOARDS_MIGRATED`. Writes one rich-JSON file per
-   slot per preset using the `hint` field from step 1. Creates
-   additional subtypes only for presets with explicit locales and
-   only when `PREF_USE_CUSTOM_KEYBOARDS` was `true`. Deletes
-   `PREF_CUSTOM_KEYBOARDS_JSON` and `PREF_USE_CUSTOM_KEYBOARDS` on
-   success.
+6. **(migration) One-shot migration in `AppUpgrade.kt`.** Guarded
+   by `PREF_CUSTOM_KEYBOARDS_MIGRATED`. For each preset:
+   - Call `CustomKeyboards.toSimpleLayoutText(preset, slot)` to
+     produce a plain simple-text body (number row already on
+     top, per A.3).
+   - For 3-row presets (no number row), prepend the locale's
+     default number row before writing, so the migrated file
+     matches the new "every layout has a number row" invariant.
+     Document this clearly in the upgrade notice the user sees.
+   - Write the file to
+     `<filesDir>/layouts/<slot>/custom.<scope>.<base36>.`
+     using `Latn` as the scope for `["*"]` presets, `Latn` for
+     any preset whose locales are all Latin, and the
+     BCP-47 locale tag for non-Latin presets.
+   - Resolve filename collisions by appending `(imported)` to the
+     display name.
+   - If `PREF_USE_CUSTOM_KEYBOARDS` was `true`, also create
+     additional subtypes pointing at the migrated layout for each
+     enabled locale that the preset's `locales` list explicitly
+     names. Enable them. Skip subtype creation for `["*"]`
+     wildcard presets.
+   - On success: set marker, delete `PREF_CUSTOM_KEYBOARDS_JSON`
+     and `PREF_USE_CUSTOM_KEYBOARDS`.
 
-8. **(cleanup) Delete the parallel system.** Remove
-   `latin/utils/CustomKeyboards.kt`,
-   `settings/screens/CustomKeyboardsScreen.kt`, the
-   `customKeyboardsActive` paths in
-   `keyboard/internal/keyboard_parser/{KeyboardParser,LayoutParser}.kt`,
-   the `Settings.onSharedPreferenceChanged` hooks for the deleted
-   prefs, the MainSettingsScreen entry, the `SettingsNavHost`
-   destination, the seed JSON in `Defaults.kt`, the
+7. **(cleanup) Delete the parallel system.** Remove
+   `latin/utils/CustomKeyboards.kt` (except the
+   `toSimpleLayoutText`/`splitKeyToken` helpers, which the
+   migrator briefly needs — move them inline into `AppUpgrade.kt`
+   or a tiny `CustomKeyboardsMigration.kt` file, then delete
+   the rest); `settings/screens/CustomKeyboardsScreen.kt`; the
+   override branch in
+   `keyboard/internal/keyboard_parser/LayoutParser.kt`; the
+   `customKeyboardsActive` paths in `KeyboardParser.kt`; the
+   `Settings.onSharedPreferenceChanged` hooks for the deleted
+   prefs; the MainSettingsScreen entry; the `SettingsNavHost`
+   destination; the seed JSON in `Defaults.kt`; the
    `PREF_USE_CUSTOM_KEYBOARDS` / `PREF_CUSTOM_KEYBOARDS_JSON`
    constants. Update AGENTS.md notes in `latin/utils`,
    `latin/settings`, `keyboard/internal/keyboard_parser`,
-   `settings/screens`.
+   `settings/screens`, `assets/layouts`.
 
-9. **(tests) Add JVM tests** covering A.4, A.13, A.14.
+8. **(tests) JVM tests** covering:
+   - Every built-in alphabet/symbol layout has 4 rows.
+   - Migration of the seeded 4-preset JSON produces deterministic
+     filenames and the expected file contents.
+   - Migration handles `\|` and `\\` escapes correctly.
+   - Migration handles `["*"]` wildcards (writes one `Latn` file,
+     no subtypes).
+   - Migration handles missing/blank/malformed JSON without
+     setting the marker.
+   - Re-running migration with the marker set is a no-op.
+   - A `Latn`-scoped custom layout appears in every Latin
+     subtype's MAIN dropdown and is hidden from non-Latin
+     subtypes.
+   - A custom symbol layout shows its first popup as a hint
+     (because `isCustomLayout` is true and the
+     `LABEL_FLAGS_DISABLE_HINT_LABEL` branch is suppressed).
 
-10. **(release) Rebuild the canonical APK** with
-    `./tools/build-dist-apk.sh`.
+9. **(release) Rebuild the canonical APK** with
+   `./tools/build-dist-apk.sh`.
 
 ## A.16 Updated TL;DR
 
-The body's TL;DR stands. The mechanism for "lift the `primary|hint`
-ergonomics into the shared parser" is now: **add a JSON `hint`
-field**, not "extend simple-text with `|`". Section 5's
-"open question" about number-row handling is resolved in A.3 by
-restoring `PREF_SHOW_NUMBER_ROW` and generalising the 4-row layout
-detection to all MAIN layouts. The wizard from step 5 is dropped in
-favor of finishing the per-slot editor on `SubtypeScreen`.
+The body's TL;DR stands. The three "critical" issues from the
+review are resolved as follows:
+
+- **A.1 (hint storage):** the existing format already encodes hints
+  implicitly as "first popup of the key". Migration translates PR
+  #113 rows into ordinary simple-text using the existing
+  `toSimpleLayoutText` helper; no new schema, no `|` grammar
+  change, no `hint` JSON field. The only parser tweak is replacing
+  the `customKeyboardsActive` hint-flag conditional with
+  `isCustomLayout(layoutName)` so user-edited symbol layouts show
+  authored popups as hints.
+- **A.2 (any scope):** dropped. The existing `custom.Latn.*`
+  convention already serves as the wildcard for every Latin
+  subtype, and non-MAIN custom layouts are already universal by
+  construction.
+- **A.3 (number row):** baked into every built-in MAIN / SYMBOLS /
+  MORE_SYMBOLS layout file. The runtime prepend logic and the
+  global `mShowsNumberRow` plumbing are deleted. Users who want a
+  different digit set fork the file. `PREF_LOCALIZED_NUMBER_ROW`
+  recommendation: drop (with a fallback escape hatch documented).
+
+Section 5's open questions and A.4-A.14 minor items still apply.
+Recommendations for those follow in A.17.
+
+## A.17 Recommendations on the remaining (A.4-A.14) items
+
+The maintainer asked for advice on each. Short form:
+
+- **A.4 Migration** — keep the spec as written. Idempotency marker
+  pref + atomic-with-retry is the only safe pattern given that
+  layout-file writes can fail on full storage / direct-boot timing.
+  *Recommend: implement exactly as A.4 describes, with the
+  A.15 step 6 simplifications (no JSON, no `hint` field needed
+  since A.1 collapsed).*
+
+- **A.5 Non-MAIN slot UI parity** — *recommend: do it.* This is the
+  highest-value UX change of the whole merge. Users authoring a
+  *Programming* custom MAIN layout almost always want a matching
+  custom SYMBOLS too; without parity they hit a wall the moment
+  they tap `?123`. Cost is low (extract one composable, reuse for
+  every slot in `SubtypeScreen.kt`).
+
+- **A.6 Wizard location** — *recommend: drop the standalone
+  wizard from `LanguageScreen` entirely.* By the time the user
+  knows what locale they want a custom layout for, they're already
+  one tap deep into `SubtypeScreen`. Surfacing creation there
+  (via the Add button on the dropdown that already exists for MAIN
+  and gets extended to non-MAIN by A.5) is enough. The only
+  addition on `LanguageScreen` should be the empty-search hint
+  string.
+
+- **A.7 Subtype name override** — *recommend: don't add code.* The
+  existing `setSubtypeNameOverride` on Android 14+ already does
+  the right thing once the migrated layout is named via
+  `LayoutUtilsCustom.getDisplayName`. Just add a test to confirm
+  the migration produces friendly names.
+
+- **A.8 Dictionary availability** — *recommend: leave as-is.* The
+  existing `MissingDictionaryDialog` flow is correct. Migration
+  should not pre-warn (would be noisy) and should not auto-create
+  subtypes for locales the user hasn't enabled (already in the
+  A.4 spec).
+
+- **A.9 Frozen `+` extras** — *recommend: add a one-line caption
+  to the Edit dialog* when the source layout name ends with `+`:
+  *"Locale-specific extra keys are frozen into the copy."*. No
+  code logic change, just a UI string. Low cost, prevents
+  confused-user reports.
+
+- **A.10 Cache invalidation** — *recommend: just remove the
+  PR-#113-added hooks in `Settings.onSharedPreferenceChanged`.*
+  The existing `LayoutUtilsCustom.onLayoutFileChanged` /
+  `KeyboardSwitcher.setThemeNeedsReload` covers all relevant
+  changes after the merge. Verify by writing a custom layout via
+  `LayoutEditDialog` and confirming the next IME show reflects it.
+
+- **A.11 Synthetic cache key** — *recommend: nothing to do.* The
+  preset cache key disappears with `CustomKeyboards.kt`. The
+  existing per-`layoutName` cache key in `LayoutParser.layoutCache`
+  already keys on the custom filename (which embeds the locale),
+  so it's correct as-is.
+
+- **A.12 Toolbar cycle button** — *recommend: punt.* The merge
+  already gives users a way to switch alphabets per locale by
+  enabling multiple additional subtypes for the same locale; the
+  globe key cycles them. A dedicated "next alphabet variant"
+  toolbar button is a small standalone follow-up issue. Don't
+  block on it.
+
+- **A.13 Validation** — *recommend: extend
+  `LayoutUtilsCustom.checkLayout` with two checks:* (i) MAIN /
+  SYMBOLS / MORE_SYMBOLS files must have exactly 4 rows after
+  A.3; (ii) any popup-as-hint string must be ≤5 characters
+  visually (matches the existing key-hint-sizing skill in
+  `.cursor/skills/key-hint-sizing/SKILL.md`). Surface both as
+  inline errors in `LayoutEditDialog`.
+
+- **A.14 Test coverage** — *recommend: add the tests listed in
+  A.15 step 8.* They are cheap to write (JVM, no Robolectric
+  needed for most) and catch every regression a future refactor
+  is likely to introduce.
+
+### Order recommendation
+
+If implementing incrementally over several PRs, this is a
+sensible order (each PR shippable on its own):
+
+1. **PR #X:** A.15 steps 1, 8 (assets + tests). This is the
+   biggest patch by line count but the lowest-risk: it adds
+   number rows to every built-in layout and adds the validation
+   test. The runtime still injects a number row on top, so
+   you'd see *two* number rows during this PR — temporarily fine
+   if the PR also flips the injection off behind a flag, but
+   simplest is to land 1 and 2 together.
+
+2. **PR #X+1:** A.15 steps 2, 3 (parser cleanup). Delete the
+   runtime number-row prepend and `mShowsNumberRow` plumbing.
+   Drop `PREF_LOCALIZED_NUMBER_ROW`. This is the
+   "remove machinery" PR.
+
+3. **PR #X+2:** A.15 step 4, 5 (UI). Extract `LayoutSlotEditor`,
+   wire it into every slot, add empty-search hint on
+   `LanguageScreen`.
+
+4. **PR #X+3:** A.15 steps 6, 7 (migration + cleanup). Delete
+   `CustomKeyboards.kt`, the `CustomKeyboardsScreen`, prefs,
+   override branches, AGENTS notes.
+
+5. **PR #X+4:** A.15 step 9 (APK rebuild).
+
+Each PR is bounded, reviewable, and rolls back independently.
+PR #X+3 is the only one with user-visible state migration; the
+others are mechanical refactors.
 
