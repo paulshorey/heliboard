@@ -3,7 +3,7 @@
 Longer-form architecture notes that complement the shorter folder-local AGENTS files.
 
 ## Direct files
-- `custom-keyboards-merge-plan.md` - plan for folding the Custom keyboards JSON-prefs feature (PR #113) into the existing per-locale `LayoutUtilsCustom` / `SubtypeScreen` editor pipeline so both share one storage layer, one parser, and one UI tree.
+- `custom-keyboards-plan.md` - plan for making per-locale layouts user-editable from the existing **Languages & Layouts** settings tree: bake the number row into every built-in layout (4 rows by default; 3-row layouts remain first-class), bring SYMBOLS/MORE_SYMBOLS/FUNCTIONAL/etc. slots to MAIN parity in `SubtypeScreen`, add a one-tap "Edit a copy" affordance, and delete the dead `PREF_SHOW_NUMBER_ROW` plumbing.
 - `input-simplified.md` - explains the mirror-based current-word architecture and why the host editor is treated as a committed-text sink.
 - `soniox-transcription.md` - end-to-end Soniox voice pipeline and configuration notes.
 
