@@ -18,6 +18,7 @@ import helium314.keyboard.latin.common.isEmoji
 import helium314.keyboard.latin.define.DebugFlags
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.utils.LayoutType
+import helium314.keyboard.latin.utils.LayoutUtilsCustom
 import helium314.keyboard.latin.utils.POPUP_KEYS_LAYOUT
 import helium314.keyboard.latin.utils.replaceFirst
 import helium314.keyboard.latin.utils.splitAt
@@ -36,8 +37,7 @@ import kotlin.math.roundToInt
 class KeyboardParser(private val params: KeyboardParams, private val context: Context) {
     private val defaultLabelFlags = when {
         params.mId.isAlphabetKeyboard -> params.mLocaleKeyboardInfos.labelFlags
-        // reproduce the no-hints in symbol layouts
-        // todo: add setting? or put it in TextKeyData to happen only if no label flags specified explicitly?
+        params.mId.isAlphaOrSymbolKeyboard && isCustomSymbolLayout() -> 0
         params.mId.isAlphaOrSymbolKeyboard -> Key.LABEL_FLAGS_DISABLE_HINT_LABEL
         else -> 0
     }
@@ -64,15 +64,9 @@ class KeyboardParser(private val params: KeyboardParams, private val context: Co
         if (params.mId.isEmojiClipBottomRow) {
             heightRescale = 4f
             // params rescale is not perfect, especially mTopPadding may cause 1 pixel offsets because it's already been converted to int once
-            if (Settings.getValues().mShowsNumberRow) {
-                params.mOccupiedHeight /= 5
-                params.mBaseHeight /= 5
-                params.mTopPadding = (params.mTopPadding / 5.0).roundToInt()
-            } else {
-                params.mOccupiedHeight /= 4
-                params.mBaseHeight /= 4
-                params.mTopPadding = (params.mTopPadding / 4.0).roundToInt()
-            }
+            params.mOccupiedHeight /= 5
+            params.mBaseHeight /= 5
+            params.mTopPadding = (params.mTopPadding / 5.0).roundToInt()
         } else {
             // rescale height if we have anything but the usual 4 rows
             heightRescale = if (keysInRows.size != 4) 4f / keysInRows.size else 1f
@@ -102,15 +96,8 @@ class KeyboardParser(private val params: KeyboardParams, private val context: Co
         }
 
         val numberRow = getNumberRow()
+        convertToLocalizedNumbers(baseKeys)
         addNumberRowOrPopupKeys(baseKeys, numberRow)
-        // Symbol popups are now defined inline in the layout files
-        // if (params.mId.isAlphabetKeyboard)
-        //     addSymbolPopupKeys(baseKeys)
-        if (params.mId.isAlphabetKeyboard && params.mId.mNumberRowEnabled) {
-            val newLabelFlags = defaultLabelFlags or
-                    if (Settings.getValues().mShowNumberRowHints) 0 else Key.LABEL_FLAGS_DISABLE_HINT_LABEL
-            baseKeys.add(0, numberRow.mapTo(mutableListOf()) { it.copy(newLabelFlags = newLabelFlags) })
-        }
         if (!params.mAllowRedundantPopupKeys)
             params.baseKeys = baseKeys.flatMap { row -> row.map { it.toKeyParams(params) } }
 
@@ -271,9 +258,30 @@ class KeyboardParser(private val params: KeyboardParams, private val context: Co
         return functionalKeysLeft to functionalKeysRight
     }
 
-    private fun addNumberRowOrPopupKeys(baseKeys: MutableList<MutableList<KeyData>>, numberRow: MutableList<KeyData>) {
-        if (!params.mId.mNumberRowEnabled && params.mId.isAlphabetKeyboard && !hasBuiltInNumbers()) {
-            baseKeys.first().forEachIndexed { index, keyData -> keyData.popup.numberLabel = numberRow.getOrNull(index)?.label }
+    private fun addNumberRowOrPopupKeys(baseKeys: MutableList<MutableList<KeyData>>, numberRow: List<KeyData>) {
+        if (params.mId.isAlphabetKeyboard
+                && baseKeys.size == 3
+                && !hasBuiltInNumbers()) {
+            baseKeys.first().forEachIndexed { i, keyData ->
+                if (keyData.popup.getPopupKeyLabels(params).isNullOrEmpty()) {
+                    keyData.popup.numberLabel = numberRow.getOrNull(i)?.label
+                }
+            }
+        }
+    }
+
+    private fun convertToLocalizedNumbers(baseKeys: MutableList<MutableList<KeyData>>) {
+        if (!params.mId.isAlphabetKeyboard || baseKeys.size < 4) return
+        val localizedNumbers = params.mLocaleKeyboardInfos.localizedNumberKeys
+        if (localizedNumbers?.size != 10 || !Settings.getValues().mLocalizedNumberRow) return
+        val topRow = baseKeys.first()
+        for (i in topRow.indices) {
+            val key = topRow[i]
+            val number = key.label.toIntOrNull() ?: continue
+            when (number) {
+                0 -> topRow[i] = key.copy(newLabel = localizedNumbers[9], newCode = KeyCode.UNSPECIFIED, newPopup = SimplePopups(listOf(key.label)).merge(key.popup))
+                in 1..9 -> topRow[i] = key.copy(newLabel = localizedNumbers[number - 1], newCode = KeyCode.UNSPECIFIED, newPopup = SimplePopups(listOf(key.label)).merge(key.popup))
+            }
         }
     }
 
@@ -313,6 +321,16 @@ class KeyboardParser(private val params: KeyboardParams, private val context: Co
             }
         }
         return row
+    }
+
+    private fun isCustomSymbolLayout(): Boolean {
+        val layoutType = when (params.mId.mElementId) {
+            KeyboardId.ELEMENT_SYMBOLS -> LayoutType.SYMBOLS
+            KeyboardId.ELEMENT_SYMBOLS_SHIFTED -> LayoutType.MORE_SYMBOLS
+            else -> return false
+        }
+        val layoutName = params.mId.mSubtype.layouts[layoutType] ?: return false
+        return LayoutUtilsCustom.isCustomLayout(layoutName)
     }
 
     // some layouts have numbers hardcoded in the main layout (pcqwerty as keys, and others as popups)

@@ -89,10 +89,15 @@ object LayoutParser {
         // not a json, or invalid json
         val simpleKeyData = parseSimpleString(layoutFileContent)
         return { params ->
+            val firstAlphabetRowIndex = if (simpleKeyData.size >= 4) 1 else 0
             simpleKeyData.mapIndexedTo(mutableListOf()) { i, row ->
                 val newRow = row.toMutableList()
-                if (params.mId.isAlphabetKeyboard && layoutName.endsWith("+"))
-                    params.mLocaleKeyboardInfos.getExtraKeys(i+1)?.let { newRow.addAll(it) }
+                if (params.mId.isAlphabetKeyboard
+                        && layoutName.endsWith("+")
+                        && i >= firstAlphabetRowIndex) {
+                    val alphabetRow = i - firstAlphabetRowIndex + 1
+                    params.mLocaleKeyboardInfos.getExtraKeys(alphabetRow)?.let { newRow.addAll(it) }
+                }
                 newRow
             }
         }
