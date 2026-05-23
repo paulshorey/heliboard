@@ -32,7 +32,7 @@ HeliBoard uses Soniox real-time transcription for voice input.
 - API key preference: `Settings.PREF_SONIOX_API_KEY` (legacy `speechmatics_api_key` and `deepgram_api_key` keys are cleared automatically the first time `TranscriptionPreferences.readSonioxApiKey` is called because those provider-specific keys cannot authenticate with Soniox).
 - Soniox session settings:
   - `Settings.PREF_SONIOX_ENABLE_ENDPOINT_DETECTION` (boolean, default `true`)
-  - `Settings.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS` (int, range 500–3000, default 2000)
+  - `Settings.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS` (int, range 500–3000, default 3000; upgrades from the previous 2000 default)
   - `Settings.PREF_SONIOX_DIARIZATION` (boolean, default `true`)
   - `Settings.PREF_SONIOX_CUSTOM_TERMS` (string, one term per line; merged with the built-in `context.terms` list at session start)
 - Local silence settings remain unchanged:
@@ -47,7 +47,7 @@ HeliBoard uses Soniox real-time transcription for voice input.
 - `context.terms` is the union of a built-in list (`HeliBoard`, `Soniox`, `Kubernetes`, `API`, `gnocchi`) and any user-defined custom terms from `PREF_SONIOX_CUSTOM_TERMS`, deduped and trimmed in `SonioxTranscriptionClient.buildSessionConfig`.
 - `context.text` is populated at the start of each Soniox session from up to the most recent 4 000 characters of editor text before the cursor, as supplied by `LatinIME.buildVoiceContextText` via `VoiceInputManager.setPriorTextProvider`. Soniox uses this to inform sentence-structure punctuation, mid-sentence casing, and proper-noun spelling. Reconnects re-fetch the prior text so the running transcript is always part of the context.
 - Soniox returns tokens continuously; there is no separate "recognition started" event. The client treats the stream as ready as soon as the start config frame is queued. Authentication failures still surface via `error_code` JSON responses, which are routed to `onStreamError`.
-- HeliBoard does not configure direct replacement rules, punctuation sensitivity, disfluency removal, or output locale for Soniox. Punctuation is decided automatically. The only user-facing latency lever is endpoint detection.
+- HeliBoard does not configure direct replacement rules, punctuation sensitivity, disfluency/filler-word removal, or output locale for Soniox — those knobs are not in the real-time WebSocket API. Punctuation is model-driven; `context.text` helps mid-sentence formatting. The main user-facing pause/punctuation levers are endpoint detection and `max_endpoint_delay_ms` (higher waits longer before finalizing).
 - When diarization is enabled, the client locks onto the first non-empty `speaker` label it sees and drops tokens from any other speaker. Soniox uses string speaker IDs (`"1"`, `"2"`, …); the locked label is not guaranteed to be the local speaker.
 - The empty-frame end-of-stream handshake is the documented graceful-shutdown mechanism. Manual finalize (`{"type": "finalize"}`) is a separate Soniox feature for mid-stream finalization that HeliBoard does not currently use.
 - The client filters Soniox's special control tokens — `<end>` (emitted on every endpoint detection event) and `<fin>` (emitted by manual finalize) — from the final-token concatenation. Without this filter both markers would leak into the editor as literal text; the Soniox SDKs filter them automatically but raw WebSocket consumers must do it themselves (see `STREAM_MARKERS` in `SonioxTranscriptionClient.kt`).

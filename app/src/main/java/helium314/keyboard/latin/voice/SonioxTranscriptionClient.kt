@@ -48,7 +48,7 @@ class SonioxTranscriptionClient {
         // Soniox's documented bounds for max_endpoint_delay_ms.
         internal const val MIN_MAX_ENDPOINT_DELAY_MS = 500
         internal const val MAX_MAX_ENDPOINT_DELAY_MS = 3000
-        internal const val DEFAULT_MAX_ENDPOINT_DELAY_MS = 2000
+        internal const val DEFAULT_MAX_ENDPOINT_DELAY_MS = 3000
 
         private val PUNCTUATION_ATTACHING_TO_PREVIOUS = setOf(
             '.', ',', '!', '?', ':', ';', ')', ']', '}', '%'

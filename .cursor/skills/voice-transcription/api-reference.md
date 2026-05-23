@@ -21,7 +21,7 @@ HeliBoard uses the Soniox **Real-Time STT WebSocket** API (`wss://stt-rt.soniox.
     "text": "<up to 4000 chars of editor text before the cursor>"
   },
   "enable_endpoint_detection": true,
-  "max_endpoint_delay_ms": 2000,
+  "max_endpoint_delay_ms": 3000,
   "enable_speaker_diarization": false
 }
 ```
@@ -34,8 +34,8 @@ HeliBoard uses the Soniox **Real-Time STT WebSocket** API (`wss://stt-rt.soniox.
 - **`language_hints`** (optional): array of ISO language codes. HeliBoard sends a single-element array based on the active keyboard subtype, or omits the field entirely so Soniox auto-detects.
 - **`context.terms`** (optional): recognition hints. HeliBoard sends the union of a built-in list (`HeliBoard`, `Soniox`, `Kubernetes`, `API`, `gnocchi`) and the user's custom terms from `PREF_SONIOX_CUSTOM_TERMS` (one per line, managed in `SonioxContextTermsScreen`). Merged, trimmed, and deduplicated by `SonioxTranscriptionClient.buildSessionConfig`.
 - **`context.text`** (optional): free-form prior text. HeliBoard sends up to the last 4 000 characters of editor text before the cursor (`LatinIME.buildVoiceContextText` via `VoiceInputManager.setPriorTextProvider`). Soniox uses this for sentence-structure punctuation, mid-sentence casing, and proper-noun spelling. Reconnects re-fetch the prior text so the running transcript stays in context.
-- **`enable_endpoint_detection`** (boolean, optional): when true, Soniox finalizes tokens immediately once it detects the speaker has stopped talking.
-- **`max_endpoint_delay_ms`** (number, optional): valid range **500–3000 ms**, default **2000 ms**.
+- **`enable_endpoint_detection`** (boolean, optional): when true, Soniox finalizes tokens once it detects the speaker has stopped talking (semantic endpointing).
+- **`max_endpoint_delay_ms`** (number, optional): valid range **500–3000 ms**. Soniox API default is **2000 ms**; HeliBoard default is **3000 ms**. **Higher = wait longer** after a pause before committing the phrase (reduces premature punctuation); **lower = finalize sooner**.
 - **`enable_speaker_diarization`** (boolean, optional): when true, every token includes a `speaker` field. HeliBoard uses this to lock onto the first observed speaker and drop tokens from later speakers.
 
 Other documented fields (`enable_language_identification`, `translation`, `client_reference_id`) are not used.
