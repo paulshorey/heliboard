@@ -264,8 +264,9 @@
     <string name="soniox_api_key_title">Soniox API Key</string>
     <string name="soniox_api_key_summary">API key for voice transcription. Get from console.soniox.com</string>
     <string name="soniox_enable_endpoint_detection_title">Enable endpoint detection</string>
-    <string name="soniox_enable_endpoint_detection_summary">Lets Soniox finalize tokens immediately when it detects the speaker has stopped talking. Reduces dictation latency.</string>
+    <string name="soniox_enable_endpoint_detection_summary">Lets Soniox finalize dictated text when it detects you have stopped speaking. Turn off only if you want text to stay provisional until you stop the microphone.</string>
     <string name="soniox_max_endpoint_delay_ms_title">Max endpoint delay (ms, 500–3000)</string>
+    <string name="soniox_max_endpoint_delay_ms_summary">How long Soniox may wait after a pause before committing a phrase. Higher values (e.g. 3000) reduce premature periods and commas; lower values finalize sooner.</string>
     <string name="soniox_diarization_title">Speaker diarization</string>
     <string name="soniox_diarization_summary">Only the first detected speaker is inserted; tokens from other speakers are dropped.</string>
     <!-- Title for the per-user "context terms" / custom vocabulary screen, used both as the row in the transcription screen and as the screen title. -->
@@ -367,7 +368,7 @@
     <!-- Title of the setting to localize number row -->
     <string name="localized_number_row">Localize number row</string>
     <!-- Description of the settings to localize number row -->
-    <string name="localized_number_row_summary">Prefer localized over latin numbers</string>
+    <string name="localized_number_row_summary">Show localised digits in the number row when this language has its own digits</string>
     <!-- Title of the setting to enable number row hints -->
     <string name="number_row_hints">Show hints on number row</string>
     <!-- Title of the setting to save subtype per app -->

@@ -131,17 +131,17 @@ In `app/src/test/java/helium314/keyboard/KeyboardParserTest.kt`, add/extend test
 
 Tick a box (`[ ]` → `[x]`) when the work is done and committed.
 
-- [ ] **2.1 Prep:** Create branch `cursor/custom-layouts-pr2-parser-cleanup` off `main`.
-- [ ] **2.2 Phase A:** Pin all reads to `true` in `KeyboardParser.kt`, `KeyboardBuilder.kt`, etc. Ensure project compiles.
-- [ ] **2.3 Phase B:** Remove prepend line in `KeyboardParser.kt`, update `addNumberRowOrPopupKeys` for `baseKeys.size == 3` with priority nullcheck.
-- [ ] **2.4 Phase C:** Add top-row localized digits pass to `KeyboardParser.kt`.
-- [ ] **2.5 Phase D:** Fix off-by-one row offset in `LayoutParser.kt` and `LayoutUtils.kt` for `+` layouts.
-- [ ] **2.6 Phase E:** Add custom symbols layout hints exception in `KeyboardParser.kt`.
-- [ ] **2.7 Phase F:** Systematically delete dead fields from `KeyboardId`, `KeyboardLayoutSet`, `KeyboardSwitcher`, `SettingsValues`, `Settings.java`, and `Defaults.kt`. Verify build compiles clean.
-- [ ] **2.8 Documentation:** Update `keyboard/internal/keyboard_parser/AGENTS.md` and `latin/settings/AGENTS.md` to match the new behavior.
-- [ ] **2.9 Strings:** In `SubtypeScreen.kt` and `res/values/strings.xml`, update `PREF_LOCALIZED_NUMBER_ROW` description to: *"Show localised digits in the number row when this language has its own digits"*.
-- [ ] **2.10 Unit Tests:** Implement the 7 tests in `KeyboardParserTest.kt`.
-- [ ] **2.11 Test Verification:** Run `./gradlew :app:testDebugUnitTest` and verify all tests pass.
+- [x] **2.1 Prep:** Create branch `cursor/custom-layouts-pr2-parser-cleanup` off `main`.
+- [x] **2.2 Phase A:** Pin all reads to `true` in `KeyboardParser.kt`, `KeyboardBuilder.kt`, etc. Ensure project compiles.
+- [x] **2.3 Phase B:** Remove prepend line in `KeyboardParser.kt`, update `addNumberRowOrPopupKeys` for `baseKeys.size == 3` with priority nullcheck.
+- [x] **2.4 Phase C:** Add top-row localized digits pass to `KeyboardParser.kt`.
+- [x] **2.5 Phase D:** Fix off-by-one row offset in `LayoutParser.kt` and `LayoutUtils.kt` for `+` layouts.
+- [x] **2.6 Phase E:** Add custom symbols layout hints exception in `KeyboardParser.kt`.
+- [x] **2.7 Phase F:** Systematically delete dead fields from `KeyboardId`, `KeyboardLayoutSet`, `KeyboardSwitcher`, `SettingsValues`, `Settings.java`, and `Defaults.kt`. Verify build compiles clean.
+- [x] **2.8 Documentation:** Update `keyboard/internal/keyboard_parser/AGENTS.md` and `latin/settings/AGENTS.md` to match the new behavior.
+- [x] **2.9 Strings:** In `SubtypeScreen.kt` and `res/values/strings.xml`, update `PREF_LOCALIZED_NUMBER_ROW` description to: *"Show localised digits in the number row when this language has its own digits"*.
+- [x] **2.10 Unit Tests:** Implement the 7 tests in `KeyboardParserTest.kt`.
+- [x] **2.11 Test Verification:** Run `./gradlew :app:testDebugUnitTest` and verify all tests pass.
 - [ ] **2.12 Manual Smoke Test:**
   - [ ] Build and install on device (`./gradlew installDebug`).
   - [ ] Persian (Farsi) — Verify number row displays localized Persian digits (`۱۲۳۴۵۶۷۸۹۰`).

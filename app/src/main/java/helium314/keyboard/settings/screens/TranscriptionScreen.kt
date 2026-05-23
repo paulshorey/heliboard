@@ -142,6 +142,7 @@ fun TranscriptionScreen(
                 )
                 InlineTextField(
                     label = stringResource(R.string.soniox_max_endpoint_delay_ms_title),
+                    summary = stringResource(R.string.soniox_max_endpoint_delay_ms_summary),
                     value = sonioxMaxEndpointDelayMs,
                     onValueChange = { newValue ->
                         sonioxMaxEndpointDelayMs = newValue
@@ -251,6 +252,7 @@ private fun InlineTextField(
     label: String,
     value: String,
     onValueChange: (String) -> Unit,
+    summary: String? = null,
     minLines: Int = 1,
     maxLines: Int = 3
 ) {
@@ -263,8 +265,16 @@ private fun InlineTextField(
             text = label,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+            modifier = Modifier.padding(start = 4.dp, bottom = if (summary != null) 2.dp else 4.dp)
         )
+        if (summary != null) {
+            Text(
+                text = summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
+            )
+        }
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,

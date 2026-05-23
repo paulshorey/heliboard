@@ -113,7 +113,7 @@ open class KeyboardBuilder<KP : KeyboardParams>(protected val mContext: Context,
     // determine key size and positions using relative width and height
     private fun determineAbsoluteValues() {
         val sv = Settings.getValues()
-        if (mParams.mId.isAlphaOrSymbolKeyboard && mParams.mId.mNumberRowEnabled && sv.mShowsNumberRow) {
+        if (mParams.mId.isAlphaOrSymbolKeyboard) {
             val extra = mResources.getDimensionPixelSize(R.dimen.config_number_row_top_extra_gap)
             if (extra > 0) {
                 mParams.mTopPadding += extra
