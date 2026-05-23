@@ -591,6 +591,19 @@ object AppUpgrade {
                     !prefs.getBoolean(Settings.PREF_BIGRAM_PREDICTIONS, Defaults.PREF_BIGRAM_PREDICTIONS))
             }
         }
+        if (prefs.contains(Settings.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS) &&
+            prefs.getInt(
+                Settings.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS,
+                Defaults.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS
+            ) == Defaults.LEGACY_PREF_SONIOX_MAX_ENDPOINT_DELAY_MS
+        ) {
+            prefs.edit {
+                putInt(
+                    Settings.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS,
+                    Defaults.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS
+                )
+            }
+        }
         upgradeToolbarPrefs(prefs)
         LayoutUtilsCustom.onLayoutFileChanged() // just to be sure
         prefs.edit { putInt(Settings.PREF_VERSION_CODE, BuildConfig.VERSION_CODE) }
