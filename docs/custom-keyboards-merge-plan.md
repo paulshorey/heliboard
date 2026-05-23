@@ -1407,6 +1407,15 @@ review are resolved as follows:
 Section 5's open questions and A.4-A.14 minor items still apply.
 Recommendations for those follow in A.17.
 
+**A.18 (PR #113 disposition):** abandon the branch and start from
+main. None of PR #113's ~700 lines of added code survive the
+merge; keeping the branch means re-deleting all of it later, plus
+writing a migrator for a pref that was never publicly shipped.
+The *design idea* (number row lives in the layout file) is fully
+preserved in A.15 step 1-2 and implemented fresh. Final PR
+sequence collapses from 5 to 4. Detailed cost/benefit table in
+A.18.
+
 ## A.17 Recommendations on the remaining (A.4-A.14) items
 
 The maintainer asked for advice on each. Short form:
@@ -1487,36 +1496,186 @@ The maintainer asked for advice on each. Short form:
 
 ### Order recommendation
 
-If implementing incrementally over several PRs, this is a
-sensible order (each PR shippable on its own):
+See **A.18** below — after deciding whether to abandon PR #113 or
+keep its branch, the PR sequencing is different. The
+recommendation in A.18 is to **abandon PR #113 and branch off
+main**, which collapses the merge plan from 5 PRs to 4 and drops
+the user-state-migration step entirely.
 
-1. **PR #X:** A.15 steps 1, 8 (assets + tests). This is the
-   biggest patch by line count but the lowest-risk: it adds
-   number rows to every built-in layout and adds the validation
-   test. The runtime still injects a number row on top, so
-   you'd see *two* number rows during this PR — temporarily fine
-   if the PR also flips the injection off behind a flag, but
-   simplest is to land 1 and 2 together.
+## A.18 Critical — should we abandon PR #113 and start from main?
 
-2. **PR #X+1:** A.15 steps 2, 3 (parser cleanup). Delete the
-   runtime number-row prepend and `mShowsNumberRow` /
-   `mNumberRowEnabled` plumbing; flip
-   `addNumberRowOrPopupKeys`'s trigger to `baseKeys.size == 3`;
-   flip the symbol hint flag to `isCustomLayout(layoutName)`.
-   Narrow `PREF_LOCALIZED_NUMBER_ROW`'s scope and description.
-   This is the "remove machinery" PR.
+The maintainer asked whether PR #113 is still worth keeping after
+the merge plan redirects every meaningful piece of it. Short
+answer: **abandon it and branch off main.** Long answer below.
 
-3. **PR #X+2:** A.15 step 4, 5 (UI). Extract `LayoutSlotEditor`,
-   wire it into every slot, add empty-search hint on
-   `LanguageScreen`.
+### What's in PR #113 vs main
 
-4. **PR #X+3:** A.15 steps 6, 7 (migration + cleanup). Delete
-   `CustomKeyboards.kt`, the `CustomKeyboardsScreen`, prefs,
-   override branches, AGENTS notes.
+`git diff origin/main..cursor/custom-keyboards-d858 --stat` shows
+the PR is **+850 / -20** lines across 18 files:
 
-5. **PR #X+4:** A.15 step 9 (APK rebuild).
+| Kind | File | Lines added | Kept under the merge plan? |
+| --- | --- | --- | --- |
+| New | `latin/utils/CustomKeyboards.kt` | 412 | **No** — JSON preset model + parser, deleted entirely. Only `toSimpleLayoutText` / `splitKeyToken` would have lived briefly for the migrator; if we abandon PR #113 there's nothing to migrate. |
+| New | `settings/screens/CustomKeyboardsScreen.kt` | 236 | **No** — the monolithic JSON editor screen, deleted. Replaced by per-slot UI in `SubtypeScreen` that already exists in upstream. |
+| Added pref | `Settings.java` / `Defaults.kt` — `PREF_USE_CUSTOM_KEYBOARDS` | 4 | **No** — deleted. |
+| Added pref | `Settings.java` / `Defaults.kt` — `PREF_CUSTOM_KEYBOARDS_JSON` (incl. ~90-line seed JSON) | ~100 | **No** — deleted. |
+| Added | `Settings.onSharedPreferenceChanged` cache-invalidation hook | 5 | **No** — deleted. |
+| Added | `KeyboardParser.kt` — `customKeyboardsActive` plumbing + symbol-hint flag carve-out + number-row prepend skip | 18 | **No** — the override is deleted. The replacement uses `LayoutUtilsCustom.isCustomLayout(layoutName)` and `baseKeys.size == 3`, both *new* edits to the same lines. |
+| Added | `LayoutParser.kt` — preset short-circuit branch | 34 | **No** — deleted entirely. |
+| Added | Compose nav entry + main settings entry | ~14 | **No** — deleted. |
+| Added | `strings.xml` strings for the editor screen | 17 | **No** — deleted. |
+| Added | AGENTS.md notes in 4 directories | ~30 | Partial — the rationale text gets rewritten under the new design. |
+| **Removed** (would have been removed anyway) | `PREF_SHOW_NUMBER_ROW`, `PREF_SHOW_NUMBER_ROW_IN_SYMBOLS` constants | 2 | Yes, A.15 step 2 deletes these too. |
+| **Removed** (would have been removed anyway) | `setNumberRowInSymbolsEnabled`, `mNumberRowInSymbols`, `mShowsNumberRowInSymbols` | ~14 | Yes, A.15 step 2 deletes these too. |
+| **Hardcoded** to `true` | `SettingsValues.mShowsNumberRow` field | 1 | Field gets deleted entirely under A.15 step 2. |
+| Build artifact | `dist/HeliBoard.apk` rebuild | binary | Will be rebuilt anyway at the end. |
 
-Each PR is bounded, reviewable, and rolls back independently.
-PR #X+3 is the only one with user-visible state migration; the
-others are mechanical refactors.
+### Net cost/benefit of keeping vs abandoning
+
+**Keeping the PR #113 branch as the base for the merge work:**
+
+- *Savings:* about **20 lines of trivial pref/field deletions** the
+  compiler would re-find anyway (the `PREF_SHOW_NUMBER_ROW*` and
+  `mNumberRowInSymbols` removals).
+- *Cost:*
+  - **~700 lines of dead code to delete** in the merge PRs
+    (`CustomKeyboards.kt` 412 + `CustomKeyboardsScreen.kt` 236 +
+    seed JSON ~90 + parser plumbing ~50 + assorted prefs and UI
+    wiring).
+  - **A real migration step** that has to handle direct-boot
+    timing, idempotency marker prefs, atomic file writes,
+    validation failures, the `["*"]` fan-out problem, locale
+    matching for additional-subtype creation, and JVM tests for
+    each edge case. A.4 + A.15 step 6 spec out about 30 lines of
+    careful logic for code that exists only to drain a pref
+    nobody has shipped publicly.
+  - **The need to keep `toSimpleLayoutText` / `splitKeyToken`
+    alive** through the migrator's lifetime — even though their
+    only consumer is the migrator deleting them.
+  - **Confusion in commit history.** The branch's first half
+    builds the parallel system; the second half tears it down.
+    A linear history is harder to bisect when something later
+    breaks.
+
+**Abandoning PR #113 and branching from main:**
+
+- *Savings:*
+  - No `CustomKeyboards.kt` / `CustomKeyboardsScreen.kt` ever
+    exist. ~700 lines never written.
+  - No migrator step. A.15 collapses from 9 steps to 7.
+  - No `PREF_CUSTOM_KEYBOARDS_MIGRATED` marker, no idempotency
+    tests, no direct-boot ordering concerns. A.4 evaporates.
+  - PR ordering goes from 5 PRs to 4 (the migration PR is gone).
+  - Clean linear commit history: each PR adds capability,
+    nothing is "added then later deleted".
+- *Cost:*
+  - **The maintainer personally loses any preset content they've
+    typed into `PREF_CUSTOM_KEYBOARDS_JSON` while testing.** This
+    is real but bounded — the PR is open and unreleased, the
+    only user is the maintainer, and the seed JSON's contents
+    (English / Programming / French AZERTY / Compact English)
+    are easy to recreate as custom layout files via the existing
+    `SubtypeScreen → +` flow once it's surfaced for non-MAIN slots
+    in PR #2 of the new sequence.
+  - **The ~20 lines of redundant deletion** (`PREF_SHOW_NUMBER_ROW`
+    etc.) get redone. That's compiler-guided, single-PR work.
+  - **The rationale comments / commit messages from PR #113**
+    that explain *why* the number row should live in the layout
+    file are useful and worth pulling into the new
+    implementation as code comments. That's cherry-picking
+    prose, not commits.
+
+### Recommendation
+
+**Abandon the `cursor/custom-keyboards-d858` branch. Close PR #113.
+Branch off main fresh for the new implementation work.**
+
+The PR's value to the codebase is the **design idea** ("the layout
+file is the source of truth for the number row, and a 3- vs 4-row
+file is the implicit toggle"), not its code. That idea is fully
+captured in A.3 and A.15 step 1-2 of this plan and will be
+implemented from scratch against main.
+
+### Is the design idea ("number row lives in the layout file")
+### itself worth keeping, or is it awkward?
+
+**Worth keeping.** Here's the test: imagine someone six months
+from now, who's never seen this discussion, opens
+`assets/layouts/main/qwerty.txt` to add a row of accents. With
+PR #113's design (post-merge):
+
+- The file shows them every key on every row.
+- They edit row 1 to swap digits for accented vowels and save.
+- The keyboard renders exactly that file.
+- They forked the file to a custom layout via "Edit a copy"
+  and the original `qwerty.txt` is untouched.
+
+With the pre-PR-#113 design:
+
+- The file shows them three rows.
+- They wonder where the number row comes from — they have to
+  trace through `KeyboardParser.kt`, `KeyboardLayoutSet.Builder`,
+  `KeyboardSwitcher`, `SettingsValues`, and
+  `PREF_SHOW_NUMBER_ROW` to find that the number row gets
+  prepended at runtime from a completely separate asset
+  (`assets/layouts/number_row/`).
+- They edit the alphabet rows, save, and find the keyboard still
+  shows a number row at the top that they can't touch from this
+  file. They search the docs, find `PREF_SHOW_NUMBER_ROW`, find
+  it isn't user-facing, give up and file a bug.
+
+The PR #113 design eliminates one layer of indirection and makes
+forks of built-in layouts WYSIWYG. The cost is 76 asset edits
+(scriptable, mechanical) and an asset-shape JVM test.
+
+The one piece of "awkwardness" worth flagging: `PREF_LOCALIZED_NUMBER_ROW`
+remains relevant *only* for the 3-row digit-hint fallback after
+the merge. That's a narrower scope than today, but the toggle's
+existence means we have *two* sources for localised digits:
+
+- For 4-row layouts: whatever the locale's layout file bakes in.
+- For 3-row layouts: a runtime swap honouring the toggle.
+
+This isn't deeply awkward — it's two cases that genuinely want
+different defaults — but A.3 step 5 already flags this with an
+option to drop the toggle entirely if the maintainer wants
+absolute uniformity. The recommendation is to *keep* the toggle
+because it's the only way a Persian/Arabic user can author a
+3-row custom layout and still get `٠١٢٣...` hints without
+manually typing them as popups.
+
+### Updated PR sequencing (replaces A.17's tail)
+
+If we branch off main:
+
+1. **PR #1:** A.15 step 1 (assets + step-8 row-count test). 76
+   built-in layout files gain a number row each. CI assertion
+   that every alphabet/symbol asset has 3 or 4 rows.
+2. **PR #2:** A.15 steps 2, 3 (parser cleanup + pref narrow).
+   Flip `addNumberRowOrPopupKeys`'s trigger; flip the symbol
+   hint flag; delete `mShowsNumberRow` / `mNumberRowEnabled` /
+   the various `*InSymbols` fields and prefs; update
+   `PREF_LOCALIZED_NUMBER_ROW`'s description. This PR's diff
+   re-does PR #113's prefs/field deletions plus the new
+   parser-side flips.
+3. **PR #3:** A.15 steps 4, 5 (UI). Extract `LayoutSlotEditor`,
+   wire it into every slot, add "Edit a copy" affordance, add
+   empty-search hint on `LanguageScreen`.
+4. **PR #4:** A.15 step 9 (APK rebuild).
+
+Each PR is bounded, reviewable, rolls back independently, and
+the project never carries dead code from a parallel system.
+
+### Action items if abandoning PR #113
+
+1. Cherry-pick the rationale comments from PR #113's commit
+   messages and code comments into a small notes file (or
+   directly into the AGENTS.md updates in PR #2 of the new
+   sequence). Specifically the explanations of *why*
+   `4 rows = number row, 3 rows = no number row*, *why the
+   built-in number-row asset should never be prepended on top
+   of a 4-row layout*, and *why symbol layouts want hints when
+   user-edited*.
+2. Close PR #113 with a comment pointing to this design doc.
+3. Open PR #1 of the new sequence against main.
 
