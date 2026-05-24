@@ -361,16 +361,10 @@
     <string name="language_and_layouts_title">Languages &amp; Layouts</string>
     <!-- Title of the setting to enable number row -->
     <string name="number_row">Number row</string>
-    <!-- Description of the settings to enable number row -->
-    <string name="number_row_summary">Always show number row</string>
-    <!-- Title of the setting to replace the top row in symbols layout with number row -->
-    <string name="number_row_in_symbols">Show number row in symbols view</string>
     <!-- Title of the setting to localize number row -->
     <string name="localized_number_row">Localize number row</string>
     <!-- Description of the settings to localize number row -->
     <string name="localized_number_row_summary">Show localised digits in the number row when this language has its own digits</string>
-    <!-- Title of the setting to enable number row hints -->
-    <string name="number_row_hints">Show hints on number row</string>
     <!-- Title of the setting to save subtype per app -->
     <string name="save_subtype_per_app">Remember language per app</string>
     <!-- Title of the setting to show key hints -->
@@ -603,10 +597,6 @@ language, hence "No language". -->
     <string name="layout_numpad" tools:keep="@string/layout_numpad">Numpad</string>
     <!-- Name for numpad layout in landscape mode -->
     <string name="layout_numpad_landscape" tools:keep="@string/layout_numpad_landscape">Numpad (landscape)</string>
-    <!-- Name for number row layout -->
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Number row</string>
-    <!-- Name for number row basic layout -->
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">Number row (basic)</string>
     <!-- Name for bottom row layout in emoji view -->
     <string name="layout_emoji_bottom_row" tools:keep="@string/layout_emoji_bottom_row">Emoji bottom row</string>
     <!-- Name for bottom row layout with action key in emoji view -->

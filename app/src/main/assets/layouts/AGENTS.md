@@ -9,7 +9,7 @@ Runtime keyboard layouts. Files here define rows, popup sets, width hints, and p
 - `main/` - primary alphabet/script layouts by locale and physical arrangement.
 - `more_symbols/` - shifted extra symbols.
 - `number/` - number-mode layout.
-- `number_row/` - top-row number layouts.
+- ~~`number_row/`~~ - removed; number rows are baked into main and symbol layouts.
 - `numpad/` - standard numeric keypad.
 - `numpad_landscape/` - landscape numeric keypad.
 - `phone/` - phone keypad layout.
@@ -21,7 +21,7 @@ Runtime keyboard layouts. Files here define rows, popup sets, width hints, and p
 - `functional/functional_keys_khipro.json` - Khipro-specific functional row.
 - `functional/functional_keys_tablet.json` - tablet functional row.
 - `number/number.json` - number layer.
-- `number_row/number_row.json` and `number_row_basic.txt` - two styles of number-row data.
+- `number_row/` directory has been removed; number rows live directly inside each main layout file.
 - Built-in `main/`, `symbols/`, and `more_symbols/` layout files now store the number row as row 1; treat these files as WYSIWYG row definitions.
 - `numpad/numpad.json` - numeric keypad.
 - `numpad_landscape/numpad_landscape.json` - landscape numeric keypad.

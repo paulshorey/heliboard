@@ -19,7 +19,6 @@ import helium314.keyboard.latin.define.DebugFlags
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.utils.LayoutType
 import helium314.keyboard.latin.utils.LayoutUtilsCustom
-import helium314.keyboard.latin.utils.POPUP_KEYS_LAYOUT
 import helium314.keyboard.latin.utils.replaceFirst
 import helium314.keyboard.latin.utils.splitAt
 import helium314.keyboard.latin.utils.sumOf
@@ -95,9 +94,7 @@ class KeyboardParser(private val params: KeyboardParams, private val context: Co
             params.mBaseWidth = params.mOccupiedWidth - params.mLeftPadding - params.mRightPadding
         }
 
-        val numberRow = getNumberRow()
         convertToLocalizedNumbers(baseKeys)
-        addNumberRowOrPopupKeys(baseKeys, numberRow)
         if (!params.mAllowRedundantPopupKeys)
             params.baseKeys = baseKeys.flatMap { row -> row.map { it.toKeyParams(params) } }
 
@@ -258,18 +255,6 @@ class KeyboardParser(private val params: KeyboardParams, private val context: Co
         return functionalKeysLeft to functionalKeysRight
     }
 
-    private fun addNumberRowOrPopupKeys(baseKeys: MutableList<MutableList<KeyData>>, numberRow: List<KeyData>) {
-        if (params.mId.isAlphabetKeyboard
-                && baseKeys.size == 3
-                && !hasBuiltInNumbers()) {
-            baseKeys.first().forEachIndexed { i, keyData ->
-                if (keyData.popup.getPopupKeyLabels(params).isNullOrEmpty()) {
-                    keyData.popup.numberLabel = numberRow.getOrNull(i)?.label
-                }
-            }
-        }
-    }
-
     private fun convertToLocalizedNumbers(baseKeys: MutableList<MutableList<KeyData>>) {
         if (!params.mId.isAlphabetKeyboard || baseKeys.size < 4) return
         val localizedNumbers = params.mLocaleKeyboardInfos.localizedNumberKeys
@@ -295,34 +280,6 @@ class KeyboardParser(private val params: KeyboardParams, private val context: Co
         }
     }
 
-    private fun getNumberRow(): MutableList<KeyData> {
-        val row = LayoutParser.parseLayout(LayoutType.NUMBER_ROW, params, context).first()
-        val localizedNumbers = params.mLocaleKeyboardInfos.localizedNumberKeys
-        if (localizedNumbers?.size != 10) return row
-        if (Settings.getValues().mLocalizedNumberRow) {
-            // replace 0-9 with localized numbers, and move latin number into popup
-            for (i in row.indices) {
-                val key = row[i]
-                val number = key.label.toIntOrNull() ?: continue
-                when (number) {
-                    0 -> row[i] = key.copy(newLabel = localizedNumbers[9], newCode = KeyCode.UNSPECIFIED, newPopup = SimplePopups(listOf(key.label)).merge(key.popup))
-                    in 1..9 -> row[i] = key.copy(newLabel = localizedNumbers[number - 1], newCode = KeyCode.UNSPECIFIED, newPopup = SimplePopups(listOf(key.label)).merge(key.popup))
-                }
-            }
-        } else {
-            // add localized numbers to popups on 0-9
-            for (i in row.indices) {
-                val key = row[i]
-                val number = key.label.toIntOrNull() ?: continue
-                when (number) {
-                    0 -> row[i] = key.copy(newPopup = SimplePopups(listOf(localizedNumbers[9])).merge(key.popup))
-                    in 1..9 -> row[i] = key.copy(newPopup = SimplePopups(listOf(localizedNumbers[number - 1])).merge(key.popup))
-                }
-            }
-        }
-        return row
-    }
-
     private fun isCustomSymbolLayout(): Boolean {
         val layoutType = when (params.mId.mElementId) {
             KeyboardId.ELEMENT_SYMBOLS -> LayoutType.SYMBOLS
@@ -332,12 +289,6 @@ class KeyboardParser(private val params: KeyboardParams, private val context: Co
         val layoutName = params.mId.mSubtype.layouts[layoutType] ?: return false
         return LayoutUtilsCustom.isCustomLayout(layoutName)
     }
-
-    // some layouts have numbers hardcoded in the main layout (pcqwerty as keys, and others as popups)
-    private fun hasBuiltInNumbers() = params.mId.mSubtype.mainLayoutName == "pcqwerty"
-            || (Settings.getValues().mPopupKeyTypes.contains(POPUP_KEYS_LAYOUT)
-                && params.mId.mSubtype.mainLayoutName in listOf("lao", "thai")
-            )
 
     companion object {
         private const val TAG = "KeyboardParser"
