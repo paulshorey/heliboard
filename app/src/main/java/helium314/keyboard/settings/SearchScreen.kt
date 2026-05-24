@@ -116,6 +116,7 @@ fun <T: Any?> SearchScreen(
     itemContent: @Composable (T) -> Unit,
     icon: @Composable (() -> Unit)? = null,
     menu: List<Pair<String, () -> Unit>>? = null,
+    emptySearchContent: @Composable (() -> Unit)? = null,
     content: @Composable (ColumnScope.() -> Unit)? = null,
 ) {
     // searchText and showSearch should have the same remember or rememberSaveable
@@ -197,9 +198,15 @@ fun <T: Any?> SearchScreen(
                     Scaffold(
                         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom)
                     ) { innerPadding ->
-                        LazyColumn(contentPadding = innerPadding) {
-                            items(items) {
-                                itemContent(it)
+                        if (items.isEmpty() && emptySearchContent != null) {
+                            Box(Modifier.fillMaxSize().padding(innerPadding).padding(16.dp)) {
+                                emptySearchContent()
+                            }
+                        } else {
+                            LazyColumn(contentPadding = innerPadding) {
+                                items(items) {
+                                    itemContent(it)
+                                }
                             }
                         }
                     }

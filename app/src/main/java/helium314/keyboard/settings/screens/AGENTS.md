@@ -19,7 +19,7 @@ Feature-specific Compose screens for the settings app.
 - `SecondaryLayoutScreen.kt` - secondary layout settings screen.
 - `SetupAppScreen.kt` - app setup/onboarding utility screen.
 - `SonioxContextTermsScreen.kt` - voice transcription custom vocabulary screen (built-in `context.terms` view + user-editable list).
-- `SubtypeScreen.kt` - subtype detail/configuration screen.
+- `SubtypeScreen.kt` - subtype detail/configuration screen. Contains `LayoutSlotEditor`, a reusable composable that provides add/edit/delete/fork controls for any `LayoutType` slot. All layout types (MAIN, SYMBOLS, FUNCTIONAL, etc.) use this unified component with identical affordances.
 - `TextCorrectionScreen.kt` - text correction/autocorrect settings screen.
 - `ToolbarScreen.kt` - toolbar customization screen.
 - `TranscriptionScreen.kt` - voice transcription settings screen (links into `SonioxContextTermsScreen`).
@@ -27,6 +27,8 @@ Feature-specific Compose screens for the settings app.
 ## Non-obvious notes
 - These screens are UI only; the actual preference keys/defaults live in `latin/settings/`.
 - When adding a screen, also update navigation wiring in `SettingsNavHost.kt` and search/discoverability if appropriate.
+- `LayoutSlotEditor` in `SubtypeScreen.kt` is the single component for all layout slot editing. Every `LayoutType` (MAIN through CLIPBOARD_BOTTOM) gets identical add/edit/delete/fork affordances. The fork icon on built-in layouts creates a pre-filled copy via `LayoutEditDialog`. For MAIN slots, locale-aware `getContentWithPlus` is used; for other slots, plain `getContent` applies.
+- When forking a `+` layout (like `qwerty+`), `LayoutEditDialog` shows a caption warning that locale extras are baked into the copy.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

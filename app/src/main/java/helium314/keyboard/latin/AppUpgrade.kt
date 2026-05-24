@@ -297,13 +297,6 @@ object AppUpgrade {
                         file.renameTo(File(dir, name))
                         prefs.edit { putString(Settings.PREF_LAYOUT_PREFIX + LayoutType.PHONE_SYMBOLS.name, name) }
                     }
-                    "custom.number_row." -> {
-                        val dir = File(folder, LayoutType.NUMBER_ROW.folder)
-                        dir.mkdirs()
-                        val name = "custom.${encodeBase36("number_row")}."
-                        file.renameTo(File(dir, name))
-                        prefs.edit { putString(Settings.PREF_LAYOUT_PREFIX + LayoutType.NUMBER_ROW.name, name) }
-                    }
                     "custom.emoji_bottom_row." -> {
                         val dir = File(folder, LayoutType.EMOJI_BOTTOM.folder)
                         dir.mkdirs()

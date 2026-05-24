@@ -134,7 +134,6 @@ fun SubtypeScreen(
     var showHintOrderDialog by remember { mutableStateOf(false) }
     var showMorePopupsDialog by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
-    val customMainLayouts = LayoutUtilsCustom.getLayoutFiles(LayoutType.MAIN, ctx, currentSubtype.locale).map { it.name }
     SearchScreen(
         onClickBack = onClickBack,
         icon = { if (currentSubtype.isAdditionalSubtype(prefs)) DeleteButton {
@@ -154,7 +153,11 @@ fun SubtypeScreen(
                     .then(Modifier.padding(innerPadding)),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                MainLayoutRow(currentSubtype, customMainLayouts) { setCurrentSubtype(it) }
+                LayoutSlotEditor(
+                    slotType = LayoutType.MAIN,
+                    currentSubtype = currentSubtype,
+                    setCurrentSubtype = { setCurrentSubtype(it) },
+                )
                 if (availableLocalesForScript.size > 1) {
                     WithSmallTitle(stringResource(R.string.secondary_locale)) {
                         ActionRow(onClick = { showSecondaryLocaleDialog = true }) {
@@ -240,52 +243,11 @@ fun SubtypeScreen(
                 )
                 LayoutType.entries.forEach { type ->
                     if (type == LayoutType.MAIN) return@forEach
-                    WithSmallTitle(stringResource(type.displayNameId)) {
-                        val explicitLayout = currentSubtype.layoutName(type)
-                        val layout = explicitLayout ?: Settings.readDefaultLayoutName(type, prefs)
-                        val defaultLayouts = LayoutUtils.getAvailableLayouts(type, ctx)
-                        val customLayouts = LayoutUtilsCustom.getLayoutFiles(type, ctx).map { it.name }
-                        DropDownField(
-                            items = defaultLayouts + customLayouts,
-                            selectedItem = layout,
-                            onSelected = {
-                                setCurrentSubtype(currentSubtype.withLayout(type, it))
-                            },
-                            extraButton = {
-                                DefaultButton(explicitLayout == null) {
-                                    setCurrentSubtype(currentSubtype.withoutLayout(type))
-                                }
-                            },
-                        ) {
-                            val displayName =
-                                if (LayoutUtilsCustom.isCustomLayout(it)) LayoutUtilsCustom.getDisplayName(it)
-                                else it.getStringResourceOrName("layout_", ctx)
-                            var showLayoutEditDialog by remember { mutableStateOf(false) }
-                            Row(
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(displayName)
-                                if (LayoutUtilsCustom.isCustomLayout(it))
-                                    IconButton({
-                                        showLayoutEditDialog = true
-                                    }) {
-                                        Icon(
-                                            painterResource(R.drawable.ic_edit),
-                                            stringResource(R.string.edit_layout)
-                                        )
-                                    }
-                            }
-                            if (showLayoutEditDialog)
-                                LayoutEditDialog(
-                                    onDismissRequest = { showLayoutEditDialog = false },
-                                    layoutType = type,
-                                    initialLayoutName = it,
-                                    isNameValid = null
-                                )
-                        }
-                    }
+                    LayoutSlotEditor(
+                        slotType = type,
+                        currentSubtype = currentSubtype,
+                        setCurrentSubtype = { setCurrentSubtype(it) },
+                    )
                 }
             }
         }
@@ -356,6 +318,178 @@ fun SubtypeScreen(
     }
 }
 
+@Composable
+private fun LayoutSlotEditor(
+    slotType: LayoutType,
+    currentSubtype: SettingsSubtype,
+    setCurrentSubtype: (SettingsSubtype) -> Unit,
+) {
+    val ctx = LocalContext.current
+    val prefs = ctx.prefs()
+    val isMain = slotType == LayoutType.MAIN
+    val locale = currentSubtype.locale
+
+    val builtInLayouts = if (isMain) {
+        LayoutUtils.getAvailableLayouts(LayoutType.MAIN, ctx, locale).toList()
+    } else {
+        LayoutUtils.getAvailableLayouts(slotType, ctx).toList()
+    }
+    val customLayouts = if (isMain) {
+        LayoutUtilsCustom.getLayoutFiles(LayoutType.MAIN, ctx, locale).map { it.name }
+    } else {
+        LayoutUtilsCustom.getLayoutFiles(slotType, ctx).map { it.name }
+    }
+
+    val selectedLayout = if (isMain) {
+        currentSubtype.mainLayoutName() ?: SubtypeLocaleUtils.QWERTY
+    } else {
+        currentSubtype.layoutName(slotType) ?: Settings.readDefaultLayoutName(slotType, prefs)
+    }
+
+    var showAddLayoutDialog by remember { mutableStateOf(false) }
+    var showLayoutEditDialog: Pair<String, String?>? by remember { mutableStateOf(null) }
+    val layoutPicker = layoutFilePicker { content, name ->
+        showLayoutEditDialog = (name ?: "new layout") to content
+    }
+
+    WithSmallTitle(
+        if (isMain) stringResource(R.string.keyboard_layout_set)
+        else stringResource(slotType.displayNameId)
+    ) {
+        DropDownField(
+            items = builtInLayouts + customLayouts,
+            selectedItem = selectedLayout,
+            onSelected = { layout ->
+                if (isMain) {
+                    if (layout == SubtypeLocaleUtils.QWERTY
+                        && SubtypeSettings.getResourceSubtypesForLocale(locale).any { it.mainLayoutName() == null })
+                        setCurrentSubtype(currentSubtype.withoutLayout(LayoutType.MAIN))
+                    else setCurrentSubtype(currentSubtype.withLayout(LayoutType.MAIN, layout))
+                } else {
+                    setCurrentSubtype(currentSubtype.withLayout(slotType, layout))
+                }
+            },
+            extraButton = {
+                IconButton({ showAddLayoutDialog = true })
+                { Icon(painterResource(R.drawable.ic_plus), stringResource(R.string.button_title_add_custom_layout)) }
+                if (!isMain) {
+                    val explicitLayout = currentSubtype.layoutName(slotType)
+                    DefaultButton(explicitLayout == null) {
+                        setCurrentSubtype(currentSubtype.withoutLayout(slotType))
+                    }
+                }
+            }
+        ) {
+            var showLayoutDeleteDialog by remember { mutableStateOf(false) }
+            val isCustom = LayoutUtilsCustom.isCustomLayout(it)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.widthIn(min = 200.dp).fillMaxWidth()
+            ) {
+                val displayName = if (isMain) {
+                    SubtypeLocaleUtils.getLayoutDisplayNameInSystemLocale(it, locale)
+                } else {
+                    if (isCustom) LayoutUtilsCustom.getDisplayName(it)
+                    else it.getStringResourceOrName("layout_", ctx)
+                }
+                Text(displayName)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (isCustom) {
+                        IconButton({ showLayoutEditDialog = it to null }) {
+                            Icon(painterResource(R.drawable.ic_edit), stringResource(R.string.edit_layout))
+                        }
+                        IconButton({ showLayoutDeleteDialog = true }) {
+                            Icon(painterResource(R.drawable.ic_bin), stringResource(R.string.delete))
+                        }
+                    } else {
+                        IconButton({
+                            val content = if (isMain)
+                                LayoutUtils.getContentWithPlus(it, locale, ctx)
+                            else
+                                LayoutUtils.getContent(slotType, it, ctx)
+                            showLayoutEditDialog = "$it-copy" to content
+                        }) {
+                            Icon(painterResource(R.drawable.ic_edit), stringResource(R.string.fork_layout))
+                        }
+                    }
+                }
+            }
+            if (showLayoutDeleteDialog) {
+                val others = if (isMain) {
+                    SubtypeSettings.getAdditionalSubtypes().filter { st -> st.mainLayoutName() == it }
+                        .any { st -> st.toSettingsSubtype() != currentSubtype }
+                } else {
+                    SubtypeSettings.getAdditionalSubtypes()
+                        .any { st -> st.toSettingsSubtype().layoutName(slotType) == it && st.toSettingsSubtype() != currentSubtype }
+                }
+                ConfirmationDialog(
+                    onDismissRequest = { showLayoutDeleteDialog = false },
+                    confirmButtonText = stringResource(R.string.delete),
+                    title = { Text(stringResource(R.string.delete_layout, LayoutUtilsCustom.getDisplayName(it))) },
+                    content = { if (others) Text(stringResource(R.string.layout_in_use)) },
+                    onConfirmed = {
+                        val currentSlotLayout = if (isMain) currentSubtype.mainLayoutName() else currentSubtype.layoutName(slotType)
+                        if (it == currentSlotLayout) {
+                            if (isMain) {
+                                val defaultLayout = SubtypeSettings.getResourceSubtypesForLocale(locale).firstOrNull()?.mainLayoutName()
+                                val newSubtype = if (defaultLayout == null) currentSubtype.withoutLayout(LayoutType.MAIN)
+                                    else currentSubtype.withLayout(LayoutType.MAIN, defaultLayout)
+                                setCurrentSubtype(newSubtype)
+                            } else {
+                                setCurrentSubtype(currentSubtype.withoutLayout(slotType))
+                            }
+                        }
+                        LayoutUtilsCustom.deleteLayout(it, slotType, ctx)
+                        (ctx.getActivity() as? SettingsActivity)?.prefChanged()
+                    }
+                )
+            }
+        }
+        if (showLayoutEditDialog != null) {
+            val layoutName = showLayoutEditDialog!!.first
+            val startContent = showLayoutEditDialog?.second
+                ?: if (isMain && layoutName in builtInLayouts) LayoutUtils.getContentWithPlus(layoutName, locale, ctx)
+                else if (!isMain && layoutName in builtInLayouts) LayoutUtils.getContent(slotType, layoutName, ctx)
+                else null
+            val isForkedFromPlus = !LayoutUtilsCustom.isCustomLayout(layoutName)
+                    && layoutName.removeSuffix("-copy").endsWith("+")
+            LayoutEditDialog(
+                onDismissRequest = { showLayoutEditDialog = null },
+                layoutType = slotType,
+                initialLayoutName = layoutName,
+                startContent = startContent,
+                locale = if (isMain) locale else null,
+                isNameValid = { it !in customLayouts },
+                isForkFromPlusLayout = isForkedFromPlus,
+                onEdited = {
+                    if (layoutName !in customLayouts || (layoutName != it && layoutName == selectedLayout))
+                        setCurrentSubtype(currentSubtype.withLayout(slotType, it))
+                }
+            )
+        }
+        if (showAddLayoutDialog) {
+            val wikiLink = stringResource(R.string.dictionary_link_text).withHtmlLink(Links.LAYOUT_WIKI_URL)
+            val layoutText = stringResource(R.string.message_add_custom_layout, wikiLink).htmlToAnnotated()
+            val discussionLink = stringResource(R.string.discussion_section_link).withHtmlLink(Links.CUSTOM_LAYOUTS)
+            val discussionSectionText = stringResource(R.string.get_layouts_message, discussionLink).htmlToAnnotated()
+            val annotated = layoutText + AnnotatedString("\n") + discussionSectionText
+
+            ConfirmationDialog(
+                onDismissRequest = { showAddLayoutDialog = false },
+                title = { Text(stringResource(R.string.button_title_add_custom_layout)) },
+                content = { Text(annotated) },
+                onConfirmed = { showLayoutEditDialog = "new layout" to "" },
+                neutralButtonText = stringResource(R.string.button_load_custom),
+                onNeutral = {
+                    showAddLayoutDialog = false
+                    layoutPicker.launch(layoutIntent)
+                }
+            )
+        }
+    }
+}
+
 
 // from ReorderSwitchPreference
 @Composable
@@ -395,112 +529,6 @@ private fun PopupOrderDialog(
         },
         getKey = { it.name }
     )
-}
-
-@Composable
-private fun MainLayoutRow(
-    currentSubtype: SettingsSubtype,
-    customLayouts: List<String>,
-    setCurrentSubtype: (SettingsSubtype) -> Unit,
-) {
-    val ctx = LocalContext.current
-    WithSmallTitle(stringResource(R.string.keyboard_layout_set)) {
-        val appLayouts = LayoutUtils.getAvailableLayouts(LayoutType.MAIN, ctx, currentSubtype.locale)
-        var showAddLayoutDialog by remember { mutableStateOf(false) }
-        var showLayoutEditDialog: Pair<String, String?>? by remember { mutableStateOf(null) }
-        val layoutPicker = layoutFilePicker { content, name ->
-            showLayoutEditDialog = (name ?: "new layout") to content
-        }
-        DropDownField(
-            items = appLayouts + customLayouts,
-            selectedItem = currentSubtype.mainLayoutName() ?: SubtypeLocaleUtils.QWERTY,
-            onSelected = { layout ->
-                // if the locale defaults to qwerty, use it as implicit default to avoid creating unnecessary additional subtypes
-                if (layout == SubtypeLocaleUtils.QWERTY
-                    && SubtypeSettings.getResourceSubtypesForLocale(currentSubtype.locale).any { it.mainLayoutName() == null })
-                    setCurrentSubtype(currentSubtype.withoutLayout(LayoutType.MAIN))
-                else setCurrentSubtype(currentSubtype.withLayout(LayoutType.MAIN, layout))
-            },
-            extraButton = {
-                IconButton({ showAddLayoutDialog = true })
-                { Icon(painterResource(R.drawable.ic_plus), stringResource(R.string.button_title_add_custom_layout)) }
-            }
-        ) {
-            var showLayoutDeleteDialog by remember { mutableStateOf(false) }
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.widthIn(min = 200.dp).fillMaxWidth()
-            ) {
-                Text(SubtypeLocaleUtils.getLayoutDisplayNameInSystemLocale(it, currentSubtype.locale))
-                Row (verticalAlignment = Alignment.CenterVertically) {
-                    IconButton({ showLayoutEditDialog = it to null }) { Icon(painterResource(R.drawable.ic_edit), stringResource(R.string.edit_layout)) }
-                    if (it in customLayouts)
-                        IconButton({ showLayoutDeleteDialog = true }) { Icon(painterResource(R.drawable.ic_bin), stringResource(R.string.delete)) }
-                }
-            }
-            if (showLayoutDeleteDialog) {
-                val others = SubtypeSettings.getAdditionalSubtypes().filter { st -> st.mainLayoutName() == it }
-                    .any { st -> st.toSettingsSubtype() != currentSubtype }
-                ConfirmationDialog(
-                    onDismissRequest = { showLayoutDeleteDialog = false },
-                    confirmButtonText = stringResource(R.string.delete),
-                    title = { Text(stringResource(R.string.delete_layout, LayoutUtilsCustom.getDisplayName(it))) },
-                    content = { if (others) Text(stringResource(R.string.layout_in_use)) },
-                    onConfirmed = {
-                        if (it == currentSubtype.mainLayoutName()) {
-                            // similar to what is done in SubtypeSettings.onRenameLayout
-                            val defaultLayout = SubtypeSettings.getResourceSubtypesForLocale(currentSubtype.locale).firstOrNull()?.mainLayoutName()
-                            val newSubtype = if (defaultLayout == null) currentSubtype.withoutLayout(LayoutType.MAIN)
-                                else currentSubtype.withLayout(LayoutType.MAIN, defaultLayout)
-                            setCurrentSubtype(newSubtype)
-                        }
-                        LayoutUtilsCustom.deleteLayout(it, LayoutType.MAIN, ctx)
-                        (ctx.getActivity() as? SettingsActivity)?.prefChanged()
-                    }
-                )
-            }
-        }
-        if (showLayoutEditDialog != null) {
-            val layoutName = showLayoutEditDialog!!.first
-            val startContent = showLayoutEditDialog?.second
-                ?: if (layoutName in appLayouts) LayoutUtils.getContentWithPlus(layoutName, currentSubtype.locale, ctx)
-                else null
-            LayoutEditDialog(
-                onDismissRequest = { showLayoutEditDialog = null },
-                layoutType = LayoutType.MAIN,
-                initialLayoutName = layoutName,
-                startContent = startContent,
-                locale = currentSubtype.locale,
-                isNameValid = { it !in customLayouts },
-                onEdited = {
-                    if (layoutName !in customLayouts // edited a built-in layout, set new one as current
-                        || layoutName != it && layoutName == currentSubtype.mainLayoutName() // layout name for current subtype changed
-                        )
-                        setCurrentSubtype(currentSubtype.withLayout(LayoutType.MAIN, it))
-                }
-            )
-        }
-        if (showAddLayoutDialog) {
-            val wikiLink = stringResource(R.string.dictionary_link_text).withHtmlLink(Links.LAYOUT_WIKI_URL)
-            val layoutText = stringResource(R.string.message_add_custom_layout, wikiLink).htmlToAnnotated()
-            val discussionLink = stringResource(R.string.discussion_section_link).withHtmlLink(Links.CUSTOM_LAYOUTS)
-            val discussionSectionText = stringResource(R.string.get_layouts_message, discussionLink).htmlToAnnotated()
-            val annotated = layoutText + AnnotatedString("\n") + discussionSectionText
-
-            ConfirmationDialog(
-                onDismissRequest = { showAddLayoutDialog = false },
-                title = { Text(stringResource(R.string.button_title_add_custom_layout)) },
-                content = { Text(annotated) },
-                onConfirmed = { showLayoutEditDialog = "new layout" to "" },
-                neutralButtonText = stringResource(R.string.button_load_custom),
-                onNeutral = {
-                    showAddLayoutDialog = false
-                    layoutPicker.launch(layoutIntent)
-                }
-            )
-        }
-    }
 }
 
 private fun getAvailableSecondaryLocales(context: Context, mainLocale: Locale): List<Locale> =

@@ -75,8 +75,6 @@ public final class KeyboardId {
     public final int mElementId;
     public final EditorInfo mEditorInfo;
     public final boolean mDeviceLocked;
-    public final boolean mNumberRowEnabled;
-    public final boolean mNumberRowInSymbols;
     public final boolean mLanguageSwitchKeyEnabled;
     public final boolean mEmojiKeyEnabled;
     public final String mCustomActionLabel;
@@ -95,8 +93,6 @@ public final class KeyboardId {
         mElementId = elementId;
         mEditorInfo = params.mEditorInfo;
         mDeviceLocked = params.mDeviceLocked;
-        mNumberRowEnabled = params.mNumberRowEnabled;
-        mNumberRowInSymbols = params.mNumberRowInSymbols;
         mLanguageSwitchKeyEnabled = params.mLanguageSwitchKeyEnabled;
         mEmojiKeyEnabled = params.mEmojiKeyEnabled;
         mCustomActionLabel = (mEditorInfo.actionLabel != null)
@@ -118,7 +114,6 @@ public final class KeyboardId {
                 id.passwordInput(),
                 id.mDeviceLocked,
                 id.mHasShortcutKey,
-                id.mNumberRowEnabled,
                 id.mLanguageSwitchKeyEnabled,
                 id.mEmojiKeyEnabled,
                 id.isMultiLine(),
@@ -142,7 +137,6 @@ public final class KeyboardId {
                 && other.passwordInput() == passwordInput()
                 && other.mDeviceLocked == mDeviceLocked
                 && other.mHasShortcutKey == mHasShortcutKey
-                && other.mNumberRowEnabled == mNumberRowEnabled
                 && other.mLanguageSwitchKeyEnabled == mLanguageSwitchKeyEnabled
                 && other.mEmojiKeyEnabled == mEmojiKeyEnabled
                 && other.isMultiLine() == isMultiLine()
@@ -229,7 +223,7 @@ public final class KeyboardId {
 
     @Override
     public String toString() {
-        return String.format(Locale.ROOT, "[%s %s:%s %dx%d %s %s%s%s%s%s%s%s%s%s%s%s]",
+        return String.format(Locale.ROOT, "[%s %s:%s %dx%d %s %s%s%s%s%s%s%s%s%s%s]",
                 elementIdToName(mElementId),
                 mSubtype.getLocale(),
                 mSubtype.getExtraValueOf(KEYBOARD_LAYOUT_SET),
@@ -241,7 +235,6 @@ public final class KeyboardId {
                 (mDeviceLocked ? " deviceLocked" : ""),
                 (passwordInput() ? " passwordInput" : ""),
                 (mHasShortcutKey ? " hasShortcutKey" : ""),
-                (mNumberRowEnabled ? " numberRowEnabled" : ""),
                 (mLanguageSwitchKeyEnabled ? " languageSwitchKeyEnabled" : ""),
                 (mEmojiKeyEnabled ? " emojiKeyEnabled" : ""),
                 (isMultiLine() ? " isMultiLine" : ""),

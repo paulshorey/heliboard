@@ -2,12 +2,14 @@
 package helium314.keyboard.settings.dialogs
 
 import android.widget.Toast
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
@@ -50,7 +52,8 @@ fun LayoutEditDialog(
     startContent: String? = null,
     locale: Locale? = null,
     onEdited: (newLayoutName: String) -> Unit = { },
-    isNameValid: ((String) -> Boolean)?
+    isNameValid: ((String) -> Boolean)?,
+    isForkFromPlusLayout: Boolean = false,
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -88,17 +91,26 @@ fun LayoutEditDialog(
         initialText = startContent ?: LayoutUtilsCustom.getLayoutFile(initialLayoutName, layoutType, ctx).readText(),
         singleLine = false,
         title = {
-            if (isNameValid == null)
-                Text(displayNameValue.text)
-            else
-                TextField(
-                    value = displayNameValue,
-                    onValueChange = { displayNameValue = it },
-                    isError = !nameValid,
-                    supportingText = { if (!nameValid) Text(stringResource(R.string.name_invalid)) },
-                    trailingIcon = { if (!nameValid) CloseIcon(R.string.name_invalid) },
-                    textStyle = contentTextDirectionStyle,
-                )
+            Column {
+                if (isNameValid == null)
+                    Text(displayNameValue.text)
+                else
+                    TextField(
+                        value = displayNameValue,
+                        onValueChange = { displayNameValue = it },
+                        isError = !nameValid,
+                        supportingText = { if (!nameValid) Text(stringResource(R.string.name_invalid)) },
+                        trailingIcon = { if (!nameValid) CloseIcon(R.string.name_invalid) },
+                        textStyle = contentTextDirectionStyle,
+                    )
+                if (isForkFromPlusLayout)
+                    Text(
+                        stringResource(R.string.fork_plus_layout_caption),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+            }
         },
         checkTextValid = { text ->
             val valid = LayoutUtilsCustom.checkLayout(text, ctx)
@@ -130,6 +142,6 @@ private fun Preview() {
     val content = LocalContext.current.assets.open("layouts/main/dvorak.json").reader().readText()
     initPreview(LocalContext.current)
     Theme(previewDark) {
-        LayoutEditDialog({}, LayoutType.MAIN, "qwerty", locale = Locale.ENGLISH, startContent = content) { true }
+        LayoutEditDialog({}, LayoutType.MAIN, "qwerty", locale = Locale.ENGLISH, startContent = content, isNameValid = { true })
     }
 }

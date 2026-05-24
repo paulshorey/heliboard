@@ -44,9 +44,12 @@ object LayoutUtils {
         // the stuff below will not work if we add "+" layouts in json format
         // ideally we should serialize keyData to json to solve this
         val rows = getSimpleRowStrings(content)
+        val firstAlphabetRowIndex = if (rows.size >= 4) 1 else 0
         val localeKeyboardInfos = getOrCreate(context, locale)
         return rows.mapIndexed { i, row ->
-            val extraKeys = localeKeyboardInfos.getExtraKeys(i + 1) ?: return@mapIndexed row
+            if (i < firstAlphabetRowIndex) return@mapIndexed row
+            val alphabetRow = i - firstAlphabetRowIndex + 1
+            val extraKeys = localeKeyboardInfos.getExtraKeys(alphabetRow) ?: return@mapIndexed row
             val rowList = row.split("\n").filterNot { it.isEmpty() }.toMutableList()
             extraKeys.forEach { key ->
                 val popups = (key.popup as? SimplePopups)?.popupKeys?.joinToString(" ")
