@@ -410,7 +410,7 @@ private fun LayoutSlotEditor(
                                 LayoutUtils.getContent(slotType, it, ctx)
                             showLayoutEditDialog = "$it-copy" to content
                         }) {
-                            Icon(painterResource(R.drawable.ic_fork_layout), stringResource(R.string.fork_layout))
+                            Icon(painterResource(R.drawable.ic_edit), stringResource(R.string.fork_layout))
                         }
                     }
                 }
