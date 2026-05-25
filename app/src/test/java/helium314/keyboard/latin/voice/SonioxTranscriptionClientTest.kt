@@ -45,12 +45,13 @@ class SonioxTranscriptionClientTest {
     }
 
     @Test
-    fun buildStartConfigMessage_omitsContextWhenNoTermsProvided() {
+    fun buildStartConfigMessage_omitsContextWhenAllContextFieldsEmpty() {
         val sessionConfig = SonioxTranscriptionClient.buildSessionConfig(
             languageTag = "en-US",
             enableEndpointDetection = true,
             maxEndpointDelayMs = 2000,
             diarizationEnabled = false,
+            contextGeneral = emptyList(),
             contextTerms = emptyList()
         )
         val payload = JSONObject(

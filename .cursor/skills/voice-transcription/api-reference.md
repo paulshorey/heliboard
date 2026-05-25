@@ -17,6 +17,10 @@ HeliBoard uses the Soniox **Real-Time STT WebSocket** API (`wss://stt-rt.soniox.
   "num_channels": 1,
   "language_hints": ["en"],
   "context": {
+    "general": [
+      { "key": "setting", "value": "Voice dictation on a mobile keyboard" },
+      { "key": "instructions", "value": "Prefer shorter sentences over long comma-separated clauses. Use commas sparingly." }
+    ],
     "terms": ["HeliBoard", "Soniox", "Kubernetes", "API", "gnocchi", "MyProject"],
     "text": "<up to 4000 chars of editor text before the cursor>"
   },

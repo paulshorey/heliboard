@@ -2212,21 +2212,22 @@ public class LatinIME extends InputMethodService implements
         final CharSequence rawBefore =
                 mInputLogic.mConnection.getTextBeforeCursor(VOICE_CASING_LOOKBACK, 0);
         final CharSequence beforeCursor = (rawBefore != null) ? rawBefore : "";
-        String cased =
+        String prepared =
                 TranscriptPostProcessor.INSTANCE.adjustLeadingCasing(text, beforeCursor);
+        prepared = TranscriptPostProcessor.INSTANCE.stripTrailingComma(prepared);
         final CharSequence rawAfter =
                 mInputLogic.mConnection.getTextAfterCursor(VOICE_PUNCTUATION_LOOKAHEAD, 0);
         final CharSequence afterCursor = (rawAfter != null) ? rawAfter : "";
-        cased = TranscriptPostProcessor.INSTANCE
-                .stripTrailingPunctuationIfMidSentence(cased, afterCursor);
+        prepared = TranscriptPostProcessor.INSTANCE
+                .stripTrailingPunctuationIfMidSentence(prepared, afterCursor);
         if (beforeCursor.length() == 0) {
-            return cased;
+            return prepared;
         }
         final char previousChar = beforeCursor.charAt(beforeCursor.length() - 1);
         if (Character.isWhitespace(previousChar) || isOpeningDelimiter(previousChar)) {
-            return cased;
+            return prepared;
         }
-        return " " + cased;
+        return " " + prepared;
     }
 
     private boolean startsWithBackwardAttachingPunctuation(@NonNull final String text) {
