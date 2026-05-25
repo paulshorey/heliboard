@@ -61,6 +61,12 @@ Direct replacement rules, disfluency/filler-word removal, punctuation sensitivit
 
 ## Post-Processing (TranscriptPostProcessor)
 
+### Pre-commit: trailing-comma stripping
+
+Before insertion, `LatinIME.prepareVoiceTranscriptionText` calls `TranscriptPostProcessor.stripTrailingComma()`. With high `max_endpoint_delay_ms` (3000 ms), Soniox often adds a trailing comma at the end of a finalized segment because it expects more speech to follow. When the endpoint fires, the comma is already baked into the finalized tokens but is usually wrong — the speaker simply paused or stopped. The strip catches this case; if the next segment genuinely continues the clause, Soniox will re-insert the comma at the proper position in the next finalized span.
+
+### Post-commit: spoken punctuation commands
+
 After each transcript chunk is committed to the text field, `LatinIME.runTranscriptPostProcessing()` reads the current paragraph (text from the last newline to the cursor, up to 1024 chars) and runs it through `TranscriptPostProcessor.processCurrentParagraph()`. If any rules match, the paragraph text is replaced in-place via `deleteTextBeforeCursor` + `commitText`.
 
 Current rules handle **spelled-out punctuation** (e.g. "exclamation point.", "comma", "question mark.", "period.", "colon.", "semicolon."). Rules are case-insensitive and sorted longest-first so that patterns with surrounding punctuation context (like ". Exclamation point.") are consumed before shorter ambiguous ones. The processor only fires when a rule actually modifies the paragraph — no-op paragraphs are skipped.

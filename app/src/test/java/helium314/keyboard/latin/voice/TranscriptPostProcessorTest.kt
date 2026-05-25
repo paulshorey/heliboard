@@ -516,6 +516,56 @@ class TranscriptPostProcessorTest {
         assertEquals("The quick brown fox", adjust("The quick brown fox", ""))
     }
 
+    // --- Trailing comma stripping ---
+
+    @Test
+    fun `strips trailing comma from chunk`() {
+        assertEquals(
+            "I went to the store",
+            TranscriptPostProcessor.stripTrailingComma("I went to the store,")
+        )
+    }
+
+    @Test
+    fun `preserves chunk with no trailing comma`() {
+        assertEquals(
+            "I went to the store.",
+            TranscriptPostProcessor.stripTrailingComma("I went to the store.")
+        )
+    }
+
+    @Test
+    fun `preserves internal commas`() {
+        assertEquals(
+            "apples, oranges, and bananas",
+            TranscriptPostProcessor.stripTrailingComma("apples, oranges, and bananas,")
+        )
+    }
+
+    @Test
+    fun `handles empty string for trailing comma`() {
+        assertEquals(
+            "",
+            TranscriptPostProcessor.stripTrailingComma("")
+        )
+    }
+
+    @Test
+    fun `handles single comma`() {
+        assertEquals(
+            "",
+            TranscriptPostProcessor.stripTrailingComma(",")
+        )
+    }
+
+    @Test
+    fun `preserves trailing period`() {
+        assertEquals(
+            "hello.",
+            TranscriptPostProcessor.stripTrailingComma("hello.")
+        )
+    }
+
     // --- Trailing punctuation stripping (mid-sentence insertion) ---
 
     private fun strip(chunk: String, after: String): String =

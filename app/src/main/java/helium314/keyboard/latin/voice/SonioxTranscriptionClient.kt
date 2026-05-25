@@ -153,6 +153,16 @@ class SonioxTranscriptionClient {
                 )
             }
             val contextObject = JSONObject()
+            if (config.contextGeneral.isNotEmpty()) {
+                contextObject.put(
+                    "general",
+                    JSONArray().apply {
+                        config.contextGeneral.forEach { (key, value) ->
+                            put(JSONObject().put("key", key).put("value", value))
+                        }
+                    }
+                )
+            }
             if (config.contextTerms.isNotEmpty()) {
                 contextObject.put(
                     "terms",

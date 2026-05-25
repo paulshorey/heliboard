@@ -29,6 +29,24 @@ object TranscriptPostProcessor {
     }
 
     /**
+     * Strip a trailing comma from [chunk] when it appears to be a speculative
+     * clause separator inserted by the STT model during a thinking pause.
+     *
+     * With high `max_endpoint_delay_ms` (e.g. 3000 ms), Soniox waits longer
+     * before finalizing and tends to insert commas where it expects more speech
+     * to follow. When the endpoint fires, the trailing comma is already baked
+     * into the finalized tokens but is usually wrong — the speaker simply
+     * paused or stopped. Removing it produces cleaner text; if the next
+     * segment genuinely continues the clause, Soniox will re-insert the comma
+     * at the proper position in the next finalized span.
+     */
+    fun stripTrailingComma(chunk: String): String {
+        if (chunk.isEmpty()) return chunk
+        if (chunk.last() == ',') return chunk.substring(0, chunk.length - 1)
+        return chunk
+    }
+
+    /**
      * Strip trailing sentence-ending punctuation from [chunk] if [followingContext]
      * shows the cursor is mid-sentence (next visible character is a lowercase letter).
      *
