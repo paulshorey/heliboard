@@ -18,6 +18,24 @@ object TranscriptPostProcessor {
     val rules: List<Rule> = buildRules()
 
     /**
+     * Remove common spoken disfluencies from a finalized Soniox chunk before commit.
+     *
+     * Matches `um` / `uh` with an optional trailing comma. At the start of the chunk
+     * the following space is removed (`uh, hello` → `hello`). Elsewhere the preceding
+     * space is removed (`well uh, there` → `well there`) so words already in the editor
+     * are not left with a trailing gap.
+     */
+    private val LEADING_DISFLUENCY = Regex("""(?i)^\b(um|uh)\b,?\s*""")
+    private val EMBEDDED_DISFLUENCY = Regex("""(?i)\s+\b(um|uh)\b,?\s*""")
+
+    fun removeDisfluencies(chunk: String): String {
+        if (chunk.isEmpty()) return chunk
+        var result = chunk.replace(LEADING_DISFLUENCY, "")
+        result = result.replace(EMBEDDED_DISFLUENCY, " ")
+        return result
+    }
+
+    /**
      * Analyze [paragraph] and return the corrected text, or `null` if no rules matched.
      */
     fun processCurrentParagraph(paragraph: String): String? {

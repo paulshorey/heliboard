@@ -580,4 +580,54 @@ class TranscriptPostProcessorTest {
     fun `strips period when followed by digit (not a letter so preserves)`() {
         assertEquals("some text.", strip("some text.", "42 more"))
     }
+
+    // --- Disfluency removal (per-chunk, before commit) ---
+
+    private fun disfluencies(chunk: String): String =
+        TranscriptPostProcessor.removeDisfluencies(chunk)
+
+    @Test
+    fun `removes leading uh with trailing space`() {
+        assertEquals("hello there", disfluencies("uh, hello there"))
+    }
+
+    @Test
+    fun `removes leading um with trailing space`() {
+        assertEquals("let's go", disfluencies("Um, let's go"))
+    }
+
+    @Test
+    fun `removes embedded uh with leading space`() {
+        assertEquals("well there", disfluencies("well uh, there"))
+    }
+
+    @Test
+    fun `removes embedded um with leading space`() {
+        assertEquals("I think so", disfluencies("I um, think so"))
+    }
+
+    @Test
+    fun `removes multiple disfluencies in one chunk`() {
+        assertEquals("okay then", disfluencies("um, okay uh, then"))
+    }
+
+    @Test
+    fun `removes disfluency without comma`() {
+        assertEquals("next", disfluencies("uh next"))
+    }
+
+    @Test
+    fun `does not remove um inside words`() {
+        assertEquals("umbrella", disfluencies("umbrella"))
+    }
+
+    @Test
+    fun `returns empty when chunk is only a disfluency`() {
+        assertEquals("", disfluencies("uh,"))
+    }
+
+    @Test
+    fun `preserves empty chunk`() {
+        assertEquals("", disfluencies(""))
+    }
 }
