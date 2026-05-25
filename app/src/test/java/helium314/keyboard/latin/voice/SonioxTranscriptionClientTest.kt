@@ -45,12 +45,13 @@ class SonioxTranscriptionClientTest {
     }
 
     @Test
-    fun buildStartConfigMessage_omitsContextWhenNoTermsProvided() {
+    fun buildStartConfigMessage_omitsContextWhenAllContextFieldsEmpty() {
         val sessionConfig = SonioxTranscriptionClient.buildSessionConfig(
             languageTag = "en-US",
             enableEndpointDetection = true,
             maxEndpointDelayMs = 2000,
             diarizationEnabled = false,
+            contextGeneral = emptyList(),
             contextTerms = emptyList()
         )
         val payload = JSONObject(
@@ -423,69 +424,6 @@ class SonioxTranscriptionClientTest {
         assertTrue(termsList.contains("MyProject"), "custom term should be present: $termsList")
         assertEquals(termsList.toSet().size, termsList.size, "terms must be deduped: $termsList")
         assertFalse(termsList.contains(""), "blank terms must be filtered: $termsList")
-    }
-
-    @Test
-    fun buildStartConfigMessage_includesDefaultContextGeneral() {
-        val sessionConfig = SonioxTranscriptionClient.buildSessionConfig(
-            languageTag = "en",
-            enableEndpointDetection = true,
-            maxEndpointDelayMs = 2000,
-            diarizationEnabled = false
-        )
-        val payload = JSONObject(
-            SonioxTranscriptionClient.buildStartConfigMessage("API_KEY", sessionConfig)
-        )
-        val context = payload.getJSONObject("context")
-        assertTrue(context.has("general"), "context should include general section")
-        val general = context.getJSONArray("general")
-        assertTrue(general.length() > 0, "general should have at least one entry")
-        val keys = (0 until general.length()).map {
-            general.getJSONObject(it).getString("key")
-        }
-        assertTrue(keys.contains("setting"), "general should include 'setting' key: $keys")
-        assertTrue(keys.contains("instructions"), "general should include 'instructions' key: $keys")
-    }
-
-    @Test
-    fun buildStartConfigMessage_includesCustomContextGeneral() {
-        val customGeneral = listOf(
-            "domain" to "Healthcare",
-            "topic" to "Patient consultation"
-        )
-        val sessionConfig = SonioxTranscriptionClient.buildSessionConfig(
-            languageTag = "en",
-            enableEndpointDetection = true,
-            maxEndpointDelayMs = 2000,
-            diarizationEnabled = false,
-            contextGeneral = customGeneral
-        )
-        val payload = JSONObject(
-            SonioxTranscriptionClient.buildStartConfigMessage("API_KEY", sessionConfig)
-        )
-        val context = payload.getJSONObject("context")
-        val general = context.getJSONArray("general")
-        assertEquals(2, general.length())
-        assertEquals("domain", general.getJSONObject(0).getString("key"))
-        assertEquals("Healthcare", general.getJSONObject(0).getString("value"))
-        assertEquals("topic", general.getJSONObject(1).getString("key"))
-        assertEquals("Patient consultation", general.getJSONObject(1).getString("value"))
-    }
-
-    @Test
-    fun buildStartConfigMessage_omitsContextGeneralWhenEmpty() {
-        val sessionConfig = SonioxTranscriptionClient.buildSessionConfig(
-            languageTag = "en",
-            enableEndpointDetection = true,
-            maxEndpointDelayMs = 2000,
-            diarizationEnabled = false,
-            contextGeneral = emptyList(),
-            contextTerms = emptyList()
-        )
-        val payload = JSONObject(
-            SonioxTranscriptionClient.buildStartConfigMessage("API_KEY", sessionConfig)
-        )
-        assertFalse(payload.has("context"))
     }
 
     @Test

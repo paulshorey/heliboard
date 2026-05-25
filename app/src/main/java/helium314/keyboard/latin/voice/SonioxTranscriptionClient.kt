@@ -81,6 +81,7 @@ class SonioxTranscriptionClient {
             val enableEndpointDetection: Boolean,
             val maxEndpointDelayMs: Int,
             val diarizationEnabled: Boolean,
+            val contextGeneral: List<Pair<String, String>>,
             val contextTerms: List<String>,
             val contextText: String?
         )
@@ -90,6 +91,7 @@ class SonioxTranscriptionClient {
             enableEndpointDetection: Boolean,
             maxEndpointDelayMs: Int,
             diarizationEnabled: Boolean,
+            contextGeneral: List<Pair<String, String>> = defaultContextGeneral(),
             contextTerms: List<String> = defaultContextTerms(),
             customContextTerms: List<String> = emptyList(),
             contextText: String? = null
@@ -106,6 +108,7 @@ class SonioxTranscriptionClient {
                     MAX_MAX_ENDPOINT_DELAY_MS
                 ),
                 diarizationEnabled = diarizationEnabled,
+                contextGeneral = contextGeneral,
                 contextTerms = mergedTerms,
                 contextText = sanitizeContextText(contextText)
             )
@@ -117,6 +120,20 @@ class SonioxTranscriptionClient {
             "Kubernetes",
             "API",
             "gnocchi"
+        )
+
+        /**
+         * Default structured context hints that tell Soniox the audio is
+         * mobile keyboard dictation. The `instructions` key is an
+         * experimental Soniox feature (documented for language detection)
+         * that also influences punctuation style — asking for shorter
+         * sentences and fewer commas reduces the model's tendency to insert
+         * clause-separating commas during thinking pauses.
+         */
+        internal fun defaultContextGeneral(): List<Pair<String, String>> = listOf(
+            "setting" to "Voice dictation on a mobile keyboard",
+            "instructions" to "Prefer shorter sentences over long comma-separated clauses. " +
+                "Use commas sparingly."
         )
 
         /**
@@ -154,14 +171,13 @@ class SonioxTranscriptionClient {
             }
             val contextObject = JSONObject()
             if (config.contextGeneral.isNotEmpty()) {
-                contextObject.put(
-                    "general",
-                    JSONArray().apply {
-                        config.contextGeneral.forEach { (key, value) ->
-                            put(JSONObject().put("key", key).put("value", value))
-                        }
-                    }
-                )
+                val generalArray = JSONArray()
+                for (pair in config.contextGeneral) {
+                    generalArray.put(
+                        JSONObject().put("key", pair.first).put("value", pair.second)
+                    )
+                }
+                contextObject.put("general", generalArray)
             }
             if (config.contextTerms.isNotEmpty()) {
                 contextObject.put(
