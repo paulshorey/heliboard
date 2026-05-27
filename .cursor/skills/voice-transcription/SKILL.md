@@ -57,7 +57,7 @@ Soniox returns smart-formatted text with punctuation already inserted; HeliBoard
 - **`enable_endpoint_detection`** + **`max_endpoint_delay_ms`** — when enabled, Soniox finalizes tokens once it detects the speaker has stopped talking (semantic endpointing: intonation, pauses, and context — not plain VAD). `max_endpoint_delay_ms` is the maximum wait after speech ends before the endpoint is returned; it must be between 500 and 3000 ms. **Higher values wait longer** before committing a phrase (fewer premature periods/commas); lower values finalize sooner. HeliBoard defaults to **3000 ms** (Soniox's API default is 2000 ms).
 - **`enable_speaker_diarization`** — when enabled, the client locks onto the first non-empty `speaker` label observed and drops tokens from other speakers. Soniox uses string speaker IDs (`"1"`, `"2"`, …); the locked ID isn't guaranteed to be the local speaker.
 
-Direct replacement rules, disfluency/filler-word removal, punctuation sensitivity, and output locale are **not** exposed in Soniox's real-time WebSocket API. Punctuation is model-driven; `context.text` (editor text before the cursor) is the main lever for mid-sentence comma/period behavior. Filler words such as "um" can only be stripped locally (e.g. in `TranscriptPostProcessor`) — Soniox does not document a built-in disfluency filter.
+Direct replacement rules, disfluency/filler-word removal, punctuation sensitivity, and output locale are **not** exposed in Soniox's real-time WebSocket API. Punctuation is model-driven; `context.text` (editor text before the cursor) is the main lever for mid-sentence comma/period behavior. Filler words such as "um" / "uh" are stripped locally in `TranscriptPostProcessor.removeDisfluencies()` — Soniox does not document a built-in disfluency filter.
 
 ## Post-Processing (TranscriptPostProcessor)
 
@@ -66,6 +66,15 @@ After each transcript chunk is committed to the text field, `LatinIME.runTranscr
 Current rules handle **spelled-out punctuation** (e.g. "exclamation point.", "comma", "question mark.", "period.", "colon.", "semicolon."). Rules are case-insensitive and sorted longest-first so that patterns with surrounding punctuation context (like ". Exclamation point.") are consumed before shorter ambiguous ones. The processor only fires when a rule actually modifies the paragraph — no-op paragraphs are skipped.
 
 To add new post-processing rules, edit `TranscriptPostProcessor.buildRules()` in `voice/TranscriptPostProcessor.kt`. Unit tests are in `TranscriptPostProcessorTest.kt`.
+
+## Per-chunk disfluency removal
+
+`TranscriptPostProcessor.removeDisfluencies(chunk)` runs in `LatinIME.prepareVoiceTranscriptionText` on every finalized chunk **before** leading-casing and space insertion. It removes standalone `um` / `uh` with an optional comma:
+
+- At the **start** of a chunk, the trailing separator is removed (`uh, hello` → `hello`).
+- **Elsewhere** in the chunk, the leading separator is removed (`well uh, there` → `well there`) so text already in the editor is not left with a trailing space.
+
+Word boundaries prevent stripping substrings inside words like `umbrella`.
 
 ## Leading-Casing Correction
 

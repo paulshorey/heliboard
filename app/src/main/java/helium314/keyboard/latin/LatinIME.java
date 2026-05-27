@@ -2206,14 +2206,19 @@ public class LatinIME extends InputMethodService implements
     private String prepareVoiceTranscriptionText(
             @NonNull final String text,
             final boolean attachesToPrevious) {
-        if (text.isEmpty() || attachesToPrevious || startsWithBackwardAttachingPunctuation(text)) {
-            return text;
+        final String withoutDisfluencies =
+                TranscriptPostProcessor.INSTANCE.removeDisfluencies(text);
+        if (withoutDisfluencies.isEmpty()) {
+            return withoutDisfluencies;
+        }
+        if (attachesToPrevious || startsWithBackwardAttachingPunctuation(withoutDisfluencies)) {
+            return withoutDisfluencies;
         }
         final CharSequence rawBefore =
                 mInputLogic.mConnection.getTextBeforeCursor(VOICE_CASING_LOOKBACK, 0);
         final CharSequence beforeCursor = (rawBefore != null) ? rawBefore : "";
-        String cased =
-                TranscriptPostProcessor.INSTANCE.adjustLeadingCasing(text, beforeCursor);
+        String cased = TranscriptPostProcessor.INSTANCE.adjustLeadingCasing(
+                withoutDisfluencies, beforeCursor);
         final CharSequence rawAfter =
                 mInputLogic.mConnection.getTextAfterCursor(VOICE_PUNCTUATION_LOOKAHEAD, 0);
         final CharSequence afterCursor = (rawAfter != null) ? rawAfter : "";

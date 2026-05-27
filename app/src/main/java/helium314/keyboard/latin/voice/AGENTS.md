@@ -5,7 +5,7 @@ Soniox realtime transcription pipeline.
 ## Direct files
 - `SonioxTranscriptionClient.kt` - WebSocket client, session config, transcript reconstruction from Soniox `tokens`.
 - `TranscriptSegment.kt` - finalized transcript chunk shared between the client and the IME pipeline.
-- `TranscriptPostProcessor.kt` - local cleanup/formatting for finalized transcript text.
+- `TranscriptPostProcessor.kt` - per-chunk disfluency removal, leading-casing, and paragraph-level cleanup for finalized transcript text.
 - `VoiceInputManager.kt` - record/stream/orchestrate voice sessions and deliver finalized text.
 - `VoiceRecorder.kt` - microphone capture of PCM audio.
 
