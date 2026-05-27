@@ -2172,22 +2172,43 @@ public class LatinIME extends InputMethodService implements
 
         final String before = beforeCursor.toString();
         final int newlinePos = before.lastIndexOf('\n');
-        final String paragraph = (newlinePos >= 0) ? before.substring(newlinePos + 1) : before;
-        if (paragraph.isEmpty()) {
+        final String originalParagraph = (newlinePos >= 0) ? before.substring(newlinePos + 1) : before;
+        if (originalParagraph.isEmpty()) {
             return;
         }
 
-        final String corrected =
+        String paragraph = originalParagraph;
+
+        // Phase 1: user-defined ending replacements (filler words, trailing punctuation).
+        // These check the ending of the full paragraph text (already committed to the field).
+        final java.util.List<TranscriptPostProcessor.Rule> endingRules =
+                TranscriptionPreferences.INSTANCE.readChunkEndingReplacements(
+                        KtxKt.prefs(this));
+        Log.i(TAG, "VOICE ending-rules: " + endingRules.size() + " rules, paragraph ends: \""
+                + paragraph.substring(Math.max(0, paragraph.length() - 20)) + "\"");
+        final String afterEnding =
+                TranscriptPostProcessor.INSTANCE.processChunkEnding(paragraph, endingRules);
+        if (afterEnding != null) {
+            Log.i(TAG, "VOICE ending-rules matched!");
+            paragraph = afterEnding;
+        }
+
+        // Phase 2: paragraph-level rules (spelled-out punctuation commands, etc.)
+        final String afterParagraph =
                 TranscriptPostProcessor.INSTANCE.processCurrentParagraph(paragraph);
-        if (corrected == null) {
+        if (afterParagraph != null) {
+            paragraph = afterParagraph;
+        }
+
+        if (paragraph.equals(originalParagraph)) {
             return;
         }
 
         Log.i(TAG, "VOICE post-processing: replacing paragraph ("
-                + paragraph.length() + " → " + corrected.length() + " chars)");
+                + originalParagraph.length() + " chars -> " + paragraph.length() + " chars)");
 
-        mInputLogic.mConnection.deleteTextBeforeCursor(paragraph.length());
-        mInputLogic.mConnection.commitText(corrected, 1);
+        mInputLogic.mConnection.deleteTextBeforeCursor(originalParagraph.length());
+        mInputLogic.mConnection.commitText(paragraph, 1);
     }
 
     /**
