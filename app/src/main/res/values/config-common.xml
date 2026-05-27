@@ -33,6 +33,8 @@
     <dimen name="config_language_on_spacebar_horizontal_margin">3dp</dimen>
     <!-- Optional top inset for the main space key on alphabet/symbol layouts (visual shift + non-hit strip). Zero uses the full bottom-row slot for drawing and taps. -->
     <dimen name="config_spacebar_visual_inset_top">0dp</dimen>
+    <!-- Extra vertical pixels added above and below the spacebar hit box so near-miss taps still register as space. Overlapping neighbors are resolved by nearest visual edge. -->
+    <dimen name="config_spacebar_hit_expand_vertical">8dp</dimen>
 
     <integer name="config_gesture_trail_fadeout_start_delay">100</integer>
     <integer name="config_gesture_trail_update_interval">20</integer>
