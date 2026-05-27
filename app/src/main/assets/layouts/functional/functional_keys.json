@@ -7,15 +7,17 @@
   [
     { "label": "symbol_alpha", "width": 0.15 },
     { "$": "variation_selector",
-      "default":  { "label": "comma" },
+      "default":  { "label": "/", "groupId": 1, "type": "function", "popup": { "main": { "label": "," } } },
       "email":    { "label": "@", "groupId": 1, "type": "function" },
       "uri":      { "label": "/", "groupId": 1, "type": "function" }
     },
     { "$": "keyboard_state_selector", "languageKeyEnabled": { "$": "keyboard_state_selector", "alphabet": { "label": "language_switch" }}},
     { "$": "keyboard_state_selector", "emojiKeyEnabled": { "$": "keyboard_state_selector", "alphabet": { "label": "emoji" }}},
     { "$": "keyboard_state_selector", "symbols": { "label": "numpad" }},
+    { "label": "!", "type": "function", "width": 0.08, "popup": { "main": { "label": "¡" } } },
     { "label": "space" },
-    { "label": "period", "labelFlags": 1073741824 },
+    { "label": "?", "type": "function", "width": 0.08, "popup": { "main": { "label": "¿" } } },
+    { "label": "-", "groupId": 2, "type": "function", "popup": { "main": { "label": "." } } },
     { "label": "action", "width": 0.15 }
   ]
 ]
