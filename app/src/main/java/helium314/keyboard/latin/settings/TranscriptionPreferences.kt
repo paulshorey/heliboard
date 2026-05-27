@@ -2,6 +2,7 @@ package helium314.keyboard.latin.settings
 
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import helium314.keyboard.latin.voice.TranscriptPostProcessor
 
 /**
  * Typed access to Soniox transcription preferences with cleanup for legacy
@@ -150,6 +151,49 @@ object TranscriptionPreferences {
     fun sanitizeMaxEndpointDelayMs(value: Int): Int {
         return value.coerceIn(MIN_MAX_ENDPOINT_DELAY_MS, MAX_MAX_ENDPOINT_DELAY_MS)
     }
+
+    // ── Chunk-ending replacements ────────────────────────────────────────
+
+    fun readChunkEndingReplacements(prefs: SharedPreferences): List<TranscriptPostProcessor.Rule> {
+        val raw = prefs.getString(
+            Settings.PREF_VOICE_CHUNK_ENDING_REPLACEMENTS,
+            Defaults.PREF_VOICE_CHUNK_ENDING_REPLACEMENTS
+        ).orEmpty()
+        return parseChunkEndingReplacements(raw)
+    }
+
+    fun readChunkEndingReplacementsRaw(prefs: SharedPreferences): String {
+        return prefs.getString(
+            Settings.PREF_VOICE_CHUNK_ENDING_REPLACEMENTS,
+            Defaults.PREF_VOICE_CHUNK_ENDING_REPLACEMENTS
+        ).orEmpty()
+    }
+
+    fun writeChunkEndingReplacements(prefs: SharedPreferences, value: String) {
+        prefs.edit {
+            putString(Settings.PREF_VOICE_CHUNK_ENDING_REPLACEMENTS, value)
+        }
+    }
+
+    internal fun parseChunkEndingReplacements(raw: String): List<TranscriptPostProcessor.Rule> {
+        if (raw.isBlank()) return emptyList()
+        val result = mutableListOf<TranscriptPostProcessor.Rule>()
+        for (line in raw.lineSequence()) {
+            val tabIdx = line.indexOf('\t')
+            if (tabIdx < 0) continue
+            val find = line.substring(0, tabIdx)
+            val replace = line.substring(tabIdx + 1)
+            if (find.isEmpty()) continue
+            result.add(TranscriptPostProcessor.Rule(find, replace))
+        }
+        return result
+    }
+
+    fun serializeChunkEndingReplacements(rules: List<TranscriptPostProcessor.Rule>): String {
+        return rules.joinToString("\n") { r -> "${r.find}\t${r.replace}" }
+    }
+
+    // ── Legacy cleanup ───────────────────────────────────────────────────
 
     private fun clearLegacyApiKeys(prefs: SharedPreferences) {
         val hasLegacySpeechmatics = prefs.contains(LEGACY_SPEECHMATICS_API_KEY_PREF)

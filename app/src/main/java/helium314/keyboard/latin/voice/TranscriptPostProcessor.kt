@@ -128,6 +128,45 @@ object TranscriptPostProcessor {
         return true
     }
 
+    /**
+     * Apply user-defined ending replacement rules to [paragraph].
+     *
+     * Each rule's `find` pattern is checked only at the **end** of the text.
+     * Leading whitespace in the find pattern acts as a word-boundary guard
+     * (prevents matching the tail of a longer word). Trailing whitespace in
+     * the find pattern is stripped for matching purposes but, if present in
+     * the original text, is re-appended after the replacement.
+     *
+     * Returns the corrected text, or `null` if no rules matched.
+     */
+    fun processChunkEnding(paragraph: String, endingRules: List<Rule>): String? {
+        if (paragraph.isEmpty() || endingRules.isEmpty()) return null
+
+        for (rule in endingRules) {
+            val find = rule.find
+            if (find.isEmpty()) continue
+
+            val trailingWs = find.length - find.trimEnd().length
+            val findCore = if (trailingWs > 0) find.substring(0, find.length - trailingWs) else find
+
+            if (findCore.isEmpty()) continue
+
+            if (!paragraph.endsWith(findCore)) {
+                if (trailingWs > 0 && paragraph.trimEnd().endsWith(findCore)) {
+                    val trimmed = paragraph.trimEnd()
+                    val actualTrailingWs = paragraph.substring(trimmed.length)
+                    val prefix = trimmed.substring(0, trimmed.length - findCore.length)
+                    return prefix + rule.replace + actualTrailingWs
+                }
+                continue
+            }
+
+            val prefix = paragraph.substring(0, paragraph.length - findCore.length)
+            return prefix + rule.replace
+        }
+        return null
+    }
+
     // ------------------------------------------------------------------
     // Rule construction — only matches capitalized sentence-form commands
     // as returned by real-time STT providers (e.g. "Colon." not "colon").

@@ -86,6 +86,7 @@ import helium314.keyboard.latin.utils.SubtypeLocaleUtils;
 import helium314.keyboard.latin.utils.SubtypeSettings;
 import helium314.keyboard.latin.utils.SubtypeState;
 import helium314.keyboard.latin.utils.ToolbarMode;
+import helium314.keyboard.latin.settings.TranscriptionPreferences;
 import helium314.keyboard.latin.voice.TranscriptPostProcessor;
 import helium314.keyboard.latin.voice.VoiceInputManager;
 import helium314.keyboard.latin.suggestions.SuggestionStripView.VoiceState;

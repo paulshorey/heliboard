@@ -169,6 +169,7 @@ object SettingsDestination {
     const val SetupApp = "setup_app"
     const val Transcription = "transcription"
     const val SonioxContextTerms = "soniox_context_terms"
+    const val VoiceEndingReplacements = "voice_ending_replacements"
     const val FullappDrafts = "fullapp_drafts"
     const val Debug = "debug"
     const val Appearance = "appearance"
