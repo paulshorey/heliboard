@@ -107,6 +107,7 @@ open class KeyboardBuilder<KP : KeyboardParams>(protected val mContext: Context,
         }
         applyMainKeyboardSpaceInset()
         addKeysToParams()
+        expandSpacebarHitArea()
         return Keyboard(mParams)
     }
 
@@ -155,6 +156,22 @@ open class KeyboardBuilder<KP : KeyboardParams>(protected val mContext: Context,
             val maxInset = (fullAbsH - 1).toInt().coerceAtLeast(1)
             val insetTop = paddingPx.coerceIn(0, maxInset)
             space.mSpaceVisualInsetTop = insetTop
+        }
+    }
+
+    /**
+     * Expands the hit box of spacebar keys vertically so that taps slightly above or below the
+     * visible key still register as space. When hit boxes overlap with neighbouring keys,
+     * [Key.squaredDistanceToEdge] tie-breaks in favour of the visually closer key.
+     */
+    private fun expandSpacebarHitArea() {
+        if (!mParams.mId.isAlphaOrSymbolKeyboard) return
+        val expandPx = mResources.getDimensionPixelSize(R.dimen.config_spacebar_hit_expand_vertical)
+        if (expandPx <= 0) return
+        for (key in mParams.mSortedKeys) {
+            if (key.code == Constants.CODE_SPACE) {
+                key.expandHitBoxVertical(expandPx, expandPx)
+            }
         }
     }
 

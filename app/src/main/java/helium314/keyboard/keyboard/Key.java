@@ -514,6 +514,16 @@ public class Key implements Comparable<Key> {
         mHitBox.bottom = params.mOccupiedHeight + params.mBottomPadding;
     }
 
+    /**
+     * Expand the hit box vertically so near-miss taps above or below the key
+     * still register. Overlapping neighbour hit boxes are resolved by
+     * {@link #squaredDistanceToEdge}, so moderate expansion is safe.
+     */
+    public void expandHitBoxVertical(final int topPx, final int bottomPx) {
+        mHitBox.top -= topPx;
+        mHitBox.bottom += bottomPx;
+    }
+
     public final boolean isSpacer() {
         return this instanceof Spacer;
     }

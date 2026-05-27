@@ -94,6 +94,7 @@ class KeyboardParser(private val params: KeyboardParams, private val context: Co
             params.mBaseWidth = params.mOccupiedWidth - params.mLeftPadding - params.mRightPadding
         }
 
+        applyShiftToNumberRow(baseKeys)
         convertToLocalizedNumbers(baseKeys)
         if (!params.mAllowRedundantPopupKeys)
             params.baseKeys = baseKeys.flatMap { row -> row.map { it.toKeyParams(params) } }
@@ -267,6 +268,27 @@ class KeyboardParser(private val params: KeyboardParams, private val context: Co
                 0 -> topRow[i] = key.copy(newLabel = localizedNumbers[9], newCode = KeyCode.UNSPECIFIED, newPopup = SimplePopups(listOf(key.label)).merge(key.popup))
                 in 1..9 -> topRow[i] = key.copy(newLabel = localizedNumbers[number - 1], newCode = KeyCode.UNSPECIFIED, newPopup = SimplePopups(listOf(key.label)).merge(key.popup))
             }
+        }
+    }
+
+    /** When manually shifted or caps-locked, swap digit labels with their first popup (hint) character. */
+    private fun applyShiftToNumberRow(baseKeys: MutableList<MutableList<KeyData>>) {
+        if (!params.mId.isAlphabetKeyboard || !params.mId.isAlphabetShiftedManually || baseKeys.size < 4) return
+        val topRow = baseKeys.first()
+        for (i in topRow.indices) {
+            val key = topRow[i]
+            if (key.label.length != 1 || !key.label[0].isDigit()) continue
+            val popupKeys = (key.popup as? SimplePopups)?.popupKeys?.toList() ?: continue
+            if (popupKeys.isEmpty()) continue
+            val hintChar = popupKeys.first()
+            if (hintChar.isEmpty()) continue
+            val newPopups = mutableListOf(key.label)
+            newPopups.addAll(popupKeys.drop(1))
+            topRow[i] = key.copy(
+                newLabel = hintChar,
+                newCode = KeyCode.UNSPECIFIED,
+                newPopup = SimplePopups(newPopups)
+            )
         }
     }
 
