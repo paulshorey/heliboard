@@ -58,6 +58,7 @@ fun TextCorrectionScreen(
     val suggestionsEnabled = suggestionsVisible && prefs.getBoolean(Settings.PREF_SHOW_SUGGESTIONS, Defaults.PREF_SHOW_SUGGESTIONS)
     val gestureEnabled = JniUtils.sHaveGestureLib && prefs.getBoolean(Settings.PREF_GESTURE_INPUT, Defaults.PREF_GESTURE_INPUT)
     val items = listOf(
+        Settings.PREF_VOICE_CHUNK_ENDING_REPLACEMENTS,
         SettingsWithoutKey.EDIT_PERSONAL_DICTIONARY,
         SettingsWithoutKey.EDIT_EMAILS_DICTIONARY,
         R.string.settings_category_correction,
