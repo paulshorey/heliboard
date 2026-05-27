@@ -9,7 +9,7 @@
 9 ( ⁹
 0 ) ⁰ ⁿ ∅
 
-q Tab|!code/key_tab
+q ~
 w `
 e ```
 r \
@@ -35,5 +35,5 @@ x }
 c <
 v >
 b *
-n ?
-m ~
+n →
+m ?
