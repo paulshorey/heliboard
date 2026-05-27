@@ -58,6 +58,7 @@ fun TextCorrectionScreen(
     val suggestionsEnabled = suggestionsVisible && prefs.getBoolean(Settings.PREF_SHOW_SUGGESTIONS, Defaults.PREF_SHOW_SUGGESTIONS)
     val gestureEnabled = JniUtils.sHaveGestureLib && prefs.getBoolean(Settings.PREF_GESTURE_INPUT, Defaults.PREF_GESTURE_INPUT)
     val items = listOf(
+        Settings.PREF_VOICE_CHUNK_ENDING_REPLACEMENTS,
         SettingsWithoutKey.EDIT_PERSONAL_DICTIONARY,
         SettingsWithoutKey.EDIT_EMAILS_DICTIONARY,
         R.string.settings_category_correction,
@@ -98,6 +99,15 @@ fun TextCorrectionScreen(
 }
 
 fun createCorrectionSettings(context: Context) = listOf(
+    Setting(context, Settings.PREF_VOICE_CHUNK_ENDING_REPLACEMENTS,
+        R.string.voice_chunk_ending_replacements_title, R.string.voice_chunk_ending_replacements_summary
+    ) {
+        Preference(
+            name = stringResource(R.string.voice_chunk_ending_replacements_title),
+            description = stringResource(R.string.voice_chunk_ending_replacements_summary),
+            onClick = { SettingsDestination.navigateTo(SettingsDestination.VoiceEndingReplacements) },
+        ) { NextScreenIcon() }
+    },
     Setting(context, SettingsWithoutKey.EDIT_PERSONAL_DICTIONARY, R.string.edit_personal_dictionary) {
         Preference(
             name = stringResource(R.string.edit_personal_dictionary),

@@ -289,6 +289,14 @@
     <string name="soniox_context_terms_user_placeholder">Add one term per line</string>
     <!-- Counter under the user-terms text field showing how many terms will be sent. -->
     <string name="soniox_context_terms_user_count">%1$d term(s) will be sent</string>
+    <string name="voice_chunk_ending_replacements_title">Voice ending replacements</string>
+    <string name="voice_chunk_ending_replacements_summary">Remove filler words and fix trailing punctuation at the end of each transcription chunk.</string>
+    <string name="voice_chunk_ending_replacements_intro">Rules are applied to the end of the text after each transcription chunk is committed. Leading whitespace in the search term acts as a word boundary (prevents matching the tail of a longer word). Trailing whitespace is preserved after replacement.</string>
+    <string name="voice_chunk_ending_replacements_find_label">Find</string>
+    <string name="voice_chunk_ending_replacements_replace_label">Replace with</string>
+    <string name="voice_chunk_ending_replacements_add">Add rule</string>
+    <string name="voice_chunk_ending_replacements_empty">No replacement rules defined. Tap + to add one.</string>
+    <string name="voice_chunk_ending_replacements_count">%1$d rule(s) active</string>
     <string name="voice_chunk_silence_seconds_title">Chunk silence duration (seconds)</string>
     <string name="voice_silence_threshold_title">Silence threshold (RMS loudness)</string>
     <string name="voice_auto_stop_silence_seconds_title">Auto-stop silence duration (seconds)</string>

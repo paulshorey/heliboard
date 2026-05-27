@@ -176,6 +176,15 @@ object Defaults {
     // User-editable Soniox `context.terms`, stored as a single string with one term per line.
     // The built-in product/technical term list is added on top of this in the client.
     const val PREF_SONIOX_CUSTOM_TERMS = ""
+    // User-editable find:replace pairs applied to the ending of each transcription chunk.
+    // Stored as one pair per line, tab-separated (find\treplace).
+    const val PREF_VOICE_CHUNK_ENDING_REPLACEMENTS =
+        " um, \t \n" +
+        " uh, \t \n" +
+        " um,\t\n" +
+        " uh,\t\n" +
+        "\u2014 \t. \n" +
+        "\u2014\t"
     const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 1
     const val PREF_VOICE_SILENCE_THRESHOLD = 220
     const val PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = 30

@@ -37,6 +37,7 @@ import helium314.keyboard.settings.screens.SubtypeScreen
 import helium314.keyboard.settings.screens.TextCorrectionScreen
 import helium314.keyboard.settings.screens.ToolbarScreen
 import helium314.keyboard.settings.screens.TranscriptionScreen
+import helium314.keyboard.settings.screens.VoiceEndingReplacementsScreen
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -113,6 +114,9 @@ fun SettingsNavHost(
         composable(SettingsDestination.SonioxContextTerms) {
             SonioxContextTermsScreen(onClickBack = ::goBack)
         }
+        composable(SettingsDestination.VoiceEndingReplacements) {
+            VoiceEndingReplacementsScreen(onClickBack = ::goBack)
+        }
         composable(SettingsDestination.FullappDrafts) {
             FullappDraftsScreen(onClickBack = ::goBack)
         }
@@ -169,6 +173,7 @@ object SettingsDestination {
     const val SetupApp = "setup_app"
     const val Transcription = "transcription"
     const val SonioxContextTerms = "soniox_context_terms"
+    const val VoiceEndingReplacements = "voice_ending_replacements"
     const val FullappDrafts = "fullapp_drafts"
     const val Debug = "debug"
     const val Appearance = "appearance"
