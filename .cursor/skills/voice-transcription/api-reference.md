@@ -35,7 +35,7 @@ HeliBoard uses the Soniox **Real-Time STT WebSocket** API (`wss://stt-rt.soniox.
 - **`context.terms`** (optional): recognition hints. HeliBoard sends the union of a built-in list (`HeliBoard`, `Soniox`, `Kubernetes`, `API`, `gnocchi`) and the user's custom terms from `PREF_SONIOX_CUSTOM_TERMS` (one per line, managed in `SonioxContextTermsScreen`). Merged, trimmed, and deduplicated by `SonioxTranscriptionClient.buildSessionConfig`.
 - **`context.text`** (optional): free-form prior text. HeliBoard sends up to the last 4 000 characters of editor text before the cursor (`LatinIME.buildVoiceContextText` via `VoiceInputManager.setPriorTextProvider`). Soniox uses this for sentence-structure punctuation, mid-sentence casing, and proper-noun spelling. Reconnects re-fetch the prior text so the running transcript stays in context.
 - **`enable_endpoint_detection`** (boolean, optional): when true, Soniox finalizes tokens once it detects the speaker has stopped talking (semantic endpointing).
-- **`max_endpoint_delay_ms`** (number, optional): valid range **500–3000 ms**. Soniox API default is **2000 ms**; HeliBoard default is **3000 ms**. **Higher = wait longer** after a pause before committing the phrase (reduces premature punctuation); **lower = finalize sooner**.
+- **`max_endpoint_delay_ms`** (number, optional): valid range **500–3000 ms**. Soniox API default is **2000 ms**; HeliBoard default is **3000 ms**. This is a **maximum**, not a fixed wait: semantic endpointing still finalizes earlier when the model thinks a sentence ended, so raising it does not stop premature punctuation — it only bounds the worst case. The VAD-driven manual finalize (see below) guarantees the trailing phrase is committed regardless.
 - **`enable_speaker_diarization`** (boolean, optional): when true, every token includes a `speaker` field. HeliBoard uses this to lock onto the first observed speaker and drop tokens from later speakers.
 
 Other documented fields (`enable_language_identification`, `translation`, `client_reference_id`) are not used.
@@ -107,14 +107,14 @@ To end the session cleanly:
 3. Wait for `{"finished": true}` (HeliBoard uses an 8 s grace timeout).
 4. Close the socket with code 1000.
 
-There is no per-chunk audio acknowledgement to track. (Soniox also exposes an optional manual finalize control message `{"type": "finalize"}` for mid-stream finalization; HeliBoard does not use it.)
+There is no per-chunk audio acknowledgement to track. (Soniox also exposes a manual finalize control message `{"type": "finalize"}` for mid-stream finalization; HeliBoard sends it on local-VAD silence and before end-of-stream to flush pending non-final tokens.)
 
 ### Special control tokens
 
 Soniox emits two reserved markers as final tokens inside the regular `tokens` array. Raw WebSocket consumers must filter them or they leak into the transcript as literal text. HeliBoard's `SonioxTranscriptionClient` filters both via the `STREAM_MARKERS` set:
 
 - **`<end>`** — appears once at the end of every utterance when `enable_endpoint_detection` is on. Documented at <https://soniox.com/docs/stt/rt/endpoint-detection>.
-- **`<fin>`** — appears at the end of every manual finalize segment. Documented at <https://soniox.com/docs/stt/rt/manual-finalization>. HeliBoard does not send `{"type": "finalize"}` today, but the filter is in place defensively.
+- **`<fin>`** — appears at the end of every manual finalize segment. Documented at <https://soniox.com/docs/stt/rt/manual-finalization>. HeliBoard sends `{"type": "finalize"}` on local-VAD silence and before end-of-stream (see `VoiceInputManager.requestManualFinalizeOnSilence` / `finalizeStreamingSession`), so this marker is filtered out of committed text.
 
 The Soniox SDKs filter these via `filterSpecialTokens()`; raw WebSocket users (HeliBoard) implement the same filter explicitly.
 

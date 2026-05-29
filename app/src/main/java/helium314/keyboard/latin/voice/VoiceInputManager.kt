@@ -4,7 +4,6 @@ package helium314.keyboard.latin.voice
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.settings.TranscriptionPreferences
@@ -42,14 +41,6 @@ class VoiceInputManager(private val context: Context) {
         private const val MAX_STREAM_RECONNECT_ATTEMPTS = 3
         private const val STREAM_RECONNECT_BASE_DELAY_MS = 500L
         private const val STREAM_CONNECT_TIMEOUT_MS = 12_000L
-
-        /**
-         * Minimum gap between manual finalize control frames. Soniox warns that
-         * finalizing too frequently can cause disconnections ("every few
-         * seconds is fine"), so we rate-limit even though we also gate on the
-         * speech→silence transition.
-         */
-        private const val MIN_MANUAL_FINALIZE_INTERVAL_MS = 1_200L
     }
 
     enum class State {
@@ -136,10 +127,9 @@ class VoiceInputManager(private val context: Context) {
     // and its semantic endpoint can be delayed (or never fire) when the model
     // is unsure an utterance ended, stranding the trailing phrase as non-final.
     // When the recorder reports a local silence, we ask Soniox to finalize so
-    // the tail is always committed. Re-armed on the next speech onset and
-    // rate-limited to avoid finalizing too often.
+    // the tail is always committed. Fires once per speech-stop transition,
+    // re-armed on the next speech onset.
     private var hasFinalizedCurrentSilence = false
-    private var lastManualFinalizeUptimeMs = 0L
 
     // New paragraph timer removed — inserting line breaks on silence caused
     // form submissions and other unintended side effects in host apps.
@@ -341,7 +331,6 @@ class VoiceInputManager(private val context: Context) {
         pendingTranscripts.clear()
         isDispatchingTranscripts = false
         hasFinalizedCurrentSilence = false
-        lastManualFinalizeUptimeMs = 0L
         transcriptionClient.cancelAll()
         if (hadPendingWork) {
             listener?.onPendingProcessingCancelled()
@@ -441,6 +430,10 @@ class VoiceInputManager(private val context: Context) {
 
         if (isStreamingReady) {
             flushPendingAudio(sessionId)
+            // Flush any pending non-final tokens before the empty end-of-stream
+            // frame so a phrase spoken right before stop is not lost when the
+            // user taps stop without waiting for the local silence window.
+            transcriptionClient.finalizeNow()
             transcriptionClient.finishStreaming()
             return
         }
@@ -475,9 +468,15 @@ class VoiceInputManager(private val context: Context) {
      * chunk-silence preference an authoritative finalization point, which is
      * the recommended pattern when server endpoint detection is disabled.
      *
-     * Fires at most once per speech→silence transition and is rate-limited so
-     * we do not finalize too frequently (Soniox can disconnect when finalize
-     * is spammed).
+     * Fires at most once per speech-stop transition (gated by
+     * [hasFinalizedCurrentSilence], re-armed on the next onSpeechStarted). The
+     * chunk-silence window itself (>= 1 s) keeps finalize calls naturally
+     * spaced, so no extra global rate limit is needed -- one would risk
+     * dropping a legitimate flush between rapid back-to-back phrases.
+     *
+     * Note: Soniox suggests finalizing after ~200 ms of silence; we wait the
+     * full chunk-silence window instead (more accurate), so do not change this
+     * to fire immediately on speech-stop.
      */
     private fun requestManualFinalizeOnSilence(sessionId: Long) {
         if (sessionId != activeSessionId) return
@@ -486,9 +485,6 @@ class VoiceInputManager(private val context: Context) {
         if (!isStreamingReady || streamSessionId != sessionId) return
         if (hasFinalizedCurrentSilence) return
 
-        val now = SystemClock.uptimeMillis()
-        if (now - lastManualFinalizeUptimeMs < MIN_MANUAL_FINALIZE_INTERVAL_MS) return
-
         // Make sure any buffered audio is delivered before finalize so the
         // tail is part of what Soniox finalizes.
         flushPendingAudio(sessionId)
@@ -496,7 +492,6 @@ class VoiceInputManager(private val context: Context) {
 
         if (transcriptionClient.finalizeNow()) {
             hasFinalizedCurrentSilence = true
-            lastManualFinalizeUptimeMs = now
             Log.i(TAG, "Manual finalize requested after local silence")
         }
     }
