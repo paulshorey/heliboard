@@ -513,6 +513,25 @@ class SonioxTranscriptionClient {
     }
 
     /**
+     * Ask Soniox to finalize all audio processed so far without ending the
+     * stream (see [FINALIZE_CONTROL_MESSAGE]). Safe to call repeatedly; when
+     * there are no pending non-final tokens it is effectively a no-op (Soniox
+     * just returns a `<fin>` marker, which we filter). Returns true when the
+     * control frame was queued.
+     */
+    fun finalizeNow(): Boolean {
+        if (isClosing) return false
+        val socket = webSocket ?: return false
+        if (!isRecognitionReady) return false
+        return try {
+            socket.send(FINALIZE_CONTROL_MESSAGE)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send Soniox finalize control frame: ${e.message}")
+            false
+        }
+    }
+
+    /**
      * Gracefully end the stream by sending an empty binary frame. Soniox
      * flushes any remaining tokens, emits `{"finished": true}`, and closes.
      * If `finished` does not arrive within [FINALIZE_CLOSE_GRACE_MS] we

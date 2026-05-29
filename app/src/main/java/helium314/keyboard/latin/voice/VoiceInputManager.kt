@@ -318,6 +318,8 @@ class VoiceInputManager(private val context: Context) {
         pendingAudioChunks.clear()
         pendingTranscripts.clear()
         isDispatchingTranscripts = false
+        hasFinalizedCurrentSilence = false
+        lastManualFinalizeUptimeMs = 0L
         transcriptionClient.cancelAll()
         if (hadPendingWork) {
             listener?.onPendingProcessingCancelled()
