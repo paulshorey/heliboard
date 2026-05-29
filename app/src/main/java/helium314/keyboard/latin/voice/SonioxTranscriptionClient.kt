@@ -45,6 +45,21 @@ class SonioxTranscriptionClient {
 
         private const val FINALIZE_CLOSE_GRACE_MS = 8_000L
 
+        /**
+         * Control message that forces Soniox to finalize every token processed
+         * so far without ending the stream. Soniox replies with the pending
+         * tokens as `is_final: true` followed by a `<fin>` marker, then keeps
+         * the session open for more audio.
+         *
+         * This is the documented mechanism for client-side VAD / push-to-talk
+         * pipelines (https://soniox.com/docs/stt/rt/manual-finalization). We use
+         * it so a trailing phrase is always committed once the local silence
+         * detector decides the speaker paused, instead of waiting for the
+         * server's semantic endpoint — which can be delayed indefinitely when
+         * the model is unsure an utterance ended.
+         */
+        internal const val FINALIZE_CONTROL_MESSAGE = "{\"type\":\"finalize\"}"
+
         // Soniox's documented bounds for max_endpoint_delay_ms.
         internal const val MIN_MAX_ENDPOINT_DELAY_MS = 500
         internal const val MAX_MAX_ENDPOINT_DELAY_MS = 3000
