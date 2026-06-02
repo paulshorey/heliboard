@@ -580,4 +580,53 @@ class TranscriptPostProcessorTest {
     fun `strips period when followed by digit (not a letter so preserves)`() {
         assertEquals("some text.", strip("some text.", "42 more"))
     }
+
+    // --- Paragraph disfluency cleanup (cross-chunk / committed text) ---
+
+    private fun disfluencies(paragraph: String): String =
+        TranscriptPostProcessor.cleanupDisfluenciesInParagraph(paragraph) ?: paragraph
+
+    @Test
+    fun `removes comma uh comma in mid sentence`() {
+        assertEquals("well there", disfluencies("well, uh, there"))
+    }
+
+    @Test
+    fun `removes comma uh period`() {
+        assertEquals("well There", disfluencies("well, uh. There"))
+    }
+
+    @Test
+    fun `removes period Uh comma after sentence`() {
+        assertEquals("Done next", disfluencies("Done. Uh, next"))
+    }
+
+    @Test
+    fun `removes um variants case insensitively`() {
+        assertEquals("I think so", disfluencies("I, UM, think so"))
+    }
+
+    @Test
+    fun `simulates three Soniox chunks merged in paragraph`() {
+        // Chunk1 "well, " + chunk2 "uh" + chunk3 ", there" → committed line.
+        assertEquals("well there", disfluencies("well, uh, there"))
+    }
+
+    @Test
+    fun `does not strip um inside words`() {
+        assertEquals("umbrella day", disfluencies("umbrella day"))
+    }
+
+    @Test
+    fun `removes leading uh at paragraph start`() {
+        assertEquals("hello there", disfluencies("Uh, hello there"))
+    }
+
+    @Test
+    fun `applyVoiceParagraphPostProcessing runs disfluency before commands`() {
+        val result = TranscriptPostProcessor.applyVoiceParagraphPostProcessing(
+            "well, uh, there"
+        )
+        assertEquals("well there", result)
+    }
 }

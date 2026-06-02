@@ -18,6 +18,64 @@ object TranscriptPostProcessor {
     val rules: List<Rule> = buildRules()
 
     /**
+     * Find/replace patterns for spoken disfluencies in already-committed paragraph text.
+     *
+     * Applied after each voice chunk is inserted so fillers split across Soniox
+     * finalize boundaries (e.g. `", "` then `"uh"` then `"there"`) are still
+     * removed once the paragraph contains the full pattern.
+     *
+     * Longest patterns first; matching is case-insensitive.
+     */
+    private val disfluencyRules: List<Rule> = listOf(
+        Rule(", um, ", " "),
+        Rule(", uh, ", " "),
+        Rule(", um,", ""),
+        Rule(", uh,", ""),
+        Rule(". Um, ", " "),
+        Rule(". Uh, ", " "),
+        Rule(", um.", ""),
+        Rule(", uh.", ""),
+        Rule(" um, ", " "),
+        Rule(" uh, ", " "),
+        Rule(" um,", ""),
+        Rule(" uh,", ""),
+        Rule(". um, ", " "),
+        Rule(". uh, ", " "),
+        Rule(" um ", " "),
+        Rule(" uh ", " "),
+    ).sortedByDescending { it.find.length }
+
+    /**
+     * Remove common `um` / `uh` disfluencies anywhere in [paragraph].
+     *
+     * @return corrected text, or `null` if nothing changed.
+     */
+    fun cleanupDisfluenciesInParagraph(paragraph: String): String? {
+        if (paragraph.isEmpty()) return null
+        var result = paragraph
+        for (rule in disfluencyRules) {
+            result = result.replace(rule.find, rule.replace, ignoreCase = true)
+        }
+        // Leading filler at paragraph start (e.g. chunk was only "Uh, hello").
+        result = LEADING_DISFLUENCY.replace(result, "")
+        return if (result != paragraph) result else null
+    }
+
+    private val LEADING_DISFLUENCY = Regex("""(?i)^\s*\b(um|uh)\b,?\s*""")
+
+    /**
+     * Run disfluency cleanup and spelled-out voice-command rules on [paragraph].
+     *
+     * @return corrected text, or `null` if nothing changed.
+     */
+    fun applyVoiceParagraphPostProcessing(paragraph: String): String? {
+        var result = paragraph
+        cleanupDisfluenciesInParagraph(result)?.let { result = it }
+        processCurrentParagraph(result)?.let { result = it }
+        return if (result != paragraph) result else null
+    }
+
+    /**
      * Analyze [paragraph] and return the corrected text, or `null` if no rules matched.
      */
     fun processCurrentParagraph(paragraph: String): String? {
