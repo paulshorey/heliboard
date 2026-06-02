@@ -17,6 +17,67 @@ object TranscriptPostProcessor {
 
     val rules: List<Rule> = buildRules()
 
+    private data class RegexRule(val pattern: Regex, val replacement: String)
+
+    private val LEADING_DISFLUENCY = Regex("""(?i)^\s*\b(um|uh)\b,?\s*""")
+
+    /**
+     * Optional space on each side of an em dash, then the dash, then optional space —
+     * normalized to ` — ` (space on both sides). Equivalent to JS `/ ?— ?/g` → ` — `.
+     */
+    private val EM_DASH_OPTIONAL_PADDING = Regex(""" ?\u2014 ?""")
+
+    /**
+     * Regex find/replace for spoken disfluencies in already-committed paragraph text.
+     *
+     * Applied after each voice chunk is inserted so fillers split across Soniox
+     * finalize boundaries are removed once the paragraph contains the full pattern.
+     * Most specific patterns are listed first.
+     */
+    private val disfluencyRegexRules: List<RegexRule> = listOf(
+        // —uh, / —um, (Soniox often glues an em dash to the filler)
+        RegexRule(Regex("""(?i)—\s*(um|uh)\s*,?"""), ""),
+        RegexRule(Regex("""(?i),\s*(um|uh)\s*,\s*"""), " "),
+        RegexRule(Regex("""(?i),\s*(um|uh)\s*,"""), ""),
+        RegexRule(Regex("""(?i)\.\s*(um|uh)\s*,\s*"""), " "),
+        RegexRule(Regex("""(?i),\s*(um|uh)\s*\."""), ""),
+        RegexRule(Regex("""(?i)\s+(um|uh)\s*,\s*"""), " "),
+        RegexRule(Regex("""(?i)\s+(um|uh)\s*,"""), ""),
+        RegexRule(Regex("""(?i)\s+(um|uh)\s+"""), " "),
+        RegexRule(LEADING_DISFLUENCY, ""),
+    )
+
+    /**
+     * Remove common `um` / `uh` disfluencies and normalize em-dash spacing in [paragraph].
+     *
+     * @return corrected text, or `null` if nothing changed.
+     */
+    fun cleanupDisfluenciesInParagraph(paragraph: String): String? {
+        if (paragraph.isEmpty()) return null
+        var result = paragraph
+        for (rule in disfluencyRegexRules) {
+            result = rule.pattern.replace(result, rule.replacement)
+        }
+        result = normalizeEmDashSpacing(result)
+        return if (result != paragraph) result else null
+    }
+
+    /** Ensures a single space on each side of U+2014 em dashes when missing. */
+    internal fun normalizeEmDashSpacing(text: String): String =
+        EM_DASH_OPTIONAL_PADDING.replace(text, " — ")
+
+    /**
+     * Run disfluency cleanup and spelled-out voice-command rules on [paragraph].
+     *
+     * @return corrected text, or `null` if nothing changed.
+     */
+    fun applyVoiceParagraphPostProcessing(paragraph: String): String? {
+        var result = paragraph
+        cleanupDisfluenciesInParagraph(result)?.let { result = it }
+        processCurrentParagraph(result)?.let { result = it }
+        return if (result != paragraph) result else null
+    }
+
     /**
      * Analyze [paragraph] and return the corrected text, or `null` if no rules matched.
      */

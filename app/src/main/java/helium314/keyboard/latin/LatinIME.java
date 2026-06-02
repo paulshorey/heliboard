@@ -2176,16 +2176,17 @@ public class LatinIME extends InputMethodService implements
             return;
         }
 
-        final String corrected =
-                TranscriptPostProcessor.INSTANCE.processCurrentParagraph(paragraph);
+        final String originalParagraph = paragraph;
+        final String corrected = TranscriptPostProcessor.INSTANCE
+                .applyVoiceParagraphPostProcessing(paragraph);
         if (corrected == null) {
             return;
         }
 
         Log.i(TAG, "VOICE post-processing: replacing paragraph ("
-                + paragraph.length() + " → " + corrected.length() + " chars)");
+                + originalParagraph.length() + " → " + corrected.length() + " chars)");
 
-        mInputLogic.mConnection.deleteTextBeforeCursor(paragraph.length());
+        mInputLogic.mConnection.deleteTextBeforeCursor(originalParagraph.length());
         mInputLogic.mConnection.commitText(corrected, 1);
     }
 
