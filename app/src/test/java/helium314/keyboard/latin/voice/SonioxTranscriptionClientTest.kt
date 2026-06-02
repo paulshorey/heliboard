@@ -475,6 +475,15 @@ class SonioxTranscriptionClientTest {
     }
 
     @Test
+    fun finalizeControlMessage_isValidFinalizeJson() {
+        val json = JSONObject(SonioxTranscriptionClient.FINALIZE_CONTROL_MESSAGE)
+        assertEquals("finalize", json.getString("type"))
+        // Soniox only accepts "finalize" or "keepalive" control types; make
+        // sure we never send extra keys it might reject.
+        assertEquals(1, json.length())
+    }
+
+    @Test
     fun buildErrorDescription_combinesCodeAndMessage() {
         val payload = JSONObject()
             .put("error_code", 401)

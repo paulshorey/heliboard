@@ -123,6 +123,14 @@ class VoiceInputManager(private val context: Context) {
     private val pendingTranscripts = ArrayDeque<PendingTranscript>()
     private var isDispatchingTranscripts = false
 
+    // Local-VAD-driven manual finalize. Soniox only commits is_final tokens,
+    // and its semantic endpoint can be delayed (or never fire) when the model
+    // is unsure an utterance ended, stranding the trailing phrase as non-final.
+    // When the recorder reports a local silence, we ask Soniox to finalize so
+    // the tail is always committed. Fires once per speech-stop transition,
+    // re-armed on the next speech onset.
+    private var hasFinalizedCurrentSilence = false
+
     // New paragraph timer removed — inserting line breaks on silence caused
     // form submissions and other unintended side effects in host apps.
 
@@ -216,11 +224,15 @@ class VoiceInputManager(private val context: Context) {
             override fun onSpeechStarted() {
                 if (sessionId != activeSessionId) return
                 cancelAutoStopTimer()
+                // New speech means a new phrase is forming; allow the next
+                // silence to trigger another manual finalize.
+                hasFinalizedCurrentSilence = false
             }
 
             override fun onSpeechStopped() {
                 if (sessionId != activeSessionId) return
                 startAutoStopTimer()
+                requestManualFinalizeOnSilence(sessionId)
             }
 
             override fun onRecordingStopped() {
@@ -318,6 +330,7 @@ class VoiceInputManager(private val context: Context) {
         pendingAudioChunks.clear()
         pendingTranscripts.clear()
         isDispatchingTranscripts = false
+        hasFinalizedCurrentSilence = false
         transcriptionClient.cancelAll()
         if (hadPendingWork) {
             listener?.onPendingProcessingCancelled()
@@ -417,6 +430,10 @@ class VoiceInputManager(private val context: Context) {
 
         if (isStreamingReady) {
             flushPendingAudio(sessionId)
+            // Flush any pending non-final tokens before the empty end-of-stream
+            // frame so a phrase spoken right before stop is not lost when the
+            // user taps stop without waiting for the local silence window.
+            transcriptionClient.finalizeNow()
             transcriptionClient.finishStreaming()
             return
         }
@@ -441,6 +458,42 @@ class VoiceInputManager(private val context: Context) {
         // If the socket already died/closed, transition to idle processing state.
         pendingAudioChunks.clear()
         notifyProcessingIdleIfDrained()
+    }
+
+    /**
+     * Ask Soniox to finalize pending tokens after the local silence detector
+     * reports the speaker paused. This guarantees a trailing phrase is
+     * committed even when Soniox's semantic endpoint is delayed or never fires
+     * (the model only commits `is_final` tokens). It also makes the user's
+     * chunk-silence preference an authoritative finalization point, which is
+     * the recommended pattern when server endpoint detection is disabled.
+     *
+     * Fires at most once per speech-stop transition (gated by
+     * [hasFinalizedCurrentSilence], re-armed on the next onSpeechStarted). The
+     * chunk-silence window itself (>= 1 s) keeps finalize calls naturally
+     * spaced, so no extra global rate limit is needed -- one would risk
+     * dropping a legitimate flush between rapid back-to-back phrases.
+     *
+     * Note: Soniox suggests finalizing after ~200 ms of silence; we wait the
+     * full chunk-silence window instead (more accurate), so do not change this
+     * to fire immediately on speech-stop.
+     */
+    private fun requestManualFinalizeOnSilence(sessionId: Long) {
+        if (sessionId != activeSessionId) return
+        if (currentState != State.RECORDING) return
+        if (isSessionStopping) return
+        if (!isStreamingReady || streamSessionId != sessionId) return
+        if (hasFinalizedCurrentSilence) return
+
+        // Make sure any buffered audio is delivered before finalize so the
+        // tail is part of what Soniox finalizes.
+        flushPendingAudio(sessionId)
+        if (!isStreamingReady) return
+
+        if (transcriptionClient.finalizeNow()) {
+            hasFinalizedCurrentSilence = true
+            Log.i(TAG, "Manual finalize requested after local silence")
+        }
     }
 
     private fun onAudioChunkCaptured(pcmData: ByteArray, sessionId: Long) {
