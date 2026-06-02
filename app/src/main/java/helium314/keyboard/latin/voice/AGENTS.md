@@ -10,6 +10,7 @@ Soniox realtime transcription pipeline.
 - `VoiceRecorder.kt` - microphone capture of PCM audio.
 
 ## Non-obvious notes
+- After each voice chunk commit, `LatinIME.runTranscriptPostProcessing` re-reads the current paragraph and runs `TranscriptPostProcessor.applyVoiceParagraphPostProcessing` (regex disfluency rules including `—uh,`, em-dash spacing, then voice commands).
 - Final insertion still happens through `LatinIME` and `InputConnection`, not by writing directly into UI widgets.
 - Preference keys/defaults for this feature live in `latin/settings/`, while the settings screens live in `settings/screens/TranscriptionScreen.kt` and `settings/screens/SonioxContextTermsScreen.kt`.
 - Soniox encodes inter-word whitespace as separate space tokens, so transcript assembly concatenates final tokens directly and trims the result rather than re-inserting spaces.

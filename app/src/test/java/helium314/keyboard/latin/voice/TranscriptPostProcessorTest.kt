@@ -629,4 +629,42 @@ class TranscriptPostProcessorTest {
         )
         assertEquals("well there", result)
     }
+
+    @Test
+    fun `removes em dash uh comma`() {
+        assertEquals("well there", disfluencies("well—uh, there"))
+    }
+
+    @Test
+    fun `pads em dash when no surrounding spaces`() {
+        assertEquals(
+            "one — two",
+            TranscriptPostProcessor.normalizeEmDashSpacing("one—two")
+        )
+    }
+
+    @Test
+    fun `pads em dash when only one side has space`() {
+        assertEquals(
+            "one — two",
+            TranscriptPostProcessor.normalizeEmDashSpacing("one —two")
+        )
+        assertEquals(
+            "one — two",
+            TranscriptPostProcessor.normalizeEmDashSpacing("one— two")
+        )
+    }
+
+    @Test
+    fun `leaves already padded em dash unchanged`() {
+        assertEquals(
+            "one — two",
+            TranscriptPostProcessor.normalizeEmDashSpacing("one — two")
+        )
+    }
+
+    @Test
+    fun `disfluency pass pads em dashes after filler removal`() {
+        assertEquals("alpha — beta", disfluencies("alpha—beta"))
+    }
 }
