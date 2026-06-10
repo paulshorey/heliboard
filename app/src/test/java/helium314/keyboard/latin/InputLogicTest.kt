@@ -758,6 +758,20 @@ class InputLogicTest {
         assertEquals("hello", text)
     }
 
+    @Test fun `autocorrect only on space or period`() {
+        reset()
+        setInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_AUTO_CORRECT)
+        chainInput("{ id")
+        getAutocorrectedWithSeparatorAfter("I'd", "id", ':')
+        assertEquals("{ id:", text)
+
+        reset()
+        setInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_AUTO_CORRECT)
+        chainInput("hullo")
+        getAutocorrectedWithSeparatorAfter("hello", "hullo", '.')
+        assertEquals("hello.", text)
+    }
+
     @Test fun `remove glide typing word on delete`() {
         reset()
         glideTypingInput("hello")
@@ -942,11 +956,15 @@ class InputLogicTest {
 
     // only works when autocorrect is on, separator after word is required
     private fun getAutocorrectedWithSpaceAfter(suggestion: String, typedWord: String?) {
+        getAutocorrectedWithSeparatorAfter(suggestion, typedWord, ' ')
+    }
+
+    private fun getAutocorrectedWithSeparatorAfter(suggestion: String, typedWord: String?, separator: Char) {
         val info = SuggestedWordInfo(suggestion, "", 0, 0, null, 0, 0)
         val typedInfo = SuggestedWordInfo(typedWord, "", 0, 0, null, 0, 0)
         val sw = SuggestedWords(ArrayList(listOf(typedInfo, info)), null, typedInfo, false, true, false, 0, 0)
         latinIME.mInputLogic.setSuggestedWords(sw) // this prepares for autocorrect
-        input(' ')
+        input(separator)
         checkConnectionConsistency()
     }
 

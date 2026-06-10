@@ -1098,6 +1098,10 @@ public final class InputLogic {
                 || settingsValues.mSpacingAndPunctuations.isWordSeparator(codePointBeforeCursor);
     }
 
+    private static boolean triggersAutoCorrectionOnSeparator(final int codePoint) {
+        return Constants.CODE_SPACE == codePoint || Constants.CODE_PERIOD == codePoint;
+    }
+
     /**
      * Handle input of a separator code point.
      * @param event The event to handle.
@@ -1132,13 +1136,14 @@ public final class InputLogic {
         }
         // isComposingWord() may have changed since we stored wasComposing
         if (mWordComposer.isComposingWord()) {
-            if (settingsValues.mAutoCorrectEnabled && ! isInlineEmojiSearchAction()) {
-                final String separator = shouldAvoidSendingCode ? LastComposedWord.NOT_A_SEPARATOR
-                        : StringUtils.newSingleCodePointString(codePoint);
+            final String separator = shouldAvoidSendingCode ? LastComposedWord.NOT_A_SEPARATOR
+                    : StringUtils.newSingleCodePointString(codePoint);
+            if (settingsValues.mAutoCorrectEnabled && !isInlineEmojiSearchAction()
+                    && triggersAutoCorrectionOnSeparator(codePoint)) {
                 commitCurrentAutoCorrection(settingsValues, separator, handler);
                 inputTransaction.setDidAutoCorrect();
             } else {
-                commitTyped(settingsValues, StringUtils.newSingleCodePointString(codePoint));
+                commitTyped(settingsValues, separator);
             }
         }
 
