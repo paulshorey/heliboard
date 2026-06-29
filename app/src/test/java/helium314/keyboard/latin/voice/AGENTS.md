@@ -9,6 +9,8 @@ Tests for the Soniox voice pipeline.
 
 ## Non-obvious notes
 - Voice bugs often split cleanly between transport/session setup and local post-processing, so keep that distinction clear in new tests.
+- `SonioxTranscriptionClientTest.kt` should cover token assembly details such as `<end>`/`<fin>` filtering and `attachesToPrevious` for punctuation or mid-word continuations.
+- `TranscriptPostProcessorTest.kt` covers both paragraph command processing and pre-commit helpers such as leading-casing adjustment and mid-sentence trailing-punctuation stripping.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

@@ -4,10 +4,10 @@ End-to-end voice transcription pipeline: local capture, Soniox real-time streami
 
 ## Overview
 
-1. **VoiceRecorder** captures PCM16 audio locally; silence detection drives auto-stop.
+1. **VoiceRecorder** captures PCM16 audio locally; silence detection drives manual finalize at speech boundaries and auto-stop after a longer pause.
 2. **SonioxTranscriptionClient** opens the real-time WebSocket, sends the JSON start config, streams binary PCM frames, parses `tokens` arrays from each response, and surfaces finalized transcript segments.
 3. **VoiceInputManager** buffers audio until the start config is queued, retries broken sessions, derives a session config from preferences + current subtype locale, queues finalized transcript segments in FIFO order, and performs graceful empty-frame shutdown.
-4. **LatinIME** inserts each finalized transcript immediately at the current caret position through `InputConnection`, restoring a leading space only when the new segment is a continuation of previous text rather than punctuation.
+4. **LatinIME** inserts each finalized transcript immediately at the current caret position through `InputConnection`, adding a leading space only when the segment is not attaching to previous text and surrounding editor text needs a separator.
 
 ## Architecture
 
@@ -30,7 +30,7 @@ End-to-end voice transcription pipeline: local capture, Soniox real-time streami
 Captures audio from the microphone with client-side silence detection.
 - **Format**: PCM16, 16kHz, mono
 - **Silence detection**: Adaptive RMS threshold on each 100ms chunk
-- **Callbacks**: Supplies PCM chunks to `VoiceInputManager`; long silence can request auto-stop
+- **Callbacks**: Supplies PCM chunks to `VoiceInputManager`; speech-stop silence requests manual finalize, and longer silence can request auto-stop
 
 ### SonioxTranscriptionClient.kt
 WebSocket client for Soniox real-time transcription.
@@ -45,17 +45,19 @@ WebSocket client for Soniox real-time transcription.
 Orchestrates recording, Soniox streaming, and ordered transcript delivery.
 - **State machine**: IDLE → RECORDING ↔ PAUSED → IDLE
 - **Buffered audio**: Holds PCM chunks until the stream is ready
-- **Transcript queue**: Preserves FIFO delivery for finalized Soniox segments, including whether a segment attaches to previous text
+- **Transcript queue**: Preserves FIFO delivery for finalized Soniox segments, including whether a segment attaches to previous text; coalesces oldest entries if the queue reaches 64
 - **Reconnects**: Retries transient WebSocket failures while the recording session remains active (3 attempts with exponential backoff)
 - **Session config**: Maps the active keyboard subtype's base language to a single Soniox `language_hints` entry; sanitizes `max_endpoint_delay_ms` to Soniox's 500–3000 ms range
 - **Auto-stop timer**: Stops recording after prolonged silence
-- **Graceful stop**: Posts a finalize task that the client converts into the empty-frame shutdown handshake
+- **Manual finalize**: Sends `{"type":"finalize"}` after local speech-stop silence and once before graceful stop so pending non-final tokens are committed
+- **Graceful stop**: Sends the empty-frame shutdown handshake after tail audio/finalize work is queued
 
 ### LatinIME.java
 Main orchestrator that coordinates all components and inserts text into the editor.
 - Uses `InputConnection.commitText(...)` at the caret, or replaces an active selection when text is highlighted
 - Calls `mInputLogic.finishInput()` first to keep composing state in sync
-- Runs paragraph-level post-processing after committed voice text
+- Applies pre-commit spacing/casing/trailing-punctuation shaping, then runs paragraph-level post-processing after committed voice text
+- Wraps commit and post-processing in one batch edit so intermediate `onUpdateSelection` callbacks do not cancel voice input
 
 ## Data Flow Steps
 
@@ -94,9 +96,9 @@ Active subtype locale + transcription preferences + editor text
 Soniox response arrives
     → SonioxTranscriptionClient collects is_final:true tokens
     → Concatenates token text directly, trims
-    → attachesToPrevious = (first char is . , ! ? : ; ) ] } %)
+    → attachesToPrevious = (starts with attaching punctuation OR Soniox split a word across responses)
     → VoiceInputManager queues and delivers the segment to LatinIME in FIFO order
-    → LatinIME conditionally restores a leading space and commits via InputConnection.commitText(...)
+    → LatinIME conditionally adds a leading space and commits via InputConnection.commitText(...)
 ```
 
 ### 4. Explicit New Paragraph Command
@@ -129,13 +131,13 @@ PAUSED     → User taps pause  → RECORDING (resume)
 - **Soniox API Key**: required for transcription
 - **Speaker diarization**: when on, Soniox tags each token with a `speaker` ID and the client locks onto the first observed speaker
 - **Enable endpoint detection**: lets Soniox finalize tokens immediately once it detects the speaker has stopped talking; reduces latency for dictation
-- **Max endpoint delay (ms)**: Soniox-documented bounds 500–3000 (default 2000)
+- **Max endpoint delay (ms)**: Soniox-documented bounds 500–3000 (HeliBoard default 3000; Soniox API default 2000)
 - **Custom voice vocabulary**: opens `SonioxContextTermsScreen` where the user can view the built-in `context.terms` list and edit their own (one term per line, merged at session start)
 - **Chunk Silence Duration**: silence window before detecting a speech boundary
 - **Silence Threshold**: RMS threshold floor for silence/speech detection
 - **Auto-stop Silence Duration**: delay before automatically stopping voice recording
 
-Soniox decides punctuation automatically. HeliBoard supplies recognition hints (built-in + user-editable `context.terms`) and recent editor text (`context.text`) so the model can use it to disambiguate sentence structure, but it does not expose direct replacements, output locale, disfluency removal, or punctuation sensitivity settings.
+Soniox decides punctuation automatically. HeliBoard supplies recognition hints (built-in + user-editable `context.terms`) and recent editor text (`context.text`) so the model can use it to disambiguate sentence structure, but it does not expose direct replacements, output locale, disfluency removal, or punctuation sensitivity settings. HeliBoard does not currently strip fillers such as "um" or "uh" locally.
 
 ### Silence Detection (VoiceRecorder.kt)
 ```kotlin

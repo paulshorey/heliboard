@@ -116,6 +116,17 @@ Responsibilities:
 
 Important: the host editor does **not** need to expose a live composing span for this to work.
 
+### Divergent insertion paths
+
+Some paths intentionally bypass `EditorWordMirror`:
+
+- voice transcription: `LatinIME.commitVoiceTranscriptionText()` calls `finishInput()`, commits the finalized segment directly, and runs transcript post-processing in the same batch edit
+- fullapp replay: `LatinIME.replaceEntireFieldText()` uses the raw `InputConnection` after the IME reconnects to the original field
+- paste and multi-character text keys: commit the current word first, then insert direct committed text
+- separators and non-word keys: finalize or clear the current word before direct insertion
+
+These paths still write through `InputConnection`; they are not allowed to mutate extract/fullapp UI widgets directly. The important invariant is that any direct commit must avoid leaving stale `WordComposer` or mirror state behind.
+
 ### Separator typing
 
 When the user types punctuation or space:
@@ -154,6 +165,7 @@ Current behavior:
 
 - the keyboard may inspect the touched word
 - the keyboard may use that word to show suggestions
+- when editing that touched word, `EditorWordMirror.setMirroredWord(...)` must preserve the `charsAfterCursor` tail so replacement deletes after-cursor text before before-cursor text
 - the keyboard should avoid rebuilding a host-managed composing region as the normal mechanism
 
 This keeps the host editor simpler and avoids contenteditable / browser composition glitches.
@@ -187,8 +199,10 @@ Avoid introducing new dependencies on:
 
 ## Remaining legacy areas
 
-There are still some legacy composition-oriented helper methods in `InputLogic` and
-`RichInputConnection`, mainly for older or less common paths. When touching them:
+There are still some legacy composition-oriented helper methods in `RichInputConnection`, mainly
+for cache bookkeeping, belated update detection, and older or less common paths. `InputLogic` also
+still has private `setLegacyComposingText*` helpers, but they are not the ordinary typing path.
+When touching these areas:
 
 - check whether the path is still part of ordinary Latin/Cyrillic typing
 - if not, keep it isolated

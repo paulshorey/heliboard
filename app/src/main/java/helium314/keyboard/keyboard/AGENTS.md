@@ -31,7 +31,8 @@ Visual keyboard system: key geometry, rendering, pointer tracking, layout switch
 - The keyboard renderer is performance-sensitive; avoid allocations and broad invalidations in hot paths.
 - Layout assets and parser logic must stay aligned with `assets/layouts/` and `res/xml/method.xml`.
 - `KeyboardActionListenerImpl.kt` is the main seam from view events into text logic.
-- `KeyboardSwitcher` owns the optional **Secondary Toolbar** container from `main_keyboard_frame.xml` and exposes `getSecondaryToolbarHeight()` for IME layout math when that strip is visible.
+- `KeyboardSwitcher` owns mode switches between the main keyboard, emoji palette, clipboard surface, and optional **Secondary Toolbar** container from `main_keyboard_frame.xml`; it exposes `getSecondaryToolbarHeight()` for IME layout math when that strip is visible.
+- Suggestion, emoji-tab, and clipboard strips share `strip_container`; visibility changes here must stay aligned with `SuggestionStripView` toolbar state and `SettingsValues.mSecondaryStripVisible`.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

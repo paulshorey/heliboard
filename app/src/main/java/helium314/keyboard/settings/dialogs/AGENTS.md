@@ -23,6 +23,7 @@ Reusable dialogs and modal customizers for the settings UI.
 ## Non-obvious notes
 - Many of these dialogs are coupled to shared preference components and screen-specific state; keep their call sites in sync when changing parameters.
 - Toolbar/layout customization dialogs often interact with serialized preference formats rather than simple booleans.
+- `ToolbarKeysCustomizer.kt` writes per-key press/long-press overrides through `ToolbarUtils.writeCustomKeyCodes`; those values are cached by `ToolbarUtils` and invalidated from `Settings.loadSettings()` on pref changes.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

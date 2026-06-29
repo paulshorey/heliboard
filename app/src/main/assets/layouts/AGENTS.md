@@ -33,8 +33,11 @@ Runtime keyboard layouts. Files here define rows, popup sets, width hints, and p
 - `main/*.json` and `main/*.txt` - per-layout main keyboards; use a nearby layout with the same script or arrangement as the starting point for new work.
 
 ## Non-obvious notes
-- `res/xml/method.xml` documents and references the layout-set names expected here.
+- Runtime layout names come from subtype `KeyboardLayoutSet` extra values in `res/xml/method.xml` plus user additional subtype prefs; the large comment block at the top of `method.xml` is documentation and can drift from actual subtype entries.
+- MAIN layout selection is subtype-owned (implicit `qwerty` when absent). Secondary slots such as SYMBOLS/FUNCTIONAL/EMOJI_BOTTOM resolve subtype override -> global default-layout pref -> `Defaults.LayoutType.default`.
 - The mix of `.json` and `.txt` files is intentional; do not convert formats casually unless the parser path is updated too.
+- `+` layouts reuse a base file and append locale `[extra_keys]` at parse time. Fork/edit preview bakes those extras for simple text layouts; JSON `+` layouts are not fully supported by that helper path.
+- `lao.json`, `thai.json`, and `pcqwerty.json` are special layouts that intentionally do not follow the baked Western digit top-row pattern; check parser/tests before normalizing them.
 - Khipro layouts also depend on `assets/khipro-mappings.json` and event combiner logic.
 
 ## Keep this file current
