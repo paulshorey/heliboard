@@ -15,8 +15,10 @@ Locale-specific text shown on keys, hints, or popup sets.
 
 ## Non-obvious notes
 - These files are not translations of UI strings; they are part of keyboard behavior and long-press UX.
+- Supported sections include `[popup_keys]` for long-press popups, `[extra_keys]` for `+` layout row additions, `[labels]` for locale-specific key labels, `[number_row]` for localized digit rows, and `[tlds]` for period-key domain popups.
+- Lookup tries the locale tag, then the language-only fallback; Hebrew locales may fall back through the legacy `iw` asset name. The no-language path also probes `more_popup_keys.txt` in code before falling back to `zz.txt`, but that file is not currently shipped.
 - When adding a new locale, copy from the closest existing locale/script rather than from English by default.
-- If a popup change seems to do nothing, verify whether the active layout is pulling data from one of the shared `more_popups_*` files instead.
+- If a popup change seems to do nothing, verify the active MorePopups tier and popup/hint source order: layout-file popups, symbol hints, locale popups, number hints, and the shared `more_popups_*` files can override expectations.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

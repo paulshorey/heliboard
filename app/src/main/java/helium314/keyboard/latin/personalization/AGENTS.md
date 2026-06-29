@@ -12,6 +12,7 @@ User-history learning and personalization glue.
 - This area affects privacy expectations and data-clearing behavior; avoid hidden persistence changes.
 - Keep behavior aligned with user dictionary and clipboard-history settings when adding learning features.
 - `EmailLearner` and `EmailsDictionary` deliberately bypass `UserHistoryDictionary` and the native dictionary stack. Emails contain `@`, `.`, and `-` which the binary dictionary pipeline treats as separators or connectors, so they cannot reliably be stored there. They live in a plain TSV file so they are also easy to expose through the standalone settings UI.
+- `Suggest.prependMatchingEmails()` inserts at most three email matches and suppresses autocorrect for email prefixes so pressing space does not commit a dictionary word over an address.
 - The email learner must be gated by `SettingsValues.mIncognitoModeEnabled`, which already covers password fields, no-learning fields, and the always-incognito toggle.
 
 ## Keep this file current

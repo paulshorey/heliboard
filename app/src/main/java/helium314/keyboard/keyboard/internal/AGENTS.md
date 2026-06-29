@@ -49,8 +49,8 @@ Internal mechanics behind keyboard rendering, previews, gesture trails, parser p
 ## Non-obvious notes
 - This folder is mostly plumbing beneath `MainKeyboardView`; many classes are hot-path and allocation-sensitive.
 - Parser output, icon resolution, and draw params must stay consistent with resource and asset naming conventions.
-- `KeyboardParser` rescales per-row relative heights when the layout has more than four rows; it also scales `KeyboardParams.mVerticalGap` with the same factor so inter-row spacing stays consistent (important for the optional number row).
-- `KeyboardBuilder` adds a small gap above the first row when the optional number row is on (`R.dimen.config_number_row_top_extra_gap`, via extra `KeyboardParams.mTopPadding` and matching `mBaseHeight` shrink). For alphabet/symbol layouts it may set `Key.KeyParams.mSpaceVisualInsetTop` on wide bottom-row space keys when `R.dimen.config_spacebar_visual_inset_top` is positive so drawing and hit-testing skip a strip at the top of the slot; the default is zero so the space key uses the full row slot.
+- `KeyboardParser` rescales per-row relative heights when the layout has more or fewer than four rows; it also scales `KeyboardParams.mVerticalGap` with the same factor so inter-row spacing stays consistent for baked number-row and special 3-row layouts.
+- `KeyboardBuilder` adds a small gap above the first row for alphabet/symbol layouts when `R.dimen.config_number_row_top_extra_gap` is positive; this is based on resource dimensions and baked row geometry, not a runtime number-row toggle. It may also set `Key.KeyParams.mSpaceVisualInsetTop` on wide bottom-row space keys when `R.dimen.config_spacebar_visual_inset_top` is positive so drawing and hit-testing skip a strip at the top of the slot; the default is zero so the space key uses the full row slot.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

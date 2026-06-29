@@ -26,9 +26,9 @@ Recording starts **instantly** on mic tap — no network round-trip delay.
 | `TranscriptSegment.kt` | Finalized chunk passed from the client to the IME pipeline |
 | `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO transcript queue, reconnects, auto-stop timers, Soniox session config assembly (incl. `context.text` via `setPriorTextProvider`) |
 | `TranscriptionPreferences.kt` | Reads/writes Soniox preferences (incl. user-editable `context.terms`) and clears legacy provider keys (Speechmatics, Deepgram) |
-| `TranscriptPostProcessor.kt` | Paragraph-level post-processing of committed text (spelled-out punctuation replacement, leading-casing correction, etc.) |
+| `TranscriptPostProcessor.kt` | Local transcript shaping helpers: pre-commit casing/trailing-punctuation adjustment plus paragraph-level spoken-command replacement after commit |
 | `LatinIME.java` | Orchestrator — finalizes composing state, commits transcript text at the caret, supplies `context.text` to Soniox via `buildVoiceContextText`, triggers post-processing |
-| `TranscriptionScreen.kt` / `SetupAppScreen.kt` | Settings UI for API key, endpoint detection, diarization, silence thresholds, and auto-stop timing |
+| `TranscriptionScreen.kt` | Settings UI for API key, endpoint detection, diarization, silence thresholds, and auto-stop timing |
 | `SonioxContextTermsScreen.kt` | Settings UI for editing user-defined `context.terms` (one per line). Merged with the built-in list at session start. |
 
 All source files live under `app/src/main/java/helium314/keyboard/latin/voice/` except `LatinIME.java` (parent package) and the settings UI/preferences helpers in `latin/settings` and `settings/screens`.
@@ -58,9 +58,11 @@ Soniox returns smart-formatted text with punctuation already inserted; HeliBoard
 - **Manual finalize on local silence** — because HeliBoard only commits `is_final` tokens and the server endpoint can be delayed or never fire, `VoiceInputManager` sends a manual finalize control frame (`SonioxTranscriptionClient.finalizeNow()` → `{"type":"finalize"}`) whenever the local `VoiceRecorder` silence detector reports `onSpeechStopped`, plus once more right before the empty end-of-stream frame on mic stop. Soniox then re-emits all pending tokens as final (plus a filtered `<fin>` marker) and keeps the stream open. This guarantees the trailing phrase is committed after the user's `PREF_VOICE_CHUNK_SILENCE_SECONDS` pause (or immediately on stop) regardless of the server endpoint, and makes disabling endpoint detection viable (finalization then runs purely off local VAD at the user's chosen pause, which avoids the model's premature sentence endings). It fires at most once per speech-stop transition (re-armed on the next `onSpeechStarted`); the chunk-silence window itself keeps finalize calls naturally spaced, so no extra global rate limit is used.
 - **`enable_speaker_diarization`** — when enabled, the client locks onto the first non-empty `speaker` label observed and drops tokens from other speakers. Soniox uses string speaker IDs (`"1"`, `"2"`, …); the locked ID isn't guaranteed to be the local speaker.
 
-Direct replacement rules, disfluency/filler-word removal, punctuation sensitivity, and output locale are **not** exposed in Soniox's real-time WebSocket API. Punctuation is model-driven; `context.text` (editor text before the cursor) is the main lever for mid-sentence comma/period behavior. Filler words such as "um" can only be stripped locally (e.g. in `TranscriptPostProcessor`) — Soniox does not document a built-in disfluency filter.
+Direct replacement rules, disfluency/filler-word removal, punctuation sensitivity, and output locale are **not** exposed in Soniox's real-time WebSocket API. Punctuation is model-driven; `context.text` (editor text before the cursor) is the main lever for mid-sentence comma/period behavior. HeliBoard does not currently strip filler words such as "um" or "uh"; that would need to be added as local processing.
 
 ## Post-Processing (TranscriptPostProcessor)
+
+Before commit, `LatinIME.prepareVoiceTranscriptionText()` uses `TranscriptPostProcessor.adjustLeadingCasing()` and `stripTrailingPunctuationIfMidSentence()` to fit the chunk into surrounding editor text.
 
 After each transcript chunk is committed to the text field, `LatinIME.runTranscriptPostProcessing()` reads the current paragraph (text from the last newline to the cursor, up to 1024 chars) and runs it through `TranscriptPostProcessor.processCurrentParagraph()`. If any rules match, the paragraph text is replaced in-place via `deleteTextBeforeCursor` + `commitText`.
 

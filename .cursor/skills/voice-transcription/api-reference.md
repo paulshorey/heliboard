@@ -32,7 +32,7 @@ HeliBoard uses the Soniox **Real-Time STT WebSocket** API (`wss://stt-rt.soniox.
 - **`model`** (required): real-time STT model. HeliBoard pins `"stt-rt-v4"`.
 - **`audio_format` / `sample_rate` / `num_channels`** (required for raw PCM): `pcm_s16le` / `16000` / `1` to match `VoiceRecorder` output.
 - **`language_hints`** (optional): array of ISO language codes. HeliBoard sends a single-element array based on the active keyboard subtype, or omits the field entirely so Soniox auto-detects.
-- **`context.terms`** (optional): recognition hints. HeliBoard sends the union of a built-in list (`HeliBoard`, `Soniox`, `Kubernetes`, `API`, `gnocchi`) and the user's custom terms from `PREF_SONIOX_CUSTOM_TERMS` (one per line, managed in `SonioxContextTermsScreen`). Merged, trimmed, and deduplicated by `SonioxTranscriptionClient.buildSessionConfig`.
+- **`context.terms`** (optional): recognition hints. HeliBoard sends the union of a built-in list (`HeliBoard`, `Soniox`, `Kubernetes`, `API`, `gnocchi`) and the user's custom terms from `PREF_SONIOX_CUSTOM_TERMS` (one per line, managed in `SonioxContextTermsScreen`; UI-limited to 200 terms and 100 chars per term). Merged, trimmed, and deduplicated by `SonioxTranscriptionClient.buildSessionConfig`.
 - **`context.text`** (optional): free-form prior text. HeliBoard sends up to the last 4 000 characters of editor text before the cursor (`LatinIME.buildVoiceContextText` via `VoiceInputManager.setPriorTextProvider`). Soniox uses this for sentence-structure punctuation, mid-sentence casing, and proper-noun spelling. Reconnects re-fetch the prior text so the running transcript stays in context.
 - **`enable_endpoint_detection`** (boolean, optional): when true, Soniox finalizes tokens once it detects the speaker has stopped talking (semantic endpointing).
 - **`max_endpoint_delay_ms`** (number, optional): valid range **500–3000 ms**. Soniox API default is **2000 ms**; HeliBoard default is **3000 ms**. This is a **maximum**, not a fixed wait: semantic endpointing still finalizes earlier when the model thinks a sentence ended, so raising it does not stop premature punctuation — it only bounds the worst case. The VAD-driven manual finalize (see below) guarantees the trailing phrase is committed regardless.
@@ -140,3 +140,5 @@ The Soniox SDKs filter these via `filterSpecialTokens()`; raw WebSocket users (H
 | `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Silence window before treating speech as paused |
 | `PREF_VOICE_SILENCE_THRESHOLD` | Int | RMS threshold used for silence detection |
 | `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` | Int | Silence duration before auto-stopping recording |
+
+`PREF_VOICE_CHUNK_SILENCE_SECONDS` and `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` drive different behaviors: chunk silence triggers `VoiceInputManager` manual finalize (`{"type":"finalize"}`) so pending tokens are committed, while auto-stop silence stops the recording session after a longer pause.
