@@ -370,6 +370,86 @@ class TranscriptPostProcessorTest {
         )
     }
 
+    // --- Filler fragments ---
+
+    @Test
+    fun `removes Um fragment at paragraph start`() {
+        assertEquals(
+            "I think we should go.",
+            process("Um, I think we should go.")
+        )
+    }
+
+    @Test
+    fun `removes Uh fragment at paragraph start`() {
+        assertEquals(
+            "this should stay lowercase",
+            process("Uh, this should stay lowercase")
+        )
+    }
+
+    @Test
+    fun `removes filler after soft pause punctuation`() {
+        assertEquals(
+            "I think we should go.",
+            process("I think, um, we should go.")
+        )
+    }
+
+    @Test
+    fun `lowercases next word after mid-sentence filler removal`() {
+        assertEquals(
+            "I think we should go.",
+            process("I think, um, We should go.")
+        )
+    }
+
+    @Test
+    fun `preserves casing after sentence-ending punctuation and filler removal`() {
+        assertEquals(
+            "First sentence. We should go.",
+            process("First sentence. Um, We should go.")
+        )
+    }
+
+    @Test
+    fun `preserves pronoun I after filler removal`() {
+        assertEquals(
+            "I think I should go.",
+            process("I think, um, I should go.")
+        )
+    }
+
+    @Test
+    fun `removes multiple filler fragments`() {
+        assertEquals(
+            "I think we should go.",
+            process("Um, I think, uh, we should go.")
+        )
+    }
+
+    @Test
+    fun `removes filler-only paragraph`() {
+        assertEquals(
+            "",
+            process("Um,")
+        )
+    }
+
+    @Test
+    fun `does not remove filler word without comma`() {
+        assertNull(
+            TranscriptPostProcessor.processCurrentParagraph("I said um because I was thinking")
+        )
+    }
+
+    @Test
+    fun `does not remove filler inside another word`() {
+        assertNull(
+            TranscriptPostProcessor.processCurrentParagraph("This hummus, tastes good")
+        )
+    }
+
     // --- Rules list sanity ---
 
     @Test
