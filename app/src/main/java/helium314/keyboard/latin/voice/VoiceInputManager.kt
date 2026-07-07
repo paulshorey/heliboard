@@ -99,7 +99,8 @@ class VoiceInputManager(private val context: Context) {
     private var activeSessionId = 0L
 
     // Local speech-boundary detection window used by VoiceRecorder callbacks.
-    // Soniox transcript segmentation is server-managed; local silence only drives auto-stop.
+    // Soniox transcript segmentation is server-managed; local silence drives manual finalize
+    // at speech boundaries and auto-stop after a longer pause.
     private var chunkSilenceDurationMs = Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS * 1000L
     private var chunkSilenceThreshold = Defaults.PREF_VOICE_SILENCE_THRESHOLD.toDouble()
     private var autoStopSilenceMs = Defaults.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS * 1000L

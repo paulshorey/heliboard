@@ -139,9 +139,9 @@ public final class KeyboardLayoutSet {
             default -> keyboardLayoutSetElementId = baseKeyboardLayoutSetElementId;
         }
 
-        // Note: The keyboard for each shift state, and mode are represented as an elementName
-        // attribute in a keyboard_layout_set XML file.  Also each keyboard layout XML resource is
-        // specified as an elementKeyboard attribute in the file.
+        // Note: Each keyboard mode resolves to a layout asset through KeyboardId, subtype
+        // KeyboardLayoutSet extra values, and KeyboardParser/LayoutParser. This fork no longer
+        // uses keyboard_layout_set XML resources for layout resolution.
         // The KeyboardId is an internal key for a Keyboard object.
 
         final KeyboardId id = new KeyboardId(keyboardLayoutSetElementId, mParams);

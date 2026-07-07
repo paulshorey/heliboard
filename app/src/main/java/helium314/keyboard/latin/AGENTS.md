@@ -32,7 +32,7 @@ This is the main IME engine. It owns the InputMethodService lifecycle, the curre
 - `RichInputMethodManager.kt` - higher-level input-method manager helper.
 - `RichInputMethodSubtype.kt` - richer subtype metadata wrapper.
 - `SingleDictionaryFacilitator.kt` - facilitator for one backing dictionary source.
-- `Suggest.kt` - suggestion request pipeline entry point.
+- `Suggest.kt` - suggestion request pipeline entry point; suggestion strip UI lives under `suggestions/`.
 - `SuggestedWords.java` - suggestion list/value model.
 - `SystemBroadcastReceiver.java` - boot/package/locale receiver.
 - `WordComposer.java` - keyboard-owned current-word source of truth.
@@ -56,8 +56,9 @@ This is the main IME engine. It owns the InputMethodService lifecycle, the curre
 ## Non-obvious notes
 - The simplified input model keeps the current word in `WordComposer`, not in the host editor.
 - `EditorWordMirror` in `inputlogic/` mirrors that current word into the host app using committed-text operations; bypassing it tends to break deletion, suggestions, and revert logic.
-- Fullapp/extract UI should be treated as a view of host text, not the source of truth.
-- Voice insertion ultimately still has to honor the same `InputConnection` contract as typed text.
+- Voice insertion is a deliberate bypass: `LatinIME.commitVoiceTranscriptionText()` calls `finishInput()` and then direct `commitText()` in one batch edit before paragraph post-processing.
+- Fullapp is a standalone draft view. It seeds from `InputConnection`, persists through `FullappEditorResult`, and replays with raw `InputConnection` replacement on IME reconnect; the system extract view is not the fullapp source of truth.
+- Toolbar button definitions and defaults live in `utils/ToolbarUtils.kt`, while strip rendering/voice overlay state lives in `suggestions/SuggestionStripView.kt`.
 - When the **Secondary Toolbar** (pinned keys) is visible, `LatinIME` includes its height in visible-strip / inset calculations so the primary strip stays tappable and more-suggestions positioning stays correct.
 
 ## Keep this file current

@@ -23,9 +23,9 @@ Cross-cutting helpers used across the IME. Search here before adding another gen
 - `JsonUtils.java` - JSON helpers.
 - `Ktx.kt` - miscellaneous Kotlin extensions.
 - `LanguageOnSpacebarUtils.java` - language label logic for the spacebar.
-- `LayoutType.kt` - keyboard layout type enum/model.
-- `LayoutUtilsCustom.kt` - custom layout helpers.
-- `LayoutUtils.kt` - general layout helpers.
+- `LayoutType.kt` - keyboard layout slot enum/model plus `KeyboardLayoutSet` extra-value serialization (`TYPE:name|TYPE:name`).
+- `LayoutUtilsCustom.kt` - custom layout helpers and persisted filename contract.
+- `LayoutUtils.kt` - built-in layout listing/content helpers.
 - `LeakGuardHandlerWrapper.java` - leak-avoiding `Handler` wrapper.
 - `Log.kt` - app logging facade with in-memory ring buffer and voice-diagnostics filtering helpers.
 - `NgramContextUtils.java` - helpers for building `NgramContext`.
@@ -49,7 +49,7 @@ Cross-cutting helpers used across the IME. Search here before adding another gen
 - `TextPlacement.java` - text placement/caret positioning helpers.
 - `TextRange.java` - text range value type.
 - `Timestamp.kt` - timestamp/time helpers.
-- `ToolbarUtils.kt` - toolbar/action-strip helpers.
+- `ToolbarUtils.kt` - toolbar/action-strip source of truth (`ToolbarKey`, `ToolbarMode`, default serialized prefs, key-code mapping, custom key-code cache).
 - `TypefaceUtils.java` - typeface loading/helpers.
 - `UncachedInputMethodManagerUtils.java` - direct IME manager helpers when cached state is stale.
 - `ViewLayoutUtils.java` - view measurement/layout helpers.
@@ -57,6 +57,10 @@ Cross-cutting helpers used across the IME. Search here before adding another gen
 ## Non-obvious notes
 - `JniUtils.java` is part of the dictionary/native contract; changes here are higher risk than a normal helper edit.
 - `DeviceProtectedUtils.java` matters because the app supports direct boot.
+- Layout resolution is layered: MAIN comes from the active subtype (`KeyboardLayoutSet` extra value, falling back to `qwerty`); non-MAIN slots resolve subtype override -> global `PREF_LAYOUT_*` -> `Defaults.LayoutType.default`.
+- Custom layout names are stored in prefs and filenames. `LayoutUtilsCustom.CUSTOM_LAYOUT_PREFIX` and its base36 naming scheme are a persistence contract; Latin-script MAIN layouts are shared as `custom.Latn.*`, while non-Latin MAIN layouts are locale-tagged.
+- Adding a toolbar key requires coordinated updates outside this file too: enum/default lists in `ToolbarUtils.kt`, icon lookup in `KeyboardIconsSet.kt`, source string, settings exposure, and upgrade/serialization handling when renaming.
+- `ToolbarUtils` caches custom key codes in memory; `Settings.loadSettings()` clears that cache when prefs change.
 - This folder is intentionally broad, but new utilities should still be named for a concrete domain rather than as generic catch-alls.
 
 ## Keep this file current

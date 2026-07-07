@@ -3,9 +3,9 @@ package helium314.keyboard.latin.voice
 
 /**
  * Post-processes transcribed text at the paragraph level to fix patterns that
- * the realtime STT provider cannot handle — primarily spelled-out punctuation
- * names that the speaker dictates as voice commands (e.g. "exclamation point",
- * "comma").
+ * the realtime STT provider cannot handle — primarily filler fragments (e.g.
+ * "um,", "uh,") and spelled-out punctuation names that the speaker dictates
+ * as voice commands (e.g. "exclamation point", "comma").
  *
  * Rules are applied case-insensitively, longest match first, so that patterns
  * with surrounding punctuation context (like ". Exclamation point.") are consumed
@@ -21,11 +21,58 @@ object TranscriptPostProcessor {
      * Analyze [paragraph] and return the corrected text, or `null` if no rules matched.
      */
     fun processCurrentParagraph(paragraph: String): String? {
-        var result = paragraph
+        var result = removeFillerFragments(paragraph)
         for (rule in rules) {
             result = result.replace(rule.find, rule.replace)
         }
         return if (result != paragraph) result else null
+    }
+
+    /**
+     * Remove common dictated filler fragments that Soniox returns as text.
+     *
+     * Soniox typically smart-formats disfluencies as short comma-attached
+     * fragments ("um,", "uh,"). Cleaning at paragraph level handles both
+     * within-chunk fillers and fillers split across finalized chunks, because
+     * [LatinIME][helium314.keyboard.latin.LatinIME] runs this pass after each
+     * commit inside the same batch edit.
+     */
+    internal fun removeFillerFragments(text: String): String {
+        if (text.isEmpty()) return text
+
+        val result = StringBuilder(text.length)
+        var cursor = 0
+        var scan = 0
+        while (scan < text.length) {
+            val fillerLength = fillerLengthAt(text, scan)
+            if (fillerLength == 0) {
+                scan++
+                continue
+            }
+
+            val removalStart = findFillerRemovalStart(text, scan)
+            var removalEnd = scan + fillerLength + 1 // include the required comma
+            while (removalEnd < text.length && isHorizontalWhitespace(text[removalEnd])) {
+                removalEnd++
+            }
+
+            result.append(text, cursor, removalStart)
+
+            val before = previousChar(text, removalStart)
+            val after = text.getOrNull(removalEnd)
+            result.append(separatorAfterFillerRemoval(before, after))
+
+            cursor = removalEnd
+            if (shouldLowercaseAfterFillerRemoval(text, removalStart, cursor)) {
+                result.append(text[cursor].lowercaseChar())
+                cursor++
+            }
+            scan = cursor
+        }
+
+        if (cursor == 0) return text
+        result.append(text, cursor, text.length)
+        return result.toString()
     }
 
     /**
@@ -108,6 +155,81 @@ object TranscriptPostProcessor {
             if (word[i].isUpperCase()) return true
         }
         return false
+    }
+
+    private fun fillerLengthAt(text: String, index: Int): Int {
+        if (index > 0 && isWordCharacter(text[index - 1])) return 0
+
+        val length = when {
+            text.regionMatches(index, "uh", 0, 2, ignoreCase = true) -> 2
+            text.regionMatches(index, "um", 0, 2, ignoreCase = true) -> 2
+            else -> return 0
+        }
+        val commaIndex = index + length
+        if (commaIndex >= text.length || text[commaIndex] != ',') return 0
+        return length
+    }
+
+    private fun findFillerRemovalStart(text: String, fillerStart: Int): Int {
+        var start = fillerStart
+        while (start > 0 && isHorizontalWhitespace(text[start - 1])) {
+            start--
+        }
+        if (start > 0 && isSoftPausePunctuation(text[start - 1])) {
+            start--
+            while (start > 0 && isHorizontalWhitespace(text[start - 1])) {
+                start--
+            }
+        }
+        return start
+    }
+
+    private fun separatorAfterFillerRemoval(before: Char?, after: Char?): String {
+        if (before == null || after == null) return ""
+        if (before.isWhitespace() || after.isWhitespace()) return ""
+        if (isOpeningDelimiter(before) || isBackwardAttachingPunctuation(after)) return ""
+        return " "
+    }
+
+    private fun shouldLowercaseAfterFillerRemoval(
+        text: String,
+        removalStart: Int,
+        afterIndex: Int
+    ): Boolean {
+        if (afterIndex >= text.length) return false
+        val first = text[afterIndex]
+        if (!first.isLetter() || !first.isUpperCase()) return false
+        if (isAtSentenceBoundary(text.subSequence(0, removalStart))) return false
+
+        val firstWord = extractFirstWord(text.substring(afterIndex))
+        return !shouldPreserveWordCasing(firstWord)
+    }
+
+    private fun previousChar(text: String, index: Int): Char? {
+        return if (index > 0) text[index - 1] else null
+    }
+
+    private fun isWordCharacter(c: Char): Boolean {
+        return c.isLetterOrDigit() || c == '\'' || c == '’'
+    }
+
+    private fun isHorizontalWhitespace(c: Char): Boolean {
+        return c == ' ' || c == '\t'
+    }
+
+    private fun isSoftPausePunctuation(c: Char): Boolean {
+        return c == ',' || c == ';' || c == ':'
+    }
+
+    private fun isOpeningDelimiter(c: Char): Boolean {
+        return c == '(' || c == '[' || c == '{' || c == '"' ||
+            c == '“' || c == '‘'
+    }
+
+    private fun isBackwardAttachingPunctuation(c: Char): Boolean {
+        return c == '.' || c == ',' || c == '!' || c == '?' ||
+            c == ':' || c == ';' || c == ')' || c == ']' ||
+            c == '}' || c == '%'
     }
 
     private fun isAtSentenceBoundary(context: CharSequence): Boolean {
