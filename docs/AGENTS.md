@@ -6,6 +6,7 @@ Longer-form architecture notes that complement the shorter folder-local AGENTS f
 - `input-simplified.md` - explains the mirror-based current-word architecture and why the host editor is treated as a committed-text sink.
 - `recent-number-row-changes.md` - number-row bake migration notes and layout/parser troubleshooting.
 - `soniox-transcription.md` - end-to-end Soniox voice pipeline, local pre/post-processing, IME insertion guards, and configuration notes.
+- `general-edit-history-plan.md` - implementation plan for generalizing the fullapp edit history into a bounded, general-purpose edit history that also captures regular-keyboard typing, without breaking fullapp draft sync.
 
 ## Non-obvious notes
 - These docs overlap intentionally with root guidance and skills; use them when you need design rationale rather than just file lookup.
