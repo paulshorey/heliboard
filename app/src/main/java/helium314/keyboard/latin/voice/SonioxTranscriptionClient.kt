@@ -229,6 +229,16 @@ class SonioxTranscriptionClient {
          * returned in [SegmentResult.tailIsWordy] so the caller can feed it
          * back on the next response.
          */
+        /** True when Soniox returned at least one `is_final` token (text or control marker). */
+        internal fun tokensContainFinalTokens(tokens: JSONArray?): Boolean {
+            if (tokens == null || tokens.length() == 0) return false
+            for (i in 0 until tokens.length()) {
+                val token = tokens.optJSONObject(i) ?: continue
+                if (token.optBoolean("is_final", false)) return true
+            }
+            return false
+        }
+
         internal fun buildSegmentFromFinalTokens(
             tokens: org.json.JSONArray?,
             primarySpeaker: String?,
@@ -351,6 +361,12 @@ class SonioxTranscriptionClient {
 
         /** Finalized transcription text rebuilt from `is_final: true` tokens. */
         fun onTranscriptionResult(segment: TranscriptSegment)
+
+        /**
+         * Soniox returned at least one `is_final` token. [hasTranscriptText] is
+         * true when those tokens contained user-visible text (not only markers).
+         */
+        fun onFinalTokensReceived(hasTranscriptText: Boolean)
 
         /** Streaming failed and this stream can no longer be used. */
         fun onStreamError(error: String)
@@ -642,6 +658,12 @@ class SonioxTranscriptionClient {
             )
             postIfCurrent(connectionToken) {
                 callback?.onTranscriptionResult(segment)
+            }
+        }
+
+        if (tokensContainFinalTokens(tokens)) {
+            postIfCurrent(connectionToken) {
+                callback?.onFinalTokensReceived(segment != null)
             }
         }
 

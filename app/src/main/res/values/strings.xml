@@ -289,6 +289,14 @@
     <string name="soniox_context_terms_user_placeholder">Add one term per line</string>
     <!-- Counter under the user-terms text field showing how many terms will be sent. -->
     <string name="soniox_context_terms_user_count">%1$d term(s) will be sent</string>
+    <string name="voice_diagnostics_title">Voice diagnostics</string>
+    <string name="voice_diagnostics_summary">View recent transcription log lines to debug voice input on this device.</string>
+    <string name="voice_diagnostics_privacy_note">May contain dictated text and editor context. Stays on device until you export it.</string>
+    <string name="voice_diagnostics_empty">No voice diagnostics yet. Use transcription, then return here and tap Refresh.</string>
+    <string name="voice_diagnostics_refresh">Refresh</string>
+    <string name="voice_diagnostics_export">Export</string>
+    <string name="voice_diagnostics_auto_refresh">Auto-refresh while viewing</string>
+    <string name="voice_diagnostics_line_count">%1$d line(s) shown</string>
     <string name="voice_chunk_silence_seconds_title">Chunk silence duration (seconds)</string>
     <string name="voice_silence_threshold_title">Silence threshold (RMS loudness)</string>
     <string name="voice_auto_stop_silence_seconds_title">Auto-stop silence duration (seconds)</string>

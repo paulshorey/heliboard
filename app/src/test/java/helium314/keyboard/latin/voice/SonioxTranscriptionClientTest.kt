@@ -508,6 +508,27 @@ class SonioxTranscriptionClientTest {
         )
     }
 
+    @Test
+    fun tokensContainFinalTokens_detectsFinalAndNonFinalTokens() {
+        assertFalse(SonioxTranscriptionClient.tokensContainFinalTokens(null))
+        assertFalse(SonioxTranscriptionClient.tokensContainFinalTokens(JSONArray()))
+        assertFalse(
+            SonioxTranscriptionClient.tokensContainFinalTokens(
+                JSONArray().put(token(text = "hello", isFinal = false))
+            )
+        )
+        assertTrue(
+            SonioxTranscriptionClient.tokensContainFinalTokens(
+                JSONArray().put(finalToken("<fin>"))
+            )
+        )
+        assertTrue(
+            SonioxTranscriptionClient.tokensContainFinalTokens(
+                JSONArray().put(finalToken("hello"))
+            )
+        )
+    }
+
     private fun finalToken(text: String, speaker: String? = null): JSONObject {
         return token(text = text, isFinal = true, speaker = speaker)
     }

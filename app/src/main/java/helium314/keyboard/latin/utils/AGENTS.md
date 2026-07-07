@@ -27,7 +27,7 @@ Cross-cutting helpers used across the IME. Search here before adding another gen
 - `LayoutUtilsCustom.kt` - custom layout helpers and persisted filename contract.
 - `LayoutUtils.kt` - built-in layout listing/content helpers.
 - `LeakGuardHandlerWrapper.java` - leak-avoiding `Handler` wrapper.
-- `Log.kt` - app logging facade.
+- `Log.kt` - app logging facade with in-memory ring buffer and voice-diagnostics filtering helpers.
 - `NgramContextUtils.java` - helpers for building `NgramContext`.
 - `PopupKeysUtils.kt` - popup-key utility logic.
 - `RecapitalizeMode.java` - recapitalization mode enum/model.

@@ -41,6 +41,7 @@ import helium314.keyboard.settings.Setting
 import helium314.keyboard.settings.SettingsActivity
 import helium314.keyboard.settings.SettingsContainer
 import helium314.keyboard.settings.SettingsDestination
+import helium314.keyboard.settings.SettingsWithoutKey
 import helium314.keyboard.settings.Theme
 import helium314.keyboard.settings.preferences.Preference
 import helium314.keyboard.settings.previewDark
@@ -129,6 +130,13 @@ fun TranscriptionScreen(
                     description = stringResource(R.string.soniox_context_terms_summary),
                     onClick = {
                         SettingsDestination.navigateTo(SettingsDestination.SonioxContextTerms)
+                    },
+                ) { NextScreenIcon() }
+                Preference(
+                    name = stringResource(R.string.voice_diagnostics_title),
+                    description = stringResource(R.string.voice_diagnostics_summary),
+                    onClick = {
+                        SettingsDestination.navigateTo(SettingsDestination.VoiceDiagnostics)
                     },
                 ) { NextScreenIcon() }
                 BooleanSettingRow(
@@ -245,7 +253,15 @@ private fun BooleanSettingRow(
 }
 
 // Settings are handled inline in the screen
-fun createTranscriptionSettings(context: Context) = emptyList<Setting>()
+fun createTranscriptionSettings(context: Context) = listOf(
+    Setting(context, SettingsWithoutKey.VOICE_DIAGNOSTICS, R.string.voice_diagnostics_title, R.string.voice_diagnostics_summary) { setting ->
+        Preference(
+            name = setting.title,
+            description = setting.description,
+            onClick = { SettingsDestination.navigateTo(SettingsDestination.VoiceDiagnostics) },
+        ) { NextScreenIcon() }
+    },
+)
 
 @Composable
 private fun InlineTextField(
