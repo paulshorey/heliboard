@@ -4,6 +4,7 @@ package helium314.keyboard.latin.voice
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.settings.TranscriptionPreferences
@@ -41,7 +42,21 @@ class VoiceInputManager(private val context: Context) {
         private const val MAX_STREAM_RECONNECT_ATTEMPTS = 3
         private const val STREAM_RECONNECT_BASE_DELAY_MS = 500L
         private const val STREAM_CONNECT_TIMEOUT_MS = 12_000L
+
+        /**
+         * How long to wait for Soniox to return final tokens after audio is
+         * sent or a manual finalize is requested. Logged as VOICE_RESPONSE in
+         * the voice diagnostics export when exceeded.
+         */
+        private const val SONIOX_RESPONSE_TIMEOUT_MS = 6_000L
     }
+
+    private data class AwaitingSonioxResponse(
+        val sessionId: Long,
+        val reason: String,
+        val startedAtMs: Long,
+        val timeoutMs: Long,
+    )
 
     enum class State {
         IDLE,       // Not doing anything
@@ -131,6 +146,11 @@ class VoiceInputManager(private val context: Context) {
     // the tail is always committed. Fires once per speech-stop transition,
     // re-armed on the next speech onset.
     private var hasFinalizedCurrentSilence = false
+
+    // Tracks round-trip latency to Soniox (stream connect, audio, finalize).
+    private var awaitingSonioxResponse: AwaitingSonioxResponse? = null
+    private var sonioxResponseTimeoutRunnable: Runnable? = null
+    private var streamConnectStartedAtMs: Long = 0L
 
     // New paragraph timer removed — inserting line breaks on silence caused
     // form submissions and other unintended side effects in host apps.
@@ -328,6 +348,8 @@ class VoiceInputManager(private val context: Context) {
         streamReconnectAttempts = 0
         cancelPendingReconnect()
         cancelStreamConnectTimeout()
+        cancelSonioxResponseWatchdog()
+        streamConnectStartedAtMs = 0L
         pendingAudioChunks.clear()
         pendingTranscripts.clear()
         isDispatchingTranscripts = false
@@ -384,6 +406,7 @@ class VoiceInputManager(private val context: Context) {
         streamSessionId = sessionId
         isStreamingConnecting = true
         isStreamingReady = false
+        streamConnectStartedAtMs = SystemClock.elapsedRealtime()
         scheduleStreamConnectTimeout(sessionId)
         if (!isReconnect) {
             finalizeWhenStreamReady = false
@@ -400,6 +423,7 @@ class VoiceInputManager(private val context: Context) {
                     streamReconnectAttempts = 0
                     isStreamingConnecting = false
                     isStreamingReady = true
+                    acknowledgeStreamConnect(sessionId)
                     flushPendingAudio(sessionId)
                     if (finalizeWhenStreamReady) {
                         finalizeWhenStreamReady = false
@@ -410,6 +434,11 @@ class VoiceInputManager(private val context: Context) {
                 override fun onTranscriptionResult(segment: TranscriptSegment) {
                     if (sessionId != activeSessionId) return
                     enqueueTranscript(segment, sessionId)
+                }
+
+                override fun onFinalTokensReceived(hasTranscriptText: Boolean) {
+                    if (sessionId != activeSessionId) return
+                    acknowledgeSonioxResponse(sessionId, hasTranscriptText)
                 }
 
                 override fun onStreamError(error: String) {
@@ -435,6 +464,7 @@ class VoiceInputManager(private val context: Context) {
             // frame so a phrase spoken right before stop is not lost when the
             // user taps stop without waiting for the local silence window.
             transcriptionClient.finalizeNow()
+            scheduleSonioxResponseWatchdog(sessionId, "stop_finalize")
             transcriptionClient.finishStreaming()
             return
         }
@@ -494,6 +524,7 @@ class VoiceInputManager(private val context: Context) {
         if (transcriptionClient.finalizeNow()) {
             hasFinalizedCurrentSilence = true
             Log.i(TAG, "Manual finalize requested after local silence")
+            scheduleSonioxResponseWatchdog(sessionId, "manual_finalize")
         }
     }
 
@@ -522,6 +553,7 @@ class VoiceInputManager(private val context: Context) {
 
     private fun flushPendingAudio(sessionId: Long) {
         if (!isStreamingReady || streamSessionId != sessionId) return
+        var sentAny = false
         while (true) {
             val next = pendingAudioChunks.firstOrNull() ?: break
             if (next.sessionId != sessionId) {
@@ -537,6 +569,14 @@ class VoiceInputManager(private val context: Context) {
                 return
             }
             pendingAudioChunks.removeFirst()
+            sentAny = true
+        }
+        if (
+            sentAny &&
+            currentState == State.RECORDING &&
+            !isSessionStopping
+        ) {
+            scheduleSonioxResponseWatchdog(sessionId, "audio_pending")
         }
     }
 
@@ -630,6 +670,7 @@ class VoiceInputManager(private val context: Context) {
 
     private fun handleStreamDisconnected(sessionId: Long, error: String?) {
         if (sessionId != activeSessionId) return
+        cancelSonioxResponseWatchdog()
         if (pendingReconnectRunnable != null && isStreamingConnecting && !isStreamingReady) {
             Log.i(TAG, "Ignoring duplicate stream disconnect callback while reconnect is already scheduled")
             return
@@ -792,7 +833,10 @@ class VoiceInputManager(private val context: Context) {
             if (sessionId != activeSessionId) return@Runnable
             if (!isStreamingConnecting || isStreamingReady || streamSessionId != sessionId) return@Runnable
             val message = "Soniox stream connection timed out"
-            Log.e(TAG, "$message after ${STREAM_CONNECT_TIMEOUT_MS}ms")
+            Log.e(
+                TAG,
+                "VOICE_RESPONSE timeout after ${STREAM_CONNECT_TIMEOUT_MS}ms (stream_connect): $message"
+            )
             // Ensure the stale socket lifecycle is torn down before reconnection handling.
             transcriptionClient.cancelAll()
             handleStreamDisconnected(sessionId, message)
@@ -869,6 +913,61 @@ class VoiceInputManager(private val context: Context) {
 
     private fun cancelAutoStopTimer() {
         mainHandler.removeCallbacks(autoStopSilenceRunnable)
+    }
+
+    // ── Soniox response latency watchdog ───────────────────────────────
+
+    private fun scheduleSonioxResponseWatchdog(
+        sessionId: Long,
+        reason: String,
+        timeoutMs: Long = SONIOX_RESPONSE_TIMEOUT_MS
+    ) {
+        cancelSonioxResponseWatchdog()
+        val startedAtMs = SystemClock.elapsedRealtime()
+        awaitingSonioxResponse = AwaitingSonioxResponse(
+            sessionId = sessionId,
+            reason = reason,
+            startedAtMs = startedAtMs,
+            timeoutMs = timeoutMs
+        )
+        val runnable = Runnable {
+            sonioxResponseTimeoutRunnable = null
+            val pending = awaitingSonioxResponse ?: return@Runnable
+            if (pending.sessionId != activeSessionId) return@Runnable
+            val elapsed = SystemClock.elapsedRealtime() - pending.startedAtMs
+            awaitingSonioxResponse = null
+            Log.e(
+                TAG,
+                "VOICE_RESPONSE timeout after ${elapsed}ms (${pending.reason}): " +
+                    "no Soniox response; streamReady=$isStreamingReady, " +
+                    "pendingAudio=${pendingAudioChunks.size}, " +
+                    "reconnectAttempt=$streamReconnectAttempts"
+            )
+        }
+        sonioxResponseTimeoutRunnable = runnable
+        mainHandler.postDelayed(runnable, timeoutMs)
+    }
+
+    private fun acknowledgeStreamConnect(sessionId: Long) {
+        if (sessionId != activeSessionId || streamConnectStartedAtMs <= 0L) return
+        val elapsed = SystemClock.elapsedRealtime() - streamConnectStartedAtMs
+        streamConnectStartedAtMs = 0L
+        Log.i(TAG, "VOICE_RESPONSE ok in ${elapsed}ms (stream_connect): stream ready")
+    }
+
+    private fun acknowledgeSonioxResponse(sessionId: Long, hasTranscriptText: Boolean) {
+        val pending = awaitingSonioxResponse ?: return
+        if (pending.sessionId != sessionId) return
+        cancelSonioxResponseWatchdog()
+        val elapsed = SystemClock.elapsedRealtime() - pending.startedAtMs
+        val detail = if (hasTranscriptText) "transcript received" else "empty final-token ack"
+        Log.i(TAG, "VOICE_RESPONSE ok in ${elapsed}ms (${pending.reason}): $detail")
+    }
+
+    private fun cancelSonioxResponseWatchdog() {
+        sonioxResponseTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+        sonioxResponseTimeoutRunnable = null
+        awaitingSonioxResponse = null
     }
 
     // ── Settings ───────────────────────────────────────────────────────

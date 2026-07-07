@@ -34,6 +34,12 @@ class LogVoiceDiagnosticsTest {
     }
 
     @Test
+    fun `voice response lines are included`() {
+        assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "VoiceInputManager", "VOICE_RESPONSE ok in 120ms (manual_finalize): transcript received")))
+        assertTrue(Log.isVoiceDiagnosticLine(LogLine('E', "VoiceInputManager", "VOICE_RESPONSE timeout after 6000ms (audio_pending): no Soniox response")))
+    }
+
+    @Test
     fun `redact raw transcript payload`() {
         val redacted = Log.redactVoiceDiagnosticMessage("VOICE raw transcript=[hello world]")
         assertEquals("VOICE raw transcript=[11 chars]", redacted)
