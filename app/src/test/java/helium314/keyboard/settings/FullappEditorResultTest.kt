@@ -1,22 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package helium314.keyboard.settings
+package helium314.keyboard.latin.edithistory
 
 import androidx.test.core.app.ApplicationProvider
 import helium314.keyboard.latin.App
 import helium314.keyboard.latin.utils.protectedPrefs
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
+import helium314.keyboard.settings.FullappEditorResult
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class FullappEditorResultTest {
     private val sessionToken = "session-1"
-    private val target = FullappEditorResult.TargetSnapshot(
+    private val target = EditorTargetSnapshot(
         packageName = "com.example.app",
         fieldId = 42,
         fieldName = "message",
@@ -50,6 +51,25 @@ class FullappEditorResultTest {
         assertTrue(FullappEditorResult.wasSupersededByRegularEditing(draft, "user kept typing"))
         assertFalse(FullappEditorResult.wasSupersededByRegularEditing(draft, "original"))
         assertFalse(FullappEditorResult.wasSupersededByRegularEditing(draft, "draft"))
+    }
+
+    @Test
+    fun `regular then fullapp still syncs when field still matches original`() {
+        val now = 1_000_000L
+        val draft = draft(lastSavedAt = now - 5_000L)
+
+        EditHistoryStore.addEntry(
+            context = ApplicationProvider.getApplicationContext(),
+            source = EditHistorySource.REGULAR,
+            target = target,
+            text = "original",
+            selectionStart = 0,
+            selectionEnd = 8,
+            updatedAt = now - 10_000L,
+        )
+
+        assertTrue(FullappEditorResult.shouldSyncToCurrentField(draft, "original", false, now))
+        assertFalse(FullappEditorResult.wasSupersededByRegularEditing(draft, "original"))
     }
 
     @Test
@@ -88,11 +108,12 @@ class FullappEditorResultTest {
 
         assertNull(FullappEditorResult.loadDraft(context, target))
         assertTrue(FullappEditorResult.getAllDrafts(context).isEmpty())
-        val archivedDrafts = FullappEditorResult.getAllArchivedDrafts(context)
-        assertEquals(1, archivedDrafts.size)
-        val archived = assertNotNull(archivedDrafts.firstOrNull())
-        assertEquals(draft, archived.draft)
-        assertTrue(archived.archivedAt >= draft.lastSavedAt)
+        val historyEntries = EditHistoryStore.getAllEntries(context)
+        assertEquals(1, historyEntries.size)
+        val archived = assertNotNull(historyEntries.firstOrNull())
+        assertEquals(EditHistorySource.FULLAPP, archived.source)
+        assertEquals(draft.draftText, archived.text)
+        assertTrue(archived.updatedAt >= draft.lastSavedAt)
     }
 
     @Test
@@ -110,10 +131,28 @@ class FullappEditorResultTest {
         FullappEditorResult.saveDraft(context, newer)
         FullappEditorResult.archiveAndClearDraft(context, newer)
 
-        val archivedDrafts = FullappEditorResult.getAllArchivedDrafts(context)
-        assertEquals(2, archivedDrafts.size)
-        assertEquals(newer, archivedDrafts[0].draft)
-        assertEquals(older, archivedDrafts[1].draft)
+        val historyEntries = EditHistoryStore.getAllEntries(context)
+        assertEquals(2, historyEntries.size)
+        assertEquals(newer.draftText, historyEntries[0].text)
+        assertEquals(older.draftText, historyEntries[1].text)
+    }
+
+    @Test
+    fun `saveDraft evicts oldest live drafts beyond cap`() {
+        val context = ApplicationProvider.getApplicationContext<App>()
+        context.protectedPrefs().edit().clear().commit()
+
+        repeat(55) { index ->
+            val draft = draft(lastSavedAt = index.toLong()).copy(
+                target = target.copy(fieldId = index, fieldName = "field-$index")
+            )
+            FullappEditorResult.saveDraft(context, draft)
+        }
+
+        val drafts = FullappEditorResult.getAllDrafts(context)
+        assertTrue(drafts.size <= 50)
+        assertFalse(drafts.any { it.target.fieldId == 0 })
+        assertTrue(drafts.any { it.target.fieldId == 54 })
     }
 
     private fun draft(lastSavedAt: Long) = FullappEditorResult.DraftRecord(

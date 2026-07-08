@@ -22,7 +22,7 @@ Standalone settings and fullapp UI built mostly with Compose.
 
 ## Non-obvious notes
 - This package edits the same preference keys defined in `latin/settings/`; keep labels/defaults/contracts aligned.
-- Fullapp mode is UI here, but text synchronization still depends on the IME pipeline rather than direct widget mutation. `FullappEditorResult` lives inside `FullappEditorActivity.kt` and owns live drafts, archived history, and target matching for `LatinIME.maybeSyncPendingFullappDraft()`.
+- Fullapp mode is UI here, but text synchronization still depends on the IME pipeline rather than direct widget mutation. `FullappEditorResult` (in `FullappEditorActivity.kt`) owns live sync-eligible drafts; bounded read-only history lives in `latin/edithistory/EditHistoryStore`.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

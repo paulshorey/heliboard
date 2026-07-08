@@ -3,7 +3,7 @@
 Tests for settings/fullapp result behavior.
 
 ## Direct files
-- `FullappEditorResultTest.kt` - fullapp editor result and draft-sync tests.
+- `FullappEditorResultTest.kt` - fullapp editor result, draft-sync, live-draft eviction, and history archival tests.
 
 ## Non-obvious notes
 - Even though this folder is small, it covers an important cross-package contract between UI and the IME/fullapp pipeline.

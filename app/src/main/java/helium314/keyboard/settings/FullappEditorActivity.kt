@@ -43,8 +43,10 @@ import helium314.keyboard.latin.utils.ExecutorUtils
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.cleanUnusedMainDicts
 import helium314.keyboard.latin.utils.protectedPrefs
+import helium314.keyboard.latin.edithistory.EditHistorySource
+import helium314.keyboard.latin.edithistory.EditHistoryStore
+import helium314.keyboard.latin.edithistory.EditorTargetSnapshot
 import org.json.JSONObject
-import java.security.MessageDigest
 
 /**
  * Fullapp text editor Activity.
@@ -85,12 +87,12 @@ class FullappEditorActivity : ComponentActivity() {
         private const val AUTOSAVE_DELAY_MS = 750L
 
         @JvmStatic
-        fun markPendingReturn(target: FullappEditorResult.TargetSnapshot) {
+        fun markPendingReturn(target: EditorTargetSnapshot) {
             pendingReturnTargetKey = target.storageKey
         }
 
         @JvmStatic
-        fun consumePendingReturn(target: FullappEditorResult.TargetSnapshot?): Boolean {
+        fun consumePendingReturn(target: EditorTargetSnapshot?): Boolean {
             val storageKey = target?.storageKey ?: return false
             if (pendingReturnTargetKey != storageKey) {
                 return false
@@ -108,7 +110,7 @@ class FullappEditorActivity : ComponentActivity() {
     private val textState = mutableStateOf(TextFieldValue())
     private val autosaveHandler = Handler(Looper.getMainLooper())
     private val autosaveRunnable = Runnable { persistDraft() }
-    private var targetSnapshot: FullappEditorResult.TargetSnapshot? = null
+    private var targetSnapshot: EditorTargetSnapshot? = null
     private var launchSessionToken = ""
     private var originalText = ""
 
@@ -240,91 +242,18 @@ object FullappEditorResult {
     private const val TAG = "FullappDrafts"
     private const val PREF_FULLAPP_DRAFT_KEYS = "fullapp_draft_keys"
     private const val PREF_FULLAPP_DRAFT_PREFIX = "fullapp_draft_"
-    private const val PREF_FULLAPP_ARCHIVE_KEYS = "fullapp_archive_keys"
-    private const val PREF_FULLAPP_ARCHIVE_PREFIX = "fullapp_archive_"
     private const val FULLAPP_SYNC_RECENCY_WINDOW_MS = 120_000L
+    private const val MAX_LIVE_DRAFTS = 50
 
-    private const val JSON_PACKAGE_NAME = "package_name"
-    private const val JSON_FIELD_ID = "field_id"
-    private const val JSON_FIELD_NAME = "field_name"
-    private const val JSON_INPUT_TYPE = "input_type"
-    private const val JSON_IME_OPTIONS = "ime_options"
-    private const val JSON_PRIVATE_IME_OPTIONS = "private_ime_options"
     private const val JSON_ORIGINAL_TEXT = "original_text"
     private const val JSON_DRAFT_TEXT = "draft_text"
     private const val JSON_SELECTION_START = "selection_start"
     private const val JSON_SELECTION_END = "selection_end"
     private const val JSON_SESSION_TOKEN = "session_token"
     private const val JSON_LAST_SAVED_AT = "last_saved_at"
-    private const val JSON_ARCHIVED_AT = "archived_at"
-
-    data class TargetSnapshot(
-        val packageName: String,
-        val fieldId: Int,
-        val fieldName: String,
-        val inputType: Int,
-        val imeOptions: Int,
-        val privateImeOptions: String
-    ) {
-        val storageKey: String
-            get() = sha256("$packageName|$fieldId|$fieldName|$inputType|$imeOptions|$privateImeOptions")
-
-        val hasStrongIdentity: Boolean
-            get() = fieldId != 0 || fieldName.isNotBlank()
-
-        fun debugSummary(): String = buildString {
-            append("pkg=").append(packageName)
-            if (fieldId != 0) append(", fieldId=").append(fieldId)
-            if (fieldName.isNotBlank()) append(", fieldName=").append(fieldName)
-            append(", inputType=0x").append(inputType.toUInt().toString(16))
-            append(", imeOptions=0x").append(imeOptions.toUInt().toString(16))
-            if (privateImeOptions.isNotBlank()) append(", privateImeOptions=present")
-        }
-
-        fun matchScore(editorInfo: EditorInfo): Int {
-            if (packageName != editorInfo.packageName.orEmpty()) {
-                return Int.MIN_VALUE
-            }
-            val currentFieldName = editorInfo.fieldName?.toString().orEmpty()
-            val currentPrivateImeOptions = editorInfo.privateImeOptions.orEmpty()
-            var score = 100
-            if (fieldId != 0 && editorInfo.fieldId != 0) {
-                if (fieldId != editorInfo.fieldId) {
-                    return Int.MIN_VALUE
-                }
-                score += 40
-            } else if (fieldId != 0 || editorInfo.fieldId != 0) {
-                score -= 5
-            }
-            if (fieldName.isNotBlank() && currentFieldName.isNotBlank()) {
-                if (fieldName != currentFieldName) {
-                    return Int.MIN_VALUE
-                }
-                score += 30
-            } else if (fieldName.isNotBlank() || currentFieldName.isNotBlank()) {
-                score -= 3
-            }
-            if (inputType == editorInfo.inputType) {
-                score += 10
-            } else if (!hasStrongIdentity) {
-                return Int.MIN_VALUE
-            }
-            if (privateImeOptions.isNotBlank() && currentPrivateImeOptions.isNotBlank()) {
-                if (privateImeOptions == currentPrivateImeOptions) {
-                    score += 5
-                } else if (!hasStrongIdentity) {
-                    return Int.MIN_VALUE
-                }
-            }
-            if (imeOptions == editorInfo.imeOptions) {
-                score += 3
-            }
-            return score
-        }
-    }
 
     data class DraftRecord(
-        val target: TargetSnapshot,
+        val target: EditorTargetSnapshot,
         val originalText: String,
         val draftText: String,
         val selectionStart: Int,
@@ -333,26 +262,13 @@ object FullappEditorResult {
         val lastSavedAt: Long
     )
 
-    data class ArchivedDraftRecord(
-        val draft: DraftRecord,
-        val archivedAt: Long
-    )
-
     @JvmStatic
-    fun createTargetSnapshot(editorInfo: EditorInfo?): TargetSnapshot? {
-        val packageName = editorInfo?.packageName?.takeIf { it.isNotBlank() } ?: return null
-        return TargetSnapshot(
-            packageName = packageName,
-            fieldId = editorInfo.fieldId,
-            fieldName = editorInfo.fieldName?.toString().orEmpty(),
-            inputType = editorInfo.inputType,
-            imeOptions = editorInfo.imeOptions,
-            privateImeOptions = editorInfo.privateImeOptions.orEmpty()
-        )
+    fun createTargetSnapshot(editorInfo: EditorInfo?): EditorTargetSnapshot? {
+        return EditorTargetSnapshot.createFrom(editorInfo)
     }
 
     @JvmStatic
-    fun putTargetExtras(intent: Intent, target: TargetSnapshot) {
+    fun putTargetExtras(intent: Intent, target: EditorTargetSnapshot) {
         intent.putExtra(FullappEditorActivity.EXTRA_PACKAGE_NAME, target.packageName)
         intent.putExtra(FullappEditorActivity.EXTRA_TARGET_FIELD_ID, target.fieldId)
         intent.putExtra(FullappEditorActivity.EXTRA_TARGET_FIELD_NAME, target.fieldName)
@@ -362,11 +278,11 @@ object FullappEditorResult {
     }
 
     @JvmStatic
-    fun getTargetFromIntent(intent: Intent?): TargetSnapshot? {
+    fun getTargetFromIntent(intent: Intent?): EditorTargetSnapshot? {
         intent ?: return null
         val packageName = intent.getStringExtra(FullappEditorActivity.EXTRA_PACKAGE_NAME)?.takeIf { it.isNotBlank() }
             ?: return null
-        return TargetSnapshot(
+        return EditorTargetSnapshot(
             packageName = packageName,
             fieldId = intent.getIntExtra(FullappEditorActivity.EXTRA_TARGET_FIELD_ID, 0),
             fieldName = intent.getStringExtra(FullappEditorActivity.EXTRA_TARGET_FIELD_NAME).orEmpty(),
@@ -377,7 +293,7 @@ object FullappEditorResult {
     }
 
     @JvmStatic
-    fun loadDraft(context: Context, target: TargetSnapshot): DraftRecord? {
+    fun loadDraft(context: Context, target: EditorTargetSnapshot): DraftRecord? {
         val rawDraft = draftPrefs(context)?.getString(prefKey(target.storageKey), null) ?: return null
         return draftFromJson(rawDraft)
     }
@@ -412,35 +328,6 @@ object FullappEditorResult {
     }
 
     @JvmStatic
-    fun getAllArchivedDrafts(context: Context): List<ArchivedDraftRecord> {
-        val prefs = draftPrefs(context) ?: return emptyList()
-        val archiveKeys = prefs.getStringSet(PREF_FULLAPP_ARCHIVE_KEYS, emptySet()).orEmpty()
-        val archivedDrafts = mutableListOf<ArchivedDraftRecord>()
-        val staleKeys = mutableListOf<String>()
-        for (archiveKey in archiveKeys) {
-            val rawArchive = prefs.getString(archivePrefKey(archiveKey), null)
-            if (rawArchive == null) {
-                staleKeys.add(archiveKey)
-                continue
-            }
-            val archivedDraft = archivedDraftFromJson(rawArchive)
-            if (archivedDraft == null) {
-                staleKeys.add(archiveKey)
-                continue
-            }
-            archivedDrafts.add(archivedDraft)
-        }
-        if (staleKeys.isNotEmpty()) {
-            val updatedKeys = archiveKeys.toMutableSet().apply { removeAll(staleKeys.toSet()) }
-            prefs.edit {
-                putStringSet(PREF_FULLAPP_ARCHIVE_KEYS, updatedKeys)
-                staleKeys.forEach { remove(archivePrefKey(it)) }
-            }
-        }
-        return archivedDrafts.sortedByDescending { it.archivedAt }
-    }
-
-    @JvmStatic
     fun saveDraft(context: Context, draft: DraftRecord) {
         val prefs = draftPrefs(context) ?: return
         val draftKeys = prefs.getStringSet(PREF_FULLAPP_DRAFT_KEYS, emptySet())?.toMutableSet() ?: mutableSetOf()
@@ -449,6 +336,7 @@ object FullappEditorResult {
             putStringSet(PREF_FULLAPP_DRAFT_KEYS, draftKeys)
             putString(prefKey(draft.target.storageKey), draft.toJson().toString())
         }
+        evictOldestLiveDraftsIfNeeded(context)
         Log.i(TAG, "Saved fullapp draft for ${draft.target.debugSummary()}, chars=${draft.draftText.length}")
     }
 
@@ -456,20 +344,21 @@ object FullappEditorResult {
     fun archiveAndClearDraft(context: Context, draft: DraftRecord) {
         val prefs = draftPrefs(context) ?: return
         val archivedAt = System.currentTimeMillis()
-        val archivedDraft = ArchivedDraftRecord(
-            draft = draft,
-            archivedAt = archivedAt
-        )
-        val archiveKeys = prefs.getStringSet(PREF_FULLAPP_ARCHIVE_KEYS, emptySet())?.toMutableSet() ?: mutableSetOf()
-        archiveKeys.add(archiveKey(draft, archivedAt))
         val draftKeys = prefs.getStringSet(PREF_FULLAPP_DRAFT_KEYS, emptySet())?.toMutableSet() ?: mutableSetOf()
         draftKeys.remove(draft.target.storageKey)
         prefs.edit {
-            putStringSet(PREF_FULLAPP_ARCHIVE_KEYS, archiveKeys)
-            putString(archivePrefKey(archiveKey(draft, archivedAt)), archivedDraft.toJson().toString())
             putStringSet(PREF_FULLAPP_DRAFT_KEYS, draftKeys)
             remove(prefKey(draft.target.storageKey))
         }
+        EditHistoryStore.addEntry(
+            context = context,
+            source = EditHistorySource.FULLAPP,
+            target = draft.target,
+            text = draft.draftText,
+            selectionStart = draft.selectionStart,
+            selectionEnd = draft.selectionEnd,
+            updatedAt = archivedAt,
+        )
         Log.i(
             TAG,
             "Archived fullapp draft for ${draft.target.debugSummary()}, chars=${draft.draftText.length}"
@@ -477,7 +366,7 @@ object FullappEditorResult {
     }
 
     @JvmStatic
-    fun clearDraft(context: Context, target: TargetSnapshot) {
+    fun clearDraft(context: Context, target: EditorTargetSnapshot) {
         val prefs = draftPrefs(context) ?: return
         val draftKeys = prefs.getStringSet(PREF_FULLAPP_DRAFT_KEYS, emptySet())?.toMutableSet() ?: mutableSetOf()
         draftKeys.remove(target.storageKey)
@@ -582,12 +471,7 @@ object FullappEditorResult {
     }
 
     private fun DraftRecord.toJson() = JSONObject().apply {
-        put(JSON_PACKAGE_NAME, target.packageName)
-        put(JSON_FIELD_ID, target.fieldId)
-        put(JSON_FIELD_NAME, target.fieldName)
-        put(JSON_INPUT_TYPE, target.inputType)
-        put(JSON_IME_OPTIONS, target.imeOptions)
-        put(JSON_PRIVATE_IME_OPTIONS, target.privateImeOptions)
+        put("target", target.toJson())
         put(JSON_ORIGINAL_TEXT, originalText)
         put(JSON_DRAFT_TEXT, draftText)
         put(JSON_SELECTION_START, selectionStart)
@@ -596,40 +480,41 @@ object FullappEditorResult {
         put(JSON_LAST_SAVED_AT, lastSavedAt)
     }
 
-    private fun ArchivedDraftRecord.toJson() = draft.toJson().apply {
-        put(JSON_ARCHIVED_AT, archivedAt)
-    }
-
     private fun draftFromJson(rawDraft: String): DraftRecord? = runCatching {
         val json = JSONObject(rawDraft)
         jsonToDraftRecord(json)
     }.getOrNull()
 
-    private fun archivedDraftFromJson(rawDraft: String): ArchivedDraftRecord? = runCatching {
-        val json = JSONObject(rawDraft)
-        ArchivedDraftRecord(
-            draft = jsonToDraftRecord(json),
-            archivedAt = json.optLong(JSON_ARCHIVED_AT, json.optLong(JSON_LAST_SAVED_AT, 0L))
-        )
-    }.getOrNull()
-
     private fun prefKey(storageKey: String) = PREF_FULLAPP_DRAFT_PREFIX + storageKey
 
-    private fun archivePrefKey(archiveKey: String) = PREF_FULLAPP_ARCHIVE_PREFIX + archiveKey
-
-    private fun archiveKey(draft: DraftRecord, archivedAt: Long): String = sha256(
-        "${draft.target.storageKey}|${draft.lastSavedAt}|$archivedAt|${draft.draftText}"
-    )
+    private fun evictOldestLiveDraftsIfNeeded(context: Context) {
+        val prefs = draftPrefs(context) ?: return
+        val draftKeys = prefs.getStringSet(PREF_FULLAPP_DRAFT_KEYS, emptySet()).orEmpty()
+        if (draftKeys.size <= MAX_LIVE_DRAFTS) {
+            return
+        }
+        val drafts = draftKeys.mapNotNull { key ->
+            val rawDraft = prefs.getString(prefKey(key), null) ?: return@mapNotNull null
+            draftFromJson(rawDraft)
+        }.sortedBy { it.lastSavedAt }
+        val toEvict = drafts.take(drafts.size - MAX_LIVE_DRAFTS)
+        if (toEvict.isEmpty()) {
+            return
+        }
+        val updatedKeys = draftKeys.toMutableSet()
+        prefs.edit {
+            toEvict.forEach { draft ->
+                updatedKeys.remove(draft.target.storageKey)
+                remove(prefKey(draft.target.storageKey))
+            }
+            putStringSet(PREF_FULLAPP_DRAFT_KEYS, updatedKeys)
+        }
+        Log.i(TAG, "Evicted ${toEvict.size} stale live fullapp drafts")
+    }
 
     private fun jsonToDraftRecord(json: JSONObject) = DraftRecord(
-        target = TargetSnapshot(
-            packageName = json.getString(JSON_PACKAGE_NAME),
-            fieldId = json.optInt(JSON_FIELD_ID, 0),
-            fieldName = json.optString(JSON_FIELD_NAME, ""),
-            inputType = json.optInt(JSON_INPUT_TYPE, 0),
-            imeOptions = json.optInt(JSON_IME_OPTIONS, 0),
-            privateImeOptions = json.optString(JSON_PRIVATE_IME_OPTIONS, "")
-        ),
+        target = json.optJSONObject("target")?.let { EditorTargetSnapshot.fromJson(it) }
+            ?: EditorTargetSnapshot.fromJson(json),
         originalText = json.optString(JSON_ORIGINAL_TEXT, ""),
         draftText = json.optString(JSON_DRAFT_TEXT, ""),
         selectionStart = json.optInt(JSON_SELECTION_START, 0),
@@ -641,11 +526,6 @@ object FullappEditorResult {
     private fun draftPrefs(context: Context): SharedPreferences? = runCatching {
         context.protectedPrefs()
     }.getOrNull()
-
-    private fun sha256(raw: String): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8))
-        return digest.joinToString(separator = "") { byte -> "%02x".format(byte) }
-    }
 }
 
 @androidx.compose.runtime.Composable

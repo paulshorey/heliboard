@@ -72,6 +72,9 @@ import helium314.keyboard.latin.settings.SettingsValues;
 import helium314.keyboard.latin.suggestions.SuggestionStripView;
 import helium314.keyboard.latin.suggestions.SuggestionStripViewAccessor;
 import helium314.keyboard.latin.touchinputconsumer.GestureConsumer;
+import helium314.keyboard.latin.edithistory.EditHistoryStore;
+import helium314.keyboard.latin.edithistory.EditorTargetSnapshot;
+import helium314.keyboard.latin.utils.ExecutorUtils;
 import helium314.keyboard.latin.utils.ColorUtilKt;
 import helium314.keyboard.latin.utils.InlineAutofillUtils;
 import helium314.keyboard.latin.utils.InputMethodPickerKt;
@@ -198,9 +201,13 @@ public class LatinIME extends InputMethodService implements
     private static final int FULLAPP_SYNC_MAX_CHARS = 100_000;
     private static final int FULLAPP_SYNC_RETRY_ATTEMPTS = 5;
     private static final long FULLAPP_SYNC_RETRY_DELAY_MS = 120L;
+    private static final long EDIT_HISTORY_CAPTURE_DELAY_MS = 1500L;
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
     @Nullable
     private String mFullappSyncInFlightKey = null;
+    @Nullable
+    private EditorTargetSnapshot mEditHistoryTarget;
+    private final Runnable mEditHistoryCaptureRunnable = this::runEditHistoryCapture;
     private long mLastVoiceErrorToastTimeMs = 0L;
     @NonNull
     private VoiceInputManager.State mLastVoiceInputManagerState = VoiceInputManager.State.IDLE;
@@ -894,6 +901,7 @@ public class LatinIME extends InputMethodService implements
         }
 
         maybeSyncPendingFullappDraft(editorInfo);
+        onEditHistoryFieldStart(editorInfo);
 
         // In landscape mode, this method gets called without the input view being created.
         if (mainKeyboardView == null) {
@@ -1061,6 +1069,9 @@ public class LatinIME extends InputMethodService implements
         super.onFinishInput();
         Log.i(TAG, "onFinishInput");
         mFullappSyncInFlightKey = null;
+        cancelEditHistoryCapture();
+        finalizeEditHistoryForTarget(mEditHistoryTarget);
+        mEditHistoryTarget = null;
 
         // Disconnecting from the text field invalidates both the InputConnection and any
         // pending voice insertion target, so cancel active recording and queued voice work.
@@ -1182,6 +1193,7 @@ public class LatinIME extends InputMethodService implements
             } catch (Throwable t) {
                 Log.w(TAG, "EmailLearner.notifyTextChanged failed", t);
             }
+            scheduleEditHistoryCapture();
         }
         if (isInputViewShown()
                 && mInputLogic.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd,
@@ -2469,13 +2481,15 @@ public class LatinIME extends InputMethodService implements
         // Trim trailing newlines as safety net (extract view or race can still add them sometimes)
         initialText = initialText.replaceFirst("[\\r\\n]+$", "");
         final EditorInfo editorInfo = getCurrentInputEditorInfo();
-        final FullappEditorResult.TargetSnapshot targetSnapshot =
+        final EditorTargetSnapshot targetSnapshot =
                 FullappEditorResult.createTargetSnapshot(editorInfo);
         final String launchSessionToken = UUID.randomUUID().toString();
         final int initialSelection = Math.max(0,
                 Math.min(getOriginalFieldCursorPosition(), initialText.length()));
 
         FullappEditorActivity.clearPendingReturn();
+        cancelEditHistoryCapture();
+        finalizeEditHistoryForTarget(mEditHistoryTarget);
         requestHideSelf(0);
         final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
         if (mainKeyboardView != null) {
@@ -2498,7 +2512,7 @@ public class LatinIME extends InputMethodService implements
     }
 
     private void maybeSyncPendingFullappDraft(@NonNull final EditorInfo editorInfo) {
-        final FullappEditorResult.TargetSnapshot targetSnapshot =
+        final EditorTargetSnapshot targetSnapshot =
                 FullappEditorResult.createTargetSnapshot(editorInfo);
         final boolean returningFromFullapp = FullappEditorActivity.consumePendingReturn(targetSnapshot);
         final String currentFieldText = getOriginalFieldTextForFullapp();
@@ -2599,6 +2613,56 @@ public class LatinIME extends InputMethodService implements
         } catch (Exception e) {
             Log.w(TAG, "Failed to restore fullapp selection: " + e.getMessage());
         }
+    }
+
+    private boolean shouldSkipEditHistoryCapture() {
+        return !mSettings.getCurrent().mEditHistoryEnabled || shouldSkipEmailCapture(mSettings.getCurrent());
+    }
+
+    private void scheduleEditHistoryCapture() {
+        if (shouldSkipEditHistoryCapture()) {
+            return;
+        }
+        mMainHandler.removeCallbacks(mEditHistoryCaptureRunnable);
+        mMainHandler.postDelayed(mEditHistoryCaptureRunnable, EDIT_HISTORY_CAPTURE_DELAY_MS);
+    }
+
+    private void cancelEditHistoryCapture() {
+        mMainHandler.removeCallbacks(mEditHistoryCaptureRunnable);
+    }
+
+    private void runEditHistoryCapture() {
+        if (shouldSkipEditHistoryCapture()) {
+            return;
+        }
+        final EditorInfo editorInfo = getCurrentInputEditorInfo();
+        final EditorTargetSnapshot target = EditorTargetSnapshot.Companion.createFrom(editorInfo);
+        if (target == null) {
+            return;
+        }
+        mEditHistoryTarget = target;
+        final String text = getOriginalFieldTextForFullapp();
+        final int cursor = getOriginalFieldCursorPosition();
+        ExecutorUtils.getBackgroundExecutor(ExecutorUtils.KEYBOARD).execute(() ->
+                EditHistoryStore.updateLatest(LatinIME.this, target, text, cursor, cursor));
+    }
+
+    private void finalizeEditHistoryForTarget(@Nullable final EditorTargetSnapshot target) {
+        if (target == null || shouldSkipEditHistoryCapture()) {
+            return;
+        }
+        cancelEditHistoryCapture();
+        ExecutorUtils.getBackgroundExecutor(ExecutorUtils.KEYBOARD).execute(() ->
+                EditHistoryStore.finalizeLatest(LatinIME.this, target));
+    }
+
+    private void onEditHistoryFieldStart(@NonNull final EditorInfo editorInfo) {
+        final EditorTargetSnapshot newTarget = EditorTargetSnapshot.Companion.createFrom(editorInfo);
+        if (mEditHistoryTarget != null && newTarget != null
+                && !mEditHistoryTarget.getStorageKey().equals(newTarget.getStorageKey())) {
+            finalizeEditHistoryForTarget(mEditHistoryTarget);
+        }
+        mEditHistoryTarget = newTarget;
     }
 
     public void dumpDictionaryForDebug(final String dictName) {

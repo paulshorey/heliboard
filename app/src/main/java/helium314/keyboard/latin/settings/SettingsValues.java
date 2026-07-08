@@ -151,6 +151,7 @@ public class SettingsValues {
     public final boolean mSuggestClipboardContent;
     public final SettingsValuesForSuggestion mSettingsValuesForSuggestion;
     public final boolean mIncognitoModeEnabled;
+    public final boolean mEditHistoryEnabled;
     public final boolean mLongPressSymbolsForNumpad;
 
     // User-defined colors
@@ -245,6 +246,7 @@ public class SettingsValues {
         mSecondaryStripVisible = mToolbarMode != ToolbarMode.HIDDEN || ! mToolbarHidingGlobal;
         mIncognitoModeEnabled = prefs.getBoolean(Settings.PREF_ALWAYS_INCOGNITO_MODE, Defaults.PREF_ALWAYS_INCOGNITO_MODE) || mInputAttributes.mNoLearning
                 || mInputAttributes.mIsPasswordField;
+        mEditHistoryEnabled = prefs.getBoolean(Settings.PREF_EDIT_HISTORY_ENABLED, Defaults.PREF_EDIT_HISTORY_ENABLED);
         mKeyboardHeightScale = Settings.readHeightScale(prefs, isLandscape);
         mSpaceSwipeHorizontal = Settings.readHorizontalSpaceSwipe(prefs);
         mSpaceSwipeVertical = Settings.readVerticalSpaceSwipe(prefs);

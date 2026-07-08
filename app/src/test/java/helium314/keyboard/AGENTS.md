@@ -12,6 +12,7 @@ Top-level test package for keyboard, parser, subtype, and IME behavior.
 
 ## Subfolders
 - `latin/` - core IME pipeline tests.
+- `latin/edithistory/` - edit history store tests.
 - `settings/` - fullapp/settings result tests.
 
 ## Non-obvious notes

@@ -234,8 +234,21 @@
     <!-- Voice Input (Soniox transcription) settings -->
     <string name="settings_screen_setup_app">Setup this app</string>
     <string name="settings_screen_transcription">Transcription</string>
-    <!-- Settings screen showing saved standalone fullapp edits and archived history -->
-    <string name="settings_screen_fullapp_drafts">Fullapp edit history</string>
+    <!-- Settings screen showing saved edits from regular keyboard and fullapp mode -->
+    <string name="settings_screen_fullapp_drafts">Edit history</string>
+    <string name="edit_history_enabled_title">Save edit history</string>
+    <string name="edit_history_enabled_summary">Keep a recoverable copy of text you type in regular keyboard mode. Password and incognito fields are never saved.</string>
+    <string name="edit_history_section_title">Edit history</string>
+    <string name="edit_history_section_summary">Read-only copies of finished edits from regular keyboard and fullapp mode. These never sync back automatically.</string>
+    <string name="edit_history_empty_title">No saved edits yet</string>
+    <string name="edit_history_empty_summary">Text you type in regular keyboard mode or fullapp mode will appear here so you can copy it later if an app loses your work.</string>
+    <string name="edit_history_source_regular">Regular keyboard</string>
+    <string name="edit_history_source_fullapp">Fullapp</string>
+    <string name="edit_history_source_fullapp_live">Fullapp (live)</string>
+    <string name="edit_history_clear">Clear history</string>
+    <string name="edit_history_clear_title">Clear edit history?</string>
+    <string name="edit_history_clear_summary">This removes all saved regular and archived fullapp history entries. Live fullapp drafts that can still sync are not removed.</string>
+    <string name="edit_history_truncated_note">Only the most recent part of this entry was saved.</string>
     <!-- Empty-state title for fullapp drafts screen -->
     <string name="fullapp_drafts_empty_title">No saved fullapp edits</string>
     <!-- Empty-state description for fullapp drafts screen -->

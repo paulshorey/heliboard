@@ -179,6 +179,7 @@ object Defaults {
     const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 1
     const val PREF_VOICE_SILENCE_THRESHOLD = 220
     const val PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = 30
+    const val PREF_EDIT_HISTORY_ENABLED = true
     const val PREF_EMOJI_RECENT_KEYS = ""
     const val PREF_LAST_SHOWN_EMOJI_CATEGORY_PAGE_ID = 0
     const val PREF_SHOW_DEBUG_SETTINGS = false

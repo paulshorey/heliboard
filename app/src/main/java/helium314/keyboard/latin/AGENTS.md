@@ -42,6 +42,7 @@ This is the main IME engine. It owns the InputMethodService lifecycle, the curre
 - `database/` - clipboard database layer.
 - `define/` - debug and decoder flags.
 - `dictionary/` - concrete binary dictionary implementations.
+- `edithistory/` - bounded read-only edit history and editor-target fingerprinting.
 - `inputlogic/` - central text-editing state machine.
 - `makedict/` - dictionary file-format metadata classes.
 - `personalization/` - user-history learning helpers.
@@ -57,7 +58,8 @@ This is the main IME engine. It owns the InputMethodService lifecycle, the curre
 - The simplified input model keeps the current word in `WordComposer`, not in the host editor.
 - `EditorWordMirror` in `inputlogic/` mirrors that current word into the host app using committed-text operations; bypassing it tends to break deletion, suggestions, and revert logic.
 - Voice insertion is a deliberate bypass: `LatinIME.commitVoiceTranscriptionText()` calls `finishInput()` and then direct `commitText()` in one batch edit before paragraph post-processing.
-- Fullapp is a standalone draft view. It seeds from `InputConnection`, persists through `FullappEditorResult`, and replays with raw `InputConnection` replacement on IME reconnect; the system extract view is not the fullapp source of truth.
+- Fullapp is a standalone draft view. It seeds from `InputConnection`, persists live sync-eligible drafts through `FullappEditorResult`, archives finished drafts into `latin/edithistory/EditHistoryStore`, and replays with raw `InputConnection` replacement on IME reconnect; the system extract view is not the fullapp source of truth.
+- Regular-keyboard typing is captured into the same read-only `EditHistoryStore` (debounced in `LatinIME`, gated by `PREF_EDIT_HISTORY_ENABLED` and the same privacy exclusions as email capture).
 - Toolbar button definitions and defaults live in `utils/ToolbarUtils.kt`, while strip rendering/voice overlay state lives in `suggestions/SuggestionStripView.kt`.
 - When the **Secondary Toolbar** (pinned keys) is visible, `LatinIME` includes its height in visible-strip / inset calculations so the primary strip stays tappable and more-suggestions positioning stays correct.
 
