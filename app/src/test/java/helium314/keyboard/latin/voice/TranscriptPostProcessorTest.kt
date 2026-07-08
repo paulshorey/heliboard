@@ -450,6 +450,22 @@ class TranscriptPostProcessorTest {
         )
     }
 
+    @Test
+    fun `removes comma-and disfluency`() {
+        assertEquals(
+            "I think we should go.",
+            process("I think we should go, and.")
+        )
+    }
+
+    @Test
+    fun `removes and-before-period disfluency`() {
+        assertEquals(
+            "I think we should go.",
+            process("I think we should go and.")
+        )
+    }
+
     // --- Rules list sanity ---
 
     @Test

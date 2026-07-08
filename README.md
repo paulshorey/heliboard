@@ -19,6 +19,46 @@ This script:
 
 Only one installable APK should exist in `./dist` at a time, and regenerating it should overwrite the previous artifact.
 
+## Run in debug mode
+
+```
+./gradlew installDebug && adb logcat -c && adb logcat -v time | grep -E 'LatinIME|VoiceInputManager|SonioxTranscription|VoiceRecorder|Soniox|VOICE_'
+```
+
+or just install without logs:
+
+```
+./gradlew installDebug
+```
+
+## Remove disfluencies
+
+app/src/main/java/helium314/keyboard/latin/voice/TranscriptPostProcessor.kt
+line 14
+
+```
+object TranscriptPostProcessor {
+
+    data class Rule(val find: String, val replace: String)
+
+    val rules: List<Rule> = buildRules()
+
+    private val disfluencyReplacements = listOf(
+        Rule("—", ""),
+        Rule(", hmm.", ""),
+        Rule(" hmm.", ""),
+        Rule("hmm.", ""),
+        Rule(", um.", "."),
+        Rule(" um.", "."),
+        Rule(", uh.", "."),
+        Rule(" uh.", "."),
+        Rule(", and.", "."),
+        Rule(" and.", "."),
+    )
+```
+
+---
+
 ## Soniox voice transcription
 
 HeliBoard uses [Soniox real-time transcription](https://soniox.com/docs/api-reference/stt/websocket-api) for voice-to-text. The session configuration is assembled in `SonioxTranscriptionClient.kt` and sent as a single JSON config text frame at the start of the WebSocket session (Soniox authenticates via the JSON `api_key` field, not HTTP headers).
@@ -52,13 +92,13 @@ HeliBoard does not configure Soniox direct replacement rules, output locale, dis
 
 ### User-facing settings (Settings → Transcription)
 
-| Setting | Pref key | Default | Description |
-|---------|----------|---------|-------------|
-| API key | `PREF_SONIOX_API_KEY` | `""` | Soniox API key |
-| Speaker diarization | `PREF_SONIOX_DIARIZATION` | `true` | Filter to primary speaker |
-| Custom voice vocabulary | `PREF_SONIOX_CUSTOM_TERMS` | `""` | User-defined `context.terms`, one term per line |
-| Enable endpoint detection | `PREF_SONIOX_ENABLE_ENDPOINT_DETECTION` | `true` | Finalize tokens immediately when Soniox detects the speaker has stopped talking |
-| Max endpoint delay (ms) | `PREF_SONIOX_MAX_ENDPOINT_DELAY_MS` | `2000` | Soniox-documented bounds: 500–3000 |
+| Setting                   | Pref key                                | Default | Description                                                                     |
+| ------------------------- | --------------------------------------- | ------- | ------------------------------------------------------------------------------- |
+| API key                   | `PREF_SONIOX_API_KEY`                   | `""`    | Soniox API key                                                                  |
+| Speaker diarization       | `PREF_SONIOX_DIARIZATION`               | `true`  | Filter to primary speaker                                                       |
+| Custom voice vocabulary   | `PREF_SONIOX_CUSTOM_TERMS`              | `""`    | User-defined `context.terms`, one term per line                                 |
+| Enable endpoint detection | `PREF_SONIOX_ENABLE_ENDPOINT_DETECTION` | `true`  | Finalize tokens immediately when Soniox detects the speaker has stopped talking |
+| Max endpoint delay (ms)   | `PREF_SONIOX_MAX_ENDPOINT_DELAY_MS`     | `2000`  | Soniox-documented bounds: 500–3000                                              |
 
 Preference keys are in `Settings.java`, defaults in `Defaults.kt`, read/write logic in `TranscriptionPreferences.kt`. `TranscriptionPreferences.readSonioxApiKey` clears legacy `speechmatics_api_key` and `deepgram_api_key` entries because those provider-specific keys cannot authenticate with Soniox.
 
@@ -68,12 +108,3 @@ Preference keys are in `Settings.java`, defaults in `Defaults.kt`, read/write lo
 - Soniox transcription pipeline: `docs/soniox-transcription.md`
 - Agent instructions: `AGENTS.md`
 - Soniox API reference: `.cursor/skills/voice-transcription/api-reference.md`
-
-## Run in debug mode:
-```
-./gradlew installDebug && adb logcat -c && adb logcat -v time | grep -E 'LatinIME|VoiceInputManager|SonioxTranscription|VoiceRecorder|Soniox|VOICE_'
-```
-or just install without logs:
-```
-./gradlew installDebug
-```

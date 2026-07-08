@@ -17,11 +17,27 @@ object TranscriptPostProcessor {
 
     val rules: List<Rule> = buildRules()
 
+    private val disfluencyReplacements = listOf(
+        Rule("—", ""),
+        Rule(", hmm.", ""),
+        Rule(" hmm.", ""),
+        Rule("hmm.", ""),
+        Rule(", um.", "."),
+        Rule(" um.", "."),
+        Rule(", uh.", "."),
+        Rule(" uh.", "."),
+        Rule(", and.", "."),
+        Rule(" and.", "."),
+    )
+
     /**
      * Analyze [paragraph] and return the corrected text, or `null` if no rules matched.
      */
     fun processCurrentParagraph(paragraph: String): String? {
         var result = removeFillerFragments(paragraph)
+        for (rule in disfluencyReplacements) {
+            result = result.replace(rule.find, rule.replace)
+        }
         for (rule in rules) {
             result = result.replace(rule.find, rule.replace)
         }
