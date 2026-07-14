@@ -250,6 +250,8 @@
     <string name="edit_history_clear_title">Clear edit history?</string>
     <string name="edit_history_clear_summary">This removes all saved regular and archived fullapp history entries. Live fullapp drafts that can still sync are not removed.</string>
     <string name="edit_history_truncated_note">Only the most recent part of this entry was saved.</string>
+    <string name="edit_history_expand_details">Show details</string>
+    <string name="edit_history_collapse_details">Hide details</string>
     <!-- Empty-state title for fullapp drafts screen -->
     <string name="fullapp_drafts_empty_title">No saved fullapp edits</string>
     <!-- Empty-state description for fullapp drafts screen -->

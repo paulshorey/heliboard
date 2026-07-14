@@ -16,10 +16,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -64,11 +64,7 @@ fun FullappDraftsScreen(
     val pendingLatest = remember(refreshToken) { EditHistoryStore.getPendingLatestEntries(context) }
     val historyEntries = remember(refreshToken) { EditHistoryStore.getAllEntries(context) }
     val allEntries = remember(liveDrafts, pendingLatest, historyEntries) {
-        buildList {
-            addAll(liveDrafts.map { EditHistoryListEntry.Live(it) })
-            addAll(pendingLatest.map { EditHistoryListEntry.Pending(it) })
-            addAll(historyEntries.map { EditHistoryListEntry.History(it) })
-        }
+        buildMergedEditHistoryEntries(liveDrafts, pendingLatest, historyEntries)
     }
     var showClearDialog by remember { mutableStateOf(false) }
 
@@ -216,65 +212,45 @@ fun EditHistorySections(
     historyEntries: List<EditHistoryEntry>,
     modifier: Modifier = Modifier,
 ) {
+    val mergedEntries = remember(liveDrafts, pendingLatest, historyEntries) {
+        buildMergedEditHistoryEntries(liveDrafts, pendingLatest, historyEntries)
+    }
     Column(modifier = modifier) {
-        if (liveDrafts.isNotEmpty()) {
-            SectionHeader(
-                title = stringResource(R.string.fullapp_live_drafts_title),
-                summary = stringResource(R.string.fullapp_live_drafts_summary)
-            )
-            liveDrafts.forEach { draft ->
-                EditHistoryEntryCard(entry = EditHistoryListEntry.Live(draft))
-            }
-        }
-        if (pendingLatest.isNotEmpty() || historyEntries.isNotEmpty()) {
-            SectionHeader(
-                title = stringResource(R.string.edit_history_section_title),
-                summary = stringResource(R.string.edit_history_section_summary)
-            )
-            pendingLatest.forEach { entry ->
-                EditHistoryEntryCard(entry = EditHistoryListEntry.Pending(entry))
-            }
-            historyEntries.forEach { entry ->
-                EditHistoryEntryCard(entry = EditHistoryListEntry.History(entry))
-            }
+        mergedEntries.forEach { entry ->
+            EditHistoryEntryCard(entry = entry)
         }
     }
 }
 
+private fun buildMergedEditHistoryEntries(
+    liveDrafts: List<FullappEditorResult.DraftRecord>,
+    pendingLatest: List<EditHistoryEntry>,
+    historyEntries: List<EditHistoryEntry>,
+): List<EditHistoryListEntry> = buildList {
+    addAll(liveDrafts.map { EditHistoryListEntry.Live(it) })
+    addAll(pendingLatest.map { EditHistoryListEntry.Pending(it) })
+    addAll(historyEntries.map { EditHistoryListEntry.History(it) })
+}.sortedByDescending { it.updatedAtMillis }
+
 private sealed interface EditHistoryListEntry {
+    val updatedAtMillis: Long
+
     data class Live(
         val draft: FullappEditorResult.DraftRecord
-    ) : EditHistoryListEntry
+    ) : EditHistoryListEntry {
+        override val updatedAtMillis: Long get() = draft.lastSavedAt
+    }
 
     data class Pending(
         val entry: EditHistoryEntry
-    ) : EditHistoryListEntry
+    ) : EditHistoryListEntry {
+        override val updatedAtMillis: Long get() = entry.updatedAt
+    }
 
     data class History(
         val entry: EditHistoryEntry
-    ) : EditHistoryListEntry
-}
-
-@Composable
-private fun SectionHeader(
-    title: String,
-    summary: String,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium
-        )
-        Text(
-            text = summary,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+    ) : EditHistoryListEntry {
+        override val updatedAtMillis: Long get() = entry.updatedAt
     }
 }
 
@@ -354,47 +330,46 @@ private fun EditHistoryEntryCard(
         shape = MaterialTheme.shapes.medium,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .padding(horizontal = 8.dp, vertical = 3.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.Top
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
                     modifier = Modifier
                         .weight(1f)
                         .clickable { metadataExpanded = !metadataExpanded },
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         painter = painterResource(R.drawable.ic_arrow_left),
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.rotate(if (metadataExpanded) 90f else -90f)
+                        contentDescription = stringResource(
+                            if (metadataExpanded) R.string.edit_history_collapse_details
+                            else R.string.edit_history_expand_details
+                        ),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .size(16.dp)
+                            .rotate(if (metadataExpanded) 90f else -90f)
                     )
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = model.appLabel,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = model.sourceLabel,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    Text(
+                        text = "${model.appLabel} · ${model.sourceLabel} · ${model.savedAt}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
                 }
                 IconButton(
-                    modifier = Modifier.padding(top = 2.dp),
+                    modifier = Modifier.size(32.dp),
                     colors = IconButtonDefaults.iconButtonColors(),
                     onClick = {
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -407,26 +382,17 @@ private fun EditHistoryEntryCard(
                     Icon(
                         painter = painterResource(R.drawable.sym_keyboard_copy_rounded),
                         contentDescription = stringResource(R.string.copy_to_clipboard),
-                        modifier = Modifier.padding(2.dp)
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
             if (metadataExpanded) {
-                HorizontalDivider()
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text(
-                        text = stringResource(R.string.fullapp_drafts_saved_at, model.savedAt),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = model.fingerprintSummary,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text(
+                    text = model.fingerprintSummary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 20.dp)
+                )
             }
             if (model.truncated) {
                 Text(
