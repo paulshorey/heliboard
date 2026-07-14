@@ -245,6 +245,7 @@
     <string name="edit_history_source_regular">Regular keyboard</string>
     <string name="edit_history_source_fullapp">Fullapp</string>
     <string name="edit_history_source_fullapp_live">Fullapp (live)</string>
+    <string name="edit_history_source_pending">Regular keyboard (in progress)</string>
     <string name="edit_history_clear">Clear history</string>
     <string name="edit_history_clear_title">Clear edit history?</string>
     <string name="edit_history_clear_summary">This removes all saved regular and archived fullapp history entries. Live fullapp drafts that can still sync are not removed.</string>

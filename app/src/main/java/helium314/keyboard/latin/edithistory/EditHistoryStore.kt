@@ -51,6 +51,8 @@ object EditHistoryStore {
     private const val JSON_UPDATED_AT = "updated_at"
     private const val JSON_TRUNCATED = "truncated"
 
+    private val lock = Any()
+
     private data class LatestSlot(
         val source: EditHistorySource,
         val target: EditorTargetSnapshot,
@@ -69,48 +71,76 @@ object EditHistoryStore {
         selectionStart: Int,
         selectionEnd: Int,
     ) {
-        if (text.isEmpty()) {
-            clearLatest(context, target)
-            return
-        }
-        val prefs = historyPrefs(context) ?: return
-        migrateIfNeeded(context, prefs)
-        val (storedText, truncated) = truncateEntryText(text)
-        val textLength = storedText.length
-        val slot = LatestSlot(
-            source = EditHistorySource.REGULAR,
-            target = target,
-            text = storedText,
-            selectionStart = selectionStart.coerceIn(0, textLength),
-            selectionEnd = selectionEnd.coerceIn(0, textLength),
-            updatedAt = System.currentTimeMillis(),
-            truncated = truncated,
-        )
-        prefs.edit {
-            putString(latestPrefKey(target.storageKey), slot.toJson().toString())
+        synchronized(lock) {
+            if (text.isEmpty()) {
+                clearLatestLocked(context, target)
+                return
+            }
+            val prefs = historyPrefs(context) ?: return
+            migrateIfNeeded(context, prefs)
+            val (storedText, truncated) = truncateEntryText(text)
+            val textLength = storedText.length
+            val slot = LatestSlot(
+                source = EditHistorySource.REGULAR,
+                target = target,
+                text = storedText,
+                selectionStart = selectionStart.coerceIn(0, textLength),
+                selectionEnd = selectionEnd.coerceIn(0, textLength),
+                updatedAt = System.currentTimeMillis(),
+                truncated = truncated,
+            )
+            prefs.edit {
+                putString(latestPrefKey(target.storageKey), slot.toJson().toString())
+            }
         }
     }
 
     @JvmStatic
     fun finalizeLatest(context: Context, target: EditorTargetSnapshot) {
-        val prefs = historyPrefs(context) ?: return
-        migrateIfNeeded(context, prefs)
-        val slot = loadLatest(prefs, target.storageKey) ?: return
-        clearLatest(context, target)
-        addEntry(
-            context = context,
-            source = slot.source,
-            target = slot.target,
-            text = slot.text,
-            selectionStart = slot.selectionStart,
-            selectionEnd = slot.selectionEnd,
-            updatedAt = slot.updatedAt,
-            truncated = slot.truncated,
-        )
+        synchronized(lock) {
+            val prefs = historyPrefs(context) ?: return
+            migrateIfNeeded(context, prefs)
+            val slot = loadLatest(prefs, target.storageKey) ?: return
+            clearLatestLocked(context, target)
+            addEntryLocked(
+                context = context,
+                source = slot.source,
+                target = slot.target,
+                text = slot.text,
+                selectionStart = slot.selectionStart,
+                selectionEnd = slot.selectionEnd,
+                updatedAt = slot.updatedAt,
+                truncated = slot.truncated,
+            )
+        }
     }
 
     @JvmStatic
     fun addEntry(
+        context: Context,
+        source: EditHistorySource,
+        target: EditorTargetSnapshot,
+        text: String,
+        selectionStart: Int,
+        selectionEnd: Int,
+        updatedAt: Long,
+        truncated: Boolean = false,
+    ) {
+        synchronized(lock) {
+            addEntryLocked(
+                context = context,
+                source = source,
+                target = target,
+                text = text,
+                selectionStart = selectionStart,
+                selectionEnd = selectionEnd,
+                updatedAt = updatedAt,
+                truncated = truncated,
+            )
+        }
+    }
+
+    private fun addEntryLocked(
         context: Context,
         source: EditHistorySource,
         target: EditorTargetSnapshot,
@@ -152,56 +182,95 @@ object EditHistoryStore {
             putString(PREF_EDIT_HISTORY_INDEX, JSONArray(index).toString())
             putString(entryPrefKey(entryId), entry.toJson().toString())
         }
-        enforceRetention(context)
+        enforceRetentionLocked(context)
         Log.i(TAG, "Saved ${source.name.lowercase()} history for ${target.debugSummary()}, chars=${storedText.length}")
     }
 
     @JvmStatic
     fun getAllEntries(context: Context): List<EditHistoryEntry> {
-        val prefs = historyPrefs(context) ?: return emptyList()
-        migrateIfNeeded(context, prefs)
-        val index = readIndex(prefs)
-        val entries = mutableListOf<EditHistoryEntry>()
-        val staleIds = mutableListOf<String>()
-        for (entryId in index) {
-            val rawEntry = prefs.getString(entryPrefKey(entryId), null)
-            if (rawEntry == null) {
-                staleIds.add(entryId)
-                continue
+        synchronized(lock) {
+            val prefs = historyPrefs(context) ?: return emptyList()
+            migrateIfNeeded(context, prefs)
+            val index = readIndex(prefs)
+            val entries = mutableListOf<EditHistoryEntry>()
+            val staleIds = mutableListOf<String>()
+            for (entryId in index) {
+                val rawEntry = prefs.getString(entryPrefKey(entryId), null)
+                if (rawEntry == null) {
+                    staleIds.add(entryId)
+                    continue
+                }
+                val entry = entryFromJson(entryId, rawEntry)
+                if (entry == null) {
+                    staleIds.add(entryId)
+                    continue
+                }
+                entries.add(entry)
             }
-            val entry = entryFromJson(entryId, rawEntry)
-            if (entry == null) {
-                staleIds.add(entryId)
-                continue
+            if (staleIds.isNotEmpty()) {
+                val cleanedIndex = index.filterNot { it in staleIds }
+                prefs.edit {
+                    putString(PREF_EDIT_HISTORY_INDEX, JSONArray(cleanedIndex).toString())
+                    staleIds.forEach { remove(entryPrefKey(it)) }
+                }
             }
-            entries.add(entry)
+            return entries.sortedByDescending { it.updatedAt }
         }
-        if (staleIds.isNotEmpty()) {
-            val cleanedIndex = index.filterNot { it in staleIds }
-            prefs.edit {
-                putString(PREF_EDIT_HISTORY_INDEX, JSONArray(cleanedIndex).toString())
-                staleIds.forEach { remove(entryPrefKey(it)) }
-            }
+    }
+
+    /**
+     * In-progress per-field slots that have not been finalized into history yet.
+     * Shown in Settings so the user can copy text even before leaving the field.
+     */
+    @JvmStatic
+    fun getPendingLatestEntries(context: Context): List<EditHistoryEntry> {
+        synchronized(lock) {
+            val prefs = historyPrefs(context) ?: return emptyList()
+            migrateIfNeeded(context, prefs)
+            return prefs.all.keys
+                .filter { it.startsWith(PREF_EDIT_HISTORY_LATEST_PREFIX) }
+                .mapNotNull { key ->
+                    val raw = prefs.getString(key, null) ?: return@mapNotNull null
+                    val slot = latestFromJson(raw) ?: return@mapNotNull null
+                    EditHistoryEntry(
+                        id = "latest:${slot.target.storageKey}",
+                        source = slot.source,
+                        target = slot.target,
+                        text = slot.text,
+                        selectionStart = slot.selectionStart,
+                        selectionEnd = slot.selectionEnd,
+                        updatedAt = slot.updatedAt,
+                        truncated = slot.truncated,
+                    )
+                }
+                .sortedByDescending { it.updatedAt }
         }
-        return entries.sortedByDescending { it.updatedAt }
     }
 
     @JvmStatic
     fun clearAll(context: Context) {
-        val prefs = historyPrefs(context) ?: return
-        migrateIfNeeded(context, prefs)
-        val index = readIndex(prefs)
-        val latestKeys = prefs.all.keys.filter { it.startsWith(PREF_EDIT_HISTORY_LATEST_PREFIX) }
-        prefs.edit {
-            remove(PREF_EDIT_HISTORY_INDEX)
-            index.forEach { remove(entryPrefKey(it)) }
-            latestKeys.forEach { remove(it) }
+        synchronized(lock) {
+            val prefs = historyPrefs(context) ?: return
+            migrateIfNeeded(context, prefs)
+            val index = readIndex(prefs)
+            val latestKeys = prefs.all.keys.filter { it.startsWith(PREF_EDIT_HISTORY_LATEST_PREFIX) }
+            prefs.edit {
+                remove(PREF_EDIT_HISTORY_INDEX)
+                index.forEach { remove(entryPrefKey(it)) }
+                latestKeys.forEach { remove(it) }
+            }
+            Log.i(TAG, "Cleared edit history")
         }
-        Log.i(TAG, "Cleared edit history")
     }
 
     @JvmStatic
     fun enforceRetention(context: Context) {
+        synchronized(lock) {
+            enforceRetentionLocked(context)
+        }
+    }
+
+    private fun enforceRetentionLocked(context: Context) {
         val prefs = historyPrefs(context) ?: return
         val now = System.currentTimeMillis()
         val index = readIndex(prefs)
@@ -244,7 +313,7 @@ object EditHistoryStore {
         }
         migrateLegacyFullappArchive(context, prefs)
         prefs.edit { putBoolean(PREF_EDIT_HISTORY_MIGRATED, true) }
-        enforceRetention(context)
+        enforceRetentionLocked(context)
     }
 
     private fun migrateLegacyFullappArchive(context: Context, prefs: SharedPreferences) {
@@ -325,7 +394,7 @@ object EditHistoryStore {
         return false
     }
 
-    private fun clearLatest(context: Context, target: EditorTargetSnapshot) {
+    private fun clearLatestLocked(context: Context, target: EditorTargetSnapshot) {
         val prefs = historyPrefs(context) ?: return
         prefs.edit { remove(latestPrefKey(target.storageKey)) }
     }

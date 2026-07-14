@@ -99,6 +99,19 @@ class EditHistoryStoreTest {
     }
 
     @Test
+    fun `getPendingLatestEntries returns in-progress slots`() {
+        val context = ApplicationProvider.getApplicationContext<App>()
+        clearPrefs(context)
+
+        EditHistoryStore.updateLatest(context, target, "still typing", 5, 5)
+
+        val pending = EditHistoryStore.getPendingLatestEntries(context)
+        assertEquals(1, pending.size)
+        assertEquals("still typing", pending.first().text)
+        assertTrue(EditHistoryStore.getAllEntries(context).isEmpty())
+    }
+
+    @Test
     fun `clearAll removes history and latest slots`() {
         val context = ApplicationProvider.getApplicationContext<App>()
         clearPrefs(context)

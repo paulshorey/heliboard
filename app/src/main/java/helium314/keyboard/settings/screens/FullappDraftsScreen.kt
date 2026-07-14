@@ -61,10 +61,12 @@ fun FullappDraftsScreen(
     val context = LocalContext.current
     var refreshToken by remember { mutableIntStateOf(0) }
     val liveDrafts = remember(refreshToken) { FullappEditorResult.getAllDrafts(context) }
+    val pendingLatest = remember(refreshToken) { EditHistoryStore.getPendingLatestEntries(context) }
     val historyEntries = remember(refreshToken) { EditHistoryStore.getAllEntries(context) }
-    val allEntries = remember(liveDrafts, historyEntries) {
+    val allEntries = remember(liveDrafts, pendingLatest, historyEntries) {
         buildList {
             addAll(liveDrafts.map { EditHistoryListEntry.Live(it) })
+            addAll(pendingLatest.map { EditHistoryListEntry.Pending(it) })
             addAll(historyEntries.map { EditHistoryListEntry.History(it) })
         }
     }
@@ -88,6 +90,7 @@ fun FullappDraftsScreen(
     val regularSourceLabel = stringResource(R.string.edit_history_source_regular)
     val fullappSourceLabel = stringResource(R.string.edit_history_source_fullapp)
     val fullappLiveSourceLabel = stringResource(R.string.edit_history_source_fullapp_live)
+    val pendingSourceLabel = stringResource(R.string.edit_history_source_pending)
     SearchScreen(
         onClickBack = onClickBack,
         title = { Text(stringResource(R.string.settings_screen_fullapp_drafts)) },
@@ -105,6 +108,15 @@ fun FullappDraftsScreen(
                             || draft.draftText.contains(lowerTerm, ignoreCase = true)
                             || draft.target.fieldId.toString().contains(lowerTerm)
                             || fullappLiveSourceLabel.contains(lowerTerm, ignoreCase = true)
+                    }
+                    is EditHistoryListEntry.Pending -> {
+                        val pending = entry.entry
+                        pending.target.packageName.contains(lowerTerm, ignoreCase = true)
+                            || resolveAppLabel(context, pending.target.packageName).contains(lowerTerm, ignoreCase = true)
+                            || pending.target.fieldName.contains(lowerTerm, ignoreCase = true)
+                            || pending.text.contains(lowerTerm, ignoreCase = true)
+                            || pendingSourceLabel.contains(lowerTerm, ignoreCase = true)
+                            || regularSourceLabel.contains(lowerTerm, ignoreCase = true)
                     }
                     is EditHistoryListEntry.History -> {
                         val history = entry.entry
@@ -136,7 +148,7 @@ fun FullappDraftsScreen(
                         key = Settings.PREF_EDIT_HISTORY_ENABLED,
                         default = Defaults.PREF_EDIT_HISTORY_ENABLED,
                     )
-                    if (historyEntries.isNotEmpty()) {
+                    if (historyEntries.isNotEmpty() || pendingLatest.isNotEmpty()) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -148,7 +160,7 @@ fun FullappDraftsScreen(
                             }
                         }
                     }
-                    if (liveDrafts.isEmpty() && historyEntries.isEmpty()) {
+                    if (liveDrafts.isEmpty() && pendingLatest.isEmpty() && historyEntries.isEmpty()) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -168,6 +180,7 @@ fun FullappDraftsScreen(
                     } else {
                         EditHistorySections(
                             liveDrafts = liveDrafts,
+                            pendingLatest = pendingLatest,
                             historyEntries = historyEntries,
                         )
                     }
@@ -183,12 +196,14 @@ fun FullappDraftHistorySections(
 ) {
     val context = LocalContext.current
     val liveDrafts = FullappEditorResult.getAllDrafts(context)
+    val pendingLatest = EditHistoryStore.getPendingLatestEntries(context)
     val historyEntries = EditHistoryStore.getAllEntries(context)
-    if (liveDrafts.isEmpty() && historyEntries.isEmpty()) {
+    if (liveDrafts.isEmpty() && pendingLatest.isEmpty() && historyEntries.isEmpty()) {
         return
     }
     EditHistorySections(
         liveDrafts = liveDrafts,
+        pendingLatest = pendingLatest,
         historyEntries = historyEntries,
         modifier = modifier,
     )
@@ -197,6 +212,7 @@ fun FullappDraftHistorySections(
 @Composable
 fun EditHistorySections(
     liveDrafts: List<FullappEditorResult.DraftRecord>,
+    pendingLatest: List<EditHistoryEntry>,
     historyEntries: List<EditHistoryEntry>,
     modifier: Modifier = Modifier,
 ) {
@@ -210,11 +226,14 @@ fun EditHistorySections(
                 EditHistoryEntryCard(entry = EditHistoryListEntry.Live(draft))
             }
         }
-        if (historyEntries.isNotEmpty()) {
+        if (pendingLatest.isNotEmpty() || historyEntries.isNotEmpty()) {
             SectionHeader(
                 title = stringResource(R.string.edit_history_section_title),
                 summary = stringResource(R.string.edit_history_section_summary)
             )
+            pendingLatest.forEach { entry ->
+                EditHistoryEntryCard(entry = EditHistoryListEntry.Pending(entry))
+            }
             historyEntries.forEach { entry ->
                 EditHistoryEntryCard(entry = EditHistoryListEntry.History(entry))
             }
@@ -225,6 +244,10 @@ fun EditHistorySections(
 private sealed interface EditHistoryListEntry {
     data class Live(
         val draft: FullappEditorResult.DraftRecord
+    ) : EditHistoryListEntry
+
+    data class Pending(
+        val entry: EditHistoryEntry
     ) : EditHistoryListEntry
 
     data class History(
@@ -287,6 +310,24 @@ private fun EditHistoryEntryCard(
                 sourceLabel = stringResource(R.string.edit_history_source_fullapp_live),
                 fingerprintSummary = buildLiveFingerprintSummary(context, draft),
                 truncated = false,
+            )
+        }
+        is EditHistoryListEntry.Pending -> {
+            val pending = entry.entry
+            val label = remember(pending.target.packageName) {
+                resolveAppLabel(context, pending.target.packageName)
+            }
+            val saved = remember(pending.updatedAt) {
+                DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+                    .format(Date(pending.updatedAt))
+            }
+            EditHistoryCardModel(
+                appLabel = label,
+                savedAt = saved,
+                text = pending.text,
+                sourceLabel = stringResource(R.string.edit_history_source_pending),
+                fingerprintSummary = buildHistoryFingerprintSummary(context, pending),
+                truncated = pending.truncated,
             )
         }
         is EditHistoryListEntry.History -> {
