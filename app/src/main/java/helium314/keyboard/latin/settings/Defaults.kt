@@ -176,6 +176,8 @@ object Defaults {
     // User-editable Soniox `context.terms`, stored as a single string with one term per line.
     // The built-in product/technical term list is added on top of this in the client.
     const val PREF_SONIOX_CUSTOM_TERMS = ""
+    // Soniox often inserts commas incorrectly; strip them by default after other cleanup.
+    const val PREF_SONIOX_REMOVE_COMMAS = true
     const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 1
     const val PREF_VOICE_SILENCE_THRESHOLD = 220
     const val PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = 30

@@ -290,6 +290,9 @@
     <string name="soniox_max_endpoint_delay_ms_summary">Upper limit on how long Soniox waits after a pause before committing a phrase. It is a maximum, not a fixed wait: the model still finalizes sooner when it thinks a sentence ended. The keyboard also flushes the trailing phrase after the \"Chunk silence duration\" pause so text is never stuck waiting.</string>
     <string name="soniox_diarization_title">Speaker diarization</string>
     <string name="soniox_diarization_summary">Only the first detected speaker is inserted; tokens from other speakers are dropped.</string>
+    <!-- Toggle to strip commas Soniox inserts during transcription; applied after filler and spoken-command cleanup. -->
+    <string name="soniox_remove_commas_title">Remove commas</string>
+    <string name="soniox_remove_commas_summary">Strip commas from transcribed text. Soniox often inserts them incorrectly; turn this off to keep commas as transcribed.</string>
     <!-- Title for the per-user "context terms" / custom vocabulary screen, used both as the row in the transcription screen and as the screen title. -->
     <string name="soniox_context_terms_title">Custom voice vocabulary</string>
     <!-- Summary shown for the row that opens the custom voice vocabulary screen. -->

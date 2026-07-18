@@ -137,7 +137,7 @@ PAUSED     → User taps pause  → RECORDING (resume)
 - **Silence Threshold**: RMS threshold floor for silence/speech detection
 - **Auto-stop Silence Duration**: delay before automatically stopping voice recording
 
-Soniox decides punctuation automatically. HeliBoard supplies recognition hints (built-in + user-editable `context.terms`) and recent editor text (`context.text`) so the model can use it to disambiguate sentence structure, but it does not expose direct replacements, output locale, disfluency removal, or punctuation sensitivity settings. HeliBoard does not currently strip fillers such as "um" or "uh" locally.
+Soniox decides punctuation automatically. HeliBoard supplies recognition hints (built-in + user-editable `context.terms`) and recent editor text (`context.text`) so the model can use it to disambiguate sentence structure, but it does not expose direct replacements, output locale, disfluency removal, or punctuation sensitivity settings. Locally, `TranscriptPostProcessor` removes comma-attached fillers such as "um," / "uh," and optionally strips all ASCII commas last when `PREF_SONIOX_REMOVE_COMMAS` is enabled.
 
 ### Silence Detection (VoiceRecorder.kt)
 ```kotlin

@@ -18,6 +18,7 @@ object TranscriptionPreferences {
     const val DEFAULT_ENABLE_ENDPOINT_DETECTION = Defaults.PREF_SONIOX_ENABLE_ENDPOINT_DETECTION
     const val DEFAULT_MAX_ENDPOINT_DELAY_MS = Defaults.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS
     const val DEFAULT_DIARIZATION = Defaults.PREF_SONIOX_DIARIZATION
+    const val DEFAULT_REMOVE_COMMAS = Defaults.PREF_SONIOX_REMOVE_COMMAS
 
     /** Hard cap on user-defined custom terms, mirroring the client. */
     private const val MAX_CUSTOM_TERMS = 200
@@ -30,7 +31,8 @@ object TranscriptionPreferences {
         val enableEndpointDetection: Boolean,
         val maxEndpointDelayMs: Int,
         val diarizationEnabled: Boolean,
-        val customTerms: List<String>
+        val customTerms: List<String>,
+        val removeCommas: Boolean
     )
 
     fun readSonioxApiKey(prefs: SharedPreferences): String {
@@ -67,7 +69,11 @@ object TranscriptionPreferences {
                 Settings.PREF_SONIOX_DIARIZATION,
                 Defaults.PREF_SONIOX_DIARIZATION
             ),
-            customTerms = readSonioxCustomTerms(prefs)
+            customTerms = readSonioxCustomTerms(prefs),
+            removeCommas = prefs.getBoolean(
+                Settings.PREF_SONIOX_REMOVE_COMMAS,
+                Defaults.PREF_SONIOX_REMOVE_COMMAS
+            )
         )
     }
 
@@ -135,6 +141,12 @@ object TranscriptionPreferences {
         }
     }
 
+    fun writeSonioxRemoveCommas(prefs: SharedPreferences, enabled: Boolean) {
+        prefs.edit {
+            putBoolean(Settings.PREF_SONIOX_REMOVE_COMMAS, enabled)
+        }
+    }
+
     fun readSonioxEnableEndpointDetection(prefs: SharedPreferences): Boolean {
         return readSonioxConfig(prefs).enableEndpointDetection
     }
@@ -145,6 +157,10 @@ object TranscriptionPreferences {
 
     fun readSonioxDiarization(prefs: SharedPreferences): Boolean {
         return readSonioxConfig(prefs).diarizationEnabled
+    }
+
+    fun readSonioxRemoveCommas(prefs: SharedPreferences): Boolean {
+        return readSonioxConfig(prefs).removeCommas
     }
 
     fun sanitizeMaxEndpointDelayMs(value: Int): Int {

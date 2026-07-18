@@ -84,6 +84,27 @@ class TranscriptionPreferencesTest {
         assertEquals(listOf("Foo", "Bar"), TranscriptionPreferences.readSonioxConfig(prefs).customTerms)
     }
 
+    @Test
+    fun readSonioxRemoveCommas_defaultsToEnabled() {
+        val prefs = newPrefs()
+        assertEquals(
+            Defaults.PREF_SONIOX_REMOVE_COMMAS,
+            TranscriptionPreferences.readSonioxRemoveCommas(prefs)
+        )
+        assertEquals(true, TranscriptionPreferences.readSonioxConfig(prefs).removeCommas)
+    }
+
+    @Test
+    fun writeAndReadSonioxRemoveCommas_roundTrips() {
+        val prefs = newPrefs()
+        TranscriptionPreferences.writeSonioxRemoveCommas(prefs, false)
+        assertEquals(false, TranscriptionPreferences.readSonioxRemoveCommas(prefs))
+        assertEquals(false, TranscriptionPreferences.readSonioxConfig(prefs).removeCommas)
+
+        TranscriptionPreferences.writeSonioxRemoveCommas(prefs, true)
+        assertEquals(true, TranscriptionPreferences.readSonioxRemoveCommas(prefs))
+    }
+
     private fun newPrefs() = ApplicationProvider.getApplicationContext<Context>()
         .getSharedPreferences(
             "transcription_preferences_test_${System.nanoTime()}",

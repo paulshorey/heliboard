@@ -466,6 +466,63 @@ class TranscriptPostProcessorTest {
         )
     }
 
+    // --- Remove all commas (final pass) ---
+
+    @Test
+    fun `removeCommas strips Soniox commas after other cleanup`() {
+        assertEquals(
+            "Hello world this is a test.",
+            TranscriptPostProcessor.processCurrentParagraph(
+                "Hello, world, this is a test.",
+                removeCommas = true
+            )
+        )
+    }
+
+    @Test
+    fun `removeCommas runs after filler removal so filler commas are already gone`() {
+        assertEquals(
+            "I think we should go.",
+            TranscriptPostProcessor.processCurrentParagraph(
+                "I think, um, we should go.",
+                removeCommas = true
+            )
+        )
+    }
+
+    @Test
+    fun `removeCommas runs after spoken Comma command replacement`() {
+        // Spoken "Comma." becomes "," then the final pass strips it.
+        assertEquals(
+            "Hello",
+            TranscriptPostProcessor.processCurrentParagraph(
+                "Hello. Comma.",
+                removeCommas = true
+            )
+        )
+    }
+
+    @Test
+    fun `removeCommas false leaves ordinary commas unchanged when no other rules match`() {
+        assertNull(
+            TranscriptPostProcessor.processCurrentParagraph(
+                "Hello, world this is a test.",
+                removeCommas = false
+            )
+        )
+    }
+
+    @Test
+    fun `removeCommas alone is enough to trigger a rewrite`() {
+        assertEquals(
+            "Hello world.",
+            TranscriptPostProcessor.processCurrentParagraph(
+                "Hello, world.",
+                removeCommas = true
+            )
+        )
+    }
+
     // --- Rules list sanity ---
 
     @Test
