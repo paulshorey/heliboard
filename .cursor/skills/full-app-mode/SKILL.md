@@ -14,7 +14,7 @@ When the user taps the fullapp toolbar button:
 3. The fullapp editor autosaves while editing and when backgrounded, so Home/app-switcher/process recreation does not drop the draft.
 4. Any explicit exit (back press, keyboard toggle button) keeps the latest draft ready to sync to the original app's textarea.
 5. When the IME reconnects to the matching editor, it retries the replay. After sync succeeds (or the target field already matches the draft), the draft is removed from the live-sync list and archived into read-only history instead of being deleted.
-6. Users can review and copy both live drafts and archived fullapp history from Settings. Archived entries never sync automatically again.
+6. Users can review and copy live fullapp drafts plus bounded regular/fullapp edit history from Settings → Edit history. Live drafts may still sync; archived/history entries never sync automatically again.
 
 ## Why Activity-Based (Not Extract View)
 
@@ -43,7 +43,7 @@ So we reuse that model: **treat fullapp as "opening the keyboard app"**, separat
 4. **While editing**: Persist a live draft in credential-protected storage, keyed by an editor fingerprint (package + field metadata). This also lets multiple apps/fields keep separate unsynced drafts.
 5. **On exit/background**: Keep the latest live draft persisted instead of relying on a one-shot in-memory handoff.
 6. **When user returns**: They go back to the original app. When they focus the matching text area, `onStartInputViewInternal()` looks up the live draft, retries `replaceEntireFieldText()` if needed, restores selection, and then archives the finished draft into read-only history instead of deleting it.
-7. **Settings history**: The settings UI shows two sections: live in-progress fullapp edits (still eligible for sync) and archived fullapp edit history (reference only, copyable, never auto-synced).
+7. **Settings history**: The settings UI shows live in-progress fullapp edits (still eligible for sync) and a merged edit history section (regular keyboard + archived fullapp entries, reference only, copyable, never auto-synced).
 
 ### Key Files
 
@@ -69,7 +69,7 @@ newlines.
 
 - `replaceEntireFieldText()` — used for inserting pending text when the IME reconnects.
 - `getOriginalFieldText()`, `getOriginalFieldCursorPosition()`, `readCurrentFieldText()` — used to seed the Activity and for `replaceEntireFieldText()`.
-- `FullappEditorResult` — live draft store, archived history store, and editor-target matching between the Activity and IME.
+- `FullappEditorResult` — live draft store, editor-target matching, and sync gating between the Activity and IME. Finished drafts archive into `latin/edithistory/EditHistoryStore`.
 
 ## What Did NOT Work (Extract View)
 
