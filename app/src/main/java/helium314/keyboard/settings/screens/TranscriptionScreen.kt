@@ -62,6 +62,9 @@ fun TranscriptionScreen(
     var sonioxDiarization by remember {
         mutableStateOf(TranscriptionPreferences.readSonioxDiarization(prefs))
     }
+    var sonioxRemoveCommas by remember {
+        mutableStateOf(TranscriptionPreferences.readSonioxRemoveCommas(prefs))
+    }
     var sonioxEnableEndpointDetection by remember {
         mutableStateOf(TranscriptionPreferences.readSonioxEnableEndpointDetection(prefs))
     }
@@ -123,6 +126,15 @@ fun TranscriptionScreen(
                     onCheckedChange = { checked ->
                         sonioxDiarization = checked
                         TranscriptionPreferences.writeSonioxDiarization(prefs, checked)
+                    }
+                )
+                BooleanSettingRow(
+                    label = stringResource(R.string.soniox_remove_commas_title),
+                    summary = stringResource(R.string.soniox_remove_commas_summary),
+                    checked = sonioxRemoveCommas,
+                    onCheckedChange = { checked ->
+                        sonioxRemoveCommas = checked
+                        TranscriptionPreferences.writeSonioxRemoveCommas(prefs, checked)
                     }
                 )
                 Preference(

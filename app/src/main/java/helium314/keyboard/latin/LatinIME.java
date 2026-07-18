@@ -69,6 +69,7 @@ import helium314.keyboard.latin.personalization.PersonalizationHelper;
 import helium314.keyboard.latin.settings.Defaults;
 import helium314.keyboard.latin.settings.Settings;
 import helium314.keyboard.latin.settings.SettingsValues;
+import helium314.keyboard.latin.settings.TranscriptionPreferences;
 import helium314.keyboard.latin.suggestions.SuggestionStripView;
 import helium314.keyboard.latin.suggestions.SuggestionStripViewAccessor;
 import helium314.keyboard.latin.touchinputconsumer.GestureConsumer;
@@ -2203,8 +2204,10 @@ public class LatinIME extends InputMethodService implements
             return;
         }
 
+        final boolean removeCommas = TranscriptionPreferences.INSTANCE.readSonioxRemoveCommas(
+                KtxKt.prefs(this));
         final String corrected =
-                TranscriptPostProcessor.INSTANCE.processCurrentParagraph(paragraph);
+                TranscriptPostProcessor.INSTANCE.processCurrentParagraph(paragraph, removeCommas);
         if (corrected == null) {
             return;
         }

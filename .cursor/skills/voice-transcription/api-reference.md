@@ -137,6 +137,7 @@ The Soniox SDKs filter these via `filterSpecialTokens()`; raw WebSocket users (H
 | `PREF_SONIOX_MAX_ENDPOINT_DELAY_MS` | Int | Maximum endpoint delay in ms (Soniox-documented bounds: 500–3000) |
 | `PREF_SONIOX_DIARIZATION` | Boolean | Enable speaker diarization to filter to primary speaker only |
 | `PREF_SONIOX_CUSTOM_TERMS` | String | User-defined `context.terms`, one per line. Merged with the built-in list at session start. |
+| `PREF_SONIOX_REMOVE_COMMAS` | Boolean | After other transcript post-processing, strip every ASCII comma from the current paragraph (default on) |
 | `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Silence window before treating speech as paused |
 | `PREF_VOICE_SILENCE_THRESHOLD` | Int | RMS threshold used for silence detection |
 | `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` | Int | Silence duration before auto-stopping recording |

@@ -10,6 +10,9 @@ package helium314.keyboard.latin.voice
  * Rules are applied case-insensitively, longest match first, so that patterns
  * with surrounding punctuation context (like ". Exclamation point.") are consumed
  * before shorter ambiguous ones (like "exclamation point.").
+ *
+ * When [removeCommas] is true, every ASCII comma is stripped as a final pass
+ * after filler cleanup and spoken-command replacements.
  */
 object TranscriptPostProcessor {
 
@@ -32,8 +35,15 @@ object TranscriptPostProcessor {
 
     /**
      * Analyze [paragraph] and return the corrected text, or `null` if no rules matched.
+     *
+     * @param removeCommas when true, strip all ASCII commas after every other
+     *   transformation. Defaults to false so existing call sites and unit tests
+     *   keep commas unless the transcription preference is enabled.
      */
-    fun processCurrentParagraph(paragraph: String): String? {
+    fun processCurrentParagraph(
+        paragraph: String,
+        removeCommas: Boolean = false
+    ): String? {
         var result = removeFillerFragments(paragraph)
         for (rule in disfluencyReplacements) {
             result = result.replace(rule.find, rule.replace)
@@ -41,7 +51,19 @@ object TranscriptPostProcessor {
         for (rule in rules) {
             result = result.replace(rule.find, rule.replace)
         }
+        if (removeCommas) {
+            result = removeAllCommas(result)
+        }
         return if (result != paragraph) result else null
+    }
+
+    /**
+     * Strip every ASCII comma. Runs last so spoken "Comma" commands and filler
+     * patterns that depend on commas have already been applied.
+     */
+    internal fun removeAllCommas(text: String): String {
+        if (text.isEmpty() || text.indexOf(',') < 0) return text
+        return text.replace(",", "")
     }
 
     /**
