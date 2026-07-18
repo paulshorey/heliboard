@@ -208,9 +208,10 @@ dimension can blow up memory:
 3. **Per-entry character cap** — e.g. `MAX_ENTRY_CHARS = 100_000`. Truncate a
    single entry's stored text (keep the tail, since the end is usually the
    newest/most-relevant content) and flag it truncated for the UI.
-4. **Optional age cap** — e.g. drop entries older than `MAX_HISTORY_AGE_MS`
-   (e.g. 30 days) opportunistically on read/write. This is a nice-to-have on top
-   of the hard caps.
+4. **Configurable age cap** — drop entries older than
+   `PREF_EDIT_HISTORY_RETENTION_HOURS` (default 24 hours; “No limit” disables age
+   eviction). Applies to archived history, pending latest slots, and live fullapp
+   drafts. Still combined with entry/char caps on write/read.
 
 Truncation runs inside a single `prefs.edit { … }` transaction in a helper
 `enforceRetention(prefs)` that:
