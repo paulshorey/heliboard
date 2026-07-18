@@ -4,7 +4,10 @@ package helium314.keyboard.latin.edithistory
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import helium314.keyboard.latin.settings.Defaults
+import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.utils.Log
+import helium314.keyboard.latin.utils.prefs
 import helium314.keyboard.latin.utils.protectedPrefs
 import org.json.JSONArray
 import org.json.JSONObject
@@ -41,7 +44,6 @@ object EditHistoryStore {
     const val MAX_HISTORY_ENTRIES = 200
     const val MAX_HISTORY_TOTAL_CHARS = 1_000_000
     const val MAX_ENTRY_CHARS = 100_000
-    const val MAX_HISTORY_AGE_MS = 30L * 24 * 60 * 60 * 1000
 
     private const val JSON_ID = "id"
     private const val JSON_SOURCE = "source"
@@ -62,6 +64,35 @@ object EditHistoryStore {
         val updatedAt: Long,
         val truncated: Boolean,
     )
+
+    /**
+     * Configured retention window in milliseconds, or null when age-based eviction is disabled
+     * (slider set to "No limit").
+     */
+    @JvmStatic
+    fun getRetentionAgeMs(context: Context): Long? {
+        val hours = context.prefs().getInt(
+            Settings.PREF_EDIT_HISTORY_RETENTION_HOURS,
+            Defaults.PREF_EDIT_HISTORY_RETENTION_HOURS,
+        )
+        if (hours >= Defaults.EDIT_HISTORY_RETENTION_HOURS_NO_LIMIT) {
+            return null
+        }
+        return hours.coerceAtLeast(1) * 60L * 60L * 1000L
+    }
+
+    @JvmStatic
+    fun isWithinRetentionWindow(
+        context: Context,
+        timestampMs: Long,
+        nowMs: Long = System.currentTimeMillis(),
+    ): Boolean {
+        if (timestampMs <= 0L) {
+            return false
+        }
+        val ageMs = getRetentionAgeMs(context) ?: return true
+        return nowMs - timestampMs <= ageMs
+    }
 
     @JvmStatic
     fun updateLatest(
@@ -191,6 +222,7 @@ object EditHistoryStore {
         synchronized(lock) {
             val prefs = historyPrefs(context) ?: return emptyList()
             migrateIfNeeded(context, prefs)
+            enforceRetentionLocked(context)
             val index = readIndex(prefs)
             val entries = mutableListOf<EditHistoryEntry>()
             val staleIds = mutableListOf<String>()
@@ -227,6 +259,7 @@ object EditHistoryStore {
         synchronized(lock) {
             val prefs = historyPrefs(context) ?: return emptyList()
             migrateIfNeeded(context, prefs)
+            enforceRetentionLocked(context)
             return prefs.all.keys
                 .filter { it.startsWith(PREF_EDIT_HISTORY_LATEST_PREFIX) }
                 .mapNotNull { key ->
@@ -273,6 +306,8 @@ object EditHistoryStore {
     private fun enforceRetentionLocked(context: Context) {
         val prefs = historyPrefs(context) ?: return
         val now = System.currentTimeMillis()
+        val retentionAgeMs = getRetentionAgeMs(context)
+        purgeExpiredLatestSlotsLocked(prefs, now, retentionAgeMs)
         val index = readIndex(prefs)
         if (index.isEmpty()) {
             return
@@ -282,7 +317,9 @@ object EditHistoryStore {
             entryFromJson(entryId, rawEntry)
         }
         val sorted = loaded
-            .filter { now - it.updatedAt <= MAX_HISTORY_AGE_MS }
+            .filter { entry ->
+                retentionAgeMs == null || now - entry.updatedAt <= retentionAgeMs
+            }
             .sortedByDescending { it.updatedAt }
         val kept = mutableListOf<EditHistoryEntry>()
         var totalChars = 0
@@ -305,6 +342,28 @@ object EditHistoryStore {
         if (removedIds.isNotEmpty()) {
             Log.i(TAG, "Evicted ${removedIds.size} edit-history entries to enforce retention")
         }
+    }
+
+    private fun purgeExpiredLatestSlotsLocked(
+        prefs: SharedPreferences,
+        nowMs: Long,
+        retentionAgeMs: Long?,
+    ) {
+        val ageLimit = retentionAgeMs ?: return
+        val expiredKeys = prefs.all.keys
+            .filter { it.startsWith(PREF_EDIT_HISTORY_LATEST_PREFIX) }
+            .filter { key ->
+                val raw = prefs.getString(key, null) ?: return@filter true
+                val slot = latestFromJson(raw) ?: return@filter true
+                nowMs - slot.updatedAt > ageLimit
+            }
+        if (expiredKeys.isEmpty()) {
+            return
+        }
+        prefs.edit {
+            expiredKeys.forEach { remove(it) }
+        }
+        Log.i(TAG, "Evicted ${expiredKeys.size} expired pending edit-history slots")
     }
 
     private fun migrateIfNeeded(context: Context, prefs: SharedPreferences) {

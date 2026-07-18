@@ -186,6 +186,8 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
     public static final String PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = "voice_auto_stop_silence_seconds";
 
     public static final String PREF_EDIT_HISTORY_ENABLED = "edit_history_enabled";
+    /** Retention window in hours; value >= Defaults.EDIT_HISTORY_RETENTION_HOURS_NO_LIMIT means no age limit. */
+    public static final String PREF_EDIT_HISTORY_RETENTION_HOURS = "edit_history_retention_hours";
 
     // Emoji
     public static final String PREF_EMOJI_MAX_SDK = "emoji_max_sdk";

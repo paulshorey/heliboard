@@ -50,6 +50,7 @@ import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.settings.FullappEditorResult
 import helium314.keyboard.settings.SearchScreen
 import helium314.keyboard.settings.dialogs.ThreeButtonAlertDialog
+import helium314.keyboard.settings.preferences.SliderPreference
 import helium314.keyboard.settings.preferences.SwitchPreference
 import java.text.DateFormat
 import java.util.Date
@@ -144,6 +145,17 @@ fun FullappDraftsScreen(
                         key = Settings.PREF_EDIT_HISTORY_ENABLED,
                         default = Defaults.PREF_EDIT_HISTORY_ENABLED,
                     )
+                    SliderPreference(
+                        name = stringResource(R.string.edit_history_retention_title),
+                        key = Settings.PREF_EDIT_HISTORY_RETENTION_HOURS,
+                        default = Defaults.PREF_EDIT_HISTORY_RETENTION_HOURS,
+                        description = { hours -> retentionHoursDescription(hours) },
+                        range = 1f..Defaults.EDIT_HISTORY_RETENTION_HOURS_NO_LIMIT.toFloat(),
+                    ) {
+                        EditHistoryStore.enforceRetention(context)
+                        FullappEditorResult.enforceAgeRetention(context)
+                        refreshToken++
+                    }
                     if (historyEntries.isNotEmpty() || pendingLatest.isNotEmpty()) {
                         Row(
                             modifier = Modifier
@@ -184,6 +196,18 @@ fun FullappDraftsScreen(
             }
         }
     )
+}
+
+@Composable
+private fun retentionHoursDescription(hours: Int): String = when {
+    hours >= Defaults.EDIT_HISTORY_RETENTION_HOURS_NO_LIMIT -> stringResource(R.string.settings_no_limit)
+    hours == 1 -> stringResource(R.string.edit_history_retention_one_hour)
+    hours % 24 == 0 -> {
+        val days = hours / 24
+        if (days == 1) stringResource(R.string.edit_history_retention_one_day)
+        else stringResource(R.string.edit_history_retention_days, days)
+    }
+    else -> stringResource(R.string.edit_history_retention_hours, hours)
 }
 
 @Composable

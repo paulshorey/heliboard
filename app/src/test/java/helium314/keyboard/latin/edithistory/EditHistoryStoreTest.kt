@@ -3,6 +3,7 @@ package helium314.keyboard.latin.edithistory
 
 import androidx.test.core.app.ApplicationProvider
 import helium314.keyboard.latin.App
+import helium314.keyboard.latin.utils.prefs
 import helium314.keyboard.latin.utils.protectedPrefs
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -161,7 +162,96 @@ class EditHistoryStoreTest {
         assertFalse(prefs.contains("fullapp_archive_$archiveKey"))
     }
 
+    @Test
+    fun `age retention drops entries older than configured window`() {
+        val context = ApplicationProvider.getApplicationContext<App>()
+        clearPrefs(context)
+        val now = System.currentTimeMillis()
+        val twentyFiveHoursAgo = now - 25L * 60L * 60L * 1000L
+        val oneHourAgo = now - 60L * 60L * 1000L
+
+        EditHistoryStore.addEntry(
+            context = context,
+            source = EditHistorySource.REGULAR,
+            target = target.copy(fieldId = 1),
+            text = "old entry",
+            selectionStart = 0,
+            selectionEnd = 0,
+            updatedAt = twentyFiveHoursAgo,
+        )
+        EditHistoryStore.addEntry(
+            context = context,
+            source = EditHistorySource.REGULAR,
+            target = target.copy(fieldId = 2),
+            text = "recent entry",
+            selectionStart = 0,
+            selectionEnd = 0,
+            updatedAt = oneHourAgo,
+        )
+
+        val entries = EditHistoryStore.getAllEntries(context)
+        assertEquals(1, entries.size)
+        assertEquals("recent entry", entries.single().text)
+    }
+
+    @Test
+    fun `age retention drops expired pending latest slots`() {
+        val context = ApplicationProvider.getApplicationContext<App>()
+        clearPrefs(context)
+        val prefs = context.protectedPrefs()
+        val twentyFiveHoursAgo = System.currentTimeMillis() - 25L * 60L * 60L * 1000L
+        val staleJson = """
+            {
+              "source": "REGULAR",
+              "text": "stale pending",
+              "selection_start": 0,
+              "selection_end": 0,
+              "updated_at": $twentyFiveHoursAgo,
+              "truncated": false,
+              "target": {
+                "package_name": "com.example.app",
+                "field_id": 42,
+                "field_name": "message",
+                "input_type": 1,
+                "ime_options": 2,
+                "private_ime_options": "opts"
+              }
+            }
+        """.trimIndent()
+        prefs.edit()
+            .putString("edit_history_latest_${target.storageKey}", staleJson)
+            .commit()
+
+        assertTrue(EditHistoryStore.getPendingLatestEntries(context).isEmpty())
+    }
+
+    @Test
+    fun `no limit retention keeps entries older than default window`() {
+        val context = ApplicationProvider.getApplicationContext<App>()
+        clearPrefs(context)
+        context.prefs().edit()
+            .putInt(
+                helium314.keyboard.latin.settings.Settings.PREF_EDIT_HISTORY_RETENTION_HOURS,
+                helium314.keyboard.latin.settings.Defaults.EDIT_HISTORY_RETENTION_HOURS_NO_LIMIT,
+            )
+            .commit()
+        val twoDaysAgo = System.currentTimeMillis() - 48L * 60L * 60L * 1000L
+
+        EditHistoryStore.addEntry(
+            context = context,
+            source = EditHistorySource.REGULAR,
+            target = target,
+            text = "kept when unlimited",
+            selectionStart = 0,
+            selectionEnd = 0,
+            updatedAt = twoDaysAgo,
+        )
+
+        assertEquals(1, EditHistoryStore.getAllEntries(context).size)
+    }
+
     private fun clearPrefs(context: App) {
         context.protectedPrefs().edit().clear().commit()
+        context.prefs().edit().clear().commit()
     }
 }

@@ -301,6 +301,7 @@ object FullappEditorResult {
     @JvmStatic
     fun getAllDrafts(context: Context): List<DraftRecord> {
         val prefs = draftPrefs(context) ?: return emptyList()
+        enforceAgeRetention(context)
         val draftKeys = prefs.getStringSet(PREF_FULLAPP_DRAFT_KEYS, emptySet()).orEmpty()
         val drafts = mutableListOf<DraftRecord>()
         val staleKeys = mutableListOf<String>()
@@ -336,6 +337,7 @@ object FullappEditorResult {
             putStringSet(PREF_FULLAPP_DRAFT_KEYS, draftKeys)
             putString(prefKey(draft.target.storageKey), draft.toJson().toString())
         }
+        enforceAgeRetention(context)
         evictOldestLiveDraftsIfNeeded(context)
         Log.i(TAG, "Saved fullapp draft for ${draft.target.debugSummary()}, chars=${draft.draftText.length}")
     }
@@ -431,6 +433,7 @@ object FullappEditorResult {
     @JvmStatic
     fun findDraftForEditor(context: Context, editorInfo: EditorInfo): DraftRecord? {
         val prefs = draftPrefs(context) ?: return null
+        enforceAgeRetention(context)
         val draftKeys = prefs.getStringSet(PREF_FULLAPP_DRAFT_KEYS, emptySet()).orEmpty()
         val staleKeys = mutableListOf<String>()
         var bestDraft: DraftRecord? = null
@@ -486,6 +489,31 @@ object FullappEditorResult {
     }.getOrNull()
 
     private fun prefKey(storageKey: String) = PREF_FULLAPP_DRAFT_PREFIX + storageKey
+
+    @JvmStatic
+    fun enforceAgeRetention(context: Context) {
+        val prefs = draftPrefs(context) ?: return
+        val retentionAgeMs = EditHistoryStore.getRetentionAgeMs(context) ?: return
+        val now = System.currentTimeMillis()
+        val draftKeys = prefs.getStringSet(PREF_FULLAPP_DRAFT_KEYS, emptySet()).orEmpty()
+        if (draftKeys.isEmpty()) {
+            return
+        }
+        val expired = draftKeys.mapNotNull { key ->
+            val rawDraft = prefs.getString(prefKey(key), null) ?: return@mapNotNull key
+            val draft = draftFromJson(rawDraft) ?: return@mapNotNull key
+            if (now - draft.lastSavedAt > retentionAgeMs) key else null
+        }
+        if (expired.isEmpty()) {
+            return
+        }
+        val updatedKeys = draftKeys.toMutableSet().apply { removeAll(expired.toSet()) }
+        prefs.edit {
+            putStringSet(PREF_FULLAPP_DRAFT_KEYS, updatedKeys)
+            expired.forEach { remove(prefKey(it)) }
+        }
+        Log.i(TAG, "Evicted ${expired.size} live fullapp drafts older than retention window")
+    }
 
     private fun evictOldestLiveDraftsIfNeeded(context: Context) {
         val prefs = draftPrefs(context) ?: return

@@ -238,6 +238,11 @@
     <string name="settings_screen_fullapp_drafts">Edit history</string>
     <string name="edit_history_enabled_title">Save edit history</string>
     <string name="edit_history_enabled_summary">Keep a recoverable copy of text you type in regular keyboard mode. Password and incognito fields are never saved.</string>
+    <string name="edit_history_retention_title">History retention time</string>
+    <string name="edit_history_retention_hours">%d hours</string>
+    <string name="edit_history_retention_one_hour">1 hour</string>
+    <string name="edit_history_retention_days">%d days</string>
+    <string name="edit_history_retention_one_day">1 day</string>
     <string name="edit_history_section_title">Edit history</string>
     <string name="edit_history_section_summary">Read-only copies of finished edits from regular keyboard and fullapp mode. These never sync back automatically.</string>
     <string name="edit_history_empty_title">No saved edits yet</string>

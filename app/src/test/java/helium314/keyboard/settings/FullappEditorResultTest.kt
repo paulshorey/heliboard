@@ -3,6 +3,9 @@ package helium314.keyboard.latin.edithistory
 
 import androidx.test.core.app.ApplicationProvider
 import helium314.keyboard.latin.App
+import helium314.keyboard.latin.settings.Defaults
+import helium314.keyboard.latin.settings.Settings
+import helium314.keyboard.latin.utils.prefs
 import helium314.keyboard.latin.utils.protectedPrefs
 import helium314.keyboard.settings.FullappEditorResult
 import kotlin.test.Test
@@ -100,8 +103,8 @@ class FullappEditorResultTest {
     @Test
     fun `archive moves draft out of live list and keeps text in history`() {
         val context = ApplicationProvider.getApplicationContext<App>()
-        context.protectedPrefs().edit().clear().commit()
-        val draft = draft(lastSavedAt = 1_000_000L)
+        clearPrefs(context)
+        val draft = draft(lastSavedAt = System.currentTimeMillis())
 
         FullappEditorResult.saveDraft(context, draft)
         FullappEditorResult.archiveAndClearDraft(context, draft)
@@ -119,9 +122,9 @@ class FullappEditorResultTest {
     @Test
     fun `archived drafts are returned newest first`() {
         val context = ApplicationProvider.getApplicationContext<App>()
-        context.protectedPrefs().edit().clear().commit()
-        val older = draft(lastSavedAt = 100L)
-        val newer = draft(lastSavedAt = 200L).copy(
+        clearPrefs(context)
+        val older = draft(lastSavedAt = System.currentTimeMillis() - 10_000L)
+        val newer = draft(lastSavedAt = System.currentTimeMillis()).copy(
             target = target.copy(fieldId = 43, fieldName = "message2")
         )
 
@@ -140,10 +143,15 @@ class FullappEditorResultTest {
     @Test
     fun `saveDraft evicts oldest live drafts beyond cap`() {
         val context = ApplicationProvider.getApplicationContext<App>()
-        context.protectedPrefs().edit().clear().commit()
+        clearPrefs(context)
+        // Keep age retention from interfering with count-based eviction.
+        context.prefs().edit()
+            .putInt(Settings.PREF_EDIT_HISTORY_RETENTION_HOURS, Defaults.EDIT_HISTORY_RETENTION_HOURS_NO_LIMIT)
+            .commit()
+        val now = System.currentTimeMillis()
 
         repeat(55) { index ->
-            val draft = draft(lastSavedAt = index.toLong()).copy(
+            val draft = draft(lastSavedAt = now - (55 - index) * 1_000L).copy(
                 target = target.copy(fieldId = index, fieldName = "field-$index")
             )
             FullappEditorResult.saveDraft(context, draft)
@@ -153,6 +161,31 @@ class FullappEditorResultTest {
         assertTrue(drafts.size <= 50)
         assertFalse(drafts.any { it.target.fieldId == 0 })
         assertTrue(drafts.any { it.target.fieldId == 54 })
+    }
+
+    @Test
+    fun `age retention drops live drafts older than configured window`() {
+        val context = ApplicationProvider.getApplicationContext<App>()
+        clearPrefs(context)
+        val now = System.currentTimeMillis()
+        val oldDraft = draft(lastSavedAt = now - 25L * 60L * 60L * 1000L).copy(
+            target = target.copy(fieldId = 1, fieldName = "old")
+        )
+        val recentDraft = draft(lastSavedAt = now - 60L * 60L * 1000L).copy(
+            target = target.copy(fieldId = 2, fieldName = "recent")
+        )
+
+        FullappEditorResult.saveDraft(context, oldDraft)
+        FullappEditorResult.saveDraft(context, recentDraft)
+
+        val drafts = FullappEditorResult.getAllDrafts(context)
+        assertEquals(1, drafts.size)
+        assertEquals(2, drafts.single().target.fieldId)
+    }
+
+    private fun clearPrefs(context: App) {
+        context.protectedPrefs().edit().clear().commit()
+        context.prefs().edit().clear().commit()
     }
 
     private fun draft(lastSavedAt: Long) = FullappEditorResult.DraftRecord(

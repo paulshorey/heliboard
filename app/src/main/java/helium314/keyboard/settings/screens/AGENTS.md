@@ -9,7 +9,7 @@ Feature-specific Compose screens for the settings app.
 - `ColorsScreen.kt` - color customization screen.
 - `DebugScreen.kt` - debug/developer settings screen.
 - `DictionaryScreen.kt` - dictionary management screen.
-- `FullappDraftsScreen.kt` - edit history screen (live fullapp drafts + bounded regular/fullapp history).
+- `FullappDraftsScreen.kt` - edit history screen (merged live fullapp drafts + bounded regular/fullapp history, retention slider, enable toggle).
 - `GestureTypingScreen.kt` - gesture typing settings screen.
 - `LanguageScreen.kt` - language/subtype entry screen.
 - `MainSettingsScreen.kt` - top-level settings home screen.
