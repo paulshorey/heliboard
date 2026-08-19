@@ -15,7 +15,10 @@ The integrated provider is **Soniox**, not Speechify.
 
 - Soniox is reached over a raw WebSocket at
   `wss://stt-rt.soniox.com/transcribe-websocket` with the model pinned to
-  `stt-rt-v4` (`SonioxTranscriptionClient`).
+  `stt-rt-v4` (`SonioxTranscriptionClient`). That pin is **stale** — Soniox's
+  current realtime model is `stt-rt-v5` and `v4` was retired after 30 June 2026;
+  see [`soniox-transcription.md`](soniox-transcription.md) and section 8.1 of the
+  [provider plan](pluggable-transcription-providers-plan.md).
 - **Speechify** appears nowhere in the codebase. The only other provider names
   present are `speechmatics_api_key` and `deepgram_api_key`, and both exist
   purely as *legacy preference keys that get deleted* — `TranscriptionPreferences`

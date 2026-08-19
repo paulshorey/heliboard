@@ -27,7 +27,9 @@ provider-plugin architecture).
 - `context.text` is supplied per session by `LatinIME.buildVoiceContextText` through `VoiceInputManager.setPriorTextProvider` (up to 4 000 chars before the cursor). `context.terms` is the union of a small built-in list and the user's `PREF_SONIOX_CUSTOM_TERMS`.
 - Graceful end-of-stream is an empty WebSocket frame; the client then waits for `{"finished": true}` before closing.
 - Provider coupling is not confined to `SonioxTranscriptionClient`: `VoiceInputManager` builds Soniox's `SessionConfig`, matches Soniox error strings in `isUnrecoverableError`, and assumes a mid-stream finalize control frame exists; `LatinIME.buildVoiceContextText` exists to fill Soniox's `context.text`. See the coupling inventory in `docs/voice-transcription-workflow.md` before adding a second provider.
-- Two contract-level assumptions matter more than any single file: finalized text is incremental and never repeated (so `commitText` can be irreversible), and segmentation is co-driven by our local VAD plus Soniox's finalize frame.
+- Two contract-level assumptions matter more than any single file: finalized text is incremental and never repeated (so `commitText` can be irreversible), and segmentation is co-driven by our local VAD plus Soniox's finalize frame. Most other providers violate at least one of these; see the four-way finality taxonomy in `docs/pluggable-transcription-providers-plan.md`.
+- `MODEL` is pinned to `stt-rt-v4`, which Soniox retired after 30 June 2026 (current is `stt-rt-v5`). Requests appear to be silently rerouted rather than rejected. Verify against a live key before changing.
+- Soniox's `{"type":"keepalive"}` message is not implemented. Harmless while recording, but a long pause drops the session and relies on reconnect-on-resume.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.
