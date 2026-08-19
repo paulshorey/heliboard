@@ -285,11 +285,11 @@
     <string name="soniox_api_key_title">Soniox API Key</string>
     <string name="soniox_api_key_summary">API key for voice transcription. Get from console.soniox.com</string>
     <string name="soniox_enable_endpoint_detection_title">Enable endpoint detection</string>
-    <string name="soniox_enable_endpoint_detection_summary">Lets Soniox finalize dictated text when its model thinks you have finished a sentence (from intonation and context), which can happen after a short pause. Turn this off to instead finalize only after the silence set by \"Chunk silence duration\" — useful if sentences end too early.</string>
+    <string name="soniox_enable_endpoint_detection_summary">Lets Soniox finalize dictated text when its model thinks you have finished a sentence (from intonation and context). HeliBoard uses Soniox v5 dictation-tuned endpointing so mid-sentence pauses are less likely to insert an early period. Turn this off to instead finalize only after the silence set by \"Chunk silence duration\".</string>
     <string name="soniox_max_endpoint_delay_ms_title">Max endpoint delay (ms, 500–3000)</string>
     <string name="soniox_max_endpoint_delay_ms_summary">Upper limit on how long Soniox waits after a pause before committing a phrase. It is a maximum, not a fixed wait: the model still finalizes sooner when it thinks a sentence ended. The keyboard also flushes the trailing phrase after the \"Chunk silence duration\" pause so text is never stuck waiting.</string>
     <string name="soniox_diarization_title">Speaker diarization</string>
-    <string name="soniox_diarization_summary">Only the first detected speaker is inserted; tokens from other speakers are dropped.</string>
+    <string name="soniox_diarization_summary">Only the first detected speaker is inserted, which helps ignore nearby talkers or TV audio. Tokens from other speakers are dropped.</string>
     <!-- Title for the per-user "context terms" / custom vocabulary screen, used both as the row in the transcription screen and as the screen title. -->
     <string name="soniox_context_terms_title">Custom voice vocabulary</string>
     <!-- Summary shown for the row that opens the custom voice vocabulary screen. -->

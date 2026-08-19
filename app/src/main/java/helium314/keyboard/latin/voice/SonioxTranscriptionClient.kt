@@ -3,6 +3,7 @@ package helium314.keyboard.latin.voice
 
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import helium314.keyboard.latin.utils.Log
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -27,7 +28,8 @@ import java.util.concurrent.TimeUnit
  * 2. Send a single JSON config text frame as the first message.
  *    It must include `api_key`, `model`, and (for raw PCM) `audio_format`,
  *    `sample_rate`, `num_channels`.
- * 3. Stream binary PCM frames.
+ * 3. Stream binary PCM frames. If nothing is sent for ~10 s, send
+ *    `{"type":"keepalive"}` so Soniox does not idle-timeout (~20 s).
  * 4. Receive JSON responses, each with a `tokens` array. Tokens with
  *    `is_final: true` are confirmed and never repeated. Non-final tokens
  *    update on every response and we drop them — the IME only commits
@@ -41,9 +43,23 @@ class SonioxTranscriptionClient {
         private const val TAG = "SonioxTranscription"
         private const val STREAMING_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
 
-        private const val MODEL = "stt-rt-v4"
+        /**
+         * Current Soniox real-time model. v4 is retired on 2026-06-30 and
+         * already aliased to v5; pin v5 explicitly so we can use v5-only
+         * knobs such as `endpoint_sensitivity`.
+         * https://soniox.com/docs/stt/models
+         */
+        internal const val MODEL = "stt-rt-v5"
 
         private const val FINALIZE_CLOSE_GRACE_MS = 8_000L
+
+        /**
+         * Soniox closes the socket if it receives neither audio nor a
+         * keepalive control frame for more than ~20 s. Send one at least
+         * every 10 s during pauses (mic pause, or any other outbound gap).
+         * https://soniox.com/docs/stt/rt/connection-keepalive
+         */
+        private const val KEEPALIVE_INTERVAL_MS = 10_000L
 
         /**
          * Control message that forces Soniox to finalize every token processed
@@ -60,10 +76,25 @@ class SonioxTranscriptionClient {
          */
         internal const val FINALIZE_CONTROL_MESSAGE = "{\"type\":\"finalize\"}"
 
+        /**
+         * Control message that keeps a real-time session alive when no audio
+         * is being sent. Distinct from OkHttp's WebSocket protocol ping.
+         */
+        internal const val KEEPALIVE_CONTROL_MESSAGE = "{\"type\":\"keepalive\"}"
+
         // Soniox's documented bounds for max_endpoint_delay_ms.
         internal const val MIN_MAX_ENDPOINT_DELAY_MS = 500
         internal const val MAX_MAX_ENDPOINT_DELAY_MS = 3000
         internal const val DEFAULT_MAX_ENDPOINT_DELAY_MS = 3000
+
+        // v5-only endpoint_sensitivity: -1.0 (patient) to 1.0 (eager).
+        // Negative values are the documented starting point for dictation and
+        // speakers who pause mid-sentence, which is exactly this keyboard's
+        // premature-period problem. Default 0.0 is Soniox's API default.
+        // https://soniox.com/docs/stt/rt/endpoint-detection
+        internal const val MIN_ENDPOINT_SENSITIVITY = -1.0
+        internal const val MAX_ENDPOINT_SENSITIVITY = 1.0
+        internal const val DEFAULT_ENDPOINT_SENSITIVITY = -0.3
 
         private val PUNCTUATION_ATTACHING_TO_PREVIOUS = setOf(
             '.', ',', '!', '?', ':', ';', ')', ']', '}', '%'
@@ -91,13 +122,21 @@ class SonioxTranscriptionClient {
         /** Hard cap on the number of user-defined custom terms. */
         internal const val MAX_USER_CONTEXT_TERMS = 200
 
+        internal data class ContextGeneralItem(
+            val key: String,
+            val value: String
+        )
+
         internal data class SessionConfig(
             val languageHint: String?,
+            val languageHintsStrict: Boolean,
             val enableEndpointDetection: Boolean,
             val maxEndpointDelayMs: Int,
+            val endpointSensitivity: Double,
             val diarizationEnabled: Boolean,
             val contextTerms: List<String>,
-            val contextText: String?
+            val contextText: String?,
+            val contextGeneral: List<ContextGeneralItem>
         )
 
         internal fun buildSessionConfig(
@@ -107,22 +146,36 @@ class SonioxTranscriptionClient {
             diarizationEnabled: Boolean,
             contextTerms: List<String> = defaultContextTerms(),
             customContextTerms: List<String> = emptyList(),
-            contextText: String? = null
+            contextText: String? = null,
+            endpointSensitivity: Double = DEFAULT_ENDPOINT_SENSITIVITY
         ): SessionConfig {
             val mergedTerms = (contextTerms + customContextTerms)
                 .map { it.trim() }
                 .filter { it.isNotEmpty() }
                 .distinct()
+            val languageHint = normalizeLanguageHint(languageTag)
             return SessionConfig(
-                languageHint = normalizeLanguageHint(languageTag),
+                languageHint = languageHint,
+                // Keyboard subtype already names the expected language. Strict
+                // hints are the documented v5 way to avoid transliteration into
+                // the wrong script (best with a single language).
+                languageHintsStrict = languageHint != null,
                 enableEndpointDetection = enableEndpointDetection,
                 maxEndpointDelayMs = maxEndpointDelayMs.coerceIn(
                     MIN_MAX_ENDPOINT_DELAY_MS,
                     MAX_MAX_ENDPOINT_DELAY_MS
                 ),
+                endpointSensitivity = endpointSensitivity.coerceIn(
+                    MIN_ENDPOINT_SENSITIVITY,
+                    MAX_ENDPOINT_SENSITIVITY
+                ),
                 diarizationEnabled = diarizationEnabled,
                 contextTerms = mergedTerms,
-                contextText = sanitizeContextText(contextText)
+                contextText = sanitizeContextText(contextText),
+                contextGeneral = buildContextGeneral(
+                    languageHint = languageHint,
+                    diarizationEnabled = diarizationEnabled
+                )
             )
         }
 
@@ -133,6 +186,39 @@ class SonioxTranscriptionClient {
             "API",
             "gnocchi"
         )
+
+        /**
+         * Structured `context.general` key/value pairs. v5 treats these as
+         * more influential than free-form `context.text`; keep the list short
+         * (Soniox recommends ~10 or fewer).
+         * https://soniox.com/docs/stt/concepts/context
+         */
+        internal fun buildContextGeneral(
+            languageHint: String?,
+            diarizationEnabled: Boolean
+        ): List<ContextGeneralItem> {
+            val items = mutableListOf(
+                ContextGeneralItem("domain", "Mobile keyboard dictation"),
+                ContextGeneralItem("setting", "User dictating text into a mobile app"),
+                ContextGeneralItem("topic", "Dictation"),
+                ContextGeneralItem("product", "HeliBoard")
+            )
+            val languageName = languageDisplayName(languageHint)
+            if (languageName != null) {
+                items += ContextGeneralItem("language", languageName)
+                items += ContextGeneralItem(
+                    "instructions",
+                    "User is dictating in $languageName. Output transcription only in $languageName."
+                )
+            }
+            if (diarizationEnabled) {
+                items += ContextGeneralItem(
+                    "speakers",
+                    "1 speaker (local user dictating)"
+                )
+            }
+            return items
+        }
 
         /**
          * Trim incoming editor context to the most recent [MAX_CONTEXT_TEXT_CHARS]
@@ -158,16 +244,39 @@ class SonioxTranscriptionClient {
                 .put("sample_rate", VoiceRecorder.SAMPLE_RATE)
                 .put("num_channels", 1)
                 .put("enable_endpoint_detection", config.enableEndpointDetection)
-                .put("max_endpoint_delay_ms", config.maxEndpointDelayMs)
                 .put("enable_speaker_diarization", config.diarizationEnabled)
+
+            if (config.enableEndpointDetection) {
+                payload.put("max_endpoint_delay_ms", config.maxEndpointDelayMs)
+                // Leave endpoint_latency_adjustment_level at Soniox's default 0
+                // (no extra aggressiveness). Negative sensitivity is the
+                // documented dictation setting so the model waits through
+                // mid-sentence pauses instead of inserting early periods.
+                payload.put("endpoint_sensitivity", config.endpointSensitivity)
+            }
 
             if (config.languageHint != null) {
                 payload.put(
                     "language_hints",
                     JSONArray().apply { put(config.languageHint) }
                 )
+                payload.put("language_hints_strict", config.languageHintsStrict)
             }
             val contextObject = JSONObject()
+            if (config.contextGeneral.isNotEmpty()) {
+                contextObject.put(
+                    "general",
+                    JSONArray().apply {
+                        config.contextGeneral.forEach { item ->
+                            put(
+                                JSONObject()
+                                    .put("key", item.key)
+                                    .put("value", item.value)
+                            )
+                        }
+                    }
+                )
+            }
             if (config.contextTerms.isNotEmpty()) {
                 contextObject.put(
                     "terms",
@@ -202,6 +311,31 @@ class SonioxTranscriptionClient {
         }
 
         /**
+         * English display name for a Soniox language-hint code, used in
+         * `context.general`. Returns null when [languageCode] is blank.
+         */
+        internal fun languageDisplayName(languageCode: String?): String? {
+            if (languageCode.isNullOrBlank()) return null
+            val displayName = Locale.forLanguageTag(languageCode)
+                .getDisplayLanguage(Locale.ENGLISH)
+                .trim()
+            return displayName.ifBlank { languageCode }
+        }
+
+        /**
+         * True when Soniox returned at least one `is_final` token (text or
+         * control marker).
+         */
+        internal fun tokensContainFinalTokens(tokens: JSONArray?): Boolean {
+            if (tokens == null || tokens.length() == 0) return false
+            for (i in 0 until tokens.length()) {
+                val token = tokens.optJSONObject(i) ?: continue
+                if (token.optBoolean("is_final", false)) return true
+            }
+            return false
+        }
+
+        /**
          * Build a [TranscriptSegment] from a single Soniox response's `tokens`
          * array. Returns `null` if the response contained no usable final
          * tokens for the active speaker.
@@ -229,16 +363,6 @@ class SonioxTranscriptionClient {
          * returned in [SegmentResult.tailIsWordy] so the caller can feed it
          * back on the next response.
          */
-        /** True when Soniox returned at least one `is_final` token (text or control marker). */
-        internal fun tokensContainFinalTokens(tokens: JSONArray?): Boolean {
-            if (tokens == null || tokens.length() == 0) return false
-            for (i in 0 until tokens.length()) {
-                val token = tokens.optJSONObject(i) ?: continue
-                if (token.optBoolean("is_final", false)) return true
-            }
-            return false
-        }
-
         internal fun buildSegmentFromFinalTokens(
             tokens: org.json.JSONArray?,
             primarySpeaker: String?,
@@ -334,23 +458,60 @@ class SonioxTranscriptionClient {
         )
 
         internal fun buildErrorDescription(json: JSONObject): String {
-            val code = json.optString("error_code", "")
             val type = json.optString("error_type", "")
-            val message = json.optString("error_message", "")
             val requestId = json.optString("request_id", "")
-            val summary = listOf(type, code)
-                .filter { it.isNotBlank() }
-                .joinToString(" ")
-            val description = when {
-                summary.isBlank() && message.isBlank() -> "Soniox reported an unknown error"
-                summary.isBlank() -> message
-                message.isBlank() -> summary
-                else -> "$summary: $message"
+            val friendly = friendlyErrorForType(type)
+            val description = friendly ?: run {
+                val code = json.optString("error_code", "")
+                val message = json.optString("error_message", "")
+                val summary = listOf(type, code)
+                    .filter { it.isNotBlank() }
+                    .joinToString(" ")
+                when {
+                    summary.isBlank() && message.isBlank() -> "Soniox reported an unknown error"
+                    summary.isBlank() -> message
+                    message.isBlank() -> summary
+                    else -> "$summary: $message"
+                }
             }
-            return if (requestId.isBlank()) {
+            val withRequestId = if (requestId.isBlank()) {
                 description
             } else {
                 "$description (request_id=$requestId)"
+            }
+            val moreInfo = json.optString("more_info", "")
+            return if (moreInfo.isBlank()) {
+                withRequestId
+            } else {
+                "$withRequestId $moreInfo"
+            }
+        }
+
+        /**
+         * Map stable Soniox `error_type` values to short user-facing text.
+         * Unknown types fall through so the raw message is preserved.
+         */
+        internal fun friendlyErrorForType(errorType: String): String? {
+            return when (errorType) {
+                "unauthenticated" ->
+                    "Invalid Soniox API key. Please check Settings."
+                "organization_balance_exhausted",
+                "organization_monthly_budget_exhausted",
+                "project_monthly_budget_exhausted" ->
+                    "Soniox account is out of credits. Add funds in the Soniox console."
+                "limit_exceeded" ->
+                    "Soniox rate limited — too many requests"
+                "max_duration_reached" ->
+                    "Soniox session reached its maximum duration"
+                "service_unavailable" ->
+                    "Soniox is temporarily unavailable. Please try again."
+                "request_timeout" ->
+                    "Soniox streaming timed out"
+                "temp_api_key_session_expired" ->
+                    "Soniox temporary API key expired"
+                "model_not_available" ->
+                    "The requested Soniox model is not available"
+                else -> null
             }
         }
     }
@@ -403,6 +564,12 @@ class SonioxTranscriptionClient {
     private var pendingFinalizeCloseRunnable: Runnable? = null
 
     @Volatile
+    private var pendingKeepaliveRunnable: Runnable? = null
+
+    @Volatile
+    private var lastOutboundAtMs = 0L
+
+    @Volatile
     private var diarizationEnabled = false
 
     @Volatile
@@ -432,7 +599,9 @@ class SonioxTranscriptionClient {
         diarizationEnabled = sessionConfig.diarizationEnabled
         primarySpeaker = null
         lastFinalTokenTailIsWordy = false
+        lastOutboundAtMs = 0L
         clearFinalizeCloseTimer()
+        clearKeepaliveTimer()
 
         val request = Request.Builder()
             .url(STREAMING_URL)
@@ -441,10 +610,14 @@ class SonioxTranscriptionClient {
         Log.i(
             TAG,
             "VOICE_STEP_3 opening Soniox realtime socket " +
-                "(language=${sessionConfig.languageHint ?: "auto"}, " +
+                "(model=$MODEL, " +
+                "language=${sessionConfig.languageHint ?: "auto"}, " +
+                "languageHintsStrict=${sessionConfig.languageHintsStrict}, " +
                 "endpointDetection=${sessionConfig.enableEndpointDetection}, " +
                 "maxEndpointDelayMs=${sessionConfig.maxEndpointDelayMs}, " +
+                "endpointSensitivity=${sessionConfig.endpointSensitivity}, " +
                 "diarization=${sessionConfig.diarizationEnabled}, " +
+                "contextGeneral=${sessionConfig.contextGeneral.size}, " +
                 "contextTerms=${sessionConfig.contextTerms.size}, " +
                 "contextTextChars=${sessionConfig.contextText?.length ?: 0})"
         )
@@ -467,6 +640,7 @@ class SonioxTranscriptionClient {
                     }
                     return
                 }
+                markOutbound()
 
                 // Soniox does not emit a "started" event. OkHttp queues frames
                 // in order, so PCM frames sent immediately after the config
@@ -474,6 +648,7 @@ class SonioxTranscriptionClient {
                 // config is queued. If authentication fails, the server will
                 // reply with `error_code` which we route to onStreamError.
                 isRecognitionReady = true
+                scheduleKeepalive(newToken)
                 Log.i(TAG, "Soniox start config queued; stream ready")
                 postIfCurrent(newToken) {
                     this@SonioxTranscriptionClient.callback?.onStreamReady()
@@ -501,6 +676,7 @@ class SonioxTranscriptionClient {
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (newToken != activeConnectionToken) return
                 clearFinalizeCloseTimer()
+                clearKeepaliveTimer()
                 isRecognitionReady = false
                 this@SonioxTranscriptionClient.webSocket = null
                 Log.i(TAG, "Soniox stream closed: code=$code, reason=$reason")
@@ -512,6 +688,7 @@ class SonioxTranscriptionClient {
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (newToken != activeConnectionToken) return
                 clearFinalizeCloseTimer()
+                clearKeepaliveTimer()
                 isRecognitionReady = false
                 this@SonioxTranscriptionClient.webSocket = null
                 if (isClosing) {
@@ -536,7 +713,9 @@ class SonioxTranscriptionClient {
         val socket = webSocket ?: return false
         if (!isRecognitionReady) return false
         return try {
-            socket.send(pcmData.toByteString())
+            val sent = socket.send(pcmData.toByteString())
+            if (sent) markOutbound()
+            sent
         } catch (e: Exception) {
             Log.e(TAG, "Failed to send audio chunk: ${e.message}")
             false
@@ -555,7 +734,9 @@ class SonioxTranscriptionClient {
         val socket = webSocket ?: return false
         if (!isRecognitionReady) return false
         return try {
-            socket.send(FINALIZE_CONTROL_MESSAGE)
+            val sent = socket.send(FINALIZE_CONTROL_MESSAGE)
+            if (sent) markOutbound()
+            sent
         } catch (e: Exception) {
             Log.e(TAG, "Failed to send Soniox finalize control frame: ${e.message}")
             false
@@ -571,6 +752,7 @@ class SonioxTranscriptionClient {
     fun finishStreaming() {
         val socket = webSocket ?: return
         isClosing = true
+        clearKeepaliveTimer()
 
         clearFinalizeCloseTimer()
         val connectionToken = activeConnectionToken
@@ -590,6 +772,7 @@ class SonioxTranscriptionClient {
             false
         }
         if (sent) {
+            markOutbound()
             Log.i(TAG, "Soniox empty end-of-stream frame sent")
         } else {
             socket.close(1000, "client_stop")
@@ -603,11 +786,13 @@ class SonioxTranscriptionClient {
 
     private fun stopStreamingInternal(cancel: Boolean, clearCallback: Boolean) {
         clearFinalizeCloseTimer()
+        clearKeepaliveTimer()
         isClosing = true
         isRecognitionReady = false
         diarizationEnabled = false
         primarySpeaker = null
         lastFinalTokenTailIsWordy = false
+        lastOutboundAtMs = 0L
         val socket = webSocket
         webSocket = null
         if (socket != null) {
@@ -679,6 +864,9 @@ class SonioxTranscriptionClient {
         if (code != null) {
             return when (code) {
                 401, 403 -> "Invalid Soniox API key. Please check Settings."
+                402 -> "Soniox account is out of credits. Add funds in the Soniox console."
+                408 -> "Soniox streaming timed out"
+                413 -> "Soniox session reached its maximum duration"
                 429 -> "Soniox rate limited — too many requests"
                 in 500..599 -> "Soniox service error ($code)"
                 else -> "Soniox connection rejected ($code)"
@@ -689,6 +877,51 @@ class SonioxTranscriptionClient {
             is SocketTimeoutException -> "Soniox streaming timed out"
             is ConnectException -> "Could not connect to Soniox streaming"
             else -> "Streaming error: ${error.message ?: "unknown"}"
+        }
+    }
+
+    private fun markOutbound() {
+        lastOutboundAtMs = SystemClock.elapsedRealtime()
+    }
+
+    /**
+     * Send Soniox's application-level keepalive if no audio or control frame
+     * has gone out for [KEEPALIVE_INTERVAL_MS]. OkHttp protocol pings are not
+     * enough — Soniox times out after ~20 s without audio or this message.
+     */
+    private fun scheduleKeepalive(connectionToken: Long) {
+        clearKeepaliveTimer()
+        val runnable = object : Runnable {
+            override fun run() {
+                if (connectionToken != activeConnectionToken) return
+                if (isClosing || !isRecognitionReady) return
+                val elapsed = SystemClock.elapsedRealtime() - lastOutboundAtMs
+                if (elapsed >= KEEPALIVE_INTERVAL_MS) {
+                    sendKeepaliveFrame()
+                }
+                if (connectionToken == activeConnectionToken && !isClosing && isRecognitionReady) {
+                    mainHandler.postDelayed(this, KEEPALIVE_INTERVAL_MS)
+                }
+            }
+        }
+        pendingKeepaliveRunnable = runnable
+        mainHandler.postDelayed(runnable, KEEPALIVE_INTERVAL_MS)
+    }
+
+    private fun sendKeepaliveFrame(): Boolean {
+        if (isClosing) return false
+        val socket = webSocket ?: return false
+        if (!isRecognitionReady) return false
+        return try {
+            val sent = socket.send(KEEPALIVE_CONTROL_MESSAGE)
+            if (sent) {
+                markOutbound()
+                Log.i(TAG, "Soniox keepalive sent")
+            }
+            sent
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send Soniox keepalive: ${e.message}")
+            false
         }
     }
 
@@ -704,5 +937,11 @@ class SonioxTranscriptionClient {
         val runnable = pendingFinalizeCloseRunnable ?: return
         mainHandler.removeCallbacks(runnable)
         pendingFinalizeCloseRunnable = null
+    }
+
+    private fun clearKeepaliveTimer() {
+        val runnable = pendingKeepaliveRunnable ?: return
+        mainHandler.removeCallbacks(runnable)
+        pendingKeepaliveRunnable = null
     }
 }

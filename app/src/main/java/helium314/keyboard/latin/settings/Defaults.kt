@@ -164,11 +164,14 @@ object Defaults {
     const val PREF_SONIOX_API_KEY = ""
     // Soniox finalizes tokens immediately when the model detects the speaker
     // has stopped talking. Enabled by default to keep dictation latency low.
+    // The client also sends v5 endpoint_sensitivity = -0.3 (dictation-patient)
+    // so mid-sentence pauses are less likely to insert an early period.
     const val PREF_SONIOX_ENABLE_ENDPOINT_DETECTION = true
     // Soniox accepts values between 500 and 3000 ms. Higher values wait longer
     // after a pause before finalizing (fewer premature periods/commas). 3000 is
     // the maximum Soniox allows and is more tolerant of thinking pauses than the
-    // API's built-in 2000 ms default.
+    // API's built-in 2000 ms default. v5's endpoint_sensitivity is the main
+    // "how eager" lever; this delay is only the worst-case cap.
     const val PREF_SONIOX_MAX_ENDPOINT_DELAY_MS = 3000
     /** Previous HeliBoard default; used to migrate unchanged installs. */
     const val LEGACY_PREF_SONIOX_MAX_ENDPOINT_DELAY_MS = 2000

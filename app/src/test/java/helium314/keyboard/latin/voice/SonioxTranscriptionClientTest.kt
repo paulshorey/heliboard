@@ -27,13 +27,21 @@ class SonioxTranscriptionClientTest {
         )
 
         assertEquals("API_KEY", payload.getString("api_key"))
-        assertEquals("stt-rt-v4", payload.getString("model"))
+        assertEquals("stt-rt-v5", payload.getString("model"))
+        assertEquals(SonioxTranscriptionClient.MODEL, payload.getString("model"))
         assertEquals("pcm_s16le", payload.getString("audio_format"))
         assertEquals(VoiceRecorder.SAMPLE_RATE, payload.getInt("sample_rate"))
         assertEquals(1, payload.getInt("num_channels"))
         assertTrue(payload.getBoolean("enable_endpoint_detection"))
         assertEquals(2000, payload.getInt("max_endpoint_delay_ms"))
+        assertEquals(
+            SonioxTranscriptionClient.DEFAULT_ENDPOINT_SENSITIVITY,
+            payload.getDouble("endpoint_sensitivity"),
+            1e-9
+        )
+        assertFalse(payload.has("endpoint_latency_adjustment_level"))
         assertFalse(payload.getBoolean("enable_speaker_diarization"))
+        assertTrue(payload.getBoolean("language_hints_strict"))
 
         val hints = payload.getJSONArray("language_hints")
         assertEquals(1, hints.length())
@@ -45,7 +53,7 @@ class SonioxTranscriptionClientTest {
     }
 
     @Test
-    fun buildStartConfigMessage_omitsContextWhenNoTermsProvided() {
+    fun buildStartConfigMessage_alwaysIncludesGeneralContext() {
         val sessionConfig = SonioxTranscriptionClient.buildSessionConfig(
             languageTag = "en-US",
             enableEndpointDetection = true,
@@ -57,7 +65,19 @@ class SonioxTranscriptionClientTest {
             SonioxTranscriptionClient.buildStartConfigMessage("API_KEY", sessionConfig)
         )
 
-        assertFalse(payload.has("context"))
+        val context = payload.getJSONObject("context")
+        assertFalse(context.has("terms"))
+        val general = generalContextMap(context)
+        assertEquals("Mobile keyboard dictation", general["domain"])
+        assertEquals("User dictating text into a mobile app", general["setting"])
+        assertEquals("Dictation", general["topic"])
+        assertEquals("HeliBoard", general["product"])
+        assertEquals("English", general["language"])
+        assertEquals(
+            "User is dictating in English. Output transcription only in English.",
+            general["instructions"]
+        )
+        assertFalse(general.containsKey("speakers"))
     }
 
     @Test
@@ -79,6 +99,42 @@ class SonioxTranscriptionClientTest {
     }
 
     @Test
+    fun buildSessionConfig_clampsEndpointSensitivityWithinAllowedRange() {
+        val tooSmall = SonioxTranscriptionClient.buildSessionConfig(
+            languageTag = "en",
+            enableEndpointDetection = true,
+            maxEndpointDelayMs = 2000,
+            diarizationEnabled = false,
+            endpointSensitivity = -5.0
+        )
+        val tooLarge = SonioxTranscriptionClient.buildSessionConfig(
+            languageTag = "en",
+            enableEndpointDetection = true,
+            maxEndpointDelayMs = 2000,
+            diarizationEnabled = false,
+            endpointSensitivity = 4.0
+        )
+        assertEquals(
+            SonioxTranscriptionClient.MIN_ENDPOINT_SENSITIVITY,
+            tooSmall.endpointSensitivity,
+            1e-9
+        )
+        assertEquals(
+            SonioxTranscriptionClient.MAX_ENDPOINT_SENSITIVITY,
+            tooLarge.endpointSensitivity,
+            1e-9
+        )
+    }
+
+    @Test
+    fun languageDisplayName_usesEnglishName() {
+        assertEquals("English", SonioxTranscriptionClient.languageDisplayName("en"))
+        assertEquals("Spanish", SonioxTranscriptionClient.languageDisplayName("es"))
+        assertNull(SonioxTranscriptionClient.languageDisplayName(null))
+        assertNull(SonioxTranscriptionClient.languageDisplayName("  "))
+    }
+
+    @Test
     fun buildStartConfigMessage_diarizationEnabled() {
         val sessionConfig = SonioxTranscriptionClient.buildSessionConfig(
             languageTag = "fr",
@@ -91,8 +147,13 @@ class SonioxTranscriptionClientTest {
         )
         assertTrue(payload.getBoolean("enable_speaker_diarization"))
         assertFalse(payload.getBoolean("enable_endpoint_detection"))
-        assertEquals(1500, payload.getInt("max_endpoint_delay_ms"))
+        assertFalse(payload.has("max_endpoint_delay_ms"))
+        assertFalse(payload.has("endpoint_sensitivity"))
         assertEquals("fr", payload.getJSONArray("language_hints").getString(0))
+        assertTrue(payload.getBoolean("language_hints_strict"))
+        val general = generalContextMap(payload.getJSONObject("context"))
+        assertEquals("French", general["language"])
+        assertEquals("1 speaker (local user dictating)", general["speakers"])
     }
 
     @Test
@@ -108,6 +169,10 @@ class SonioxTranscriptionClientTest {
                 SonioxTranscriptionClient.buildStartConfigMessage("API_KEY", sessionConfig)
             )
             assertFalse(payload.has("language_hints"), "tag=$tag should omit language_hints")
+            assertFalse(payload.has("language_hints_strict"), "tag=$tag should omit language_hints_strict")
+            val general = generalContextMap(payload.getJSONObject("context"))
+            assertFalse(general.containsKey("language"), "tag=$tag should omit general language")
+            assertFalse(general.containsKey("instructions"), "tag=$tag should omit language instructions")
         }
     }
 
@@ -484,6 +549,13 @@ class SonioxTranscriptionClientTest {
     }
 
     @Test
+    fun keepaliveControlMessage_isValidKeepaliveJson() {
+        val json = JSONObject(SonioxTranscriptionClient.KEEPALIVE_CONTROL_MESSAGE)
+        assertEquals("keepalive", json.getString("type"))
+        assertEquals(1, json.length())
+    }
+
+    @Test
     fun buildErrorDescription_combinesCodeAndMessage() {
         val payload = JSONObject()
             .put("error_code", 401)
@@ -491,7 +563,26 @@ class SonioxTranscriptionClientTest {
             .put("error_message", "Incorrect API key")
             .put("request_id", "req_123")
         val description = SonioxTranscriptionClient.buildErrorDescription(payload)
-        assertEquals("unauthenticated 401: Incorrect API key (request_id=req_123)", description)
+        assertEquals(
+            "Invalid Soniox API key. Please check Settings. (request_id=req_123)",
+            description
+        )
+    }
+
+    @Test
+    fun buildErrorDescription_appendsMoreInfoAndMapsCreditErrors() {
+        val payload = JSONObject()
+            .put("error_code", 402)
+            .put("error_type", "organization_balance_exhausted")
+            .put("error_message", "Organization balance exhausted.")
+            .put("more_info", "https://soniox.com/docs/api-reference/errors")
+            .put("request_id", "req_402")
+        val description = SonioxTranscriptionClient.buildErrorDescription(payload)
+        assertEquals(
+            "Soniox account is out of credits. Add funds in the Soniox console. " +
+                "(request_id=req_402) https://soniox.com/docs/api-reference/errors",
+            description
+        )
     }
 
     @Test
@@ -527,6 +618,16 @@ class SonioxTranscriptionClientTest {
                 JSONArray().put(finalToken("hello"))
             )
         )
+    }
+
+    private fun generalContextMap(context: JSONObject): Map<String, String> {
+        val general = context.optJSONArray("general") ?: return emptyMap()
+        val map = LinkedHashMap<String, String>()
+        for (i in 0 until general.length()) {
+            val item = general.getJSONObject(i)
+            map[item.getString("key")] = item.getString("value")
+        }
+        return map
     }
 
     private fun finalToken(text: String, speaker: String? = null): JSONObject {

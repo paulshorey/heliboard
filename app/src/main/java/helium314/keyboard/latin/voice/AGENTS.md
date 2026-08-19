@@ -19,8 +19,10 @@ Soniox realtime transcription pipeline.
 - Soniox emits `<end>` (after every endpoint detection) and `<fin>` (after every manual finalize) as final tokens that look like real text. Raw WebSocket consumers must filter them; HeliBoard does it via `STREAM_MARKERS` in `SonioxTranscriptionClient`.
 - HeliBoard only commits `is_final` tokens. Tokens become final via server endpoint detection, manual finalize, or end-of-stream; local `VoiceRecorder` silence triggers manual finalize, while a separate longer silence timer auto-stops recording.
 - `VoiceInputManager` preserves FIFO transcript delivery, coalesces the oldest transcript entries if its queue reaches 64, and drops the oldest buffered audio chunks if the stream is not ready after 300 chunks.
+- The realtime model is pinned to `stt-rt-v5`. Session config also sends structured `context.general` (domain/setting/topic/product, plus language instructions and a one-speaker hint when diarization is on), `language_hints_strict` when the subtype has a usable language, and v5 `endpoint_sensitivity = -0.3` when endpoint detection is on (dictation-patient; fewer early periods).
 - `context.text` is supplied per session by `LatinIME.buildVoiceContextText` through `VoiceInputManager.setPriorTextProvider` (up to 4 000 chars before the cursor). `context.terms` is the union of a small built-in list and the user's `PREF_SONIOX_CUSTOM_TERMS`.
 - Graceful end-of-stream is an empty WebSocket frame; the client then waits for `{"finished": true}` before closing.
+- The client sends `{"type":"keepalive"}` at least every 10 s when no audio or control frame has gone out, so a paused mic does not trip Soniox's ~20 s idle timeout.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

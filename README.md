@@ -69,13 +69,15 @@ HeliBoard uses [Soniox real-time transcription](https://soniox.com/docs/api-refe
 
 The client:
 
-- pins `model = "stt-rt-v4"`
+- pins `model = "stt-rt-v5"`
 - sends raw PCM (`audio_format = "pcm_s16le"`, `sample_rate = 16000`, `num_channels = 1`) to match `VoiceRecorder` output
-- maps the active keyboard subtype's base language to a single-element `language_hints` array (omitting it when the subtype has no usable language so Soniox auto-detects)
+- maps the active keyboard subtype's base language to a single-element `language_hints` array and sets `language_hints_strict` (omitting both when the subtype has no usable language so Soniox auto-detects)
+- sends structured `context.general` for keyboard dictation (domain/setting/topic/product, plus language instructions and a one-speaker hint when diarization is on)
 - sends `context.terms` as the union of a small built-in list (`HeliBoard`, `Soniox`, `Kubernetes`, …) and any user-defined custom terms from settings
 - sends `context.text` from up to the most recent 4 000 characters of editor text before the cursor (via `LatinIME.buildVoiceContextText`) when available
-- forwards the user's endpoint-detection and diarization preferences
+- forwards the user's endpoint-detection and diarization preferences, and when endpoint detection is on sends v5 `endpoint_sensitivity = -0.3` (dictation-patient) with `max_endpoint_delay_ms`
 - streams binary PCM frames immediately after queuing the start config
+- sends `{"type":"keepalive"}` at least every 10 s during outbound gaps so a paused mic does not idle-timeout the session
 - ends the session by sending an empty WebSocket frame and waiting for `{"finished": true}` (with an 8 s grace timeout)
 
 ### Speaker diarization
