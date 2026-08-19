@@ -2,6 +2,11 @@
 
 Soniox realtime transcription pipeline.
 
+Long-form docs: `docs/voice-transcription-workflow.md` (end-to-end lifecycle,
+threading, guards, provider-coupling inventory), `docs/soniox-transcription.md`
+(Soniox wire protocol), `docs/pluggable-transcription-providers-plan.md` (planned
+provider-plugin architecture).
+
 ## Direct files
 - `SonioxTranscriptionClient.kt` - WebSocket client, session config, transcript reconstruction from Soniox `tokens`.
 - `TranscriptSegment.kt` - finalized transcript chunk shared between the client and the IME pipeline.
@@ -21,6 +26,8 @@ Soniox realtime transcription pipeline.
 - `VoiceInputManager` preserves FIFO transcript delivery, coalesces the oldest transcript entries if its queue reaches 64, and drops the oldest buffered audio chunks if the stream is not ready after 300 chunks.
 - `context.text` is supplied per session by `LatinIME.buildVoiceContextText` through `VoiceInputManager.setPriorTextProvider` (up to 4 000 chars before the cursor). `context.terms` is the union of a small built-in list and the user's `PREF_SONIOX_CUSTOM_TERMS`.
 - Graceful end-of-stream is an empty WebSocket frame; the client then waits for `{"finished": true}` before closing.
+- Provider coupling is not confined to `SonioxTranscriptionClient`: `VoiceInputManager` builds Soniox's `SessionConfig`, matches Soniox error strings in `isUnrecoverableError`, and assumes a mid-stream finalize control frame exists; `LatinIME.buildVoiceContextText` exists to fill Soniox's `context.text`. See the coupling inventory in `docs/voice-transcription-workflow.md` before adding a second provider.
+- Two contract-level assumptions matter more than any single file: finalized text is incremental and never repeated (so `commitText` can be irreversible), and segmentation is co-driven by our local VAD plus Soniox's finalize frame.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

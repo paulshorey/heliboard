@@ -2,6 +2,13 @@
 
 HeliBoard uses Soniox real-time transcription for voice input.
 
+This file is the **provider/API reference**. For the provider-agnostic control
+flow — session lifecycle, threading, interruption guards, and where Soniox is
+baked into the pipeline — see
+[`voice-transcription-workflow.md`](voice-transcription-workflow.md). For the plan
+to make the provider swappable, see
+[`pluggable-transcription-providers-plan.md`](pluggable-transcription-providers-plan.md).
+
 ## Runtime flow
 
 1. `VoiceRecorder` captures 16 kHz mono PCM16 audio immediately when the mic button is tapped.

@@ -99,6 +99,15 @@ Silence-driven automatic paragraph insertion is disabled because inserting `"\n\
 
 - Detailed data flow: [data-flow.md](data-flow.md)
 - Soniox API reference and settings keys: [api-reference.md](api-reference.md)
+- End-to-end lifecycle, threading model, interruption guards, and the inventory of where the provider is baked in: `docs/voice-transcription-workflow.md`
+- Planned provider-plugin architecture (normalized event stream, capability negotiation, phased migration): `docs/pluggable-transcription-providers-plan.md`
+
+## Provider naming
+
+The only integrated speech-to-text provider is **Soniox**. Speechify is not used
+anywhere in this codebase. `speechmatics_api_key` and `deepgram_api_key` survive
+only as legacy preference keys that `TranscriptionPreferences` deletes on first
+read — there is no Speechmatics or Deepgram client code.
 
 ## Update documentation
 
