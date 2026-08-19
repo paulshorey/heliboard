@@ -18,6 +18,89 @@ FIFO ordering, editor insertion, interruption guards) stay written once.
 Read [`voice-transcription-workflow.md`](voice-transcription-workflow.md) first;
 this plan assumes its vocabulary.
 
+### 1.1 Scope recommendation — read this before building any of it
+
+**Sections 3–8 describe the maximal design, and it is more than should be built.**
+They are kept because the analysis is what makes the trade-offs visible, not because
+the whole thing is a work plan. What follows is the honest recommendation.
+
+**Invert the direction of adaptation.** The maximal design has the *host* adapt to
+capabilities the *plugin* declares. With a realistic provider count of two or three
+that is backwards, and it is the specific decision that would make this a
+maintenance problem: every capability field becomes a live branch in shared code,
+and most combinations are never exercised. Prefer a **fixed host contract that
+providers adapt to internally**. The host contract is stable and already proven:
+PCM16/16 kHz mono in, append-only shaped text out, main-thread fenced callbacks.
+
+Under that inversion most of Section 3 dissolves:
+
+| Maximal design | Recommended instead |
+| --- | --- |
+| `ProviderCapabilities` with ~15 negotiated fields | No capability object. Providers just behave correctly. |
+| `KeepAlivePolicy` declared to the host | The Deepgram plugin owns a keepalive timer. |
+| `AudioFormatSpec` negotiation + `AudioEncoder` chain | The OpenAI plugin resamples to 24 kHz internally. |
+| `TranscriptAssembler` as a policy engine over four modes | One ~40-line prefix-diff helper that plugins call if their protocol needs it. |
+| `SegmentJoiner` driven by `WhitespaceConvention` | Each plugin computes `attachesToPrevious` itself, exactly as Soniox does today. |
+| `TextShapingProfile` of booleans | **Each provider owns its own post-processing rule set.** See below. |
+| Declarative `ProviderSetting` schema + generic renderer | A small hand-written settings screen per provider. |
+
+**The text-shaping profile is where the maximal design is not merely excessive but
+wrong.** `adjustLeadingCasing`, `stripTrailingPunctuationIfMidSentence`, the filler
+fragments, and the spoken-punctuation rules were tuned empirically against what
+Soniox actually emits. They are not provider-agnostic passes with a flag; they are
+Soniox-shaped heuristics. Three booleans will not capture what has to differ between
+providers, and forcing them through one shared pipeline means tuning for provider B
+can silently regress provider A — in a dimension (dictation feel) that no test
+asserts and only real use reveals. Duplicating a rule set per provider is the
+*correct* design here, not a failure to abstract.
+
+**What genuinely should be shared** is what is already provider-independent and
+already works: `VoiceRecorder` and its VAD, the session fencing token, the audio
+buffer, the FIFO transcript queue, the interruption guards, the wake lock, and the
+single-batch-edit insertion. That is the large majority of the pipeline's real
+complexity, and none of it needs to know who transcribes.
+
+**Minimum viable plugin seam** — roughly five types, no negotiation:
+
+```kotlin
+interface TranscriptionSession {
+    fun start(request: TranscriptionRequest, sink: (TranscriptionEvent) -> Unit)
+    fun sendAudio(frame: ByteArray): Boolean
+    fun onLocalSilence()   // plugin decides: flush, ignore, or cut the request
+    fun finish()
+    fun cancel()
+}
+```
+
+`onLocalSilence()` replaces the whole finalization-policy table: the host reports the
+VAD event it already detects, and the plugin decides what that means for its
+protocol. Same for session caps and keepalive — the plugin reconnects itself and the
+host never learns about it.
+
+**Sequencing.** Do a stripped Phase 0 (thin seam, Soniox moved behind it, plus the
+fake-transport test seam — which is worth having with one provider). Fix the
+genuinely-bad bits regardless of provider count: substring-matched error
+classification, the provider name in user-facing strings, the unmasked API key
+field, and the stale model pin in 8.1. Then add provider #2 with **full internal
+ownership**, including its own settings screen and its own post-processing rules. If
+that hurts more than expected, you have learned it cheaply and can stop at two.
+
+**Extract shared abstractions only at the third provider**, when what actually
+repeats is observable rather than predicted. Applying the rule of three here matters
+more than usual, because the survey shows the realistic provider count is small: most
+candidates are poor fits (Google and Azure are heavy dependencies with no
+flush-and-continue, Groq is not streaming, Speechify has no STT API at all). The main
+provider with a *differentiated user reason* to exist alongside Soniox is an offline
+engine such as Vosk — which the thin seam handles fine, since a segmented engine can
+own its own request cycling.
+
+**Why not pure feature branches instead.** Doing one provider per throwaway branch
+avoids all of this cost but has two specific failure modes: you can never compare
+two providers on the same device against the same speech without reflashing, and the
+second integration discards the first rather than accumulating. The thin seam is
+cheap enough to be worth it purely as *a way to keep both and switch between them* —
+which is also the only version of this that can ever ship a user-facing choice.
+
 ## 2. Why the current shape cannot absorb a second provider
 
 Section 8 of the workflow doc has the full coupling inventory. Condensed, the
@@ -49,7 +132,12 @@ ones that actually make a naive swap fail:
 Any design that does not solve those two problems explicitly is a re-skin, not an
 abstraction.
 
-## 3. Target architecture
+## 3. Target architecture (maximal design)
+
+> Everything from here to Section 8 is the *maximal* design. Per 1.1, it documents
+> the full problem space so the trade-offs are visible; it is not the recommended
+> build scope. Read it for the analysis of what varies between providers, then
+> implement the thin seam from 1.1.
 
 ### 3.1 Layers
 
@@ -756,6 +844,9 @@ become natural additions once the settings schema is declarative.
 
 ## Keep this file current
 
+- Sections 3–8 are the maximal design and analysis; Section 1.1 is the
+  recommendation. If they ever conflict, 1.1 wins — and if the recommendation
+  changes, update 1.1 rather than quietly building from Section 3.
 - Update this plan as phases land, and record deviations rather than silently
   diverging from it.
 - When a phase completes, fold the resulting architecture into
