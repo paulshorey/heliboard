@@ -374,11 +374,21 @@ via `stopVoiceRecordingOnUserInput()` → `discardPendingVoiceWork()`:
 - `onEvent`/`onCodeInput` for any key other than `KeyCode.VOICE_INPUT`,
   `onTextInput`, batch (glide) input, suggestion picks, and consumed hardware key
   events.
-- `onUpdateSelection`: if a voice session is active or has pending work and the
-  cursor moved somewhere that is not a belated echo of our own edit, the session
-  is discarded. Text-field-cleared and cursor-moved-away-from-end are called out
-  separately in the logs. The guard is wrapped in a try/catch that also discards
-  on failure — fail-safe rather than fail-open.
+- `onUpdateSelection`, which is the subtlest of the guards. It fires only when a
+  voice session is active *or* still has pending work, the selection actually
+  moved, and `RichInputConnection.isBelatedExpectedUpdate()` says the move was
+  **not** a delayed echo of our own edit. Even then it does not always cancel:
+  - Cursor is **not** at the end of the text → discard ("cursor moved away from
+    end").
+  - Cursor **is** at the end and the field is now empty → discard ("text field
+    cleared"), which is the message-sent case.
+  - Cursor **is** at the end and the field still has text → **keep recording.**
+    The user may have merely tapped the field, and the caret is still exactly
+    where transcripts get inserted.
+
+  The whole block is wrapped in a try/catch that also discards on exception —
+  fail-safe rather than fail-open, since the `InputConnection` can be invalid if
+  the field disappeared mid-session.
 - `onFinishInput`: the insertion target is gone, so all voice work is discarded.
 - Keyboard hidden with the screen still on: **graceful** stop, so already-spoken
   audio still lands.
