@@ -103,7 +103,7 @@ provider/
   TranscriptionRequest.kt     neutral session request
   ProviderCapabilities.kt     what this provider supports
   ProviderSetting.kt          declarative settings schema
-  ProviderCredentials.kt      static key or minted ephemeral token
+  ProviderCredentials.kt      CredentialFlow: static key, minted token, REST init
   TranscriptionFailure.kt     neutral error classification
   TranscriptionProviderRegistry.kt
   transport/
@@ -281,12 +281,11 @@ sealed interface TranscriptionEvent {
 }
 ```
 
-`revisionKey` replaces the `utteranceId` counter from the first draft of this
-plan. A monotonic counter assumed segments complete in order, which the survey
-showed is not safe: OpenAI does not guarantee completion ordering across turns and
-keys results by `item_id` instead. A provider-supplied opaque key covers
-AssemblyAI's `turn_order`, Gladia's `data.id`, and OpenAI's `item_id` without the
-core needing to know which is which.
+`revisionKey` is deliberately an opaque provider-supplied string rather than a
+monotonic counter. A counter would assume segments complete in order, which is not
+safe: OpenAI does not guarantee completion ordering across turns and keys results by
+`item_id`. An opaque key covers AssemblyAI's `turn_order`, Gladia's `data.id`, and
+OpenAI's `item_id` without the core needing to know which is which.
 
 `SpeakerRevision` is advisory only. AssemblyAI can revise earlier speaker labels
 and Google's diarization can re-emit words from the start of the stream, but our
@@ -334,9 +333,11 @@ sealed interface ProviderSetting {
 }
 ```
 
-### 3.3 The three hard problems
+### 3.3 The hard problems
 
-Everything above is plumbing. These three are the actual design work.
+Everything above is plumbing. These four are the actual design work, and each is
+solved once in shared code rather than being re-solved (or quietly ignored) by every
+plugin.
 
 **Problem 1 — "final" means four different things.** This is the single most
 important finding from the provider survey, and it is why a `Boolean isFinal`
@@ -391,28 +392,33 @@ spacing and punctuation bugs that the provider already solved, so plugins must
 emit provider-rendered text and keep word data for diagnostics only.
 
 **Problem 2 — spacing and word-splitting.** `attachesToPrevious` is currently
-derived from Soniox's "whitespace arrives as its own tokens" convention. A
-provider that emits bare words needs spaces synthesized instead.
+derived from Soniox's "whitespace arrives as its own tokens" convention, which is
+unique to Soniox among the surveyed providers. Everyone else hands back a rendered
+segment where inter-word spacing is already correct *within* the segment, leaving
+only the join between consecutive segments to decide.
 
 *Solution:* move the decision into `SegmentJoiner`, driven by
-`WhitespaceConvention` plus the `rawStartsWithWhitespace` flag that each plugin
-reports. `TOKENS_CARRY_WHITESPACE` reproduces today's exact logic (including the
-`previousTailIsWordy` mid-word-continuation rule). `JOIN_WITH_SPACE` inserts a
-separator between words and keeps only the punctuation-attachment rule. The
-existing `SonioxTranscriptionClientTest` cases for `attachesToPrevious` move here
-essentially unchanged, which is a useful parity check.
+`WhitespaceConvention` plus the `rawStartsWithWhitespace` flag each plugin reports.
+`TOKENS_CARRY_WHITESPACE` reproduces today's exact logic, including the
+`previousTailIsWordy` mid-word-continuation rule that prevents `head ing`.
+`PROVIDER_RENDERED_TEXT` trusts the segment's internal spacing and applies only the
+punctuation-attachment and separator rules at the boundary. The existing
+`SonioxTranscriptionClientTest` cases for `attachesToPrevious` move here essentially
+unchanged, which is a useful parity check.
 
-**Problem 3 — finalization guarantee without a finalize frame.** The
-"trailing phrase always lands" guarantee currently depends on Soniox's finalize
-control message.
+**Problem 3 — finalization guarantee without a finalize frame.** The "trailing
+phrase always lands" guarantee currently depends on Soniox's finalize control
+message. Per the survey this is a minority feature: Google, Azure, and Gladia have
+no flush-and-continue at all.
 
-*Solution:* `VoiceInputManager` picks a policy from `FinalizationSupport`:
+*Solution:* `VoiceInputManager` picks a policy from `manualFinalize` and
+`serverEndpointing`:
 
 | Provider support | Policy on local `onSpeechStopped` |
 | --- | --- |
-| Manual flush available | Today's behaviour: send the flush, once per speech-stop transition. |
-| Server endpointing only | Do nothing; rely on the server. Arm a longer watchdog and, if nothing finalizes, close and reopen the stream to force a flush (`STREAM_CYCLE_ON_STALL`). |
-| Neither (`SEGMENTED` mode) | Treat the silence boundary as an utterance boundary: finish the current request, deliver its result, and open the next request on the following speech onset. |
+| `FLUSH_AND_CONTINUE` | Today's behaviour: send the flush, once per speech-stop transition. |
+| `ENDS_SESSION`, or unsupported with server endpointing | Do nothing; rely on the server. Arm a longer watchdog and, if nothing finalizes, close and reopen the stream to force a flush (`STREAM_CYCLE_ON_STALL`). |
+| Neither (`SEGMENTED` mode) | Treat the silence boundary as a request boundary: finish the current request, deliver its result, and open the next on the following speech onset. |
 
 `SEGMENTED` mode is what makes chunked-HTTP and on-device engines expressible at
 all. The local VAD already produces exactly the boundaries such engines need, so
@@ -535,12 +541,14 @@ reveal toggle), and the strings become provider-neutral (`soniox_api_key_title` 
 a generic "API key" title plus a per-provider display name and help URL supplied
 by the descriptor).
 
-**Security note.** Every network provider here requires a long-lived secret in
-client-side `SharedPreferences`. That is the status quo and this plan does not
-change it, but it is worth designing the credentials seam
-(`ProviderCredentials`, with support for exchanging a key for a short-lived
-token before connecting) so that a future "relay through my own endpoint" plugin
-is expressible without another refactor.
+**Security note.** Storing a long-lived provider secret in client-side
+`SharedPreferences` is the status quo for Soniox and this plan does not change it.
+But per 3.2.1 it is not a universally available option: several providers expect a
+short-lived credential minted server-side, and Google's cannot safely live in an
+app at all. The `CredentialFlow` seam exists so those providers are expressible, and
+so a future "relay through my own endpoint" plugin does not need another refactor.
+Provider settings that are `ProviderSetting.Secret` must be masked in the UI and
+redacted in diagnostics.
 
 ## 6. Testing strategy
 
@@ -578,8 +586,8 @@ Each phase is independently shippable and leaves the app working.
 **Phase 0 — extract the seams, change no behaviour.** Add the `provider/`,
 `normalize/`, and `audio/` packages. Move Soniox into
 `providers/soniox/` behind the new interfaces, with capabilities describing
-exactly what it does today (`STREAMING`, `INCREMENTAL_FINALS`,
-`TOKENS_CARRY_WHITESPACE`, manual flush supported). `VoiceInputManager` talks only
+exactly what it does today (`STREAMING`, `APPEND_TOKENS`,
+`TOKENS_CARRY_WHITESPACE`, `FLUSH_AND_CONTINUE`). `VoiceInputManager` talks only
 to `TranscriptionSession`. No new preferences, no UI change. Gate: the golden
 transcript tests from Section 6 pass unchanged, and the existing voice test suite
 passes.
