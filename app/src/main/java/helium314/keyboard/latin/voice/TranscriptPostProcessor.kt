@@ -7,9 +7,12 @@ package helium314.keyboard.latin.voice
  * "um,", "uh,") and spelled-out punctuation names that the speaker dictates
  * as voice commands (e.g. "exclamation point", "comma").
  *
- * Rules are applied case-insensitively, longest match first, so that patterns
+ * Rules are applied case-sensitively and longest match first, so that patterns
  * with surrounding punctuation context (like ". Exclamation point.") are consumed
- * before shorter ambiguous ones (like "exclamation point.").
+ * before shorter ambiguous ones (like "Exclamation point."). Case sensitivity is
+ * deliberate: a capitalized sentence-form command is the provider's rendering of
+ * a spoken command, whereas the lowercase form mid-sentence means the user is
+ * talking *about* the punctuation ("add a comma here") and must be left alone.
  */
 object TranscriptPostProcessor {
 

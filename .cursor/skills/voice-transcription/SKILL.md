@@ -66,7 +66,7 @@ Before commit, `LatinIME.prepareVoiceTranscriptionText()` uses `TranscriptPostPr
 
 After each transcript chunk is committed to the text field, `LatinIME.runTranscriptPostProcessing()` reads the current paragraph (text from the last newline to the cursor, up to 1024 chars) and runs it through `TranscriptPostProcessor.processCurrentParagraph()`. If any rules match, the paragraph text is replaced in-place via `deleteTextBeforeCursor` + `commitText`.
 
-Current processing removes common comma-attached filler fragments ("um,", "uh,") and handles **spelled-out punctuation** (e.g. "exclamation point.", "comma", "question mark.", "period.", "colon.", "semicolon."). Rules are case-insensitive and sorted longest-first so that patterns with surrounding punctuation context (like ". Exclamation point.") are consumed before shorter ambiguous ones. The processor only fires when a rule actually modifies the paragraph — no-op paragraphs are skipped.
+Current processing removes common comma-attached filler fragments ("um,", "uh,") and handles **spelled-out punctuation** (e.g. "Exclamation point.", "Comma", "Question mark.", "Period.", "Colon.", "Semicolon."). Rules are **case-sensitive** and sorted longest-first so that patterns with surrounding punctuation context (like ". Exclamation point.") are consumed before shorter ambiguous ones. Case sensitivity is deliberate: only the capitalized sentence form is treated as a spoken command, so "add a comma here" is left alone. The processor only fires when a rule actually modifies the paragraph — no-op paragraphs are skipped.
 
 To add new post-processing rules, edit `TranscriptPostProcessor.buildRules()` in `voice/TranscriptPostProcessor.kt`. Unit tests are in `TranscriptPostProcessorTest.kt`.
 
@@ -99,6 +99,15 @@ Silence-driven automatic paragraph insertion is disabled because inserting `"\n\
 
 - Detailed data flow: [data-flow.md](data-flow.md)
 - Soniox API reference and settings keys: [api-reference.md](api-reference.md)
+- End-to-end lifecycle, threading model, interruption guards, and the inventory of where the provider is baked in: `docs/voice-transcription-workflow.md`
+- Planned provider-plugin architecture (normalized event stream, capability negotiation, phased migration): `docs/pluggable-transcription-providers-plan.md`
+
+## Provider naming
+
+The only integrated speech-to-text provider is **Soniox**. Speechify is not used
+anywhere in this codebase. `speechmatics_api_key` and `deepgram_api_key` survive
+only as legacy preference keys that `TranscriptionPreferences` deletes on first
+read — there is no Speechmatics or Deepgram client code.
 
 ## Update documentation
 
