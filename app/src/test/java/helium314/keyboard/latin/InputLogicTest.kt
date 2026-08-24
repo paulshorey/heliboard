@@ -202,9 +202,6 @@ class InputLogicTest {
 
     @Test fun noSuggestionsFlagStillLooksUpSuggestionsForCurrentWord() {
         reset()
-        // The always-show setting is the historical override for this flag. Suggestions should
-        // still work when that override is off, because the keyboard owns the current word.
-        latinIME.prefs().edit { putBoolean(Settings.PREF_ALWAYS_SHOW_SUGGESTIONS, false) }
         setInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
         input('h')
         input('e')
@@ -212,20 +209,47 @@ class InputLogicTest {
         assertEquals("hel", text)
         assertEquals("", composingText)
         assertEquals(true, settingsValues.mInputAttributes.mShouldShowSuggestions)
+        assertEquals(true, settingsValues.mInputAttributes.mIsNoSuggestionsField)
         assertEquals(true, settingsValues.needsToLookupSuggestions())
         assertEquals(true, composer.isComposingWord)
         assertEquals("hel", composer.typedWord)
     }
 
+    @Test fun noSuggestionsFlagDoesNotAutocorrectOrLearn() {
+        reset()
+        latinIME.prefs().edit { putBoolean(Settings.PREF_MORE_AUTO_CORRECTION, true) }
+        setInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+        assertEquals(true, settingsValues.needsToLookupSuggestions())
+        assertEquals(false, settingsValues.mAutoCorrectEnabled)
+        assertEquals(false, settingsValues.shouldLearnFromCurrentField())
+        lastAddedWord = ""
+        chainInput("hel")
+        input(' ')
+        assertEquals("hel ", text)
+        assertEquals("", lastAddedWord)
+    }
+
+    @Test fun noSuggestionsFieldCanStillAutocorrectWhenHostRequestsIt() {
+        reset()
+        setInputType(
+            InputType.TYPE_CLASS_TEXT
+                    or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                    or InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
+        )
+        assertEquals(true, settingsValues.needsToLookupSuggestions())
+        assertEquals(true, settingsValues.mAutoCorrectEnabled)
+        assertEquals(false, settingsValues.shouldLearnFromCurrentField())
+    }
+
     @Test fun passwordFieldDoesNotLookUpSuggestionsOrTrackCurrentWord() {
         reset()
-        latinIME.prefs().edit { putBoolean(Settings.PREF_ALWAYS_SHOW_SUGGESTIONS, true) }
         setInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
         input('h')
         input('i')
         assertEquals("hi", text)
         assertEquals(false, settingsValues.mInputAttributes.mShouldShowSuggestions)
         assertEquals(false, settingsValues.needsToLookupSuggestions())
+        assertEquals(false, settingsValues.shouldLearnFromCurrentField())
         assertEquals(false, composer.isComposingWord)
         assertEquals("", composer.typedWord)
     }

@@ -953,7 +953,7 @@ public final class InputLogic {
                 || mWordComposer.isComposingWord() // emoji will be part of the word in this case, better do nothing
                 || !settingsValues.mBigramPredictionEnabled // this is only for next word suggestions, so they need to be enabled
                 || settingsValues.mIncognitoModeEnabled
-                || !settingsValues.isSuggestionsEnabledPerUserSettings() // see comment in performAdditionToUserHistoryDictionary
+                || !settingsValues.shouldLearnFromCurrentField() // see comment in performAdditionToUserHistoryDictionary
                 || !StringUtilsKt.isEmoji(text)
         ) return;
         if (mConnection.hasSlowInputConnection()) {
@@ -1671,8 +1671,9 @@ public final class InputLogic {
         // If correction is not enabled, we don't add words to the user history dictionary.
         // That's to avoid unintended additions in some sensitive fields, or fields that
         // expect to receive non-words.
-        // mInputTypeNoAutoCorrect changed to !isSuggestionsEnabledPerUserSettings because this was cancelling learning way too often
-        if (!settingsValues.isSuggestionsEnabledPerUserSettings() || TextUtils.isEmpty(suggestion))
+        // Showing spelling candidates in TYPE_TEXT_FLAG_NO_SUGGESTIONS fields does not mean
+        // those fields should be learned from.
+        if (!settingsValues.shouldLearnFromCurrentField() || TextUtils.isEmpty(suggestion))
             return;
         final String strippedWord = stripWordSeparatorsFromEnd(suggestion, settingsValues);
         final boolean isEmailAddress = StringUtils.looksLikeEmailAddress(strippedWord);
