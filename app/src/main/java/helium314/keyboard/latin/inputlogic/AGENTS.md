@@ -11,6 +11,7 @@ Central text-entry state machine and the mirror-based current-word architecture.
 
 ## Non-obvious notes
 - `WordComposer` is the active word source of truth; `EditorWordMirror` exists so host editors still see the evolving word.
+- Current-word tracking and suggestion lookup start only when `needsToLookupSuggestions()` is true. That is now true for non-password text fields even if the host set `TYPE_TEXT_FLAG_NO_SUGGESTIONS`.
 - Avoid reintroducing host-composition dependence for ordinary typing unless a path truly requires it.
 - Ordinary letter typing, recorrection, and gesture words on lift go through the mirror path; direct `commitText()` paths such as separators, paste/multi-character keys, voice, and fullapp replay must first clear or avoid current-word mirror state.
 - Recorrection in the middle of an existing word arms the mirror with `setMirroredWord(word, charsAfterCursor, ...)`; delete-after-cursor happens before delete-before-cursor so the word tail is not duplicated or eaten.

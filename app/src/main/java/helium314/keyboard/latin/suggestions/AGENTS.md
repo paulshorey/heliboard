@@ -11,6 +11,7 @@ Suggestion strip UI and the expanded more-suggestions panel.
 
 ## Non-obvious notes
 - UI refresh timing matters here; sluggish updates often come from `LatinIME.UIHandler.postUpdateSuggestionStrip`, async dictionary lookup, or `InputLogic.performUpdateSuggestionStripSync`, not from strip layout alone.
+- The strip always lays out three word slots. Empty slots with no labels mean `performUpdateSuggestionStripSync` was given an empty `SuggestedWords` list (lookup skipped or no dictionary hits), not that the toolbar mode hid suggestions.
 - `Suggest.kt` and `SuggestedWords.java` live in the parent `latin/` package; this folder renders their results and hosts more-suggestions/external suggestion views.
 - `strip_container.xml` multiplexes the word suggestion strip, emoji tabs, and clipboard strip. Only one primary child is visible at a time, so do not assume `SuggestionStripView` is always the active strip.
 - Toolbar state is split: `ToolbarUtils.kt` defines `ToolbarKey`, defaults, serialized prefs, and key-code mapping; `SuggestionStripView.kt` renders the expandable toolbar and reacts to pref changes.

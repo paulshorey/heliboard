@@ -184,6 +184,8 @@ class InputLogicTest {
         assertEquals("hi", text)
         assertEquals("", composingText)
         assertEquals(true, settingsValues.needsToLookupSuggestions())
+        assertEquals(true, composer.isComposingWord)
+        assertEquals("hi", composer.typedWord)
     }
 
     @Test fun normalTextStillLooksUpSuggestionsWithoutHostComposition() {
@@ -194,6 +196,48 @@ class InputLogicTest {
         assertEquals("hi", text)
         assertEquals("", composingText)
         assertEquals(true, settingsValues.needsToLookupSuggestions())
+        assertEquals(true, composer.isComposingWord)
+        assertEquals("hi", composer.typedWord)
+    }
+
+    @Test fun noSuggestionsFlagStillLooksUpSuggestionsForCurrentWord() {
+        reset()
+        // The always-show setting is the historical override for this flag. Suggestions should
+        // still work when that override is off, because the keyboard owns the current word.
+        latinIME.prefs().edit { putBoolean(Settings.PREF_ALWAYS_SHOW_SUGGESTIONS, false) }
+        setInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+        input('h')
+        input('e')
+        input('l')
+        assertEquals("hel", text)
+        assertEquals("", composingText)
+        assertEquals(true, settingsValues.mInputAttributes.mShouldShowSuggestions)
+        assertEquals(true, settingsValues.needsToLookupSuggestions())
+        assertEquals(true, composer.isComposingWord)
+        assertEquals("hel", composer.typedWord)
+    }
+
+    @Test fun passwordFieldDoesNotLookUpSuggestionsOrTrackCurrentWord() {
+        reset()
+        latinIME.prefs().edit { putBoolean(Settings.PREF_ALWAYS_SHOW_SUGGESTIONS, true) }
+        setInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
+        input('h')
+        input('i')
+        assertEquals("hi", text)
+        assertEquals(false, settingsValues.mInputAttributes.mShouldShowSuggestions)
+        assertEquals(false, settingsValues.needsToLookupSuggestions())
+        assertEquals(false, composer.isComposingWord)
+        assertEquals("", composer.typedWord)
+    }
+
+    @Test fun numberFieldDoesNotLookUpSuggestions() {
+        reset()
+        setInputType(InputType.TYPE_CLASS_NUMBER)
+        assertEquals(false, settingsValues.mInputAttributes.mShouldShowSuggestions)
+        assertEquals(false, settingsValues.needsToLookupSuggestions())
+        input('a')
+        assertEquals(false, composer.isComposingWord)
+        assertEquals("", composer.typedWord)
     }
 
     @Test fun browserWorkaroundMarksFirefoxWebEditorsAsWebEditText() {
@@ -204,6 +248,24 @@ class InputLogicTest {
         assertEquals(
             InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT,
             adjusted and InputType.TYPE_MASK_VARIATION
+        )
+        assertEquals(0, adjusted and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+    }
+
+    @Test fun browserWorkaroundDoesNotDisableSuggestionsOnFirefoxAutocorrectFields() {
+        val inputType = InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_FLAG_IME_MULTI_LINE or
+                InputType.TYPE_TEXT_FLAG_AUTO_CORRECT or
+                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        val adjusted = AppWorkarounds.adjustInputType(inputType, "org.mozilla.firefox")
+        assertEquals(
+            InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT,
+            adjusted and InputType.TYPE_MASK_VARIATION
+        )
+        assertEquals(0, adjusted and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+        assertEquals(
+            InputType.TYPE_TEXT_FLAG_AUTO_CORRECT,
+            adjusted and InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
         )
     }
 

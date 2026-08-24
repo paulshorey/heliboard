@@ -13,6 +13,7 @@ API-level and app/OEM compatibility helpers.
 ## Non-obvious notes
 - This folder accumulates real-world platform quirks; avoid cleanup that removes a workaround without reproducing the original bug.
 - `EditorInfo` behavior is highly app-dependent, so changes here often need testing against multiple host apps.
+- `AppWorkarounds.adjustInputType` marks Firefox/Chromium website editors as `WEB_EDIT_TEXT` when they omit that variation. It must not inject `TYPE_TEXT_FLAG_NO_SUGGESTIONS`; that used to disable current-word suggestions even though ordinary typing no longer uses host composing spans.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

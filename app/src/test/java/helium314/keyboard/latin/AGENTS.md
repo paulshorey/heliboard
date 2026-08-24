@@ -16,6 +16,7 @@ Core IME pipeline tests.
 
 ## Non-obvious notes
 - `InputLogicTest.kt` is the most important behavior-regression suite for ordinary typing.
+- Suggestion-strip regressions for host `TYPE_TEXT_FLAG_NO_SUGGESTIONS` live in `InputLogicTest` (`noSuggestionsFlagStillLooksUpSuggestionsForCurrentWord`). Password and non-text fields should still skip lookup.
 - The mix of Java and Kotlin tests here is intentional; keep whichever language is clearest for the target code.
 
 ## Keep this file current

@@ -91,8 +91,10 @@ public final class InputAttributes {
         final boolean flagAutoCorrect = 0 != (mInputType & InputType.TYPE_TEXT_FLAG_AUTO_CORRECT);
         final boolean flagAutoComplete = 0 != (mInputType & InputType.TYPE_TEXT_FLAG_AUTO_COMPLETE);
         // TODO: Have a helper method in InputTypeUtils
-        // Make sure that passwords are not displayed in {@link SuggestionStripView}.
-        mShouldShowSuggestions = !mIsPasswordField && !flagNoSuggestions;
+        // Host apps set TYPE_TEXT_FLAG_NO_SUGGESTIONS to avoid IME composing spans, not to hide
+        // the keyboard's suggestion strip. The current word lives in WordComposer and is mirrored
+        // as committed text, so we can still look up suggestions. Password fields remain excluded.
+        mShouldShowSuggestions = !mIsPasswordField;
         mMayOverrideShowingSuggestions = !mIsPasswordField;
 
         mShouldInsertSpacesAutomatically = InputTypeUtils.isAutoSpaceFriendlyType(mInputType);
