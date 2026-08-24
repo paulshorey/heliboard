@@ -11,17 +11,27 @@ HeliBoard uses the Soniox **Real-Time STT WebSocket** API (`wss://stt-rt.soniox.
 ```json
 {
   "api_key": "<SONIOX_API_KEY>",
-  "model": "stt-rt-v4",
+  "model": "stt-rt-v5",
   "audio_format": "pcm_s16le",
   "sample_rate": 16000,
   "num_channels": 1,
   "language_hints": ["en"],
+  "language_hints_strict": true,
   "context": {
+    "general": [
+      { "key": "domain", "value": "Mobile keyboard dictation" },
+      { "key": "setting", "value": "User dictating text into a mobile app" },
+      { "key": "topic", "value": "Dictation" },
+      { "key": "product", "value": "HeliBoard" },
+      { "key": "language", "value": "English" },
+      { "key": "instructions", "value": "User is dictating in English. Output transcription only in English." }
+    ],
     "terms": ["HeliBoard", "Soniox", "Kubernetes", "API", "gnocchi", "MyProject"],
     "text": "<up to 4000 chars of editor text before the cursor>"
   },
   "enable_endpoint_detection": true,
   "max_endpoint_delay_ms": 3000,
+  "endpoint_sensitivity": -0.3,
   "enable_speaker_diarization": false
 }
 ```
@@ -29,16 +39,19 @@ HeliBoard uses the Soniox **Real-Time STT WebSocket** API (`wss://stt-rt.soniox.
 ### Key config fields
 
 - **`api_key`** (required): Soniox API key. Authentication failures arrive later as JSON responses with `error_code` (`Authentication failed` etc.) and the connection closes.
-- **`model`** (required): real-time STT model. HeliBoard pins `"stt-rt-v4"`.
+- **`model`** (required): real-time STT model. HeliBoard pins `"stt-rt-v5"` (v4 retired 2026-06-30).
 - **`audio_format` / `sample_rate` / `num_channels`** (required for raw PCM): `pcm_s16le` / `16000` / `1` to match `VoiceRecorder` output.
 - **`language_hints`** (optional): array of ISO language codes. HeliBoard sends a single-element array based on the active keyboard subtype, or omits the field entirely so Soniox auto-detects.
+- **`language_hints_strict`** (boolean, optional, v5): `true` when a language hint is present. Strongly biases recognition to that one language (best-effort). See <https://soniox.com/docs/stt/concepts/language-restrictions>.
+- **`context.general`** (optional): structured key/value pairs. v5 treats these as more influential than `text`. HeliBoard always sends dictation domain/setting/topic/product; adds `language`/`instructions` from the subtype; adds `speakers` when diarization is on. See <https://soniox.com/docs/stt/concepts/context>.
 - **`context.terms`** (optional): recognition hints. HeliBoard sends the union of a built-in list (`HeliBoard`, `Soniox`, `Kubernetes`, `API`, `gnocchi`) and the user's custom terms from `PREF_SONIOX_CUSTOM_TERMS` (one per line, managed in `SonioxContextTermsScreen`; UI-limited to 200 terms and 100 chars per term). Merged, trimmed, and deduplicated by `SonioxTranscriptionClient.buildSessionConfig`.
 - **`context.text`** (optional): free-form prior text. HeliBoard sends up to the last 4 000 characters of editor text before the cursor (`LatinIME.buildVoiceContextText` via `VoiceInputManager.setPriorTextProvider`). Soniox uses this for sentence-structure punctuation, mid-sentence casing, and proper-noun spelling. Reconnects re-fetch the prior text so the running transcript stays in context.
 - **`enable_endpoint_detection`** (boolean, optional): when true, Soniox finalizes tokens once it detects the speaker has stopped talking (semantic endpointing).
-- **`max_endpoint_delay_ms`** (number, optional): valid range **500–3000 ms**. Soniox API default is **2000 ms**; HeliBoard default is **3000 ms**. This is a **maximum**, not a fixed wait: semantic endpointing still finalizes earlier when the model thinks a sentence ended, so raising it does not stop premature punctuation — it only bounds the worst case. The VAD-driven manual finalize (see below) guarantees the trailing phrase is committed regardless.
+- **`max_endpoint_delay_ms`** (number, optional): valid range **500–3000 ms**. Soniox API default is **2000 ms**; HeliBoard default is **3000 ms**. Sent only when endpoint detection is on. This is a **maximum**, not a fixed wait.
+- **`endpoint_sensitivity`** (number, optional, v5 only): valid range **-1.0–1.0**, API default **0.0**. HeliBoard pins **-0.3** (Soniox's dictation/slow-speaker recommendation) so the model is less likely to emit an endpoint during a thinking pause. `endpoint_latency_adjustment_level` is omitted (API default 0). See <https://soniox.com/docs/stt/rt/endpoint-detection>.
 - **`enable_speaker_diarization`** (boolean, optional): when true, every token includes a `speaker` field. HeliBoard uses this to lock onto the first observed speaker and drop tokens from later speakers.
 
-Other documented fields (`enable_language_identification`, `translation`, `client_reference_id`) are not used.
+Other documented fields (`enable_language_identification`, `translation`, `client_reference_id`, `endpoint_latency_adjustment_level`) are not used. Translation is out of scope for keyboard dictation; language identification token tags are unused because the subtype already names the language.
 
 ### Audio format
 
@@ -107,7 +120,7 @@ To end the session cleanly:
 3. Wait for `{"finished": true}` (HeliBoard uses an 8 s grace timeout).
 4. Close the socket with code 1000.
 
-There is no per-chunk audio acknowledgement to track. (Soniox also exposes a manual finalize control message `{"type": "finalize"}` for mid-stream finalization; HeliBoard sends it on local-VAD silence and before end-of-stream to flush pending non-final tokens.)
+There is no per-chunk audio acknowledgement to track. (Soniox also exposes a manual finalize control message `{"type": "finalize"}` for mid-stream finalization; HeliBoard sends it on local-VAD silence and before end-of-stream to flush pending non-final tokens. A separate `{"type": "keepalive"}` control frame is sent at least every 10 s when no audio is going out, so a paused mic does not trip Soniox's ~20 s idle timeout.)
 
 ### Special control tokens
 

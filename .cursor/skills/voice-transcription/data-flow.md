@@ -36,10 +36,11 @@ Captures audio from the microphone with client-side silence detection.
 WebSocket client for Soniox real-time transcription.
 - **URL**: `wss://stt-rt.soniox.com/transcribe-websocket`
 - **Authentication**: `api_key` field inside the start config JSON; no HTTP headers
-- **Startup**: Sends a single JSON config text frame (`api_key`, `model`, `audio_format`, `sample_rate`, `num_channels`, optional `language_hints`, merged `context.terms` (built-in + user custom), `context.text` from the editor when available, plus the endpoint-detection and diarization flags)
+- **Startup**: Sends a single JSON config text frame (`api_key`, `model=stt-rt-v5`, `audio_format`, `sample_rate`, `num_channels`, optional `language_hints` + `language_hints_strict`, `context.general` for dictation, merged `context.terms` (built-in + user custom), `context.text` from the editor when available, plus the endpoint-detection / v5 `endpoint_sensitivity` and diarization flags)
 - **Transport**: Binary PCM frames over the socket
 - **Output**: Filters Soniox's `<end>` (endpoint detection) and `<fin>` (manual finalize) control markers, then concatenates final-token text in arrival order (Soniox encodes inter-word whitespace inside token text), trims, and emits a `TranscriptSegment`
 - **Graceful stop**: Sends an empty WebSocket frame, waits for `{"finished": true}` (8 s grace), closes 1000
+- **Keepalive**: Sends `{"type":"keepalive"}` at least every 10 s during outbound gaps (mic pause) so Soniox does not idle-timeout the session
 
 ### VoiceInputManager.kt
 Orchestrates recording, Soniox streaming, and ordered transcript delivery.
@@ -50,6 +51,7 @@ Orchestrates recording, Soniox streaming, and ordered transcript delivery.
 - **Session config**: Maps the active keyboard subtype's base language to a single Soniox `language_hints` entry; sanitizes `max_endpoint_delay_ms` to Soniox's 500–3000 ms range
 - **Auto-stop timer**: Stops recording after prolonged silence
 - **Manual finalize**: Sends `{"type":"finalize"}` after local speech-stop silence and once before graceful stop so pending non-final tokens are committed
+- **Keepalive**: Relies on `SonioxTranscriptionClient` sending `{"type":"keepalive"}` during outbound gaps (including mic pause)
 - **Graceful stop**: Sends the empty-frame shutdown handshake after tail audio/finalize work is queued
 
 ### LatinIME.java
@@ -84,11 +86,13 @@ User speaks
 Active subtype locale + transcription preferences + editor text
     → SonioxTranscriptionClient.buildSessionConfig()
     → language_hints  = single ISO language code or omitted
+    → language_hints_strict = true when a hint is sent
+    → context.general = dictation domain/setting/topic/product (+ language/instructions, + speakers if diarization)
     → context.terms = built-in product terms ∪ PREF_SONIOX_CUSTOM_TERMS (deduped)
     → context.text  = LatinIME.buildVoiceContextText() (≤ 4000 chars before cursor)
-    → enable_endpoint_detection / max_endpoint_delay_ms (500–3000)
+    → enable_endpoint_detection / max_endpoint_delay_ms (500–3000) / endpoint_sensitivity (-0.3)
     → enable_speaker_diarization
-    → model = "stt-rt-v4", audio_format = "pcm_s16le", 16 kHz / mono
+    → model = "stt-rt-v5", audio_format = "pcm_s16le", 16 kHz / mono
 ```
 
 ### 3. Transcript → Immediate Insert
@@ -137,7 +141,7 @@ PAUSED     → User taps pause  → RECORDING (resume)
 - **Silence Threshold**: RMS threshold floor for silence/speech detection
 - **Auto-stop Silence Duration**: delay before automatically stopping voice recording
 
-Soniox decides punctuation automatically. HeliBoard supplies recognition hints (built-in + user-editable `context.terms`) and recent editor text (`context.text`) so the model can use it to disambiguate sentence structure, but it does not expose direct replacements, output locale, disfluency removal, or punctuation sensitivity settings. HeliBoard does not currently strip fillers such as "um" or "uh" locally.
+Soniox decides punctuation automatically. HeliBoard supplies structured `context.general`, recognition hints (built-in + user-editable `context.terms`), and recent editor text (`context.text`) so the model can disambiguate sentence structure and domain terms. It does not expose direct replacements, output locale, or a punctuation-sensitivity knob. Common comma-attached fillers such as "um," and "uh," are stripped locally by `TranscriptPostProcessor`.
 
 ### Silence Detection (VoiceRecorder.kt)
 ```kotlin
