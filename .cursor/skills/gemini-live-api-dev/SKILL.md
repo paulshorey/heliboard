@@ -182,6 +182,8 @@ async for response in session.receive():
             for part in content.model_turn.parts:
                 if part.inline_data:
                     audio_data = part.inline_data.data
+                if part.text:
+                    print(f"Gemini: {part.text}")
         # Transcription
         if content.input_transcription:
             print(f"User: {content.input_transcription.text}")
@@ -201,6 +203,7 @@ if (content?.modelTurn?.parts) {
     if (part.inlineData) {
       const audioData = part.inlineData.data; // Base64 encoded
     }
+    if (part.text) console.log('Gemini:', part.text);
   }
 }
 if (content?.inputTranscription) console.log('User:', content.inputTranscription.text);

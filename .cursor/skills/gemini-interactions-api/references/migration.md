@@ -32,7 +32,7 @@ The core changes when migrating from `generateContent` to the Interactions API:
 | What | `generateContent` | Interactions API |
 |------|----------------|-----------------|
 | **SDK method** | `client.models.generate_content()` | `client.interactions.create()` |
-| **Response text** | `response.text` | `interaction.steps[-1].content[0].text` |
+| **Response text** | `response.text` | `interaction.output_text` |
 | **Multi-turn** | Manual history array or `client.chats.create()` | `previous_interaction_id=interaction.id` |
 | **Streaming** | `generate_content_stream()` / `:streamGenerateContent` | `stream=True` + `step.delta` events |
 | **Structured output** | `config.response_format` inside `GenerateContentConfig` | Top-level `response_format` array |
@@ -74,7 +74,7 @@ Every item is tagged: **`[BLOCKS]`** items cause errors or broken behavior if mi
 
 - [ ] Updated SDK: `google-genai` ≥ 2.0.0 (Python) / `@google/genai` ≥ 2.0.0 (JS)
 - [ ] Replaced `client.models.generate_content()` → `client.interactions.create()`
-- [ ] Replaced `response.text` → `interaction.steps[-1].content[0].text`
+- [ ] Replaced `response.text` → `interaction.output_text`
 - [ ] Replaced `response.candidates[0].content.parts` → iterate `interaction.steps`
 - [ ] Replaced `client.chats.create()` / manual history → `previous_interaction_id`
 - [ ] Removed all `types.*` wrappers (`GenerateContentConfig`, `Tool`, `Content`, `Part`) — Interactions API uses plain dicts. Check feature docs for exact format.

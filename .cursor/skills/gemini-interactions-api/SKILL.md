@@ -145,8 +145,8 @@ while True:
     if interaction.status == "completed":
         print(interaction.output_text)
         break
-    elif interaction.status == "failed":
-        print(f"Failed: {interaction.error}")
+    elif interaction.status in ("failed", "cancelled"):
+        print(f"Failed: {interaction.status}")
         break
     time.sleep(10)
 ```
@@ -216,7 +216,7 @@ const interaction = await client.interactions.create({
     environment: "remote",
 });
 
-console.log(`Environment ID: {interaction.environment_id}`);
+console.log(`Environment ID: ${interaction.environment_id}`);
 console.log(interaction.output_text);
 ```
 
@@ -255,7 +255,7 @@ print(result.output_text)
 ```typescript
 const agent = await client.agents.create({
     id: "code-reviewer",
-    base_agent="antigravity-preview-05-2026",
+    base_agent: "antigravity-preview-05-2026",
     system_instruction: "You are a senior code reviewer. Check every file for bugs, style issues, and security vulnerabilities.",
     base_environment: {
         type: "remote",
