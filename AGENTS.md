@@ -15,7 +15,7 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
 - `docs/` - deeper design notes such as `input-simplified.md` and `soniox-transcription.md`.
 - `tools/` - SDK setup, canonical APK build, release scripts, and the `tools:make-emoji-keys` helper module.
 - `.cursor/` - Cursor environment, Gemini Docs MCP (`mcp.json`), and agent skills (HeliBoard product skills plus Gemini API skills).
-- `skills-lock.json` - lockfile for the installed `google-gemini/gemini-skills` packages.
+- `skills-lock.json` - lockfile for the vendored `google-gemini/gemini-skills` packages; refresh them with `./tools/sync-gemini-skills.sh`.
 
 ## High-value entry points
 - `app/src/main/AndroidManifest.xml` - declares the IME service, spell checker service, settings activities, receivers, and direct-boot behavior.
@@ -42,6 +42,7 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
 - The closest folder-local `AGENTS.md` is usually more detailed than this root file; follow it once you know which subtree you are in.
 - Build the canonical installable artifact with `./tools/build-dist-apk.sh`, which writes `dist/HeliBoard.apk`.
 - Gemini API work (models, SDKs, Live API, Interactions API, `gemini-3.5-transcribe-live`) must use the skills under `.cursor/skills/gemini-*` and the Docs MCP in `.cursor/mcp.json`. Do not invent endpoints from training data. If MCP search is unavailable, fetch `https://ai.google.dev/gemini-api/docs/llms.txt`.
+- The `.cursor/skills/gemini-*` files are vendored upstream copies. Refresh them only with `./tools/sync-gemini-skills.sh`, and put any local correction in `tools/gemini-skills-fixups.py` so a refresh cannot silently revert it. See `.cursor/AGENTS.md` for why a direct `npx skills` run duplicates the skills.
 
 ## Suggested reading order
 1. Root `AGENTS.md`

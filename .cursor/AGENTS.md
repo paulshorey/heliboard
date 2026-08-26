@@ -24,7 +24,7 @@ npx add-mcp "https://gemini-api-docs-mcp.dev" -a cursor -y -n gemini-docs
 
 ## Gemini API skills
 
-Installed from [google-gemini/gemini-skills](https://github.com/google-gemini/gemini-skills) into `.cursor/skills/` so they sit next to the existing HeliBoard skills. The install lockfile is `skills-lock.json` at the repo root.
+Vendored from [google-gemini/gemini-skills](https://github.com/google-gemini/gemini-skills) into `.cursor/skills/` so they sit next to the existing HeliBoard skills. The install lockfile is `skills-lock.json` at the repo root.
 
 | Skill | Use when |
 | :--- | :--- |
@@ -34,13 +34,19 @@ Installed from [google-gemini/gemini-skills](https://github.com/google-gemini/ge
 
 Read the matching skill **before** writing Gemini client code. Do not use deprecated SDKs (`google-generativeai`, `@google/generative-ai`) or retired model IDs (`gemini-1.5-*`, `gemini-2.0-*`).
 
-Refresh skills with:
+### Refreshing
 
 ```bash
-npx skills add google-gemini/gemini-skills --skill gemini-api-dev --skill gemini-live-api-dev --skill gemini-interactions-api --agent cursor -y --copy
+./tools/sync-gemini-skills.sh
 ```
 
-Then copy the installed folders from `.agents/skills/` into `.cursor/skills/` if the CLI writes the vendor-neutral `.agents` path instead.
+Do not call `npx skills add` or `npx skills update` directly. The skills CLI installs into `.agents/skills/`, and Cursor loads that path *in addition to* `.cursor/skills/`, so a direct run leaves two copies of every skill under the same names, drifting apart with no warning. `.agents/` is gitignored for the same reason. The sync script does the download, moves the result into `.cursor/skills/`, deletes `.agents/`, and re-applies the local fixups.
+
+### Local fixups
+
+The vendored files are upstream verbatim except for the corrections declared in `tools/gemini-skills-fixups.py`, which fix upstream code samples that do not run as written (a TypeScript object literal that fails to parse, a template literal missing `${...}`, a Deep Research poll loop that never exits on a cancelled interaction, and Live API receive loops that drop text parts).
+
+Never hand-edit `.cursor/skills/gemini-*`; add an entry to that script instead, or the next refresh reverts the change. `tools/gemini-skills-fixups.py --check` reports the state of each one and flags any whose upstream text moved, which is the signal that upstream fixed it and the entry can be dropped.
 
 ## HeliBoard product skills
 
