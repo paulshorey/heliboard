@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "gemini-api-dev": {
+      "source": "google-gemini/gemini-skills",
+      "sourceType": "github",
+      "skillPath": "skills/gemini-api-dev/SKILL.md",
+      "computedHash": "c51e5d0549c5e9fe908aa0aeff59b9119b7ef1e6fe0382b98294e645f5880511"
+    },
+    "gemini-interactions-api": {
+      "source": "google-gemini/gemini-skills",
+      "sourceType": "github",
+      "skillPath": "skills/gemini-interactions-api/SKILL.md",
+      "computedHash": "9a8b5e415bd30316b69fea61fe718ae09464301fa22a04d6769090efa6929121"
+    },
+    "gemini-live-api-dev": {
+      "source": "google-gemini/gemini-skills",
+      "sourceType": "github",
+      "skillPath": "skills/gemini-live-api-dev/SKILL.md",
+      "computedHash": "2467a20bd5d21be7c85dbbed8004a3b903f125551780ca5757bc363e54296c75"
+    }
+  }
+}

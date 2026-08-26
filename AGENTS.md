@@ -14,6 +14,8 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
 - `app/src/test/` - JVM and Robolectric tests.
 - `docs/` - deeper design notes such as `input-simplified.md` and `soniox-transcription.md`.
 - `tools/` - SDK setup, canonical APK build, release scripts, and the `tools:make-emoji-keys` helper module.
+- `.cursor/` - Cursor environment, Gemini Docs MCP (`mcp.json`), and agent skills (HeliBoard product skills plus Gemini API skills).
+- `skills-lock.json` - lockfile for the installed `google-gemini/gemini-skills` packages.
 
 ## High-value entry points
 - `app/src/main/AndroidManifest.xml` - declares the IME service, spell checker service, settings activities, receivers, and direct-boot behavior.
@@ -26,6 +28,7 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
 - `app/src/main/java/helium314/keyboard/settings/FullappEditorActivity.kt` - standalone full-screen editor mode.
 - `app/src/main/java/helium314/keyboard/latin/settings/Settings.java` + `Settings.kt` + `Defaults.kt` + `TranscriptionPreferences.kt` - runtime preference keys, defaults, and typed access.
 - `app/src/main/java/helium314/keyboard/keyboard/internal/keyboard_parser/KeyboardParser.kt` + `app/src/main/assets/layouts/` - keyboard layout parsing and source layout data.
+- `.cursor/mcp.json` + `.cursor/skills/gemini-api-dev/` + `.cursor/skills/gemini-live-api-dev/` + `.cursor/skills/gemini-interactions-api/` - Gemini Docs MCP and API skills for current models (including `gemini-3.5-transcribe` / `gemini-3.5-transcribe-live`).
 
 ## Cross-folder rules worth remembering
 - There are two settings trees: `latin/settings` holds runtime preference keys, defaults, and snapshots; `settings/` holds the Compose UI and fullapp screens.
@@ -38,12 +41,14 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
 - The spell checker (`latin/spellcheck/`) is a separate Android entry point from `LatinIME`, so config or resource changes can affect one without the other.
 - The closest folder-local `AGENTS.md` is usually more detailed than this root file; follow it once you know which subtree you are in.
 - Build the canonical installable artifact with `./tools/build-dist-apk.sh`, which writes `dist/HeliBoard.apk`.
+- Gemini API work (models, SDKs, Live API, Interactions API, `gemini-3.5-transcribe-live`) must use the skills under `.cursor/skills/gemini-*` and the Docs MCP in `.cursor/mcp.json`. Do not invent endpoints from training data. If MCP search is unavailable, fetch `https://ai.google.dev/gemini-api/docs/llms.txt`.
 
 ## Suggested reading order
 1. Root `AGENTS.md`
 2. `app/src/main/AGENTS.md` or `app/src/main/java/helium314/keyboard/AGENTS.md`, depending on whether you are changing Android app wiring or Java/Kotlin package code
 3. The `AGENTS.md` in the exact folder you plan to edit
 4. Relevant long-form docs under `docs/` or task-specific guides under `.cursor/skills/`
+5. `.cursor/AGENTS.md` when the task involves Gemini APIs, MCP, or Cursor agent setup
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.
