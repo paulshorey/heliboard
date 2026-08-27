@@ -2,163 +2,217 @@ package helium314.keyboard.latin.settings
 
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import helium314.keyboard.latin.voice.GeminiTranscriptionClient
 
 /**
- * Typed access to Soniox transcription preferences with cleanup for legacy
- * provider keys (Speechmatics, Deepgram).
+ * Typed access to Gemini Live transcription preferences.
+ *
+ * Also erases the preferences of the speech providers this app used before
+ * Gemini. Their API keys belong to other accounts and their tuning knobs have no
+ * Gemini equivalent, so nothing is carried over except the user's own vocabulary
+ * list, which is provider-independent. The literal key names below are what is
+ * already written to disk on existing installs, so they have to be spelled out
+ * here even though nothing else references those providers.
  */
 object TranscriptionPreferences {
-    private const val LEGACY_SPEECHMATICS_API_KEY_PREF = "speechmatics_api_key"
-    private const val LEGACY_DEEPGRAM_API_KEY_PREF = "deepgram_api_key"
+    private const val LEGACY_CUSTOM_TERMS_PREF = "soniox_custom_terms"
 
-    // Soniox documents max_endpoint_delay_ms must be between 500 and 3000.
-    private const val MIN_MAX_ENDPOINT_DELAY_MS = 500
-    private const val MAX_MAX_ENDPOINT_DELAY_MS = 3000
-
-    const val DEFAULT_ENABLE_ENDPOINT_DETECTION = Defaults.PREF_SONIOX_ENABLE_ENDPOINT_DETECTION
-    const val DEFAULT_MAX_ENDPOINT_DELAY_MS = Defaults.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS
-    const val DEFAULT_DIARIZATION = Defaults.PREF_SONIOX_DIARIZATION
-
-    /** Hard cap on user-defined custom terms, mirroring the client. */
-    private const val MAX_CUSTOM_TERMS = 200
-
-    /** Hard cap on the length of any individual custom term. */
-    private const val MAX_CUSTOM_TERM_LENGTH = 100
-
-    data class SonioxConfig(
-        val apiKey: String,
-        val enableEndpointDetection: Boolean,
-        val maxEndpointDelayMs: Int,
-        val diarizationEnabled: Boolean,
-        val customTerms: List<String>
+    private val LEGACY_PROVIDER_PREFS = listOf(
+        "speechmatics_api_key",
+        "deepgram_api_key",
+        "soniox_api_key",
+        "soniox_enable_endpoint_detection",
+        "soniox_max_endpoint_delay_ms",
+        "soniox_diarization",
+        LEGACY_CUSTOM_TERMS_PREF
     )
 
-    fun readSonioxApiKey(prefs: SharedPreferences): String {
-        clearLegacyApiKeys(prefs)
+    /** Hard cap on user-defined vocabulary terms, mirroring the client. */
+    private const val MAX_CUSTOM_VOCABULARY_TERMS =
+        GeminiTranscriptionClient.MAX_USER_VOCABULARY_TERMS
+
+    /** Hard cap on the length of any individual vocabulary term. */
+    private const val MAX_VOCABULARY_TERM_LENGTH = 100
+
+    data class GeminiConfig(
+        val apiKey: String,
+        /** `SMART` (cleaned/formatted) or `VERBATIM` (literal). */
+        val transcriptionMode: String,
+        /** `automaticActivityDetection.silenceDurationMs`. */
+        val endOfSpeechSilenceMs: Int,
+        /** When true, `languageCodes` is left empty so Gemini detects the language. */
+        val autoDetectLanguage: Boolean,
+        /** When true, editor text near the caret seeds `customVocabulary`. */
+        val useEditorContext: Boolean,
+        val customVocabulary: List<String>
+    )
+
+    fun readGeminiApiKey(prefs: SharedPreferences): String {
+        migrateLegacyProviderPrefs(prefs)
         return prefs.getString(
-            Settings.PREF_SONIOX_API_KEY,
-            Defaults.PREF_SONIOX_API_KEY
+            Settings.PREF_GEMINI_API_KEY,
+            Defaults.PREF_GEMINI_API_KEY
         )?.trim().orEmpty()
     }
 
-    fun writeSonioxApiKey(prefs: SharedPreferences, value: String) {
-        val trimmedValue = value.trim()
+    fun writeGeminiApiKey(prefs: SharedPreferences, value: String) {
         prefs.edit {
-            putString(Settings.PREF_SONIOX_API_KEY, trimmedValue)
-            remove(LEGACY_SPEECHMATICS_API_KEY_PREF)
-            remove(LEGACY_DEEPGRAM_API_KEY_PREF)
+            putString(Settings.PREF_GEMINI_API_KEY, value.trim())
+            LEGACY_PROVIDER_PREFS.forEach { remove(it) }
         }
     }
 
-    fun readSonioxConfig(prefs: SharedPreferences): SonioxConfig {
-        return SonioxConfig(
-            apiKey = readSonioxApiKey(prefs),
-            enableEndpointDetection = prefs.getBoolean(
-                Settings.PREF_SONIOX_ENABLE_ENDPOINT_DETECTION,
-                Defaults.PREF_SONIOX_ENABLE_ENDPOINT_DETECTION
-            ),
-            maxEndpointDelayMs = sanitizeMaxEndpointDelayMs(
-                prefs.getInt(
-                    Settings.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS,
-                    Defaults.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS
-                )
-            ),
-            diarizationEnabled = prefs.getBoolean(
-                Settings.PREF_SONIOX_DIARIZATION,
-                Defaults.PREF_SONIOX_DIARIZATION
-            ),
-            customTerms = readSonioxCustomTerms(prefs)
+    fun readGeminiConfig(prefs: SharedPreferences): GeminiConfig {
+        return GeminiConfig(
+            apiKey = readGeminiApiKey(prefs),
+            transcriptionMode = readGeminiTranscriptionMode(prefs),
+            endOfSpeechSilenceMs = readGeminiEndOfSpeechSilenceMs(prefs),
+            autoDetectLanguage = readGeminiAutoDetectLanguage(prefs),
+            useEditorContext = readGeminiUseEditorContext(prefs),
+            customVocabulary = readGeminiCustomVocabulary(prefs)
         )
     }
 
-    /**
-     * Read user-defined custom Soniox `context.terms`. The preference is stored
-     * as a single string with one term per line; this helper splits, trims,
-     * deduplicates and clamps to [MAX_CUSTOM_TERMS] entries.
-     */
-    fun readSonioxCustomTerms(prefs: SharedPreferences): List<String> {
-        val raw = prefs.getString(
-            Settings.PREF_SONIOX_CUSTOM_TERMS,
-            Defaults.PREF_SONIOX_CUSTOM_TERMS
-        ).orEmpty()
-        return parseCustomTerms(raw)
+    fun readGeminiTranscriptionMode(prefs: SharedPreferences): String {
+        return GeminiTranscriptionClient.sanitizeTranscriptionMode(
+            prefs.getString(
+                Settings.PREF_GEMINI_TRANSCRIPTION_MODE,
+                Defaults.PREF_GEMINI_TRANSCRIPTION_MODE
+            )
+        )
     }
 
-    /** Stored form (as the user sees it) — preserves their order, trims whitespace. */
-    fun readSonioxCustomTermsRaw(prefs: SharedPreferences): String {
-        return prefs.getString(
-            Settings.PREF_SONIOX_CUSTOM_TERMS,
-            Defaults.PREF_SONIOX_CUSTOM_TERMS
-        ).orEmpty()
-    }
-
-    fun writeSonioxCustomTerms(prefs: SharedPreferences, value: String) {
+    fun writeGeminiTranscriptionMode(prefs: SharedPreferences, value: String) {
         prefs.edit {
-            putString(Settings.PREF_SONIOX_CUSTOM_TERMS, value)
+            putString(
+                Settings.PREF_GEMINI_TRANSCRIPTION_MODE,
+                GeminiTranscriptionClient.sanitizeTranscriptionMode(value)
+            )
         }
     }
 
-    internal fun parseCustomTerms(raw: String): List<String> {
+    /** True when the settings toggle is on smart (cleaned) transcription. */
+    fun readGeminiSmartMode(prefs: SharedPreferences): Boolean =
+        readGeminiTranscriptionMode(prefs) == GeminiTranscriptionClient.TRANSCRIPTION_MODE_SMART
+
+    fun writeGeminiSmartMode(prefs: SharedPreferences, smart: Boolean) {
+        writeGeminiTranscriptionMode(
+            prefs,
+            if (smart) {
+                GeminiTranscriptionClient.TRANSCRIPTION_MODE_SMART
+            } else {
+                GeminiTranscriptionClient.TRANSCRIPTION_MODE_VERBATIM
+            }
+        )
+    }
+
+    fun readGeminiEndOfSpeechSilenceMs(prefs: SharedPreferences): Int {
+        return sanitizeEndOfSpeechSilenceMs(
+            prefs.getInt(
+                Settings.PREF_GEMINI_END_OF_SPEECH_SILENCE_MS,
+                Defaults.PREF_GEMINI_END_OF_SPEECH_SILENCE_MS
+            )
+        )
+    }
+
+    fun writeGeminiEndOfSpeechSilenceMs(prefs: SharedPreferences, value: Int) {
+        prefs.edit {
+            putInt(
+                Settings.PREF_GEMINI_END_OF_SPEECH_SILENCE_MS,
+                sanitizeEndOfSpeechSilenceMs(value)
+            )
+        }
+    }
+
+    fun readGeminiAutoDetectLanguage(prefs: SharedPreferences): Boolean {
+        return prefs.getBoolean(
+            Settings.PREF_GEMINI_AUTO_DETECT_LANGUAGE,
+            Defaults.PREF_GEMINI_AUTO_DETECT_LANGUAGE
+        )
+    }
+
+    fun writeGeminiAutoDetectLanguage(prefs: SharedPreferences, enabled: Boolean) {
+        prefs.edit {
+            putBoolean(Settings.PREF_GEMINI_AUTO_DETECT_LANGUAGE, enabled)
+        }
+    }
+
+    fun readGeminiUseEditorContext(prefs: SharedPreferences): Boolean {
+        return prefs.getBoolean(
+            Settings.PREF_GEMINI_USE_EDITOR_CONTEXT,
+            Defaults.PREF_GEMINI_USE_EDITOR_CONTEXT
+        )
+    }
+
+    fun writeGeminiUseEditorContext(prefs: SharedPreferences, enabled: Boolean) {
+        prefs.edit {
+            putBoolean(Settings.PREF_GEMINI_USE_EDITOR_CONTEXT, enabled)
+        }
+    }
+
+    /**
+     * Read the user's custom vocabulary. The preference is stored as a single
+     * string with one term per line; this helper splits, trims, deduplicates and
+     * clamps to [MAX_CUSTOM_VOCABULARY_TERMS] entries.
+     */
+    fun readGeminiCustomVocabulary(prefs: SharedPreferences): List<String> {
+        return parseCustomVocabulary(readGeminiCustomVocabularyRaw(prefs))
+    }
+
+    /** Stored form (as the user sees it) — preserves their order and blank lines. */
+    fun readGeminiCustomVocabularyRaw(prefs: SharedPreferences): String {
+        return prefs.getString(
+            Settings.PREF_GEMINI_CUSTOM_VOCABULARY,
+            Defaults.PREF_GEMINI_CUSTOM_VOCABULARY
+        ).orEmpty()
+    }
+
+    fun writeGeminiCustomVocabulary(prefs: SharedPreferences, value: String) {
+        prefs.edit {
+            putString(Settings.PREF_GEMINI_CUSTOM_VOCABULARY, value)
+        }
+    }
+
+    internal fun parseCustomVocabulary(raw: String): List<String> {
         if (raw.isBlank()) return emptyList()
         val seen = LinkedHashSet<String>()
         for (line in raw.lineSequence()) {
             val trimmed = line.trim()
             if (trimmed.isEmpty()) continue
-            val clamped = if (trimmed.length > MAX_CUSTOM_TERM_LENGTH) {
-                trimmed.substring(0, MAX_CUSTOM_TERM_LENGTH)
+            val clamped = if (trimmed.length > MAX_VOCABULARY_TERM_LENGTH) {
+                trimmed.substring(0, MAX_VOCABULARY_TERM_LENGTH)
             } else {
                 trimmed
             }
-            if (seen.add(clamped) && seen.size >= MAX_CUSTOM_TERMS) break
+            if (seen.add(clamped) && seen.size >= MAX_CUSTOM_VOCABULARY_TERMS) break
         }
         return seen.toList()
     }
 
-    fun writeSonioxEnableEndpointDetection(prefs: SharedPreferences, enabled: Boolean) {
+    fun sanitizeEndOfSpeechSilenceMs(value: Int): Int {
+        return value.coerceIn(
+            GeminiTranscriptionClient.MIN_END_OF_SPEECH_SILENCE_MS,
+            GeminiTranscriptionClient.MAX_END_OF_SPEECH_SILENCE_MS
+        )
+    }
+
+    /**
+     * Carry the user's hand-written vocabulary list over from the previous
+     * provider's preference (only when they have not written a Gemini list yet),
+     * then delete every preference belonging to the old providers.
+     *
+     * Called both from [readGeminiApiKey] and from app upgrade, so a restored
+     * backup is cleaned up too, not just an in-place update.
+     */
+    fun migrateLegacyProviderPrefs(prefs: SharedPreferences) {
+        if (LEGACY_PROVIDER_PREFS.none { prefs.contains(it) }) return
+        val legacyTerms = prefs.getString(LEGACY_CUSTOM_TERMS_PREF, "").orEmpty()
+        val currentVocabulary = readGeminiCustomVocabularyRaw(prefs)
         prefs.edit {
-            putBoolean(Settings.PREF_SONIOX_ENABLE_ENDPOINT_DETECTION, enabled)
-        }
-    }
-
-    fun writeSonioxMaxEndpointDelayMs(prefs: SharedPreferences, value: Int) {
-        prefs.edit {
-            putInt(
-                Settings.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS,
-                sanitizeMaxEndpointDelayMs(value)
-            )
-        }
-    }
-
-    fun writeSonioxDiarization(prefs: SharedPreferences, enabled: Boolean) {
-        prefs.edit {
-            putBoolean(Settings.PREF_SONIOX_DIARIZATION, enabled)
-        }
-    }
-
-    fun readSonioxEnableEndpointDetection(prefs: SharedPreferences): Boolean {
-        return readSonioxConfig(prefs).enableEndpointDetection
-    }
-
-    fun readSonioxMaxEndpointDelayMs(prefs: SharedPreferences): Int {
-        return readSonioxConfig(prefs).maxEndpointDelayMs
-    }
-
-    fun readSonioxDiarization(prefs: SharedPreferences): Boolean {
-        return readSonioxConfig(prefs).diarizationEnabled
-    }
-
-    fun sanitizeMaxEndpointDelayMs(value: Int): Int {
-        return value.coerceIn(MIN_MAX_ENDPOINT_DELAY_MS, MAX_MAX_ENDPOINT_DELAY_MS)
-    }
-
-    private fun clearLegacyApiKeys(prefs: SharedPreferences) {
-        val hasLegacySpeechmatics = prefs.contains(LEGACY_SPEECHMATICS_API_KEY_PREF)
-        val hasLegacyDeepgram = prefs.contains(LEGACY_DEEPGRAM_API_KEY_PREF)
-        if (!hasLegacySpeechmatics && !hasLegacyDeepgram) return
-
-        prefs.edit {
-            remove(LEGACY_SPEECHMATICS_API_KEY_PREF)
-            remove(LEGACY_DEEPGRAM_API_KEY_PREF)
+            if (legacyTerms.isNotBlank() && currentVocabulary.isBlank()) {
+                putString(Settings.PREF_GEMINI_CUSTOM_VOCABULARY, legacyTerms)
+            }
+            LEGACY_PROVIDER_PREFS.forEach { remove(it) }
         }
     }
 }

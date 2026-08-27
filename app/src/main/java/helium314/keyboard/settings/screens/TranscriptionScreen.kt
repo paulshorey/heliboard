@@ -56,18 +56,21 @@ fun TranscriptionScreen(
     if ((b?.value ?: 0) < 0)
         Log.v("irrelevant", "stupid way to trigger recomposition on preference change")
 
-    var sonioxApiKey by remember {
-        mutableStateOf(TranscriptionPreferences.readSonioxApiKey(prefs))
+    var geminiApiKey by remember {
+        mutableStateOf(TranscriptionPreferences.readGeminiApiKey(prefs))
     }
-    var sonioxDiarization by remember {
-        mutableStateOf(TranscriptionPreferences.readSonioxDiarization(prefs))
+    var geminiSmartMode by remember {
+        mutableStateOf(TranscriptionPreferences.readGeminiSmartMode(prefs))
     }
-    var sonioxEnableEndpointDetection by remember {
-        mutableStateOf(TranscriptionPreferences.readSonioxEnableEndpointDetection(prefs))
+    var geminiUseEditorContext by remember {
+        mutableStateOf(TranscriptionPreferences.readGeminiUseEditorContext(prefs))
     }
-    var sonioxMaxEndpointDelayMs by remember {
+    var geminiAutoDetectLanguage by remember {
+        mutableStateOf(TranscriptionPreferences.readGeminiAutoDetectLanguage(prefs))
+    }
+    var geminiEndOfSpeechSilenceMs by remember {
         mutableStateOf(
-            TranscriptionPreferences.readSonioxMaxEndpointDelayMs(prefs).toString()
+            TranscriptionPreferences.readGeminiEndOfSpeechSilenceMs(prefs).toString()
         )
     }
     var chunkSilenceSeconds by remember {
@@ -107,29 +110,39 @@ fun TranscriptionScreen(
                     .padding(innerPadding)
             ) {
                 InlineTextField(
-                    label = stringResource(R.string.soniox_api_key_title),
-                    value = sonioxApiKey,
+                    label = stringResource(R.string.gemini_api_key_title),
+                    summary = stringResource(R.string.gemini_api_key_summary),
+                    value = geminiApiKey,
                     onValueChange = { newValue ->
-                        sonioxApiKey = newValue.trim()
-                        TranscriptionPreferences.writeSonioxApiKey(prefs, newValue)
+                        geminiApiKey = newValue.trim()
+                        TranscriptionPreferences.writeGeminiApiKey(prefs, newValue)
                     },
                     minLines = 1,
                     maxLines = 2
                 )
                 BooleanSettingRow(
-                    label = stringResource(R.string.soniox_diarization_title),
-                    summary = stringResource(R.string.soniox_diarization_summary),
-                    checked = sonioxDiarization,
+                    label = stringResource(R.string.gemini_smart_mode_title),
+                    summary = stringResource(R.string.gemini_smart_mode_summary),
+                    checked = geminiSmartMode,
                     onCheckedChange = { checked ->
-                        sonioxDiarization = checked
-                        TranscriptionPreferences.writeSonioxDiarization(prefs, checked)
+                        geminiSmartMode = checked
+                        TranscriptionPreferences.writeGeminiSmartMode(prefs, checked)
+                    }
+                )
+                BooleanSettingRow(
+                    label = stringResource(R.string.gemini_use_editor_context_title),
+                    summary = stringResource(R.string.gemini_use_editor_context_summary),
+                    checked = geminiUseEditorContext,
+                    onCheckedChange = { checked ->
+                        geminiUseEditorContext = checked
+                        TranscriptionPreferences.writeGeminiUseEditorContext(prefs, checked)
                     }
                 )
                 Preference(
-                    name = stringResource(R.string.soniox_context_terms_title),
-                    description = stringResource(R.string.soniox_context_terms_summary),
+                    name = stringResource(R.string.voice_vocabulary_title),
+                    description = stringResource(R.string.voice_vocabulary_summary),
                     onClick = {
-                        SettingsDestination.navigateTo(SettingsDestination.SonioxContextTerms)
+                        SettingsDestination.navigateTo(SettingsDestination.VoiceVocabulary)
                     },
                 ) { NextScreenIcon() }
                 Preference(
@@ -140,22 +153,22 @@ fun TranscriptionScreen(
                     },
                 ) { NextScreenIcon() }
                 BooleanSettingRow(
-                    label = stringResource(R.string.soniox_enable_endpoint_detection_title),
-                    summary = stringResource(R.string.soniox_enable_endpoint_detection_summary),
-                    checked = sonioxEnableEndpointDetection,
+                    label = stringResource(R.string.gemini_auto_detect_language_title),
+                    summary = stringResource(R.string.gemini_auto_detect_language_summary),
+                    checked = geminiAutoDetectLanguage,
                     onCheckedChange = { checked ->
-                        sonioxEnableEndpointDetection = checked
-                        TranscriptionPreferences.writeSonioxEnableEndpointDetection(prefs, checked)
+                        geminiAutoDetectLanguage = checked
+                        TranscriptionPreferences.writeGeminiAutoDetectLanguage(prefs, checked)
                     }
                 )
                 InlineTextField(
-                    label = stringResource(R.string.soniox_max_endpoint_delay_ms_title),
-                    summary = stringResource(R.string.soniox_max_endpoint_delay_ms_summary),
-                    value = sonioxMaxEndpointDelayMs,
+                    label = stringResource(R.string.gemini_end_of_speech_silence_ms_title),
+                    summary = stringResource(R.string.gemini_end_of_speech_silence_ms_summary),
+                    value = geminiEndOfSpeechSilenceMs,
                     onValueChange = { newValue ->
-                        sonioxMaxEndpointDelayMs = newValue
+                        geminiEndOfSpeechSilenceMs = newValue
                         newValue.toIntOrNull()?.let { parsed ->
-                            TranscriptionPreferences.writeSonioxMaxEndpointDelayMs(prefs, parsed)
+                            TranscriptionPreferences.writeGeminiEndOfSpeechSilenceMs(prefs, parsed)
                         }
                     },
                     minLines = 1,
@@ -163,6 +176,7 @@ fun TranscriptionScreen(
                 )
                 InlineTextField(
                     label = stringResource(R.string.voice_chunk_silence_seconds_title),
+                    summary = stringResource(R.string.voice_chunk_silence_seconds_summary),
                     value = chunkSilenceSeconds,
                     onValueChange = { newValue ->
                         chunkSilenceSeconds = newValue

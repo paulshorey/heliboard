@@ -161,25 +161,30 @@ object Defaults {
     const val PREF_REMOVE_REDUNDANT_POPUPS = false
     const val PREF_SPACE_BAR_TEXT = ""
     const val PREF_TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss"
-    const val PREF_SONIOX_API_KEY = ""
-    // Soniox finalizes tokens immediately when the model detects the speaker
-    // has stopped talking. Enabled by default to keep dictation latency low.
-    // The client also sends v5 endpoint_sensitivity = -0.3 (dictation-patient)
-    // so mid-sentence pauses are less likely to insert an early period.
-    const val PREF_SONIOX_ENABLE_ENDPOINT_DETECTION = true
-    // Soniox accepts values between 500 and 3000 ms. Higher values wait longer
-    // after a pause before finalizing (fewer premature periods/commas). 3000 is
-    // the maximum Soniox allows and is more tolerant of thinking pauses than the
-    // API's built-in 2000 ms default. v5's endpoint_sensitivity is the main
-    // "how eager" lever; this delay is only the worst-case cap.
-    const val PREF_SONIOX_MAX_ENDPOINT_DELAY_MS = 3000
-    /** Previous HeliBoard default; used to migrate unchanged installs. */
-    const val LEGACY_PREF_SONIOX_MAX_ENDPOINT_DELAY_MS = 2000
-    const val PREF_SONIOX_DIARIZATION = true
-    // User-editable Soniox `context.terms`, stored as a single string with one term per line.
-    // The built-in product/technical term list is added on top of this in the client.
-    const val PREF_SONIOX_CUSTOM_TERMS = ""
-    const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 1
+    const val PREF_GEMINI_API_KEY = ""
+    // Smart transcription: Gemini removes filler words, resolves spoken
+    // self-corrections, and applies punctuation, casing and list formatting.
+    // Verbatim is available for users who want the literal words instead.
+    const val PREF_GEMINI_TRANSCRIPTION_MODE = "SMART"
+    // Server-side end-of-speech window. Google documents that short windows split
+    // one utterance into fragments and cost accuracy because the model loses
+    // cross-fragment context, so this defaults well above the API's own default
+    // and trades latency for correct sentence structure.
+    const val PREF_GEMINI_END_OF_SPEECH_SILENCE_MS = 1500
+    // Off by default: Google recommends sending an explicit language hint because
+    // auto-detection misfires on short utterances, which is the common case for
+    // keyboard dictation. The hint comes from the active keyboard subtype.
+    const val PREF_GEMINI_AUTO_DETECT_LANGUAGE = false
+    // Seed `customVocabulary` with proper nouns already present in the editor so
+    // dictated names match the spelling and casing the user typed.
+    const val PREF_GEMINI_USE_EDITOR_CONTEXT = true
+    // User-editable Gemini `customVocabulary`, stored as a single string with one
+    // term per line. The built-in term list is added on top of this in the client.
+    const val PREF_GEMINI_CUSTOM_VOCABULARY = ""
+    // Local pause that triggers an early turn finalize (Gemini `audioStreamEnd`).
+    // Two seconds keeps the server's own semantic end-of-speech detection in
+    // charge for normal speech and only steps in when it has not fired.
+    const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 2
     const val PREF_VOICE_SILENCE_THRESHOLD = 220
     const val PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = 30
     const val PREF_EDIT_HISTORY_ENABLED = true

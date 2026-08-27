@@ -22,7 +22,8 @@ import kotlin.math.sqrt
  * boundary callbacks ([RecordingCallback.onSpeechStarted] / [RecordingCallback.onSpeechStopped])
  * based on adaptive silence detection.
  *
- * Audio format: PCM 16-bit, 16kHz, mono — compatible with Soniox and most speech APIs.
+ * Audio format: PCM 16-bit little-endian, 16 kHz, mono — the native input format
+ * for the Gemini Live API and for most streaming speech APIs.
  */
 class VoiceRecorder(private val context: Context) {
 

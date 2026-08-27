@@ -18,11 +18,11 @@ Feature-specific Compose screens for the settings app.
 - `PreferencesScreen.kt` - general preference settings screen.
 - `SecondaryLayoutScreen.kt` - secondary layout settings screen.
 - `SetupAppScreen.kt` - app setup/onboarding utility screen.
-- `SonioxContextTermsScreen.kt` - voice transcription custom vocabulary screen (built-in `context.terms` view + user-editable list).
+- `VoiceVocabularyScreen.kt` - voice transcription custom vocabulary screen (built-in `customVocabulary` view + user-editable list).
 - `SubtypeScreen.kt` - subtype detail/configuration screen. Contains `LayoutSlotEditor`, a reusable composable that provides add/edit/delete/fork controls for any `LayoutType` slot. All layout types (MAIN, SYMBOLS, FUNCTIONAL, etc.) use this unified component with identical affordances.
 - `TextCorrectionScreen.kt` - text correction/autocorrect settings screen.
 - `ToolbarScreen.kt` - toolbar customization screen.
-- `TranscriptionScreen.kt` - voice transcription settings screen (links into `SonioxContextTermsScreen` and `VoiceDiagnosticsScreen`).
+- `TranscriptionScreen.kt` - voice transcription settings screen (links into `VoiceVocabularyScreen` and `VoiceDiagnosticsScreen`).
 - `VoiceDiagnosticsScreen.kt` - on-device viewer for recent voice/transcription diagnostic log lines.
 
 ## Non-obvious notes
