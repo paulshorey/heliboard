@@ -1,108 +1,276 @@
 ---
 name: voice-transcription
-description: Voice-to-text pipeline using Soniox real-time transcription with local audio capture and direct finalized-text insertion. Use when working on microphone recording, audio streaming, transcription results, silence detection, or voice input UI.
+description: Voice-to-text pipeline using the Google Gemini Live API (gemini-3.5-transcribe-live) with local audio capture and direct finalized-text insertion. Use when working on microphone recording, audio streaming, transcription results, silence detection, or voice input UI.
 ---
 
 # Voice Transcription
 
-Local recording + Soniox real-time streaming transcription + immediate caret insertion.
+Local recording + Gemini Live real-time transcription + immediate caret insertion.
+
+For raw Gemini Live API details (models, endpoints, SDK patterns), read the
+`gemini-live-api-dev` skill and query the Gemini Docs MCP. This skill covers how
+HeliBoard uses that API.
 
 ## Architecture
 
 ```
-Microphone → VoiceRecorder (PCM16 16kHz) → Soniox WebSocket → final-token spans
+Microphone → VoiceRecorder (PCM16 16kHz) → Gemini Live WebSocket → inputTranscription
                                                                         ↓
 Text Field ← LatinIME (commitText) ← VoiceInputManager (FIFO queue + reconnect + graceful stop)
 ```
 
 Recording starts **instantly** on mic tap — no network round-trip delay.
 
+## Accuracy over latency
+
+This pipeline is deliberately tuned for correctness, not responsiveness. Dictated
+text goes straight into the user's editor, so a wrong word or a period in the
+wrong place costs more than a second of waiting. When changing anything here, do
+not "optimize" latency at the expense of transcript quality.
+
 ## Key Files
 
 | File | Role |
 |------|------|
 | `VoiceRecorder.kt` | PCM16 capture, adaptive RMS silence detection |
-| `SonioxTranscriptionClient.kt` | WebSocket client for `wss://stt-rt.soniox.com/transcribe-websocket`. Sends JSON start config (auth via `api_key` field, model `stt-rt-v5`), streams binary PCM, parses responses, filters `<end>`/`<fin>` control markers, sends `{"type":"keepalive"}` during outbound gaps, handles graceful shutdown (empty frame → wait for `finished:true`) |
+| `GeminiTranscriptionClient.kt` | WebSocket client for `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=…`. Builds the `setup` payload at a negotiated [setup tier](#setup-tier-degradation), streams base64 PCM as JSON text frames, parses `inputTranscription` / `interimInputTranscription` / `turnComplete` / `goAway`, sends `audioStreamEnd` for Hybrid VAD, and reassembles editor segments |
+| `VoiceContextVocabulary.kt` | Harvests proper nouns and acronyms from editor text and merges them with user + built-in terms into `customVocabulary` |
 | `TranscriptSegment.kt` | Finalized chunk passed from the client to the IME pipeline |
-| `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO transcript queue, reconnects, auto-stop timers, Soniox session config assembly (incl. `context.text` via `setPriorTextProvider`) |
-| `TranscriptionPreferences.kt` | Reads/writes Soniox preferences (incl. user-editable `context.terms`) and clears legacy provider keys (Speechmatics, Deepgram) |
-| `TranscriptPostProcessor.kt` | Local transcript shaping helpers: pre-commit casing/trailing-punctuation adjustment plus paragraph-level spoken-command replacement after commit |
-| `LatinIME.java` | Orchestrator — finalizes composing state, commits transcript text at the caret, supplies `context.text` to Soniox via `buildVoiceContextText`, triggers post-processing |
-| `TranscriptionScreen.kt` | Settings UI for API key, endpoint detection, diarization, silence thresholds, and auto-stop timing |
-| `SonioxContextTermsScreen.kt` | Settings UI for editing user-defined `context.terms` (one per line). Merged with the built-in list at session start. |
+| `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO transcript queue, reconnects, session rotation on `goAway`, auto-stop timers, session config assembly |
+| `TranscriptionPreferences.kt` | Reads/writes Gemini preferences and erases the preference keys of previously used providers |
+| `TranscriptPostProcessor.kt` | Local transcript shaping: pre-commit casing/trailing-punctuation adjustment plus paragraph-level spoken-command replacement after commit |
+| `LatinIME.java` | Orchestrator — finalizes composing state, commits transcript text at the caret, supplies editor text for vocabulary harvesting via `buildVoiceContextText`, triggers post-processing |
+| `TranscriptionScreen.kt` | Settings UI for API key, smart mode, editor-context biasing, language detection, end-of-speech pause, and local silence thresholds |
+| `VoiceVocabularyScreen.kt` | Settings UI for editing user `customVocabulary` (one per line). Merged with the built-in list at session start. |
 
-All source files live under `app/src/main/java/helium314/keyboard/latin/voice/` except `LatinIME.java` (parent package) and the settings UI/preferences helpers in `latin/settings` and `settings/screens`.
+All source files live under `app/src/main/java/helium314/keyboard/latin/voice/`
+except `LatinIME.java` (parent package) and the settings UI/preferences helpers in
+`latin/settings` and `settings/screens`.
 
 ## Chunked Audio Flow
 
-1. Mic chunks are captured locally in `VoiceRecorder`.
-2. `VoiceInputManager` builds a Soniox session config from preferences + the current subtype locale.
-3. The `SonioxTranscriptionClient` opens the socket and sends the JSON start config; PCM frames are streamed immediately afterwards.
-4. Soniox emits JSON responses containing a `tokens` array. Each token has a `text` and `is_final` flag.
-5. `SonioxTranscriptionClient` collects only `is_final: true` tokens, drops Soniox's special markers (`<end>` from endpoint detection, `<fin>` from manual finalize), concatenates the remaining text directly (Soniox encodes inter-word whitespace as separate space tokens), trims, and emits a `TranscriptSegment`. The client also tracks whether the previous response's finalized text ended on a "wordy" character (letter/digit/`'`/`-`); when the next response's raw text does **not** start with whitespace and the previous tail was wordy, Soniox is signaling a mid-word continuation (e.g. `"head"` then `"ing"` for `"heading"`) and the segment is marked `attachesToPrevious` so the IME does not insert a separating space.
-6. `VoiceInputManager` delivers segments in FIFO order to `LatinIME`.
-7. `LatinIME` inserts each finalized segment with `commitText(...)`, replacing any active selection range and restoring a leading space only when the segment is **not** flagged `attachesToPrevious` (which covers both leading attaching punctuation and Soniox-split mid-word continuations).
+1. Mic chunks are captured locally in `VoiceRecorder` (~100 ms each).
+2. `VoiceInputManager` builds a session config from preferences, the current
+   subtype locale, and the editor text before the caret.
+3. `GeminiTranscriptionClient` opens the socket and sends one `setup` frame, then
+   **waits for `{"setupComplete":{}}`** before releasing audio. Buffered chunks
+   flush on `onStreamReady`.
+4. Audio goes out as JSON text frames:
+   `{"realtimeInput":{"audio":{"data":"<base64>","mimeType":"audio/pcm;rate=16000"}}}`.
+5. The server emits `serverContent.interimInputTranscription` (speculative,
+   **never committed**) and `serverContent.inputTranscription` (authoritative).
+   `serverContent.turnComplete` closes an utterance. `serverContent.modelTurn` is
+   ignored so no generated response can leak into the editor.
+6. `TranscriptAccumulator` converts finalized transcripts into segments and marks
+   `attachesToPrevious`.
+7. `VoiceInputManager` delivers segments in FIFO order to `LatinIME`.
+8. `LatinIME` inserts each segment with `commitText(...)`, replacing any active
+   selection and restoring a leading space only when the segment is **not**
+   `attachesToPrevious`.
 
-On graceful stop, the client sends an empty WebSocket frame, waits for `{"finished": true}`, and closes with code 1000. An 8-second grace timer guards against the server not emitting `finished`. While the socket is open but idle (mic paused, or any other outbound gap of ~10 s), the client sends `{"type":"keepalive"}` so Soniox does not close the session after ~20 s without audio.
+On graceful stop the client sends `audioStreamEnd` and keeps reading for up to 8 s
+so the trailing phrase still arrives, then closes with 1000.
 
-## Transcript Handling
+## Setup payload
 
-Soniox returns smart-formatted text with punctuation already inserted; HeliBoard does not tune it client-side. Key Soniox config features the client uses:
+```json
+{"setup":{
+  "model":"models/gemini-3.5-transcribe-live",
+  "generationConfig":{"responseModalities":["TEXT"]},
+  "inputAudioTranscription":{"languageCodes":["en-US"],"mode":"SMART","customVocabulary":["…"]},
+  "realtimeInputConfig":{"automaticActivityDetection":{
+    "disabled":false,
+    "startOfSpeechSensitivity":"START_SENSITIVITY_HIGH","prefixPaddingMs":300,
+    "endOfSpeechSensitivity":"END_SENSITIVITY_LOW","silenceDurationMs":1500}},
+  "systemInstruction":{"parts":[{"text":"…"}]}
+}}
+```
 
-- **`model`** — pinned to `"stt-rt-v5"` in code. Not user-configurable. v4 is retired 2026-06-30 and already aliased to v5.
-- **`audio_format` / `sample_rate` / `num_channels`** — `pcm_s16le` / `16000` / `1`, matching `VoiceRecorder` output.
-- **`language_hints`** — single-element ISO language code from the keyboard subtype (e.g. `["en"]`). Omitted when the subtype has no usable language so Soniox auto-detects.
-- **`language_hints_strict`** — `true` whenever a language hint is sent. Strongly biases v5 toward that one language (best-effort; documented as the right setting when the app already knows the language).
-- **`context.general`** — structured key/value pairs that v5 treats as more influential than free-form `text`. HeliBoard always sends domain/setting/topic/product for keyboard dictation, plus `language`/`instructions` when a hint is available, plus `speakers` when diarization is on.
-- **`context.terms`** — built-in list (`HeliBoard`, `Soniox`, `Kubernetes`, `API`, `gnocchi`) merged with the user-editable list from `PREF_SONIOX_CUSTOM_TERMS` (managed in `SonioxContextTermsScreen`), then deduped/trimmed in `SonioxTranscriptionClient.buildSessionConfig`.
-- **`context.text`** — populated at session start (and on reconnect) from up to the most recent 4 000 chars of editor text before the cursor, supplied by `LatinIME.buildVoiceContextText` via `VoiceInputManager.setPriorTextProvider`. Soniox uses this for sentence-structure punctuation, mid-sentence casing, and proper-noun spelling.
-- **`enable_endpoint_detection`** + **`max_endpoint_delay_ms`** + **`endpoint_sensitivity`** — when enabled, Soniox finalizes tokens once it detects the speaker has stopped talking (semantic endpointing: intonation, pauses, and context — not plain VAD). `max_endpoint_delay_ms` is the **maximum** wait after speech ends before the endpoint is returned; it must be between 500 and 3000 ms. `endpoint_sensitivity` is v5-only (`-1.0`–`1.0`); HeliBoard pins **`-0.3`** (Soniox's documented dictation/slow-speaker starting point) so mid-sentence pauses are less likely to insert an early period. `endpoint_latency_adjustment_level` is left at the API default `0` — the low-latency voice-agent profile is too aggressive for dictation. Higher `max_endpoint_delay_ms` only raises the worst-case wait. HeliBoard defaults that delay to **3000 ms** (Soniox's API default is 2000 ms).
-- **Manual finalize on local silence** — because HeliBoard only commits `is_final` tokens and the server endpoint can be delayed or never fire, `VoiceInputManager` sends a manual finalize control frame (`SonioxTranscriptionClient.finalizeNow()` → `{"type":"finalize"}`) whenever the local `VoiceRecorder` silence detector reports `onSpeechStopped`, plus once more right before the empty end-of-stream frame on mic stop. Soniox then re-emits all pending tokens as final (plus a filtered `<fin>` marker) and keeps the stream open. This guarantees the trailing phrase is committed after the user's `PREF_VOICE_CHUNK_SILENCE_SECONDS` pause (or immediately on stop) regardless of the server endpoint, and makes disabling endpoint detection viable (finalization then runs purely off local VAD at the user's chosen pause, which avoids the model's premature sentence endings). It fires at most once per speech-stop transition (re-armed on the next `onSpeechStarted`); the chunk-silence window itself keeps finalize calls naturally spaced, so no extra global rate limit is used.
-- **`enable_speaker_diarization`** — when enabled, the client locks onto the first non-empty `speaker` label observed and drops tokens from other speakers. Soniox uses string speaker IDs (`"1"`, `"2"`, …); the locked ID isn't guaranteed to be the local speaker.
+Two placement rules, both covered by tests in `GeminiTranscriptionClientTest`:
 
-Direct replacement rules, punctuation sensitivity, and output locale are **not** exposed in Soniox's real-time WebSocket API. Punctuation is model-driven; `context.text` (editor text before the cursor) is the main lever for mid-sentence comma/period behavior. HeliBoard locally strips common comma-attached filler fragments such as "um," and "uh," during transcript post-processing.
+- **`inputAudioTranscription` is a sibling of `generationConfig`, not a child.**
+  Nesting it closes the socket with 1007. Google's Live Translate guide documents
+  the broken shape, so this is easy to regress.
+- **`responseModalities` must be `["TEXT"]`** and belongs inside
+  `generationConfig`. `AUDIO` is for the conversational Live Agent models; only one
+  modality per session is allowed.
+
+## Setup-tier degradation
+
+The transcribe model's documented feature list is narrower than the shared `setup`
+proto it accepts, and an unsupported field is rejected with close code 1007 —
+which would leave voice input permanently dead. So `setup` is rendered at one of
+four `SetupTier` values and the client reconnects one tier lower on 1007:
+
+`FULL` → `NO_SYSTEM_INSTRUCTION` → `NO_REALTIME_CONFIG` → `MINIMAL`
+
+The working tier is cached in `negotiatedSetupTier` for the process. A 1007 whose
+reason names an auth status is **not** retried. When adding a new `setup` field,
+put it in the tier that matches how well-documented it is for this model.
+
+## Config levers, in order of impact
+
+- **`mode: SMART`** — disfluency removal, inline self-correction resolution,
+  list/number/date formatting, grammar and casing polish. `VERBATIM` is the
+  literal alternative.
+- **`silenceDurationMs`** (default **1500 ms**, range 400–5000) with
+  **`endOfSpeechSensitivity: END_SENSITIVITY_LOW`**. Google documents that short
+  windows split one utterance into fragments and that the model then loses
+  cross-fragment context, lowering quality. Do not reduce this for latency.
+- **`customVocabulary`** — user terms, then built-in terms, then editor-harvested
+  terms, capped at 100 (Google notes best results around 100 even though 1 000 are
+  accepted).
+- **`languageCodes`** — explicit BCP-47 hint from the subtype, mapped through
+  `resolveLanguageCode` onto the codes Gemini documents. Unknown subtypes send `[]`
+  rather than a code Gemini might reject. Auto-detect is opt-in because it misfires
+  on short utterances.
+- **`startOfSpeechSensitivity: START_SENSITIVITY_HIGH` + `prefixPaddingMs: 300`** —
+  keeps prefix audio so the first syllable is not clipped.
+- **`systemInstruction`** — static dictation guidance, no editor text. Live
+  Transcription does not advertise system-instruction support, so it may be
+  ignored; that is why it sits in the top tier.
+
+## Editor context → vocabulary, not prompt
+
+`LatinIME.buildVoiceContextText` supplies up to 4 000 chars before the caret;
+`VoiceContextVocabulary` harvests words worth biasing and sends **only those
+words**. Harvested: internal capitals (`iPhone`), all-caps ≤10 chars (`API`), and
+capitalized words not at a sentence start. Rejected: common English words, words
+containing digits, and tokens glued by `@ / \ : _` (URLs, paths, emails,
+identifiers).
+
+**Verbatim editor text is deliberately never sent.** Neither `systemInstruction`
+nor a seeded `clientContent` history is a documented input for this model, and
+feeding an already-typed paragraph to a generative model risks it echoing that
+text back as transcription. Casing and punctuation continuity with surrounding
+text is handled locally instead (see below).
+
+## Turn finalization (Hybrid VAD)
+
+Server VAD stays enabled for accurate speech onset but is configured to be patient
+about ending speech, which means a trailing phrase can sit unfinalized. The client
+backstops it with `{"realtimeInput":{"audioStreamEnd":true}}`:
+
+- after local silence (`PREF_VOICE_CHUNK_SILENCE_SECONDS`, default **2 s** —
+  longer than the server window, so the server's semantic endpointing normally
+  wins), at most once per speech-stop transition;
+- on **mic pause** — a turn left open with no audio is the dominant cause of the
+  Live API dropping the connection with 1011;
+- on **stop**, before the read grace period.
+
+The session stays open; the next audio chunk reopens the stream.
+
+## Transcript assembly
+
+The Live API has emitted finalized transcripts both as per-utterance deltas and as
+text that grows on each message, and the semantics changed between model
+generations. `TranscriptAccumulator` compares each transcript against the previous
+one, so text extending the previous message contributes only its suffix, unrelated
+text contributes all of itself, and an identical repeat (seen on reconnect)
+contributes nothing. `turnComplete` resets the comparison.
+
+`attachesToPrevious` is set for segments starting with attaching punctuation
+(`. , ! ? : ; ) ] } %`) or resuming mid-word (`head` then `heading` yields `ing`,
+not `head ing`).
+
+## Session lifecycle
+
+- Sessions are capped at **10 minutes**.
+- `{"goAway":{"timeLeft":"30s"}}` — `timeLeft` is a protobuf Duration and arrives
+  as a **string**.
+- `VoiceInputManager` rotates onto a fresh connection 1.5 s before the announced
+  deadline and unconditionally after 9 minutes. Rotation does not consume a
+  reconnect attempt; buffered audio carries across.
+- There is **no application-level keepalive** in this protocol. OkHttp pings run
+  every 20 s; the real fix for dropped connections is the audio lifecycle above.
+- Close codes: 1007 setup schema or auth, 1008 policy/billing, 1011 stalled turn,
+  1006 network.
 
 ## Post-Processing (TranscriptPostProcessor)
 
-Before commit, `LatinIME.prepareVoiceTranscriptionText()` uses `TranscriptPostProcessor.adjustLeadingCasing()` and `stripTrailingPunctuationIfMidSentence()` to fit the chunk into surrounding editor text.
+Before commit, `LatinIME.prepareVoiceTranscriptionText()` uses
+`TranscriptPostProcessor.adjustLeadingCasing()` and
+`stripTrailingPunctuationIfMidSentence()` to fit the chunk into surrounding text.
 
-After each transcript chunk is committed to the text field, `LatinIME.runTranscriptPostProcessing()` reads the current paragraph (text from the last newline to the cursor, up to 1024 chars) and runs it through `TranscriptPostProcessor.processCurrentParagraph()`. If any rules match, the paragraph text is replaced in-place via `deleteTextBeforeCursor` + `commitText`.
+After each chunk is committed, `LatinIME.runTranscriptPostProcessing()` reads the
+current paragraph (from the last newline to the cursor, up to 1024 chars) and runs
+`TranscriptPostProcessor.processCurrentParagraph()`. If any rule matches, the
+paragraph is replaced in place via `deleteTextBeforeCursor` + `commitText`.
 
-Current processing removes common comma-attached filler fragments ("um,", "uh,") and handles **spelled-out punctuation** (e.g. "exclamation point.", "comma", "question mark.", "period.", "colon.", "semicolon."). Rules are case-insensitive and sorted longest-first so that patterns with surrounding punctuation context (like ". Exclamation point.") are consumed before shorter ambiguous ones. The processor only fires when a rule actually modifies the paragraph — no-op paragraphs are skipped.
+Current processing removes comma-attached filler fragments ("um,", "uh,") and
+handles **spelled-out punctuation** ("exclamation point.", "comma", "question
+mark.", "period.", "colon.", "semicolon."). Rules are case-insensitive and sorted
+longest-first so patterns with surrounding punctuation context are consumed before
+shorter ambiguous ones. The processor only fires when a rule actually modifies the
+paragraph.
 
-To add new post-processing rules, edit `TranscriptPostProcessor.buildRules()` in `voice/TranscriptPostProcessor.kt`. Unit tests are in `TranscriptPostProcessorTest.kt`.
+To add rules, edit `TranscriptPostProcessor.buildRules()`. Unit tests are in
+`TranscriptPostProcessorTest.kt`.
 
 ## Leading-Casing Correction
 
-Real-time STT providers (including Soniox) typically capitalize the first letter of a new utterance. When the user dictates mid-sentence — caret placed inside existing text, or resumed after deleting a trailing period — that capitalization is wrong.
+Real-time STT models capitalize the first letter of a new utterance. When the user
+dictates mid-sentence — caret inside existing text, or resumed after deleting a
+trailing period — that capitalization is wrong.
 
-`TranscriptPostProcessor.adjustLeadingCasing(chunk, previousContext)` handles this **before commit**. It is called from `LatinIME.prepareVoiceTranscriptionText`, which reads `VOICE_CASING_LOOKBACK` (16) characters before the cursor and passes them in alongside the chunk.
+`TranscriptPostProcessor.adjustLeadingCasing(chunk, previousContext)` handles this
+**before commit**, called from `LatinIME.prepareVoiceTranscriptionText` with
+`VOICE_CASING_LOOKBACK` (16) characters of preceding text.
 
 The first character is lowercased only when all of these hold:
-- the chunk is not `attachesToPrevious` (segments that start with attaching punctuation are short-circuited earlier in `prepareVoiceTranscriptionText`)
+- the chunk is not `attachesToPrevious`
 - the first character is an uppercase letter
-- the previous visible character (ignoring trailing whitespace and closing `"`, `'`, `“”`, `‘’`, `)`, `]`, `}`, `»`) is **not** `.`, `!`, `?`, or a newline — and the context is not empty/whitespace
-- the first word is **not** `I`/`I'm`/`I'll`/`I've`/`I'd`, an all-uppercase acronym (`NASA`), or a camel/Pascal-case word with internal uppercase (`iPhone`, `McDonald's`)
+- the previous visible character (ignoring trailing whitespace and closing `"`,
+  `'`, `“”`, `‘’`, `)`, `]`, `}`, `»`) is **not** `.`, `!`, `?`, or a newline — and
+  the context is not empty/whitespace
+- the first word is **not** `I`/`I'm`/`I'll`/`I've`/`I'd`, an all-uppercase acronym
+  (`NASA`), or a camel/Pascal-case word with internal uppercase (`iPhone`,
+  `McDonald's`)
 
-Known tradeoff: proper nouns dictated as the first word of a mid-sentence chunk (e.g. `Amazon`, `Paris`) are lowercased. Soniox does not currently expose a custom-vocab feature that would let us bias such words.
+Known tradeoff: a proper noun dictated as the first word of a mid-sentence chunk
+(`Amazon`, `Paris`) is lowercased. Editor-harvested `customVocabulary` reduces how
+often this matters, because such words are more likely to be transcribed as part
+of a longer phrase.
 
 ## Paragraph Breaks
 
-Silence-driven automatic paragraph insertion is disabled because inserting `"\n\n"` into arbitrary host fields caused form submissions and other unintended side effects. Explicit spoken commands such as "New paragraph." are still handled by `TranscriptPostProcessor`.
+Silence-driven automatic paragraph insertion is disabled because inserting `"\n\n"`
+into arbitrary host fields caused form submissions and other unintended side
+effects. Explicit spoken commands such as "New paragraph." are still handled by
+`TranscriptPostProcessor`.
 
 ## Thread Safety
 
 - Audio recording: background thread
-- Soniox callbacks: forwarded to main thread
+- Gemini callbacks: forwarded to main thread
 - Timer callbacks: main thread
 - Text insertion: always sequential on main thread
+
+## Verifying against the real API
+
+`GeminiTranscriptionClientTest`, `GeminiTranscriptionClientStreamTest` (local
+WebSocket server, including the 1007 tier fallback) and `VoiceContextVocabularyTest`
+cover the wire format and client state machine. They cannot confirm what Google's
+server does with each field.
+
+For that, `tools/gemini-live-smoke-test.py` sends the app's exact payloads to the
+real endpoint:
+
+```bash
+export GEMINI_API_KEY=...
+tools/gemini-live-smoke-test.py --probe-setup        # which setup tiers are accepted
+tools/gemini-live-smoke-test.py --audio speech.wav   # real transcripts (16 kHz mono PCM16)
+```
 
 ## Additional Resources
 
 - Detailed data flow: [data-flow.md](data-flow.md)
-- Soniox API reference and settings keys: [api-reference.md](api-reference.md)
-- Gemini realtime speech-to-text (`gemini-3.5-transcribe-live`) is documented by the installed `gemini-live-api-dev` skill and the Gemini Docs MCP in `.cursor/mcp.json`. Use those, not this Soniox skill, when working on Gemini transcription.
+- Gemini Live API reference and settings keys: [api-reference.md](api-reference.md)
+- Long-form design notes: `docs/gemini-transcription.md`
+- Raw Gemini Live API: the `gemini-live-api-dev` skill + the Gemini Docs MCP
 
 ## Update documentation
 
-IMPORTANT: When you change something, or discover that the code or functionality differs from what's described, update this skill and its supporting docs immediately.
+IMPORTANT: When you change something, or discover that the code or functionality
+differs from what's described, update this skill and its supporting docs
+immediately.
