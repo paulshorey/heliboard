@@ -101,6 +101,7 @@ Silence-driven automatic paragraph insertion is disabled because inserting `"\n\
 
 - Detailed data flow: [data-flow.md](data-flow.md)
 - Soniox API reference and settings keys: [api-reference.md](api-reference.md)
+- Gemini realtime speech-to-text (`gemini-3.5-transcribe-live`) is documented by the installed `gemini-live-api-dev` skill and the Gemini Docs MCP in `.cursor/mcp.json`. Use those, not this Soniox skill, when working on Gemini transcription.
 
 ## Update documentation
 
