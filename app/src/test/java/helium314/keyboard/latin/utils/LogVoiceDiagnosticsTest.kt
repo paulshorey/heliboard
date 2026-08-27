@@ -11,7 +11,7 @@ class LogVoiceDiagnosticsTest {
     fun `voice package tags are included`() {
         assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "VoiceInputManager", "VOICE_STEP_1 start")))
         assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "VoiceRecorder", "Recording started")))
-        assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "SonioxTranscription", "stream ready")))
+        assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "GeminiTranscription", "stream ready")))
     }
 
     @Test
@@ -35,8 +35,8 @@ class LogVoiceDiagnosticsTest {
 
     @Test
     fun `voice response lines are included`() {
-        assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "VoiceInputManager", "VOICE_RESPONSE ok in 120ms (manual_finalize): transcript received")))
-        assertTrue(Log.isVoiceDiagnosticLine(LogLine('E', "VoiceInputManager", "VOICE_RESPONSE timeout after 6000ms (audio_pending): no Soniox response")))
+        assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "VoiceInputManager", "VOICE_RESPONSE ok in 120ms (turn_finalize): transcript received")))
+        assertTrue(Log.isVoiceDiagnosticLine(LogLine('E', "VoiceInputManager", "VOICE_RESPONSE timeout after 15000ms (audio_pending): no Gemini response")))
     }
 
     @Test
@@ -49,6 +49,17 @@ class LogVoiceDiagnosticsTest {
     fun `redact api key patterns`() {
         val redacted = Log.redactVoiceDiagnosticMessage("""config api_key="secret-key-123" failed""")
         assertEquals("""config api_key=[redacted] failed""", redacted)
+    }
+
+    @Test
+    fun `redact api key in url query string`() {
+        val redacted = Log.redactVoiceDiagnosticMessage(
+            "opening wss://generativelanguage.googleapis.com/ws/x?key=AIzaSecret123&alt=json"
+        )
+        assertEquals(
+            "opening wss://generativelanguage.googleapis.com/ws/x?key=[redacted]&alt=json",
+            redacted
+        )
     }
 
     @Test

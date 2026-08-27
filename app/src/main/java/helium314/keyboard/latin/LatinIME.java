@@ -194,7 +194,7 @@ public class LatinIME extends InputMethodService implements
 
     private final ClipboardHistoryManager mClipboardHistoryManager = new ClipboardHistoryManager(this);
 
-    // Voice input manager (local recording + Soniox transcription)
+    // Voice input manager (local recording + Gemini Live transcription)
     private VoiceInputManager mVoiceInputManager;
     // Wake lock to prevent CPU sleep during voice recording
     private PowerManager.WakeLock mVoiceWakeLock;
@@ -2284,17 +2284,18 @@ public class LatinIME extends InputMethodService implements
     }
 
     /**
-     * Maximum chars of editor context sent as Soniox `context.text`. Soniox's
-     * documented context limit is ~10,000 chars / 8,000 tokens for the entire
-     * context object; staying well under that leaves headroom for terms.
+     * Maximum chars of editor text scanned to seed Gemini's speech-biasing
+     * vocabulary. Only harvested terms are sent, never this text itself, so the
+     * window can be generous.
      */
     private static final int VOICE_CONTEXT_TEXT_LOOKBACK = 4000;
 
     /**
      * Provider hook for {@link VoiceInputManager#setPriorTextProvider}. Reads
      * up to {@link #VOICE_CONTEXT_TEXT_LOOKBACK} characters of editor text
-     * before the cursor so Soniox can use it as `context.text` to inform
-     * sentence-structure punctuation, casing, and proper-noun spelling.
+     * before the cursor. {@code VoiceContextVocabulary} harvests proper nouns
+     * and acronyms from it so dictated names come back spelled and capitalized
+     * the way the user already typed them.
      */
     @Nullable
     private String buildVoiceContextText() {
@@ -2305,7 +2306,7 @@ public class LatinIME extends InputMethodService implements
             if (before == null || before.length() == 0) return null;
             return before.toString();
         } catch (Exception e) {
-            Log.e(TAG, "Error reading editor context for Soniox: " + e.getMessage());
+            Log.e(TAG, "Error reading editor context for voice vocabulary: " + e.getMessage());
             return null;
         }
     }

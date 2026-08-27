@@ -175,12 +175,13 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
     public static final String PREF_TOOLBAR_MODE = "toolbar_mode";
     public static final String PREF_TOOLBAR_HIDING_GLOBAL = "toolbar_hiding_global";
 
-    // Voice Input (Soniox transcription)
-    public static final String PREF_SONIOX_API_KEY = "soniox_api_key";
-    public static final String PREF_SONIOX_ENABLE_ENDPOINT_DETECTION = "soniox_enable_endpoint_detection";
-    public static final String PREF_SONIOX_MAX_ENDPOINT_DELAY_MS = "soniox_max_endpoint_delay_ms";
-    public static final String PREF_SONIOX_DIARIZATION = "soniox_diarization";
-    public static final String PREF_SONIOX_CUSTOM_TERMS = "soniox_custom_terms";
+    // Voice Input (Gemini Live transcription)
+    public static final String PREF_GEMINI_API_KEY = "gemini_api_key";
+    public static final String PREF_GEMINI_TRANSCRIPTION_MODE = "gemini_transcription_mode";
+    public static final String PREF_GEMINI_END_OF_SPEECH_SILENCE_MS = "gemini_end_of_speech_silence_ms";
+    public static final String PREF_GEMINI_AUTO_DETECT_LANGUAGE = "gemini_auto_detect_language";
+    public static final String PREF_GEMINI_USE_EDITOR_CONTEXT = "gemini_use_editor_context";
+    public static final String PREF_GEMINI_CUSTOM_VOCABULARY = "gemini_custom_vocabulary";
     public static final String PREF_VOICE_CHUNK_SILENCE_SECONDS = "voice_chunk_silence_seconds";
     public static final String PREF_VOICE_SILENCE_THRESHOLD = "voice_silence_threshold";
     public static final String PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = "voice_auto_stop_silence_seconds";

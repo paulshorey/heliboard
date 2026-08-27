@@ -8,17 +8,16 @@ import android.os.SystemClock
 import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.settings.TranscriptionPreferences
-import helium314.keyboard.latin.settings.TranscriptionPreferences.SonioxConfig
+import helium314.keyboard.latin.settings.TranscriptionPreferences.GeminiConfig
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.prefs
-import java.util.Locale
 
 /**
  * Manages the voice input workflow:
  *
  * 1. Record audio locally via [VoiceRecorder] (starts instantly).
- * 2. Stream raw PCM chunks to Soniox over WebSocket.
- * 3. Receive finalized transcript updates from Soniox in stream order.
+ * 2. Stream raw PCM chunks to the Gemini Live API over WebSocket.
+ * 3. Receive finalized transcripts from Gemini in stream order.
  * 4. Deliver transcript text to [VoiceInputListener.onTranscriptionResult].
  */
 class VoiceInputManager(private val context: Context) {
@@ -44,14 +43,24 @@ class VoiceInputManager(private val context: Context) {
         private const val STREAM_CONNECT_TIMEOUT_MS = 12_000L
 
         /**
-         * How long to wait for Soniox to return final tokens after audio is
-         * sent or a manual finalize is requested. Logged as VOICE_RESPONSE in
-         * the voice diagnostics export when exceeded.
+         * How long to wait for Gemini to respond after audio is sent or a turn
+         * finalize is requested. Logged as VOICE_RESPONSE in the voice
+         * diagnostics export when exceeded.
+         *
+         * Generous on purpose: the session is configured to prefer a correct
+         * transcript over a fast one, so a slow reply is expected behaviour and
+         * this timer only exists to surface a genuinely dead stream.
          */
-        private const val SONIOX_RESPONSE_TIMEOUT_MS = 6_000L
+        private const val GEMINI_RESPONSE_TIMEOUT_MS = 15_000L
+
+        /**
+         * Grace period subtracted from a `goAway` notice so the replacement
+         * session is open before the old connection is terminated.
+         */
+        private const val SESSION_ROTATE_LEAD_MS = 1_500L
     }
 
-    private data class AwaitingSonioxResponse(
+    private data class AwaitingGeminiResponse(
         val sessionId: Long,
         val reason: String,
         val startedAtMs: Long,
@@ -84,10 +93,11 @@ class VoiceInputManager(private val context: Context) {
     }
 
     /**
-     * Supplies the most recent editor text before the cursor for use as Soniox
-     * `context.text`. Called on the main thread from [startStreamingSession],
-     * including reconnects, so callers should return the freshest available
-     * text. Returning null or a blank string omits the field.
+     * Supplies the most recent editor text before the cursor, used to seed
+     * Gemini's `customVocabulary` with words the user has already typed. Called
+     * on the main thread from [startStreamingSession], including reconnects, so
+     * callers should return the freshest available text. Returning null or a
+     * blank string omits the editor-derived terms.
      */
     fun interface PriorTextProvider {
         fun getPriorText(): String?
@@ -105,7 +115,7 @@ class VoiceInputManager(private val context: Context) {
     )
 
     private val voiceRecorder = VoiceRecorder(context)
-    private val transcriptionClient = SonioxTranscriptionClient()
+    private val transcriptionClient = GeminiTranscriptionClient()
     private var listener: VoiceInputListener? = null
     private var priorTextProvider: PriorTextProvider? = null
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -114,12 +124,12 @@ class VoiceInputManager(private val context: Context) {
     private var activeSessionId = 0L
 
     // Local speech-boundary detection window used by VoiceRecorder callbacks.
-    // Soniox transcript segmentation is server-managed; local silence drives manual finalize
-    // at speech boundaries and auto-stop after a longer pause.
+    // Gemini segments turns server-side; local silence drives an early turn
+    // finalize at speech boundaries and auto-stop after a longer pause.
     private var chunkSilenceDurationMs = Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS * 1000L
     private var chunkSilenceThreshold = Defaults.PREF_VOICE_SILENCE_THRESHOLD.toDouble()
     private var autoStopSilenceMs = Defaults.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS * 1000L
-    private var sonioxConfig: SonioxConfig = TranscriptionPreferences.readSonioxConfig(context.prefs())
+    private var geminiConfig: GeminiConfig = TranscriptionPreferences.readGeminiConfig(context.prefs())
 
     // Streaming state
     private var streamSessionId = 0L
@@ -131,6 +141,7 @@ class VoiceInputManager(private val context: Context) {
     private var streamReconnectAttempts = 0
     private var pendingReconnectRunnable: Runnable? = null
     private var pendingStreamConnectTimeoutRunnable: Runnable? = null
+    private var pendingSessionRotateRunnable: Runnable? = null
 
     // Buffered audio while stream is not yet open
     private val pendingAudioChunks = ArrayDeque<PendingAudioChunk>()
@@ -139,17 +150,17 @@ class VoiceInputManager(private val context: Context) {
     private val pendingTranscripts = ArrayDeque<PendingTranscript>()
     private var isDispatchingTranscripts = false
 
-    // Local-VAD-driven manual finalize. Soniox only commits is_final tokens,
-    // and its semantic endpoint can be delayed (or never fire) when the model
-    // is unsure an utterance ended, stranding the trailing phrase as non-final.
-    // When the recorder reports a local silence, we ask Soniox to finalize so
-    // the tail is always committed. Fires once per speech-stop transition,
-    // re-armed on the next speech onset.
+    // Local-VAD-driven early turn finalize. Gemini's own end-of-speech detection
+    // is deliberately configured to be patient so mid-sentence pauses do not
+    // split an utterance, which means a trailing phrase can sit unfinalized. When
+    // the recorder reports local silence we send `audioStreamEnd` so the tail is
+    // committed. Fires once per speech-stop transition, re-armed on the next
+    // speech onset.
     private var hasFinalizedCurrentSilence = false
 
-    // Tracks round-trip latency to Soniox (stream connect, audio, finalize).
-    private var awaitingSonioxResponse: AwaitingSonioxResponse? = null
-    private var sonioxResponseTimeoutRunnable: Runnable? = null
+    // Tracks round-trip latency to Gemini (stream connect, audio, finalize).
+    private var awaitingGeminiResponse: AwaitingGeminiResponse? = null
+    private var geminiResponseTimeoutRunnable: Runnable? = null
     private var streamConnectStartedAtMs: Long = 0L
 
     // New paragraph timer removed — inserting line breaks on silence caused
@@ -186,9 +197,9 @@ class VoiceInputManager(private val context: Context) {
     }
 
     /**
-     * Register a provider that returns the editor text before the cursor for
-     * use as Soniox `context.text`. The provider is invoked synchronously on
-     * the main thread when a streaming session opens (including reconnects),
+     * Register a provider that returns the editor text before the cursor, used
+     * to seed Gemini's `customVocabulary`. The provider is invoked synchronously
+     * on the main thread when a streaming session opens (including reconnects),
      * so it must be cheap and must not block.
      */
     fun setPriorTextProvider(provider: PriorTextProvider?) {
@@ -205,7 +216,7 @@ class VoiceInputManager(private val context: Context) {
     }
 
     /**
-     * Start recording. Microphone starts immediately; Soniox connects in parallel.
+     * Start recording. Microphone starts immediately; Gemini connects in parallel.
      */
     fun startRecording(): Boolean {
         if (currentState != State.IDLE) {
@@ -220,7 +231,7 @@ class VoiceInputManager(private val context: Context) {
 
         val apiKey = getApiKey()
         if (apiKey.isBlank()) {
-            listener?.onError("Soniox API key not configured. Please set it in Settings.")
+            listener?.onError("Gemini API key not configured. Please set it in Settings.")
             return false
         }
 
@@ -246,14 +257,14 @@ class VoiceInputManager(private val context: Context) {
                 if (sessionId != activeSessionId) return
                 cancelAutoStopTimer()
                 // New speech means a new phrase is forming; allow the next
-                // silence to trigger another manual finalize.
+                // silence to trigger another turn finalize.
                 hasFinalizedCurrentSilence = false
             }
 
             override fun onSpeechStopped() {
                 if (sessionId != activeSessionId) return
                 startAutoStopTimer()
-                requestManualFinalizeOnSilence(sessionId)
+                requestTurnFinalizeOnSilence(sessionId)
             }
 
             override fun onRecordingStopped() {
@@ -304,6 +315,11 @@ class VoiceInputManager(private val context: Context) {
         cancelPendingReconnect()
         streamReconnectAttempts = 0
         finalizeWhenStreamReady = false
+        // A turn left open with no incoming audio is what makes the Live API
+        // drop the connection, so close it out before the mic goes quiet.
+        if (isStreamingReady) {
+            transcriptionClient.finalizeTurn()
+        }
         updateState(State.PAUSED)
     }
 
@@ -348,7 +364,8 @@ class VoiceInputManager(private val context: Context) {
         streamReconnectAttempts = 0
         cancelPendingReconnect()
         cancelStreamConnectTimeout()
-        cancelSonioxResponseWatchdog()
+        cancelSessionRotateTimer()
+        cancelGeminiResponseWatchdog()
         streamConnectStartedAtMs = 0L
         pendingAudioChunks.clear()
         pendingTranscripts.clear()
@@ -365,6 +382,7 @@ class VoiceInputManager(private val context: Context) {
     private fun stopRecordingInternal(cancelPending: Boolean) {
         cancelAutoStopTimer()
         cancelStreamConnectTimeout()
+        cancelSessionRotateTimer()
 
         val sessionAtStop = activeSessionId
         if (cancelPending) {
@@ -389,19 +407,23 @@ class VoiceInputManager(private val context: Context) {
 
     private fun startStreamingSession(sessionId: Long, apiKey: String, isReconnect: Boolean = false) {
         if (sessionId != activeSessionId) return
-        val priorText = try {
-            priorTextProvider?.getPriorText()
-        } catch (e: Exception) {
-            Log.e(TAG, "Prior text provider threw: ${e.message}")
+        val editorContext = if (geminiConfig.useEditorContext) {
+            try {
+                priorTextProvider?.getPriorText()
+            } catch (e: Exception) {
+                Log.e(TAG, "Prior text provider threw: ${e.message}")
+                null
+            }
+        } else {
             null
         }
-        val sessionConfig = SonioxTranscriptionClient.buildSessionConfig(
-            languageTag = getCurrentLanguageHint(),
-            enableEndpointDetection = sonioxConfig.enableEndpointDetection,
-            maxEndpointDelayMs = sonioxConfig.maxEndpointDelayMs,
-            diarizationEnabled = sonioxConfig.diarizationEnabled,
-            customContextTerms = sonioxConfig.customTerms,
-            contextText = priorText
+        val sessionConfig = GeminiTranscriptionClient.buildSessionConfig(
+            languageTag = getCurrentLanguageTag(),
+            autoDetectLanguage = geminiConfig.autoDetectLanguage,
+            transcriptionMode = geminiConfig.transcriptionMode,
+            endOfSpeechSilenceMs = geminiConfig.endOfSpeechSilenceMs,
+            userVocabulary = geminiConfig.customVocabulary,
+            editorContext = editorContext
         )
         streamSessionId = sessionId
         isStreamingConnecting = true
@@ -415,7 +437,7 @@ class VoiceInputManager(private val context: Context) {
         transcriptionClient.startStreaming(
             apiKey = apiKey,
             sessionConfig = sessionConfig,
-            callback = object : SonioxTranscriptionClient.StreamingCallback {
+            callback = object : GeminiTranscriptionClient.StreamingCallback {
                 override fun onStreamReady() {
                     if (sessionId != activeSessionId) return
                     cancelPendingReconnect()
@@ -424,6 +446,10 @@ class VoiceInputManager(private val context: Context) {
                     isStreamingConnecting = false
                     isStreamingReady = true
                     acknowledgeStreamConnect(sessionId)
+                    scheduleSessionRotate(
+                        sessionId,
+                        GeminiTranscriptionClient.SESSION_ROTATE_AFTER_MS
+                    )
                     flushPendingAudio(sessionId)
                     if (finalizeWhenStreamReady) {
                         finalizeWhenStreamReady = false
@@ -436,9 +462,14 @@ class VoiceInputManager(private val context: Context) {
                     enqueueTranscript(segment, sessionId)
                 }
 
-                override fun onFinalTokensReceived(hasTranscriptText: Boolean) {
+                override fun onServerResponse(hasTranscriptText: Boolean) {
                     if (sessionId != activeSessionId) return
-                    acknowledgeSonioxResponse(sessionId, hasTranscriptText)
+                    acknowledgeGeminiResponse(sessionId, hasTranscriptText)
+                }
+
+                override fun onSessionExpiring(timeLeftMs: Long) {
+                    if (sessionId != activeSessionId) return
+                    scheduleSessionRotate(sessionId, timeLeftMs - SESSION_ROTATE_LEAD_MS)
                 }
 
                 override fun onStreamError(error: String) {
@@ -458,19 +489,20 @@ class VoiceInputManager(private val context: Context) {
         if (sessionId != activeSessionId) return
         if (streamSessionId != sessionId) return
 
+        cancelSessionRotateTimer()
+
         if (isStreamingReady) {
             flushPendingAudio(sessionId)
-            // Flush any pending non-final tokens before the empty end-of-stream
-            // frame so a phrase spoken right before stop is not lost when the
-            // user taps stop without waiting for the local silence window.
-            transcriptionClient.finalizeNow()
-            scheduleSonioxResponseWatchdog(sessionId, "stop_finalize")
+            scheduleGeminiResponseWatchdog(sessionId, "stop_finalize")
+            // Sends audioStreamEnd and then keeps reading, so a phrase spoken
+            // right before stop is not lost when the user taps stop without
+            // waiting for the local silence window.
             transcriptionClient.finishStreaming()
             return
         }
 
         if (isStreamingConnecting) {
-            // Stop requested before socket is ready. Finalize once onStreamReady fires.
+            // Stop requested before the session is ready. Finalize once onStreamReady fires.
             finalizeWhenStreamReady = true
             return
         }
@@ -492,39 +524,39 @@ class VoiceInputManager(private val context: Context) {
     }
 
     /**
-     * Ask Soniox to finalize pending tokens after the local silence detector
-     * reports the speaker paused. This guarantees a trailing phrase is
-     * committed even when Soniox's semantic endpoint is delayed or never fires
-     * (the model only commits `is_final` tokens). It also makes the user's
-     * chunk-silence preference an authoritative finalization point, which is
-     * the recommended pattern when server endpoint detection is disabled.
+     * Ask Gemini to end the current turn after the local silence detector reports
+     * the speaker paused, by sending `audioStreamEnd` (the documented "Hybrid
+     * VAD" pattern). The session stays open and the next audio chunk reopens the
+     * stream.
+     *
+     * The server's own end-of-speech detection is configured to be patient so
+     * mid-sentence pauses do not fragment an utterance and cost accuracy. That
+     * patience means a trailing phrase can sit unfinalized, so the user's
+     * `PREF_VOICE_CHUNK_SILENCE_SECONDS` pause acts as the backstop that always
+     * commits it.
      *
      * Fires at most once per speech-stop transition (gated by
      * [hasFinalizedCurrentSilence], re-armed on the next onSpeechStarted). The
-     * chunk-silence window itself (>= 1 s) keeps finalize calls naturally
-     * spaced, so no extra global rate limit is needed -- one would risk
-     * dropping a legitimate flush between rapid back-to-back phrases.
-     *
-     * Note: Soniox suggests finalizing after ~200 ms of silence; we wait the
-     * full chunk-silence window instead (more accurate), so do not change this
-     * to fire immediately on speech-stop.
+     * chunk-silence window itself keeps calls naturally spaced, so no extra
+     * global rate limit is needed — one would risk dropping a legitimate flush
+     * between rapid back-to-back phrases.
      */
-    private fun requestManualFinalizeOnSilence(sessionId: Long) {
+    private fun requestTurnFinalizeOnSilence(sessionId: Long) {
         if (sessionId != activeSessionId) return
         if (currentState != State.RECORDING) return
         if (isSessionStopping) return
         if (!isStreamingReady || streamSessionId != sessionId) return
         if (hasFinalizedCurrentSilence) return
 
-        // Make sure any buffered audio is delivered before finalize so the
-        // tail is part of what Soniox finalizes.
+        // Make sure any buffered audio is delivered before the finalize so the
+        // tail is part of the turn Gemini closes.
         flushPendingAudio(sessionId)
         if (!isStreamingReady) return
 
-        if (transcriptionClient.finalizeNow()) {
+        if (transcriptionClient.finalizeTurn()) {
             hasFinalizedCurrentSilence = true
-            Log.i(TAG, "Manual finalize requested after local silence")
-            scheduleSonioxResponseWatchdog(sessionId, "manual_finalize")
+            Log.i(TAG, "Turn finalize requested after local silence")
+            scheduleGeminiResponseWatchdog(sessionId, "turn_finalize")
         }
     }
 
@@ -576,7 +608,7 @@ class VoiceInputManager(private val context: Context) {
             currentState == State.RECORDING &&
             !isSessionStopping
         ) {
-            scheduleSonioxResponseWatchdog(sessionId, "audio_pending")
+            scheduleGeminiResponseWatchdog(sessionId, "audio_pending")
         }
     }
 
@@ -670,7 +702,8 @@ class VoiceInputManager(private val context: Context) {
 
     private fun handleStreamDisconnected(sessionId: Long, error: String?) {
         if (sessionId != activeSessionId) return
-        cancelSonioxResponseWatchdog()
+        cancelGeminiResponseWatchdog()
+        cancelSessionRotateTimer()
         if (pendingReconnectRunnable != null && isStreamingConnecting && !isStreamingReady) {
             Log.i(TAG, "Ignoring duplicate stream disconnect callback while reconnect is already scheduled")
             return
@@ -680,7 +713,7 @@ class VoiceInputManager(private val context: Context) {
         isStreamingConnecting = false
 
         if (currentState == State.PAUSED) {
-            Log.i(TAG, "Soniox stream disconnected while paused — waiting for resume")
+            Log.i(TAG, "Gemini stream disconnected while paused — waiting for resume")
             notifyProcessingIdleIfDrained()
             return
         }
@@ -705,7 +738,7 @@ class VoiceInputManager(private val context: Context) {
         // same invalid session repeatedly.
         if (isUnrecoverableError(error)) {
             pendingAudioChunks.clear()
-            val message = error ?: "Soniox stream rejected"
+            val message = error ?: "Gemini stream rejected"
             Log.e(TAG, "Unrecoverable stream error — stopping recording: $message")
             listener?.onError(message)
             stopRecordingInternal(cancelPending = true)
@@ -720,7 +753,7 @@ class VoiceInputManager(private val context: Context) {
         }
 
         pendingAudioChunks.clear()
-        val message = error ?: "Soniox stream closed"
+        val message = error ?: "Gemini stream closed"
         Log.e(TAG, "Stream disconnected unrecoverably: $message")
         listener?.onError(message)
         stopRecordingInternal(cancelPending = true)
@@ -730,22 +763,20 @@ class VoiceInputManager(private val context: Context) {
         if (error == null) return false
         val lower = error.lowercase()
         return (lower.contains("invalid") && lower.contains("api key")) ||
-            lower.contains("incorrect api key") ||
+            lower.contains("not allowed to use") ||
             lower.contains("missing api key") ||
-            lower.contains("expired temporary api key") ||
             lower.contains("unauthenticated") ||
             lower.contains("unauthorized") ||
+            lower.contains("permission_denied") ||
             lower.contains("authentication failed") ||
             lower.contains("connection rejected") ||
-            lower.contains("model_not_available") ||
-            lower.contains("requested model is not available") ||
-            lower.contains("does not support real-time") ||
-            lower.contains("limit_exceeded") ||
+            lower.contains("is not available for this key") ||
+            lower.contains("rejected the request") ||
+            lower.contains("rejected this api key") ||
+            lower.contains("rejected the transcription session setup") ||
+            lower.contains("requires billing") ||
             lower.contains("rate limited") ||
-            lower.contains("too many requests") ||
-            lower.contains("payment required") ||
-            lower.contains("balance exhausted") ||
-            lower.contains("monthly budget")
+            lower.contains("too many requests")
     }
 
     private fun scheduleReconnectOrStop(sessionId: Long, reason: String) {
@@ -758,7 +789,7 @@ class VoiceInputManager(private val context: Context) {
         val message = if (allowWhileStopping) {
             "Final voice segment could not be transcribed completely"
         } else {
-            "Soniox stream unavailable: $reason"
+            "Gemini stream unavailable: $reason"
         }
         Log.e(TAG, message)
         listener?.onError(message)
@@ -780,7 +811,7 @@ class VoiceInputManager(private val context: Context) {
             return false
         }
         if (sessionApiKey.isBlank()) {
-            Log.e(TAG, "Cannot reconnect stream: missing Soniox API key")
+            Log.e(TAG, "Cannot reconnect stream: missing Gemini API key")
             return false
         }
         cancelPendingReconnect()
@@ -789,7 +820,7 @@ class VoiceInputManager(private val context: Context) {
         isStreamingConnecting = true
         Log.w(
             TAG,
-            "Scheduling Soniox reconnect in ${delayMs}ms " +
+            "Scheduling Gemini reconnect in ${delayMs}ms " +
                 "(attempt $streamReconnectAttempts/$MAX_STREAM_RECONNECT_ATTEMPTS, reason=$reason)"
         )
         val reconnectRunnable = Runnable {
@@ -832,7 +863,7 @@ class VoiceInputManager(private val context: Context) {
             pendingStreamConnectTimeoutRunnable = null
             if (sessionId != activeSessionId) return@Runnable
             if (!isStreamingConnecting || isStreamingReady || streamSessionId != sessionId) return@Runnable
-            val message = "Soniox stream connection timed out"
+            val message = "Gemini stream connection timed out"
             Log.e(
                 TAG,
                 "VOICE_RESPONSE timeout after ${STREAM_CONNECT_TIMEOUT_MS}ms (stream_connect): $message"
@@ -849,6 +880,36 @@ class VoiceInputManager(private val context: Context) {
         val runnable = pendingStreamConnectTimeoutRunnable ?: return
         mainHandler.removeCallbacks(runnable)
         pendingStreamConnectTimeoutRunnable = null
+    }
+
+    /**
+     * Move the dictation onto a fresh connection before the current one is
+     * terminated. Live transcription sessions are capped at 10 minutes, and the
+     * server announces the impending disconnect with `goAway`. Rotating is not an
+     * error, so it does not consume a reconnect attempt; buffered audio carries
+     * across the gap.
+     */
+    private fun scheduleSessionRotate(sessionId: Long, delayMs: Long) {
+        if (sessionId != activeSessionId) return
+        cancelSessionRotateTimer()
+        val safeDelayMs = delayMs.coerceAtLeast(0L)
+        val rotateRunnable = Runnable {
+            pendingSessionRotateRunnable = null
+            if (sessionId != activeSessionId) return@Runnable
+            if (isSessionStopping || currentState == State.IDLE) return@Runnable
+            if (sessionApiKey.isBlank()) return@Runnable
+            Log.i(TAG, "Rotating Gemini session onto a fresh connection")
+            streamReconnectAttempts = 0
+            startStreamingSession(sessionId, sessionApiKey, isReconnect = true)
+        }
+        pendingSessionRotateRunnable = rotateRunnable
+        mainHandler.postDelayed(rotateRunnable, safeDelayMs)
+    }
+
+    private fun cancelSessionRotateTimer() {
+        val runnable = pendingSessionRotateRunnable ?: return
+        mainHandler.removeCallbacks(runnable)
+        pendingSessionRotateRunnable = null
     }
 
     private fun reloadRuntimeConfig() {
@@ -875,7 +936,7 @@ class VoiceInputManager(private val context: Context) {
         chunkSilenceDurationMs = chunkSilenceSeconds * 1000L
         autoStopSilenceMs = autoStopSilenceSeconds * 1000L
         chunkSilenceThreshold = silenceThreshold.toDouble()
-        sonioxConfig = TranscriptionPreferences.readSonioxConfig(prefs)
+        geminiConfig = TranscriptionPreferences.readGeminiConfig(prefs)
 
         voiceRecorder.updateSilenceConfig(
             silenceDurationMs = chunkSilenceDurationMs,
@@ -887,10 +948,11 @@ class VoiceInputManager(private val context: Context) {
             "Voice config loaded: localSpeechSilence=${chunkSilenceDurationMs}ms, " +
                 "silenceThreshold=${chunkSilenceThreshold}, " +
                 "autoStopSilence=${autoStopSilenceMs}ms, " +
-                "sonioxEnableEndpointDetection=${sonioxConfig.enableEndpointDetection}, " +
-                "sonioxMaxEndpointDelayMs=${sonioxConfig.maxEndpointDelayMs}, " +
-                "sonioxDiarization=${sonioxConfig.diarizationEnabled}, " +
-                "sonioxCustomTerms=${sonioxConfig.customTerms.size}"
+                "geminiMode=${geminiConfig.transcriptionMode}, " +
+                "geminiEndOfSpeechSilenceMs=${geminiConfig.endOfSpeechSilenceMs}, " +
+                "geminiAutoDetectLanguage=${geminiConfig.autoDetectLanguage}, " +
+                "geminiUseEditorContext=${geminiConfig.useEditorContext}, " +
+                "geminiCustomVocabulary=${geminiConfig.customVocabulary.size}"
         )
     }
 
@@ -915,36 +977,36 @@ class VoiceInputManager(private val context: Context) {
         mainHandler.removeCallbacks(autoStopSilenceRunnable)
     }
 
-    // ── Soniox response latency watchdog ───────────────────────────────
+    // ── Gemini response latency watchdog ───────────────────────────────
 
-    private fun scheduleSonioxResponseWatchdog(
+    private fun scheduleGeminiResponseWatchdog(
         sessionId: Long,
         reason: String,
-        timeoutMs: Long = SONIOX_RESPONSE_TIMEOUT_MS
+        timeoutMs: Long = GEMINI_RESPONSE_TIMEOUT_MS
     ) {
-        cancelSonioxResponseWatchdog()
+        cancelGeminiResponseWatchdog()
         val startedAtMs = SystemClock.elapsedRealtime()
-        awaitingSonioxResponse = AwaitingSonioxResponse(
+        awaitingGeminiResponse = AwaitingGeminiResponse(
             sessionId = sessionId,
             reason = reason,
             startedAtMs = startedAtMs,
             timeoutMs = timeoutMs
         )
         val runnable = Runnable {
-            sonioxResponseTimeoutRunnable = null
-            val pending = awaitingSonioxResponse ?: return@Runnable
+            geminiResponseTimeoutRunnable = null
+            val pending = awaitingGeminiResponse ?: return@Runnable
             if (pending.sessionId != activeSessionId) return@Runnable
             val elapsed = SystemClock.elapsedRealtime() - pending.startedAtMs
-            awaitingSonioxResponse = null
+            awaitingGeminiResponse = null
             Log.e(
                 TAG,
                 "VOICE_RESPONSE timeout after ${elapsed}ms (${pending.reason}): " +
-                    "no Soniox response; streamReady=$isStreamingReady, " +
+                    "no Gemini response; streamReady=$isStreamingReady, " +
                     "pendingAudio=${pendingAudioChunks.size}, " +
                     "reconnectAttempt=$streamReconnectAttempts"
             )
         }
-        sonioxResponseTimeoutRunnable = runnable
+        geminiResponseTimeoutRunnable = runnable
         mainHandler.postDelayed(runnable, timeoutMs)
     }
 
@@ -955,41 +1017,42 @@ class VoiceInputManager(private val context: Context) {
         Log.i(TAG, "VOICE_RESPONSE ok in ${elapsed}ms (stream_connect): stream ready")
     }
 
-    private fun acknowledgeSonioxResponse(sessionId: Long, hasTranscriptText: Boolean) {
-        val pending = awaitingSonioxResponse ?: return
+    private fun acknowledgeGeminiResponse(sessionId: Long, hasTranscriptText: Boolean) {
+        val pending = awaitingGeminiResponse ?: return
         if (pending.sessionId != sessionId) return
-        cancelSonioxResponseWatchdog()
+        cancelGeminiResponseWatchdog()
         val elapsed = SystemClock.elapsedRealtime() - pending.startedAtMs
-        val detail = if (hasTranscriptText) "transcript received" else "empty final-token ack"
+        val detail = if (hasTranscriptText) "transcript received" else "interim or turn boundary"
         Log.i(TAG, "VOICE_RESPONSE ok in ${elapsed}ms (${pending.reason}): $detail")
     }
 
-    private fun cancelSonioxResponseWatchdog() {
-        sonioxResponseTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
-        sonioxResponseTimeoutRunnable = null
-        awaitingSonioxResponse = null
+    private fun cancelGeminiResponseWatchdog() {
+        geminiResponseTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+        geminiResponseTimeoutRunnable = null
+        awaitingGeminiResponse = null
     }
 
     // ── Settings ───────────────────────────────────────────────────────
 
     private fun getApiKey(): String {
         return try {
-            TranscriptionPreferences.readSonioxApiKey(context.prefs())
+            TranscriptionPreferences.readGeminiApiKey(context.prefs())
         } catch (e: Exception) {
             Log.e(TAG, "Error getting API key: ${e.message}")
             ""
         }
     }
 
-    private fun getCurrentLanguageHint(): String? {
+    /**
+     * Full language tag of the active keyboard subtype (for example `en_US`), so
+     * the client can pick the matching BCP-47 regional variant Gemini expects
+     * rather than a bare language code.
+     */
+    private fun getCurrentLanguageTag(): String? {
         return try {
             val locale = Settings.getValues()?.mLocale ?: return null
-            val language = locale.language
-            when {
-                language.isBlank() -> null
-                language == "und" -> null
-                else -> language.lowercase(Locale.US)
-            }
+            if (locale.language.isBlank() || locale.language == "und") return null
+            locale.toLanguageTag().takeIf { it.isNotBlank() && it != "und" }
         } catch (e: Exception) {
             Log.e(TAG, "Error getting language: ${e.message}")
             null
