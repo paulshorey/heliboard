@@ -33,7 +33,7 @@ public final class InputAttributes {
     final public boolean mInputTypeShouldAutoCorrect;
     final public boolean mIsPasswordField;
     final public boolean mShouldShowSuggestions;
-    final public boolean mMayOverrideShowingSuggestions;
+    final public boolean mIsNoSuggestionsField;
     final public boolean mApplicationSpecifiedCompletionOn;
     final public boolean mShouldInsertSpacesAutomatically;
     final public boolean mShouldShowVoiceInputKey;
@@ -74,7 +74,7 @@ public final class InputAttributes {
                         + " imeOptions=0x%08x", mInputType, editorInfo.imeOptions));
             }
             mShouldShowSuggestions = false;
-            mMayOverrideShowingSuggestions = false;
+            mIsNoSuggestionsField = false;
             mInputTypeShouldAutoCorrect = false;
             mApplicationSpecifiedCompletionOn = false;
             mShouldInsertSpacesAutomatically = false;
@@ -91,9 +91,13 @@ public final class InputAttributes {
         final boolean flagAutoCorrect = 0 != (mInputType & InputType.TYPE_TEXT_FLAG_AUTO_CORRECT);
         final boolean flagAutoComplete = 0 != (mInputType & InputType.TYPE_TEXT_FLAG_AUTO_COMPLETE);
         // TODO: Have a helper method in InputTypeUtils
-        // Make sure that passwords are not displayed in {@link SuggestionStripView}.
-        mShouldShowSuggestions = !mIsPasswordField && !flagNoSuggestions;
-        mMayOverrideShowingSuggestions = !mIsPasswordField;
+        // Host apps set TYPE_TEXT_FLAG_NO_SUGGESTIONS to avoid IME composing spans, not to hide
+        // the keyboard's suggestion strip. The current word lives in WordComposer and is mirrored
+        // as committed text, so we can still look up suggestions. Password fields remain excluded.
+        // Autocorrect and user-history learning still honor the host flag: showing candidates is
+        // not the same as replacing or remembering the typed text.
+        mShouldShowSuggestions = !mIsPasswordField;
+        mIsNoSuggestionsField = flagNoSuggestions;
 
         mShouldInsertSpacesAutomatically = InputTypeUtils.isAutoSpaceFriendlyType(mInputType);
 
