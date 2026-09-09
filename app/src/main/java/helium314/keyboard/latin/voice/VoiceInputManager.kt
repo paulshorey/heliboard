@@ -60,6 +60,12 @@ class VoiceInputManager(private val context: Context) {
         private const val SESSION_ROTATE_LEAD_MS = 1_500L
 
         /**
+         * When `goAway` is imminent, force rotation even if the user is still
+         * talking so the socket is not aborted mid-handshake.
+         */
+        private const val SESSION_ROTATE_FORCE_LEAD_MS = 400L
+
+        /**
          * If Gemini keeps updating an interim hypothesis and then goes quiet
          * without a final — typical of SMART mode waiting for the next word —
          * finalize the turn even when local RMS silence did not fire.
@@ -149,12 +155,17 @@ class VoiceInputManager(private val context: Context) {
     private var isStreamingReady = false
     private var isStreamingConnecting = false
     private var finalizeWhenStreamReady = false
+    /** Pause happened before `setupComplete`; finalize the turn as soon as the socket is ready. */
+    private var finalizeTurnWhenStreamReady = false
+    /** 9-minute / goAway rotate is waiting for the current utterance to finish. */
+    private var rotateAfterSpeechStops = false
     private var isSessionStopping = false
     private var sessionApiKey = ""
     private var streamReconnectAttempts = 0
     private var pendingReconnectRunnable: Runnable? = null
     private var pendingStreamConnectTimeoutRunnable: Runnable? = null
     private var pendingSessionRotateRunnable: Runnable? = null
+    private var pendingForceRotateRunnable: Runnable? = null
 
     // Buffered audio while stream is not yet open
     private val pendingAudioChunks = ArrayDeque<PendingAudioChunk>()
@@ -293,6 +304,10 @@ class VoiceInputManager(private val context: Context) {
                 if (sessionId != activeSessionId) return
                 startAutoStopTimer()
                 requestTurnFinalizeOnSilence(sessionId)
+                if (rotateAfterSpeechStops) {
+                    rotateAfterSpeechStops = false
+                    rotateStreamingSession(sessionId, "speech stopped")
+                }
             }
 
             override fun onRecordingStopped() {
@@ -347,6 +362,8 @@ class VoiceInputManager(private val context: Context) {
         // drop the connection, so close it out before the mic goes quiet.
         if (isStreamingReady) {
             transcriptionClient.finalizeTurn()
+        } else if (isStreamingConnecting) {
+            finalizeTurnWhenStreamReady = true
         }
         updateState(State.PAUSED)
     }
@@ -387,6 +404,8 @@ class VoiceInputManager(private val context: Context) {
         isStreamingReady = false
         isStreamingConnecting = false
         finalizeWhenStreamReady = false
+        finalizeTurnWhenStreamReady = false
+        rotateAfterSpeechStops = false
         isSessionStopping = false
         sessionApiKey = ""
         streamReconnectAttempts = 0
@@ -487,8 +506,18 @@ class VoiceInputManager(private val context: Context) {
                     flushPendingAudio(sessionId)
                     if (finalizeWhenStreamReady) {
                         finalizeWhenStreamReady = false
+                        finalizeTurnWhenStreamReady = false
                         finalizeStreamingSession(sessionId)
+                    } else if (finalizeTurnWhenStreamReady || currentState == State.PAUSED) {
+                        finalizeTurnWhenStreamReady = false
+                        transcriptionClient.finalizeTurn()
                     }
+                }
+
+                override fun onHandshakeRestarted() {
+                    if (sessionId != activeSessionId) return
+                    if (!isStreamingConnecting || isStreamingReady) return
+                    scheduleStreamConnectTimeout(sessionId)
                 }
 
                 override fun onTranscriptionResult(segment: TranscriptSegment) {
@@ -513,7 +542,11 @@ class VoiceInputManager(private val context: Context) {
 
                 override fun onSessionExpiring(timeLeftMs: Long) {
                     if (sessionId != activeSessionId) return
-                    scheduleSessionRotate(sessionId, timeLeftMs - SESSION_ROTATE_LEAD_MS)
+                    scheduleSessionRotate(
+                        sessionId,
+                        timeLeftMs - SESSION_ROTATE_LEAD_MS,
+                        forceAfterMs = timeLeftMs - SESSION_ROTATE_FORCE_LEAD_MS
+                    )
                 }
 
                 override fun onStreamError(error: String) {
@@ -987,8 +1020,12 @@ class VoiceInputManager(private val context: Context) {
      * server announces the impending disconnect with `goAway`. Rotating is not an
      * error, so it does not consume a reconnect attempt; buffered audio carries
      * across the gap.
+     *
+     * If the user is still talking, wait for the next local silence so the
+     * current utterance can finalize on the outgoing socket. [forceAfterMs]
+     * (used for `goAway`) is the last moment we can wait.
      */
-    private fun scheduleSessionRotate(sessionId: Long, delayMs: Long) {
+    private fun scheduleSessionRotate(sessionId: Long, delayMs: Long, forceAfterMs: Long? = null) {
         if (sessionId != activeSessionId) return
         cancelSessionRotateTimer()
         val safeDelayMs = delayMs.coerceAtLeast(0L)
@@ -997,18 +1034,45 @@ class VoiceInputManager(private val context: Context) {
             if (sessionId != activeSessionId) return@Runnable
             if (isSessionStopping || currentState == State.IDLE) return@Runnable
             if (sessionApiKey.isBlank()) return@Runnable
-            Log.i(TAG, "Rotating Gemini session onto a fresh connection")
-            streamReconnectAttempts = 0
-            startStreamingSession(sessionId, sessionApiKey, isReconnect = true)
+            if (voiceRecorder.isCurrentlySpeaking) {
+                rotateAfterSpeechStops = true
+                Log.i(TAG, "Deferring Gemini session rotate until the current utterance ends")
+                return@Runnable
+            }
+            rotateStreamingSession(sessionId, "scheduled")
         }
         pendingSessionRotateRunnable = rotateRunnable
         mainHandler.postDelayed(rotateRunnable, safeDelayMs)
+        if (forceAfterMs != null) {
+            val forceDelay = forceAfterMs.coerceAtLeast(safeDelayMs)
+            if (forceDelay > safeDelayMs) {
+                val forceRunnable = Runnable {
+                    pendingForceRotateRunnable = null
+                    if (sessionId != activeSessionId) return@Runnable
+                    if (!rotateAfterSpeechStops) return@Runnable
+                    rotateAfterSpeechStops = false
+                    rotateStreamingSession(sessionId, "goAway deadline")
+                }
+                pendingForceRotateRunnable = forceRunnable
+                mainHandler.postDelayed(forceRunnable, forceDelay)
+            }
+        }
+    }
+
+    private fun rotateStreamingSession(sessionId: Long, reason: String) {
+        if (sessionId != activeSessionId) return
+        if (isSessionStopping || currentState == State.IDLE) return
+        if (sessionApiKey.isBlank()) return
+        Log.i(TAG, "Rotating Gemini session onto a fresh connection ($reason)")
+        streamReconnectAttempts = 0
+        startStreamingSession(sessionId, sessionApiKey, isReconnect = true)
     }
 
     private fun cancelSessionRotateTimer() {
-        val runnable = pendingSessionRotateRunnable ?: return
-        mainHandler.removeCallbacks(runnable)
+        pendingSessionRotateRunnable?.let { mainHandler.removeCallbacks(it) }
         pendingSessionRotateRunnable = null
+        pendingForceRotateRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingForceRotateRunnable = null
     }
 
     private fun reloadRuntimeConfig() {

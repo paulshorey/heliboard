@@ -170,9 +170,10 @@ user stops talking and nothing is written. The client backstops this:
 - If no authoritative final arrives within **800 ms** of `audioStreamEnd`, the
   last interim hypothesis is committed. A late polished final of the same words
   is dropped so the editor does not see a duplicate, including SMART rewrites
-  that drop a leading filler or change the first word. A session rotate flushes
-  an armed leftover before the connection token changes; otherwise the old
-  socket's close handler would skip the commit.
+  that drop a leading filler or change the first word. `audioStreamEnd` after
+  a final already arrived does not re-arm that flush. A session rotate waits
+  for the current utterance when it can, then flushes any leftover before the
+  connection token changes.
 - On **mic pause** the same `audioStreamEnd` is sent. A turn left open with no
   audio is the dominant cause of the Live API dropping the connection with 1011.
 - On **stop**, `finishStreaming()` sends it and then keeps reading for up to 8 s.

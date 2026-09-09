@@ -750,6 +750,13 @@ class GeminiTranscriptionClient {
 
         /** Stream closed (gracefully or remotely). */
         fun onStreamClosed()
+
+        /**
+         * The client opened a replacement handshake on this same manager
+         * session (setup-tier fallback). Reset any connect timeout that was
+         * started for the previous attempt.
+         */
+        fun onHandshakeRestarted() {}
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -804,6 +811,13 @@ class GeminiTranscriptionClient {
     private var turnFlushDeadlineElapsed = false
 
     /**
+     * True after this turn already produced an authoritative
+     * `inputTranscription`. A later Hybrid VAD `audioStreamEnd` (local silence
+     * after the server already finalized) must not re-arm leftover flush.
+     */
+    private var turnHadAuthoritativeFinal = false
+
+    /**
      * Set while the socket is open but `setupComplete` has not arrived. A 1007
      * close in this window means the `setup` payload was rejected, which is what
      * triggers [SetupTier] degradation.
@@ -832,8 +846,9 @@ class GeminiTranscriptionClient {
     ) {
         // A goAway / 9-minute rotate opens a new socket by incrementing the
         // connection token. The outgoing close handler then sees a stale token
-        // and skips its leftover flush. Commit any armed leftover here first.
-        if (turnFlushArmed) {
+        // and skips its leftover flush. Commit any leftover here first, including
+        // a mid-speech hypothesis when rotation cannot wait for silence.
+        if (turnFlushArmed || lastInterimText != null) {
             flushPendingInterim(activeConnectionToken)
         }
 
@@ -987,6 +1002,7 @@ class GeminiTranscriptionClient {
             "Gemini rejected setup tier $rejectedTier (code=$code, reason=$reason); " +
                 "retrying with $fallback"
         )
+        callback.onHandshakeRestarted()
         startStreaming(apiKey, sessionConfig, callback, fallback)
         return true
     }
@@ -1030,6 +1046,11 @@ class GeminiTranscriptionClient {
             val sent = socket.send(AUDIO_STREAM_END_MESSAGE)
             if (sent) {
                 postIfCurrent(activeConnectionToken) {
+                    if (turnHadAuthoritativeFinal && lastInterimText == null) {
+                        // Server already closed this turn. Re-arming would
+                        // commit the next utterance's first interim after 800 ms.
+                        return@postIfCurrent
+                    }
                     turnFlushArmed = true
                     turnFlushDeadlineElapsed = false
                     scheduleInterimFlush()
@@ -1157,6 +1178,7 @@ class GeminiTranscriptionClient {
             clearInterimFlushTimer()
             turnFlushArmed = false
             turnFlushDeadlineElapsed = false
+            turnHadAuthoritativeFinal = true
             lastInterimText = null
             val flushed = flushedInterimText
             val textToAccept = if (flushed != null) {
@@ -1281,6 +1303,7 @@ class GeminiTranscriptionClient {
         flushedInterimText = null
         turnFlushArmed = false
         turnFlushDeadlineElapsed = false
+        turnHadAuthoritativeFinal = false
     }
 
     private fun clearInterimFlushTimer() {
