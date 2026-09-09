@@ -184,7 +184,10 @@ again. The client therefore:
 - **Holds outbound audio** until speech resumes, keeping a 300 ms prefix so the
   next utterance is not clipped. Silence must not reopen the turn.
 - Commits the last interim if no authoritative final arrives within **800 ms** of
-  `audioStreamEnd`. A late polished rewrite of those same words is dropped.
+  `audioStreamEnd`. A late polished rewrite of those same words is dropped,
+  including SMART rewrites that drop a leading filler or change the first word.
+  A session rotate flushes an armed leftover before the connection token
+  changes so the outgoing close handler cannot drop it.
 - Sends the same `audioStreamEnd` on **mic pause** (a turn left open with no
   audio is the dominant cause of close 1011) and on **stop**, then keeps reading
   for up to 8 s.

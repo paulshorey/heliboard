@@ -379,6 +379,42 @@ class GeminiTranscriptionClientStreamTest {
     }
 
     @Test
+    fun reconnectFlushesAnArmedLeftoverInterimBeforeTheTokenChanges() {
+        enqueueServer(object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                serverReceived.add(text)
+                if (text.contains("\"setup\"")) {
+                    webSocket.send("""{"setupComplete":{}}""")
+                }
+            }
+        })
+        enqueueServer(object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                serverReceived.add(text)
+                if (text.contains("\"setup\"")) {
+                    webSocket.send("""{"setupComplete":{}}""")
+                }
+            }
+        })
+
+        startClient()
+        awaitUntil { events.contains("ready") }
+        currentServerSocket!!.send(
+            """{"serverContent":{"interimInputTranscription":{"text":"trailing phrase"}}}"""
+        )
+        awaitUntil { events.contains("interim") }
+        assertTrue(client.finalizeTurn())
+        // Arm the leftover flush without waiting out the 800 ms timer.
+        shadowOf(Looper.getMainLooper()).idle()
+
+        startClient()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals("trailing phrase", transcripts.single().text)
+        awaitUntil { events.count { it == "ready" } >= 2 }
+    }
+
+    @Test
     fun flushesAnInterimThatArrivesAfterTheFinalizeDeadline() {
         enqueueServer(object : WebSocketListener() {
             override fun onMessage(webSocket: WebSocket, text: String) {

@@ -107,6 +107,7 @@ Active subtype locale + transcription preferences + editor text
 serverContent arrives
     → interimInputTranscription is held, not committed while the speaker is talking
     → after audioStreamEnd, a leftover interim is flushed if no final arrives
+      (also on session rotate, before the connection token is incremented)
     → inputTranscription goes through TranscriptAccumulator
         · extends the previous transcript → emit only the suffix
         · unrelated text                  → emit all of it
