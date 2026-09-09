@@ -173,7 +173,10 @@ user stops talking and nothing is written. The client backstops this:
   that drop a leading filler or change the first word. `audioStreamEnd` after
   a final already arrived does not re-arm that flush. A session rotate waits
   for the current utterance when it can, then flushes any leftover before the
-  connection token changes.
+  connection token changes. If `goAway` is already imminent, rotate immediately
+  even while speaking. A deferred rotate is cancelled if the stream dies or a
+  replacement session starts first. `resumeRecording` clears a pending
+  pause-during-connect finalize so the new dictation is not closed on `setupComplete`.
 - On **mic pause** the same `audioStreamEnd` is sent. A turn left open with no
   audio is the dominant cause of the Live API dropping the connection with 1011.
 - On **stop**, `finishStreaming()` sends it and then keeps reading for up to 8 s.
@@ -197,8 +200,10 @@ not `head ing`).
 - `{"goAway":{"timeLeft":"30s"}}` — `timeLeft` is a protobuf Duration and arrives
   as a **string**.
 - `VoiceInputManager` rotates onto a fresh connection 1.5 s before the announced
-  deadline and unconditionally after 9 minutes. Rotation does not consume a
-  reconnect attempt; buffered audio carries across.
+  deadline and unconditionally after 9 minutes. If the user is still talking,
+  rotation waits for local silence unless `goAway` is already imminent. A
+  deferred rotate is cancelled if the stream dies first. Rotation does not
+  consume a reconnect attempt; buffered audio carries across.
 - There is **no application-level keepalive** in this protocol. OkHttp pings run
   every 20 s; the real fix for dropped connections is the audio lifecycle above.
 - Close codes: 1007 setup schema or auth, 1008 policy/billing, 1011 stalled turn,
