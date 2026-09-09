@@ -395,6 +395,33 @@ class GeminiTranscriptionClientTest {
     }
 
     @Test
+    fun leftoverAfterFlushedInterim_treatsContractionsAsOneWord() {
+        assertNull(
+            GeminiTranscriptionClient.leftoverAfterFlushedInterim("I don't.", "I dont")
+        )
+        assertNull(
+            GeminiTranscriptionClient.leftoverAfterFlushedInterim("co-op.", "coop")
+        )
+        assertEquals(
+            listOf("i", "don't"),
+            GeminiTranscriptionClient.tokenizeTranscript("I don't.")
+        )
+    }
+
+    @Test
+    fun accumulator_usesRecordAsAsTheNextComparisonBaseline() {
+        val accumulator = TranscriptAccumulator()
+
+        assertEquals("and then I", accumulator.accept("and then I")?.text)
+        assertEquals(
+            "went home.",
+            accumulator.accept("went home.", recordAs = "And then I went home")?.text
+        )
+        val extension = assertNotNull(accumulator.accept("And then I went home later."))
+        assertEquals("later.", extension.text)
+    }
+
+    @Test
     fun systemInstruction_tellsTheModelToFinalizeUnfinishedTrailingSpeech() {
         val instruction = GeminiTranscriptionClient.SYSTEM_INSTRUCTION
         assertTrue(instruction.contains("unfinished"))

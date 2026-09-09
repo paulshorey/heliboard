@@ -117,12 +117,14 @@ class VoiceRecorder(private val context: Context) {
     private var recordingThread: Thread? = null
     @Volatile private var isRecording = false
     @Volatile private var isPaused = false
+    @Volatile private var isSpeaking = false
     @Volatile private var silenceConfig = SilenceConfig()
     private var callback: RecordingCallback? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
     val isCurrentlyRecording: Boolean get() = isRecording
     val isCurrentlyPaused: Boolean get() = isPaused
+    val isCurrentlySpeaking: Boolean get() = isSpeaking
 
     fun setCallback(callback: RecordingCallback?) {
         this.callback = callback
@@ -280,7 +282,7 @@ class VoiceRecorder(private val context: Context) {
     private fun recordingLoop() {
         val readBuffer = ByteArray(BYTES_PER_READ)
         var silenceDurationMs = 0L
-        var isSpeaking = false
+        isSpeaking = false
         var noiseFloor = INITIAL_NOISE_FLOOR
         var smoothedEnergy = INITIAL_NOISE_FLOOR
         val energyHistory = ArrayDeque<Double>()

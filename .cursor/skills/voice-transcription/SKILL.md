@@ -157,10 +157,12 @@ wait for a complete sentence. Together that means a trailing unfinished phrase
 can sit as an interim hypothesis and never become `inputTranscription` — the
 user stops talking and nothing is written. The client backstops this:
 
-- After local silence (`PREF_VOICE_CHUNK_SILENCE_SECONDS`, default **2 s**), or
-  when an interim hypothesis goes stale for **2 s** with no final,
+- After local silence (`PREF_VOICE_CHUNK_SILENCE_SECONDS`, default **2 s**),
   `VoiceInputManager` sends `{"realtimeInput":{"audioStreamEnd":true}}`. At most
-  once per speech-stop transition; re-armed on the next `onSpeechStarted`.
+  once per speech-stop transition; re-armed on the next `onSpeechStarted`. A
+  stale-interim backup (2 s with no final) fires only while
+  `VoiceRecorder.isCurrentlySpeaking` is false, so it cannot hold audio during
+  live speech.
 - **Outbound audio is then held** until speech resumes. The next silent PCM
   chunk would reopen the turn and Gemini would start waiting for the next word
   again. A 300 ms prefix buffer is kept so the following utterance is not

@@ -179,8 +179,8 @@ often stays as an interim hypothesis, and sending more silent PCM after
 again. The client therefore:
 
 - Sends `{"realtimeInput":{"audioStreamEnd":true}}` on local silence
-  (`PREF_VOICE_CHUNK_SILENCE_SECONDS`, default **2 s**) and when an interim
-  hypothesis goes stale for **2 s** with no final.
+  (`PREF_VOICE_CHUNK_SILENCE_SECONDS`, default **2 s**). A stale-interim backup
+  (2 s with no final) runs only while local VAD reports the user is not speaking.
 - **Holds outbound audio** until speech resumes, keeping a 300 ms prefix so the
   next utterance is not clipped. Silence must not reopen the turn.
 - Commits the last interim if no authoritative final arrives within **800 ms** of

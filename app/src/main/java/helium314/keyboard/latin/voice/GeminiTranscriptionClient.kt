@@ -558,7 +558,14 @@ class GeminiTranscriptionClient {
                 emittedTailIsWordy = false
             }
 
-            fun accept(rawText: String): TranscriptSegment? {
+            /** Keep [rawText] as the comparison baseline without emitting a segment. */
+            fun remember(rawText: String) {
+                lastRawText = rawText
+                val trimmed = rawText.trim()
+                emittedTailIsWordy = trimmed.isNotEmpty() && isWordyContinuationChar(trimmed.last())
+            }
+
+            fun accept(rawText: String, recordAs: String = rawText): TranscriptSegment? {
                 if (rawText.isEmpty()) return null
 
                 val previousRaw = lastRawText
@@ -567,11 +574,14 @@ class GeminiTranscriptionClient {
                     rawText.startsWith(previousRaw)
                 val newPart = when {
                     previousRaw.isEmpty() -> rawText
-                    rawText == previousRaw -> return null
+                    rawText == previousRaw -> {
+                        lastRawText = recordAs
+                        return null
+                    }
                     isPrefixExtension -> rawText.substring(previousRaw.length)
                     else -> rawText
                 }
-                lastRawText = rawText
+                lastRawText = recordAs
 
                 val trimmed = newPart.trim()
                 if (trimmed.isEmpty()) return null
@@ -616,8 +626,9 @@ class GeminiTranscriptionClient {
 
             var matched = 0
             while (matched < interimTokens.size && matched < finalTokens.size) {
-                val interim = interimTokens[matched]
-                val fin = finalTokens[matched]
+                val interim = comparableTranscriptToken(interimTokens[matched])
+                val fin = comparableTranscriptToken(finalTokens[matched])
+                if (interim.isEmpty() || fin.isEmpty()) break
                 if (interim == fin || fin.startsWith(interim) || interim.startsWith(fin)) {
                     matched++
                 } else {
@@ -629,11 +640,18 @@ class GeminiTranscriptionClient {
             return takeLastTranscriptWords(finalText, finalTokens.size - matched)
         }
 
+        internal fun comparableTranscriptToken(token: String): String =
+            buildString {
+                for (c in token) {
+                    if (c.isLetterOrDigit()) append(c)
+                }
+            }
+
         internal fun tokenizeTranscript(text: String): List<String> {
             val normalized = buildString {
                 for (c in text.lowercase(Locale.US)) {
                     when {
-                        c.isLetterOrDigit() -> append(c)
+                        isWordyContinuationChar(c) -> append(c)
                         lastOrNull()?.isWhitespace() != true && isNotEmpty() -> append(' ')
                     }
                 }
@@ -721,12 +739,20 @@ class GeminiTranscriptionClient {
      * Last speculative hypothesis for the open turn. Committed only after
      * `audioStreamEnd` if no authoritative `inputTranscription` arrives.
      */
-    @Volatile
     private var lastInterimText: String? = null
 
     /** Interim already inserted so a late polished final does not duplicate it. */
-    @Volatile
     private var flushedInterimText: String? = null
+
+    /**
+     * True after Hybrid VAD `audioStreamEnd` until that turn's leftover interim
+     * is flushed, a final arrives, or speech resumes. The flush timer must not
+     * commit an interim from the next utterance.
+     */
+    private var turnFlushArmed = false
+
+    /** The 800 ms wait already elapsed with no interim; flush the first one that arrives. */
+    private var turnFlushDeadlineElapsed = false
 
     /**
      * Set while the socket is open but `setupComplete` has not arrived. A 1007
@@ -764,8 +790,7 @@ class GeminiTranscriptionClient {
         isSessionReady = false
         awaitingSetupTier = tier
         accumulator.reset()
-        lastInterimText = null
-        flushedInterimText = null
+        resetTurnFlushState()
         clearFinalizeCloseTimer()
         clearInterimFlushTimer()
 
@@ -827,7 +852,6 @@ class GeminiTranscriptionClient {
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (newToken != activeConnectionToken) return
                 clearFinalizeCloseTimer()
-                clearInterimFlushTimer()
                 val rejectedTier = awaitingSetupTier
                 awaitingSetupTier = null
                 isSessionReady = false
@@ -837,17 +861,22 @@ class GeminiTranscriptionClient {
                 if (!isClosing && rejectedTier != null &&
                     retrySetupWithLowerTier(rejectedTier, code, reason, apiKey, sessionConfig, callback)
                 ) {
+                    clearInterimFlushTimer()
                     return
                 }
                 if (!isClosing && code != 1000) {
                     val message = describeCloseFailure(code, reason)
                     Log.e(TAG, "Gemini stream closed unexpectedly: $message")
                     postIfCurrent(newToken) {
+                        flushPendingInterim(newToken)
+                        clearInterimFlushTimer()
                         this@GeminiTranscriptionClient.callback?.onStreamError(message)
                     }
                     return
                 }
                 postIfCurrent(newToken) {
+                    flushPendingInterim(newToken)
+                    clearInterimFlushTimer()
                     this@GeminiTranscriptionClient.callback?.onStreamClosed()
                 }
             }
@@ -855,13 +884,14 @@ class GeminiTranscriptionClient {
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (newToken != activeConnectionToken) return
                 clearFinalizeCloseTimer()
-                clearInterimFlushTimer()
                 awaitingSetupTier = null
                 isSessionReady = false
                 this@GeminiTranscriptionClient.webSocket = null
                 if (isClosing) {
                     Log.i(TAG, "Gemini stream failure after close request: ${t.message}")
                     postIfCurrent(newToken) {
+                        flushPendingInterim(newToken)
+                        clearInterimFlushTimer()
                         this@GeminiTranscriptionClient.callback?.onStreamClosed()
                     }
                     return
@@ -869,6 +899,8 @@ class GeminiTranscriptionClient {
                 val errorMessage = mapConnectionError(t, response)
                 Log.e(TAG, "Gemini stream failure: $errorMessage (raw: ${t.message})")
                 postIfCurrent(newToken) {
+                    flushPendingInterim(newToken)
+                    clearInterimFlushTimer()
                     this@GeminiTranscriptionClient.callback?.onStreamError(errorMessage)
                 }
             }
@@ -917,6 +949,17 @@ class GeminiTranscriptionClient {
     }
 
     /**
+     * Forget leftover-interim flush state because a new utterance has started.
+     * Cancels a pending flush so it cannot commit the next phrase mid-speech.
+     */
+    fun onNewSpeechTurn() {
+        postIfCurrent(activeConnectionToken) {
+            clearInterimFlushTimer()
+            resetTurnFlushState()
+        }
+    }
+
+    /**
      * Ask Gemini to finalize the current turn immediately instead of waiting out
      * its own silence window (Hybrid VAD). The session stays open and the next
      * audio chunk reopens the stream, so this is also the right signal to send
@@ -930,7 +973,11 @@ class GeminiTranscriptionClient {
         return try {
             val sent = socket.send(AUDIO_STREAM_END_MESSAGE)
             if (sent) {
-                scheduleInterimFlush()
+                postIfCurrent(activeConnectionToken) {
+                    turnFlushArmed = true
+                    turnFlushDeadlineElapsed = false
+                    scheduleInterimFlush()
+                }
             }
             sent
         } catch (e: Exception) {
@@ -981,8 +1028,7 @@ class GeminiTranscriptionClient {
         isSessionReady = false
         awaitingSetupTier = null
         accumulator.reset()
-        lastInterimText = null
-        flushedInterimText = null
+        resetTurnFlushState()
         val socket = webSocket
         webSocket = null
         if (socket != null) {
@@ -1023,8 +1069,16 @@ class GeminiTranscriptionClient {
             return
         }
 
-        // A single server event can carry several fields at once, so every
-        // branch below is checked independently.
+        // Transcript state and leftover-interim flush share the main thread so
+        // a timer cannot race handleMessage and duplicate or drop text.
+        postIfCurrent(connectionToken) {
+            applyServerContent(connectionToken, json)
+        }
+    }
+
+    private fun applyServerContent(connectionToken: Long, json: JSONObject) {
+        if (connectionToken != activeConnectionToken) return
+
         var sawResponse = false
         var sawTranscript = false
         var sawInterim = false
@@ -1033,11 +1087,20 @@ class GeminiTranscriptionClient {
             lastInterimText = interim
             sawResponse = true
             sawInterim = true
+            if (turnFlushArmed) {
+                if (turnFlushDeadlineElapsed) {
+                    flushPendingInterim(connectionToken)
+                } else {
+                    scheduleInterimFlush()
+                }
+            }
         }
 
         extractFinalTranscript(json)?.let { finalText ->
             sawResponse = true
             clearInterimFlushTimer()
+            turnFlushArmed = false
+            turnFlushDeadlineElapsed = false
             lastInterimText = null
             val flushed = flushedInterimText
             val textToAccept = if (flushed != null) {
@@ -1047,18 +1110,17 @@ class GeminiTranscriptionClient {
             }
             flushedInterimText = null
             if (textToAccept == null) {
+                accumulator.remember(finalText)
                 Log.i(TAG, "Gemini final transcript is a polish of already-flushed interim; ignoring")
             } else {
-                val segment = accumulator.accept(textToAccept)
+                val segment = accumulator.accept(textToAccept, recordAs = finalText)
                 if (segment != null) {
                     sawTranscript = true
                     Log.i(
                         TAG,
                         "VOICE_STEP_4 Gemini final transcript (${segment.text.length} chars)"
                     )
-                    postIfCurrent(connectionToken) {
-                        callback?.onTranscriptionResult(segment)
-                    }
+                    callback?.onTranscriptionResult(segment)
                 } else {
                     Log.i(TAG, "Gemini final transcript added no new text; ignoring")
                 }
@@ -1067,31 +1129,26 @@ class GeminiTranscriptionClient {
 
         if (isTurnComplete(json)) {
             sawResponse = true
-            // A turn can close with only an interim (SMART mode waiting for the
-            // next word). Commit that tail before forgetting the turn.
+            clearInterimFlushTimer()
+            // Commit a leftover interim, but keep flushedInterimText so a late
+            // polished final can still be deduped. Speech resume clears it.
             flushPendingInterim(connectionToken)
+            turnFlushArmed = false
+            turnFlushDeadlineElapsed = false
             accumulator.reset()
             lastInterimText = null
-            flushedInterimText = null
-        }
-
-        if (sawInterim) {
-            postIfCurrent(connectionToken) {
-                callback?.onInterimTranscription()
-            }
-        }
-
-        if (sawResponse) {
-            postIfCurrent(connectionToken) {
-                callback?.onServerResponse(sawTranscript)
-            }
         }
 
         extractGoAwayMillis(json)?.let { timeLeftMs ->
             Log.w(TAG, "Gemini goAway received; ${timeLeftMs}ms left on this connection")
-            postIfCurrent(connectionToken) {
-                callback?.onSessionExpiring(timeLeftMs)
-            }
+            callback?.onSessionExpiring(timeLeftMs)
+        }
+
+        if (sawInterim) {
+            callback?.onInterimTranscription()
+        }
+        if (sawResponse) {
+            callback?.onServerResponse(sawTranscript)
         }
     }
 
@@ -1135,6 +1192,11 @@ class GeminiTranscriptionClient {
         val runnable = Runnable {
             pendingInterimFlushRunnable = null
             if (connectionToken != activeConnectionToken) return@Runnable
+            if (!turnFlushArmed) return@Runnable
+            if (lastInterimText == null) {
+                turnFlushDeadlineElapsed = true
+                return@Runnable
+            }
             flushPendingInterim(connectionToken)
         }
         pendingInterimFlushRunnable = runnable
@@ -1148,14 +1210,21 @@ class GeminiTranscriptionClient {
         val segment = accumulator.accept(interim) ?: return
         flushedInterimText = interim
         lastInterimText = null
+        turnFlushArmed = false
+        turnFlushDeadlineElapsed = false
         Log.i(
             TAG,
             "VOICE_STEP_4 Gemini flushed leftover interim (${segment.text.length} chars)"
         )
-        postIfCurrent(connectionToken) {
-            callback?.onTranscriptionResult(segment)
-            callback?.onServerResponse(true)
-        }
+        callback?.onTranscriptionResult(segment)
+        callback?.onServerResponse(true)
+    }
+
+    private fun resetTurnFlushState() {
+        lastInterimText = null
+        flushedInterimText = null
+        turnFlushArmed = false
+        turnFlushDeadlineElapsed = false
     }
 
     private fun clearInterimFlushTimer() {

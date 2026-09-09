@@ -279,8 +279,10 @@ class VoiceInputManager(private val context: Context) {
                 cancelAutoStopTimer()
                 cancelStaleInterimFinalize()
                 // New speech means a new phrase is forming; allow the next
-                // silence to trigger another turn finalize.
+                // silence to trigger another turn finalize. Also cancel any
+                // leftover-interim flush so it cannot commit this utterance.
                 hasFinalizedCurrentSilence = false
+                transcriptionClient.onNewSpeechTurn()
                 if (holdAudioUntilSpeech) {
                     holdAudioUntilSpeech = false
                     releaseHeldAudioPrefix(sessionId)
@@ -631,6 +633,11 @@ class VoiceInputManager(private val context: Context) {
             staleInterimFinalizeRunnable = null
             if (sessionId != activeSessionId) return@Runnable
             if (currentState != State.RECORDING || isSessionStopping) return@Runnable
+            // Holding audio after finalize is released only on onSpeechStarted.
+            // If local VAD still thinks the user is talking, that callback will
+            // not fire and later speech would be dropped. Only use this backup
+            // when the recorder is actually silent.
+            if (voiceRecorder.isCurrentlySpeaking) return@Runnable
             Log.i(TAG, "Stale interim hypothesis — requesting turn finalize")
             requestTurnFinalizeOnSilence(sessionId)
         }

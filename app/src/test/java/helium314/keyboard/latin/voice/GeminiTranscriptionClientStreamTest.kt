@@ -314,6 +314,97 @@ class GeminiTranscriptionClientStreamTest {
         assertEquals("hello wor", transcripts.single().text)
     }
 
+    @Test
+    fun keepsDedupStateAfterTurnCompleteSoALateFinalIsNotRepeated() {
+        enqueueServer(object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                serverReceived.add(text)
+                if (text.contains("\"setup\"")) {
+                    webSocket.send("""{"setupComplete":{}}""")
+                }
+            }
+        })
+
+        startClient()
+        awaitUntil { events.contains("ready") }
+        currentServerSocket!!.send(
+            """{"serverContent":{"interimInputTranscription":{"text":"hello wor"}}}"""
+        )
+        awaitUntil { events.contains("interim") }
+        assertTrue(client.finalizeTurn())
+        shadowOf(Looper.getMainLooper()).idleFor(
+            Duration.ofMillis(GeminiTranscriptionClient.INTERIM_FLUSH_AFTER_FINALIZE_MS + 50)
+        )
+        assertEquals("hello wor", transcripts.single().text)
+
+        currentServerSocket!!.send("""{"serverContent":{"turnComplete":true}}""")
+        currentServerSocket!!.send(
+            """{"serverContent":{"inputTranscription":{"text":"Hello world."}}}"""
+        )
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(200))
+
+        assertEquals(1, transcripts.size)
+        assertEquals("hello wor", transcripts.single().text)
+    }
+
+    @Test
+    fun newSpeechTurnCancelsAPendingFlushSoTheNextUtteranceIsNotInsertedEarly() {
+        enqueueServer(object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                serverReceived.add(text)
+                if (text.contains("\"setup\"")) {
+                    webSocket.send("""{"setupComplete":{}}""")
+                }
+            }
+        })
+
+        startClient()
+        awaitUntil { events.contains("ready") }
+        currentServerSocket!!.send(
+            """{"serverContent":{"interimInputTranscription":{"text":"hello"}}}"""
+        )
+        awaitUntil { events.contains("interim") }
+        assertTrue(client.finalizeTurn())
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100))
+
+        client.onNewSpeechTurn()
+        currentServerSocket!!.send(
+            """{"serverContent":{"interimInputTranscription":{"text":"world"}}}"""
+        )
+        shadowOf(Looper.getMainLooper()).idleFor(
+            Duration.ofMillis(GeminiTranscriptionClient.INTERIM_FLUSH_AFTER_FINALIZE_MS + 50)
+        )
+
+        assertTrue(transcripts.isEmpty(), "pending flush committed the next utterance: $transcripts")
+    }
+
+    @Test
+    fun flushesAnInterimThatArrivesAfterTheFinalizeDeadline() {
+        enqueueServer(object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                serverReceived.add(text)
+                if (text.contains("\"setup\"")) {
+                    webSocket.send("""{"setupComplete":{}}""")
+                }
+            }
+        })
+
+        startClient()
+        awaitUntil { events.contains("ready") }
+        assertTrue(client.finalizeTurn())
+        shadowOf(Looper.getMainLooper()).idleFor(
+            Duration.ofMillis(GeminiTranscriptionClient.INTERIM_FLUSH_AFTER_FINALIZE_MS + 50)
+        )
+        assertTrue(transcripts.isEmpty())
+
+        currentServerSocket!!.send(
+            """{"serverContent":{"interimInputTranscription":{"text":"late words"}}}"""
+        )
+        awaitUntil { transcripts.isNotEmpty() }
+
+        assertEquals("late words", transcripts.single().text)
+    }
+
     // ── helpers ────────────────────────────────────────────────────────
 
     private var currentServerSocket: WebSocket? = null
