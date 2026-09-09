@@ -166,6 +166,7 @@ class VoiceInputManager(private val context: Context) {
     private var pendingStreamConnectTimeoutRunnable: Runnable? = null
     private var pendingSessionRotateRunnable: Runnable? = null
     private var pendingForceRotateRunnable: Runnable? = null
+    private var pendingRotateAfterFinalizeRunnable: Runnable? = null
 
     // Buffered audio while stream is not yet open
     private val pendingAudioChunks = ArrayDeque<PendingAudioChunk>()
@@ -298,6 +299,11 @@ class VoiceInputManager(private val context: Context) {
                     holdAudioUntilSpeech = false
                     releaseHeldAudioPrefix(sessionId)
                 }
+                // A new utterance started during the leftover-flush wait.
+                // Keep the deferred rotate and wait for the next silence.
+                if (pendingRotateAfterFinalizeRunnable != null) {
+                    cancelRotateAfterTurnSettle()
+                }
             }
 
             override fun onSpeechStopped() {
@@ -305,8 +311,7 @@ class VoiceInputManager(private val context: Context) {
                 startAutoStopTimer()
                 requestTurnFinalizeOnSilence(sessionId)
                 if (rotateAfterSpeechStops) {
-                    rotateAfterSpeechStops = false
-                    rotateStreamingSession(sessionId, "speech stopped")
+                    scheduleRotateAfterTurnSettle(sessionId)
                 }
             }
 
@@ -461,6 +466,7 @@ class VoiceInputManager(private val context: Context) {
 
     private fun startStreamingSession(sessionId: Long, apiKey: String, isReconnect: Boolean = false) {
         if (sessionId != activeSessionId) return
+        cancelSessionRotateTimer()
         val editorContext = if (geminiConfig.useEditorContext) {
             try {
                 priorTextProvider?.getPriorText()
@@ -1064,6 +1070,7 @@ class VoiceInputManager(private val context: Context) {
                     if (sessionId != activeSessionId) return@Runnable
                     if (!rotateAfterSpeechStops) return@Runnable
                     rotateAfterSpeechStops = false
+                    cancelRotateAfterTurnSettle()
                     rotateStreamingSession(sessionId, "goAway deadline")
                 }
                 pendingForceRotateRunnable = forceRunnable
@@ -1081,11 +1088,41 @@ class VoiceInputManager(private val context: Context) {
         startStreamingSession(sessionId, sessionApiKey, isReconnect = true)
     }
 
+    /**
+     * After a deferred rotate, [requestTurnFinalizeOnSilence] only sends
+     * `audioStreamEnd`. Wait for the leftover-flush window so a polished final
+     * can arrive before the outgoing socket is cancelled. A `goAway` force
+     * deadline still rotates immediately.
+     */
+    private fun scheduleRotateAfterTurnSettle(sessionId: Long) {
+        if (sessionId != activeSessionId) return
+        cancelRotateAfterTurnSettle()
+        val runnable = Runnable {
+            pendingRotateAfterFinalizeRunnable = null
+            if (sessionId != activeSessionId) return@Runnable
+            if (!rotateAfterSpeechStops) return@Runnable
+            rotateAfterSpeechStops = false
+            rotateStreamingSession(sessionId, "speech stopped")
+        }
+        pendingRotateAfterFinalizeRunnable = runnable
+        mainHandler.postDelayed(
+            runnable,
+            GeminiTranscriptionClient.INTERIM_FLUSH_AFTER_FINALIZE_MS
+        )
+        Log.i(TAG, "Waiting for leftover flush before Gemini session rotate")
+    }
+
+    private fun cancelRotateAfterTurnSettle() {
+        pendingRotateAfterFinalizeRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingRotateAfterFinalizeRunnable = null
+    }
+
     private fun cancelSessionRotateTimer() {
         pendingSessionRotateRunnable?.let { mainHandler.removeCallbacks(it) }
         pendingSessionRotateRunnable = null
         pendingForceRotateRunnable?.let { mainHandler.removeCallbacks(it) }
         pendingForceRotateRunnable = null
+        cancelRotateAfterTurnSettle()
     }
 
     private fun reloadRuntimeConfig() {

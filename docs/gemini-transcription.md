@@ -222,8 +222,8 @@ the editor.
   Duration, so it arrives as a **string**, not a number.
 - `VoiceInputManager` rotates onto a fresh connection 1.5 s before the announced
   deadline, and unconditionally after 9 minutes as a backstop. If the user is
-  still talking, rotation waits for local silence unless `goAway` is already
-  imminent. A deferred rotate is cancelled if the stream dies or a replacement
+  still talking, rotation waits for local silence and the leftover-flush window
+  unless `goAway` is already imminent. A deferred rotate is cancelled if the stream dies or a replacement
   session starts first. Rotation is not an error, so it does not consume a
   reconnect attempt; buffered audio carries across the gap.
 - There is **no application-level keepalive** in this protocol. OkHttp protocol

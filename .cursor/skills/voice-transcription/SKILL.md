@@ -172,9 +172,9 @@ user stops talking and nothing is written. The client backstops this:
   is dropped so the editor does not see a duplicate, including SMART rewrites
   that drop a leading filler or change the first word. `audioStreamEnd` after
   a final already arrived does not re-arm that flush. A session rotate waits
-  for the current utterance when it can, then flushes any leftover before the
-  connection token changes. If `goAway` is already imminent, rotate immediately
-  even while speaking. A deferred rotate is cancelled if the stream dies or a
+  for the current utterance when it can, then waits the leftover-flush window
+  so a polished final can arrive before the outgoing socket is cancelled. If
+  `goAway` is already imminent, rotate immediately even while speaking. A deferred rotate is cancelled if the stream dies or a
   replacement session starts first. `resumeRecording` clears a pending
   pause-during-connect finalize so the new dictation is not closed on `setupComplete`.
 - On **mic pause** the same `audioStreamEnd` is sent. A turn left open with no

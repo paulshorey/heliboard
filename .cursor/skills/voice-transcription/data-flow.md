@@ -55,7 +55,7 @@ Orchestrates recording, Gemini streaming, and ordered transcript delivery.
 - **Buffered audio**: holds PCM chunks until `setupComplete` arrives
 - **Transcript queue**: preserves FIFO delivery, including `attachesToPrevious`; coalesces oldest entries if the queue reaches 64
 - **Reconnects**: retries transient WebSocket failures while the session is active (3 attempts, exponential backoff)
-- **Session rotation**: on `goAway` (1.5 s before the announced deadline) and unconditionally after 9 minutes; waits for the current utterance unless `goAway` is already imminent; a deferred rotate is cancelled if the stream dies first; does not consume a reconnect attempt
+- **Session rotation**: on `goAway` (1.5 s before the announced deadline) and unconditionally after 9 minutes; waits for the current utterance and leftover-flush window unless `goAway` is already imminent; a deferred rotate is cancelled if the stream dies first; does not consume a reconnect attempt
 - **Session config**: maps the subtype locale to a documented BCP-47 code, clamps `silenceDurationMs` to 400–5000 ms
 - **Auto-stop timer**: stops recording after prolonged silence
 - **Turn finalize**: sends `audioStreamEnd` after local speech-stop silence, when an interim goes stale, on mic pause, and before graceful stop; holds outbound audio until the next speech onset
