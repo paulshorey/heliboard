@@ -365,6 +365,70 @@ class GeminiTranscriptionClientTest {
         assertEquals("Hello world.", accumulator.accept("Hello world.")?.text)
     }
 
+    @Test
+    fun leftoverAfterFlushedInterim_dropsAPolishedRewriteOfTheSameWords() {
+        assertNull(
+            GeminiTranscriptionClient.leftoverAfterFlushedInterim("Hello world.", "hello wor")
+        )
+        assertNull(
+            GeminiTranscriptionClient.leftoverAfterFlushedInterim("And then I.", "and then I")
+        )
+    }
+
+    @Test
+    fun leftoverAfterFlushedInterim_keepsWordsTheFinalAdded() {
+        assertEquals(
+            "went home.",
+            GeminiTranscriptionClient.leftoverAfterFlushedInterim(
+                "And then I went home.",
+                "and then I"
+            )
+        )
+    }
+
+    @Test
+    fun leftoverAfterFlushedInterim_keepsAnUnrelatedFinal() {
+        assertEquals(
+            "Something else.",
+            GeminiTranscriptionClient.leftoverAfterFlushedInterim("Something else.", "hello")
+        )
+    }
+
+    @Test
+    fun leftoverAfterFlushedInterim_treatsContractionsAsOneWord() {
+        assertNull(
+            GeminiTranscriptionClient.leftoverAfterFlushedInterim("I don't.", "I dont")
+        )
+        assertNull(
+            GeminiTranscriptionClient.leftoverAfterFlushedInterim("co-op.", "coop")
+        )
+        assertEquals(
+            listOf("i", "don't"),
+            GeminiTranscriptionClient.tokenizeTranscript("I don't.")
+        )
+    }
+
+    @Test
+    fun accumulator_usesRecordAsAsTheNextComparisonBaseline() {
+        val accumulator = TranscriptAccumulator()
+
+        assertEquals("and then I", accumulator.accept("and then I")?.text)
+        assertEquals(
+            "went home.",
+            accumulator.accept("went home.", recordAs = "And then I went home")?.text
+        )
+        val extension = assertNotNull(accumulator.accept("And then I went home later."))
+        assertEquals("later.", extension.text)
+    }
+
+    @Test
+    fun systemInstruction_tellsTheModelToFinalizeUnfinishedTrailingSpeech() {
+        val instruction = GeminiTranscriptionClient.SYSTEM_INSTRUCTION
+        assertTrue(instruction.contains("unfinished"))
+        assertTrue(instruction.contains("Do not wait for the next word"))
+        assertFalse(instruction.contains("Prefer waiting for a complete phrase"))
+    }
+
     // ── helpers ────────────────────────────────────────────────────────
 
     private fun sessionConfig(

@@ -57,10 +57,13 @@ except `LatinIME.java` (parent package) and the settings UI/preferences helpers 
    flush on `onStreamReady`.
 4. Audio goes out as JSON text frames:
    `{"realtimeInput":{"audio":{"data":"<base64>","mimeType":"audio/pcm;rate=16000"}}}`.
-5. The server emits `serverContent.interimInputTranscription` (speculative,
-   **never committed**) and `serverContent.inputTranscription` (authoritative).
-   `serverContent.turnComplete` closes an utterance. `serverContent.modelTurn` is
-   ignored so no generated response can leak into the editor.
+5. The server emits `serverContent.interimInputTranscription` (speculative)
+   and `serverContent.inputTranscription` (authoritative). Interims are not
+   committed while the speaker is talking. After Hybrid VAD `audioStreamEnd`, a
+   leftover interim is flushed if no final arrives — SMART mode otherwise holds
+   an unfinished trailing phrase waiting for the next word. `turnComplete`
+   closes an utterance. `modelTurn` is ignored so no generated response can leak
+   into the editor.
 6. `TranscriptAccumulator` converts finalized transcripts into segments and marks
    `attachesToPrevious`.
 7. `VoiceInputManager` delivers segments in FIFO order to `LatinIME`.
@@ -126,9 +129,10 @@ put it in the tier that matches how well-documented it is for this model.
   on short utterances.
 - **`startOfSpeechSensitivity: START_SENSITIVITY_HIGH` + `prefixPaddingMs: 300`** —
   keeps prefix audio so the first syllable is not clipped.
-- **`systemInstruction`** — static dictation guidance, no editor text. Live
-  Transcription does not advertise system-instruction support, so it may be
-  ignored; that is why it sits in the top tier.
+- **`systemInstruction`** — static dictation guidance, no editor text. Tells the
+  model to emit unfinished trailing speech when the turn ends rather than wait
+  for the next word. Live Transcription does not advertise system-instruction
+  support, so it may be ignored; that is why it sits in the top tier.
 
 ## Editor context → vocabulary, not prompt
 
@@ -148,17 +152,27 @@ text is handled locally instead (see below).
 ## Turn finalization (Hybrid VAD)
 
 Server VAD stays enabled for accurate speech onset but is configured to be patient
-about ending speech, which means a trailing phrase can sit unfinalized. The client
-backstops it with `{"realtimeInput":{"audioStreamEnd":true}}`:
+about ending speech (`END_SENSITIVITY_LOW`, 1500 ms). SMART mode also likes to
+wait for a complete sentence. Together that means a trailing unfinished phrase
+can sit as an interim hypothesis and never become `inputTranscription` — the
+user stops talking and nothing is written. The client backstops this:
 
-- after local silence (`PREF_VOICE_CHUNK_SILENCE_SECONDS`, default **2 s** —
-  longer than the server window, so the server's semantic endpointing normally
-  wins), at most once per speech-stop transition;
-- on **mic pause** — a turn left open with no audio is the dominant cause of the
-  Live API dropping the connection with 1011;
-- on **stop**, before the read grace period.
-
-The session stays open; the next audio chunk reopens the stream.
+- After local silence (`PREF_VOICE_CHUNK_SILENCE_SECONDS`, default **2 s**),
+  `VoiceInputManager` sends `{"realtimeInput":{"audioStreamEnd":true}}`. At most
+  once per speech-stop transition; re-armed on the next `onSpeechStarted`. A
+  stale-interim backup (2 s with no final) fires only while
+  `VoiceRecorder.isCurrentlySpeaking` is false, so it cannot hold audio during
+  live speech.
+- **Outbound audio is then held** until speech resumes. The next silent PCM
+  chunk would reopen the turn and Gemini would start waiting for the next word
+  again. A 300 ms prefix buffer is kept so the following utterance is not
+  clipped.
+- If no authoritative final arrives within **800 ms** of `audioStreamEnd`, the
+  last interim hypothesis is committed. A late polished final of the same words
+  is dropped so the editor does not see a duplicate.
+- On **mic pause** the same `audioStreamEnd` is sent. A turn left open with no
+  audio is the dominant cause of the Live API dropping the connection with 1011.
+- On **stop**, `finishStreaming()` sends it and then keeps reading for up to 8 s.
 
 ## Transcript assembly
 

@@ -39,8 +39,8 @@ WebSocket client for the Gemini Live API.
 - **Authentication**: API key in the query string; no HTTP header
 - **Startup**: sends one `setup` text frame at the negotiated `SetupTier`, then **waits for `{"setupComplete":{}}`** before reporting the stream ready
 - **Transport**: JSON text frames only; audio is base64 inside `realtimeInput.audio`
-- **Output**: commits `serverContent.inputTranscription` through `TranscriptAccumulator`; discards `interimInputTranscription` and ignores `modelTurn`
-- **Turn finalize**: `{"realtimeInput":{"audioStreamEnd":true}}` ends the turn without ending the session
+- **Output**: commits `serverContent.inputTranscription` through `TranscriptAccumulator`; flushes leftover `interimInputTranscription` after `audioStreamEnd` if no final arrives; ignores `modelTurn`
+- **Turn finalize**: `{"realtimeInput":{"audioStreamEnd":true}}` ends the turn without ending the session; outbound audio is then held until speech resumes so silence does not reopen the turn
 - **Graceful stop**: sends `audioStreamEnd`, keeps reading for 8 s, closes 1000
 - **Schema resilience**: retries one `SetupTier` lower when the server closes with 1007, caching the working tier in `negotiatedSetupTier`
 
@@ -58,7 +58,7 @@ Orchestrates recording, Gemini streaming, and ordered transcript delivery.
 - **Session rotation**: on `goAway` (1.5 s before the announced deadline) and unconditionally after 9 minutes; does not consume a reconnect attempt
 - **Session config**: maps the subtype locale to a documented BCP-47 code, clamps `silenceDurationMs` to 400–5000 ms
 - **Auto-stop timer**: stops recording after prolonged silence
-- **Turn finalize**: sends `audioStreamEnd` after local speech-stop silence, on mic pause, and before graceful stop
+- **Turn finalize**: sends `audioStreamEnd` after local speech-stop silence, when an interim goes stale, on mic pause, and before graceful stop; holds outbound audio until the next speech onset
 - **Response watchdog**: 15 s (generous, because the session is tuned to prefer a correct transcript over a fast one); logs `VOICE_RESPONSE` lines for diagnostics
 
 ### LatinIME.java
@@ -105,7 +105,8 @@ Active subtype locale + transcription preferences + editor text
 ### 3. Transcript → Immediate Insert
 ```
 serverContent arrives
-    → interimInputTranscription is discarded (never committed)
+    → interimInputTranscription is held, not committed while the speaker is talking
+    → after audioStreamEnd, a leftover interim is flushed if no final arrives
     → inputTranscription goes through TranscriptAccumulator
         · extends the previous transcript → emit only the suffix
         · unrelated text                  → emit all of it

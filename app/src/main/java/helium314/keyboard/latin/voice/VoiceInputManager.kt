@@ -58,6 +58,19 @@ class VoiceInputManager(private val context: Context) {
          * session is open before the old connection is terminated.
          */
         private const val SESSION_ROTATE_LEAD_MS = 1_500L
+
+        /**
+         * If Gemini keeps updating an interim hypothesis and then goes quiet
+         * without a final — typical of SMART mode waiting for the next word —
+         * finalize the turn even when local RMS silence did not fire.
+         */
+        private const val STALE_INTERIM_FINALIZE_MS = 2_000L
+
+        /**
+         * Audio chunks (~100 ms) kept while outbound audio is held after
+         * `audioStreamEnd`, so the next utterance still has prefix padding.
+         */
+        private const val PREFIX_HOLD_CHUNKS = 3
     }
 
     private data class AwaitingGeminiResponse(
@@ -158,6 +171,14 @@ class VoiceInputManager(private val context: Context) {
     // speech onset.
     private var hasFinalizedCurrentSilence = false
 
+    // After Hybrid VAD `audioStreamEnd`, further silent PCM immediately reopens
+    // the turn and SMART mode starts waiting for the next word again. Hold
+    // outbound audio until speech resumes, keeping a short prefix so the first
+    // syllable of the next utterance is not clipped.
+    private var holdAudioUntilSpeech = false
+    private val heldAudioPrefix = ArrayDeque<PendingAudioChunk>()
+    private var staleInterimFinalizeRunnable: Runnable? = null
+
     // Tracks round-trip latency to Gemini (stream connect, audio, finalize).
     private var awaitingGeminiResponse: AwaitingGeminiResponse? = null
     private var geminiResponseTimeoutRunnable: Runnable? = null
@@ -256,9 +277,16 @@ class VoiceInputManager(private val context: Context) {
             override fun onSpeechStarted() {
                 if (sessionId != activeSessionId) return
                 cancelAutoStopTimer()
+                cancelStaleInterimFinalize()
                 // New speech means a new phrase is forming; allow the next
-                // silence to trigger another turn finalize.
+                // silence to trigger another turn finalize. Also cancel any
+                // leftover-interim flush so it cannot commit this utterance.
                 hasFinalizedCurrentSilence = false
+                transcriptionClient.onNewSpeechTurn()
+                if (holdAudioUntilSpeech) {
+                    holdAudioUntilSpeech = false
+                    releaseHeldAudioPrefix(sessionId)
+                }
             }
 
             override fun onSpeechStopped() {
@@ -371,6 +399,9 @@ class VoiceInputManager(private val context: Context) {
         pendingTranscripts.clear()
         isDispatchingTranscripts = false
         hasFinalizedCurrentSilence = false
+        holdAudioUntilSpeech = false
+        heldAudioPrefix.clear()
+        cancelStaleInterimFinalize()
         transcriptionClient.cancelAll()
         if (hadPendingWork) {
             listener?.onPendingProcessingCancelled()
@@ -381,8 +412,11 @@ class VoiceInputManager(private val context: Context) {
 
     private fun stopRecordingInternal(cancelPending: Boolean) {
         cancelAutoStopTimer()
+        cancelStaleInterimFinalize()
         cancelStreamConnectTimeout()
         cancelSessionRotateTimer()
+        holdAudioUntilSpeech = false
+        heldAudioPrefix.clear()
 
         val sessionAtStop = activeSessionId
         if (cancelPending) {
@@ -459,12 +493,22 @@ class VoiceInputManager(private val context: Context) {
 
                 override fun onTranscriptionResult(segment: TranscriptSegment) {
                     if (sessionId != activeSessionId) return
+                    cancelStaleInterimFinalize()
                     enqueueTranscript(segment, sessionId)
+                }
+
+                override fun onInterimTranscription() {
+                    if (sessionId != activeSessionId) return
+                    if (currentState != State.RECORDING || isSessionStopping) return
+                    scheduleStaleInterimFinalize(sessionId)
                 }
 
                 override fun onServerResponse(hasTranscriptText: Boolean) {
                     if (sessionId != activeSessionId) return
                     acknowledgeGeminiResponse(sessionId, hasTranscriptText)
+                    if (hasTranscriptText) {
+                        cancelStaleInterimFinalize()
+                    }
                 }
 
                 override fun onSessionExpiring(timeLeftMs: Long) {
@@ -555,14 +599,69 @@ class VoiceInputManager(private val context: Context) {
 
         if (transcriptionClient.finalizeTurn()) {
             hasFinalizedCurrentSilence = true
+            // Stop sending silence immediately; the next audio chunk would
+            // reopen the turn and Gemini would wait for another word.
+            holdAudioUntilSpeech = true
+            heldAudioPrefix.clear()
             Log.i(TAG, "Turn finalize requested after local silence")
             scheduleGeminiResponseWatchdog(sessionId, "turn_finalize")
         }
     }
 
+    private fun releaseHeldAudioPrefix(sessionId: Long) {
+        if (heldAudioPrefix.isEmpty()) return
+        val prefix = ArrayList<PendingAudioChunk>(heldAudioPrefix.size)
+        while (heldAudioPrefix.isNotEmpty()) {
+            val chunk = heldAudioPrefix.removeFirst()
+            if (chunk.sessionId == sessionId) {
+                prefix.add(chunk)
+            }
+        }
+        for (i in prefix.indices.reversed()) {
+            pendingAudioChunks.addFirst(prefix[i])
+        }
+        if (isStreamingReady && streamSessionId == sessionId) {
+            flushPendingAudio(sessionId)
+        }
+    }
+
+    private fun scheduleStaleInterimFinalize(sessionId: Long) {
+        cancelStaleInterimFinalize()
+        if (sessionId != activeSessionId) return
+        if (currentState != State.RECORDING || isSessionStopping) return
+        val runnable = Runnable {
+            staleInterimFinalizeRunnable = null
+            if (sessionId != activeSessionId) return@Runnable
+            if (currentState != State.RECORDING || isSessionStopping) return@Runnable
+            // Holding audio after finalize is released only on onSpeechStarted.
+            // If local VAD still thinks the user is talking, that callback will
+            // not fire and later speech would be dropped. Only use this backup
+            // when the recorder is actually silent.
+            if (voiceRecorder.isCurrentlySpeaking) return@Runnable
+            Log.i(TAG, "Stale interim hypothesis — requesting turn finalize")
+            requestTurnFinalizeOnSilence(sessionId)
+        }
+        staleInterimFinalizeRunnable = runnable
+        mainHandler.postDelayed(runnable, STALE_INTERIM_FINALIZE_MS)
+    }
+
+    private fun cancelStaleInterimFinalize() {
+        val runnable = staleInterimFinalizeRunnable ?: return
+        mainHandler.removeCallbacks(runnable)
+        staleInterimFinalizeRunnable = null
+    }
+
     private fun onAudioChunkCaptured(pcmData: ByteArray, sessionId: Long) {
         if (sessionId != activeSessionId) return
         if (pcmData.isEmpty()) return
+
+        if (holdAudioUntilSpeech) {
+            heldAudioPrefix.addLast(PendingAudioChunk(sessionId, pcmData))
+            while (heldAudioPrefix.size > PREFIX_HOLD_CHUNKS) {
+                heldAudioPrefix.removeFirst()
+            }
+            return
+        }
 
         while (pendingAudioChunks.size >= MAX_PENDING_AUDIO_CHUNKS) {
             pendingAudioChunks.removeFirst()

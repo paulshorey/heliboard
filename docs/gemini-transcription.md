@@ -20,8 +20,9 @@ costs the user more than a second of waiting.
    sent as JSON text frames containing base64 PCM
    (`realtimeInput.audio`, `mimeType: audio/pcm;rate=16000`).
 5. The server emits two transcript streams inside `serverContent`:
-   - `interimInputTranscription` — speculative partials. **Never committed.** They
-     only prove the stream is alive and satisfy the response watchdog.
+   - `interimInputTranscription` — speculative partials. Not committed while the
+     speaker is talking. After `audioStreamEnd`, a leftover interim is flushed if
+     no final arrives, so an unfinished trailing phrase still lands.
    - `inputTranscription` — the authoritative transcript for a speech segment.
      This is what reaches the editor.
    `turnComplete` closes an utterance.
@@ -170,19 +171,23 @@ punctuation continuity that vocabulary cannot.
 ## Turn finalization (Hybrid VAD)
 
 Server-side VAD stays enabled so speech onset keeps its prefix padding, but it is
-configured to be patient about *ending* speech. That patience means a trailing
-phrase can sit unfinalized, so the client provides a backstop:
+configured to be patient about *ending* speech (`END_SENSITIVITY_LOW`, 1500 ms).
+SMART mode also prefers a complete sentence. Mid-dictation that is fine: complete
+sentences finalize and land. At the end of a dictation the last unfinished phrase
+often stays as an interim hypothesis, and sending more silent PCM after
+`audioStreamEnd` immediately reopens the turn so Gemini waits for the next word
+again. The client therefore:
 
-- On local silence (`PREF_VOICE_CHUNK_SILENCE_SECONDS`, default **2 s** — longer
-  than the server window so the server's semantic endpointing normally wins),
-  `VoiceInputManager` sends `{"realtimeInput":{"audioStreamEnd":true}}`. The
-  server treats this as an immediate end of turn, bypassing its silence wait. The
-  session stays open and the next audio chunk reopens the stream.
-- On **mic pause**, the same signal is sent. A turn left open with no incoming
-  audio is the dominant cause of the Live API dropping a connection with 1011.
-- On **stop**, `finishStreaming()` sends it and then keeps reading for up to 8 s,
-  because closing right after the last audio chunk is the usual way to lose the
-  final phrase.
+- Sends `{"realtimeInput":{"audioStreamEnd":true}}` on local silence
+  (`PREF_VOICE_CHUNK_SILENCE_SECONDS`, default **2 s**). A stale-interim backup
+  (2 s with no final) runs only while local VAD reports the user is not speaking.
+- **Holds outbound audio** until speech resumes, keeping a 300 ms prefix so the
+  next utterance is not clipped. Silence must not reopen the turn.
+- Commits the last interim if no authoritative final arrives within **800 ms** of
+  `audioStreamEnd`. A late polished rewrite of those same words is dropped.
+- Sends the same `audioStreamEnd` on **mic pause** (a turn left open with no
+  audio is the dominant cause of close 1011) and on **stop**, then keeps reading
+  for up to 8 s.
 
 It fires at most once per speech-stop transition, re-armed on the next speech
 onset.
