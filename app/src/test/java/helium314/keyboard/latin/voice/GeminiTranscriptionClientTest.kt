@@ -365,6 +365,43 @@ class GeminiTranscriptionClientTest {
         assertEquals("Hello world.", accumulator.accept("Hello world.")?.text)
     }
 
+    @Test
+    fun leftoverAfterFlushedInterim_dropsAPolishedRewriteOfTheSameWords() {
+        assertNull(
+            GeminiTranscriptionClient.leftoverAfterFlushedInterim("Hello world.", "hello wor")
+        )
+        assertNull(
+            GeminiTranscriptionClient.leftoverAfterFlushedInterim("And then I.", "and then I")
+        )
+    }
+
+    @Test
+    fun leftoverAfterFlushedInterim_keepsWordsTheFinalAdded() {
+        assertEquals(
+            "went home.",
+            GeminiTranscriptionClient.leftoverAfterFlushedInterim(
+                "And then I went home.",
+                "and then I"
+            )
+        )
+    }
+
+    @Test
+    fun leftoverAfterFlushedInterim_keepsAnUnrelatedFinal() {
+        assertEquals(
+            "Something else.",
+            GeminiTranscriptionClient.leftoverAfterFlushedInterim("Something else.", "hello")
+        )
+    }
+
+    @Test
+    fun systemInstruction_tellsTheModelToFinalizeUnfinishedTrailingSpeech() {
+        val instruction = GeminiTranscriptionClient.SYSTEM_INSTRUCTION
+        assertTrue(instruction.contains("unfinished"))
+        assertTrue(instruction.contains("Do not wait for the next word"))
+        assertFalse(instruction.contains("Prefer waiting for a complete phrase"))
+    }
+
     // ── helpers ────────────────────────────────────────────────────────
 
     private fun sessionConfig(

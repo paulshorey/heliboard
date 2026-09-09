@@ -91,9 +91,11 @@ speech-to-text model `gemini-3.5-transcribe-live`. Documentation:
   - **`prefixPaddingMs`**: speech duration required before start-of-speech is
     committed; the server retains this much prefix audio, which is what prevents
     front-word truncation. HeliBoard sends **300**.
-- **`systemInstruction`**: short static dictation guidance. Live Transcription's
-  documented feature list does not include system instructions, so this may be
-  silently ignored; it therefore lives in the highest `SetupTier` only.
+- **`systemInstruction`**: short static dictation guidance that tells the model
+  to emit unfinished trailing speech when the turn ends rather than wait for the
+  next word. Live Transcription's documented feature list does not include system
+  instructions, so this may be silently ignored; it therefore lives in the
+  highest `SetupTier` only.
 
 Not used: `tools`, `speechConfig`, `outputAudioTranscription`, `translationConfig`,
 `proactivity`, `historyConfig`, `contextWindowCompression`, `sessionResumption`.
@@ -144,8 +146,11 @@ the server accepts today.
 The server treats this as immediate turn finalization, bypassing its silence wait,
 with server VAD as fallback if the client's detector misses. **The session stays
 open** — "the client can reopen the stream by sending an audio message" — so
-HeliBoard uses it after local silence, on mic pause, and on stop. It is only valid
-while automatic activity detection is enabled.
+HeliBoard uses it after local silence, when an interim goes stale, on mic pause,
+and on stop. After sending it, outbound audio is held until speech resumes;
+silent PCM would reopen the turn and SMART mode would wait for the next word
+again. If no `inputTranscription` arrives within 800 ms, the last interim is
+committed. It is only valid while automatic activity detection is enabled.
 
 Manual VAD (`activityStart` / `activityEnd`, both empty objects) requires
 `automaticActivityDetection.disabled: true` and gives up the server's pre-speech
