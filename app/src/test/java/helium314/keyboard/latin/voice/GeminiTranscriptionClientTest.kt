@@ -395,6 +395,17 @@ class GeminiTranscriptionClientTest {
     }
 
     @Test
+    fun leftoverAfterFlushedInterim_keepsAnUnrelatedFinalThatSharesATrailingWord() {
+        assertEquals(
+            "Something else today.",
+            GeminiTranscriptionClient.leftoverAfterFlushedInterim(
+                "Something else today.",
+                "hello today"
+            )
+        )
+    }
+
+    @Test
     fun leftoverAfterFlushedInterim_dropsARewriteThatDroppedALeadingFiller() {
         assertNull(
             GeminiTranscriptionClient.leftoverAfterFlushedInterim(
@@ -407,6 +418,9 @@ class GeminiTranscriptionClientTest {
                 "The meeting is at noon.",
                 "yeah so the meeting is at noon"
             )
+        )
+        assertNull(
+            GeminiTranscriptionClient.leftoverAfterFlushedInterim("hello.", "um hello")
         )
     }
 

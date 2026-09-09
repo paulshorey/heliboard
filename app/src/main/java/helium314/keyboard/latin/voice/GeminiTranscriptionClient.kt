@@ -644,7 +644,7 @@ class GeminiTranscriptionClient {
                     val remainingInterim = interimTokens.subList(interimSkip, interimTokens.size)
                     val remainingFinal = finalTokens.subList(finalSkip, finalTokens.size)
                     val matched = countMatchingPrefix(remainingInterim, remainingFinal)
-                    if (!isStrongTokenAlignment(matched, remainingInterim.size, remainingFinal.size)) {
+                    if (!isStrongSkippedAlignment(matched, interimTokens.size, finalTokens.size)) {
                         continue
                     }
                     if (matched > bestMatched) {
@@ -675,14 +675,18 @@ class GeminiTranscriptionClient {
         }
 
         /**
-         * A one-token overlap ("I", "the") is only trusted when it is the
-         * entire remaining shorter sequence. Two or more fuzzy matches are
-         * enough to treat the final as a rewrite of the flushed interim.
+         * Skip-search alignments must not treat a shared tail word as polish.
+         * `hello today` vs `Something else today` would otherwise match `today`
+         * after skipping everything else and drop the authoritative final.
+         *
+         * Two or more matches are trusted only when they cover at least half
+         * of the flushed interim. A single-token match is only a filler-plus-
+         * word rewrite (`um hello` → `hello`).
          */
-        internal fun isStrongTokenAlignment(matched: Int, remainingLeft: Int, remainingRight: Int): Boolean {
+        internal fun isStrongSkippedAlignment(matched: Int, interimSize: Int, finalSize: Int): Boolean {
             if (matched <= 0) return false
-            val shorter = minOf(remainingLeft, remainingRight)
-            return matched >= 2 || matched >= shorter
+            if (matched >= 2) return matched * 2 >= interimSize
+            return interimSize <= 2 && finalSize <= 2
         }
 
         internal fun comparableTranscriptToken(token: String): String =
