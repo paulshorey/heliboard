@@ -617,6 +617,12 @@ class GeminiTranscriptionClient {
          * and no final arrived, a late SMART-mode final may repeat those words
          * with polish. Returns the extra text that still needs committing, or
          * null when the final is only a rewrite of what was already inserted.
+         *
+         * SMART often drops a leading filler or rewrites the first word, so a
+         * prefix-only compare would treat the whole final as new and duplicate
+         * it. Leading tokens on either side may be skipped when the remaining
+         * overlap is strong; tokens that sit before that overlap cannot be
+         * inserted (the interim is already in the editor).
          */
         internal fun leftoverAfterFlushedInterim(finalText: String, flushedInterim: String): String? {
             val finalTokens = tokenizeTranscript(finalText)
@@ -624,20 +630,59 @@ class GeminiTranscriptionClient {
             if (finalTokens.isEmpty()) return null
             if (interimTokens.isEmpty()) return finalText.trim()
 
+            val prefixMatched = countMatchingPrefix(interimTokens, finalTokens)
+            if (prefixMatched > 0) {
+                if (prefixMatched >= finalTokens.size) return null
+                return takeLastTranscriptWords(finalText, finalTokens.size - prefixMatched)
+            }
+
+            var bestMatched = 0
+            var bestFinalSkip = 0
+            for (interimSkip in 0 until interimTokens.size) {
+                for (finalSkip in 0 until finalTokens.size) {
+                    if (interimSkip == 0 && finalSkip == 0) continue
+                    val remainingInterim = interimTokens.subList(interimSkip, interimTokens.size)
+                    val remainingFinal = finalTokens.subList(finalSkip, finalTokens.size)
+                    val matched = countMatchingPrefix(remainingInterim, remainingFinal)
+                    if (!isStrongTokenAlignment(matched, remainingInterim.size, remainingFinal.size)) {
+                        continue
+                    }
+                    if (matched > bestMatched) {
+                        bestMatched = matched
+                        bestFinalSkip = finalSkip
+                    }
+                }
+            }
+            if (bestMatched == 0) return finalText.trim()
+            val leftoverCount = finalTokens.size - bestFinalSkip - bestMatched
+            if (leftoverCount <= 0) return null
+            return takeLastTranscriptWords(finalText, leftoverCount)
+        }
+
+        internal fun countMatchingPrefix(left: List<String>, right: List<String>): Int {
             var matched = 0
-            while (matched < interimTokens.size && matched < finalTokens.size) {
-                val interim = comparableTranscriptToken(interimTokens[matched])
-                val fin = comparableTranscriptToken(finalTokens[matched])
-                if (interim.isEmpty() || fin.isEmpty()) break
-                if (interim == fin || fin.startsWith(interim) || interim.startsWith(fin)) {
+            while (matched < left.size && matched < right.size) {
+                val a = comparableTranscriptToken(left[matched])
+                val b = comparableTranscriptToken(right[matched])
+                if (a.isEmpty() || b.isEmpty()) break
+                if (a == b || b.startsWith(a) || a.startsWith(b)) {
                     matched++
                 } else {
                     break
                 }
             }
-            if (matched == 0) return finalText.trim()
-            if (matched >= finalTokens.size) return null
-            return takeLastTranscriptWords(finalText, finalTokens.size - matched)
+            return matched
+        }
+
+        /**
+         * A one-token overlap ("I", "the") is only trusted when it is the
+         * entire remaining shorter sequence. Two or more fuzzy matches are
+         * enough to treat the final as a rewrite of the flushed interim.
+         */
+        internal fun isStrongTokenAlignment(matched: Int, remainingLeft: Int, remainingRight: Int): Boolean {
+            if (matched <= 0) return false
+            val shorter = minOf(remainingLeft, remainingRight)
+            return matched >= 2 || matched >= shorter
         }
 
         internal fun comparableTranscriptToken(token: String): String =
@@ -781,6 +826,13 @@ class GeminiTranscriptionClient {
         callback: StreamingCallback,
         tier: SetupTier
     ) {
+        // A goAway / 9-minute rotate opens a new socket by incrementing the
+        // connection token. The outgoing close handler then sees a stale token
+        // and skips its leftover flush. Commit any armed leftover here first.
+        if (turnFlushArmed) {
+            flushPendingInterim(activeConnectionToken)
+        }
+
         val newToken = activeConnectionToken + 1
         activeConnectionToken = newToken
         stopStreamingInternal(cancel = true, clearCallback = false)

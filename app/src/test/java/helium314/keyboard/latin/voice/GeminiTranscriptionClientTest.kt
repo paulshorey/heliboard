@@ -395,6 +395,43 @@ class GeminiTranscriptionClientTest {
     }
 
     @Test
+    fun leftoverAfterFlushedInterim_dropsARewriteThatDroppedALeadingFiller() {
+        assertNull(
+            GeminiTranscriptionClient.leftoverAfterFlushedInterim(
+                "I think we should go.",
+                "um I think we should go"
+            )
+        )
+        assertNull(
+            GeminiTranscriptionClient.leftoverAfterFlushedInterim(
+                "The meeting is at noon.",
+                "yeah so the meeting is at noon"
+            )
+        )
+    }
+
+    @Test
+    fun leftoverAfterFlushedInterim_dropsARewriteThatChangedTheOpeningWord() {
+        assertNull(
+            GeminiTranscriptionClient.leftoverAfterFlushedInterim(
+                "Well hello there.",
+                "Hello there"
+            )
+        )
+    }
+
+    @Test
+    fun leftoverAfterFlushedInterim_keepsASuffixAfterSkippedFiller() {
+        assertEquals(
+            "to the store.",
+            GeminiTranscriptionClient.leftoverAfterFlushedInterim(
+                "I think we should go to the store.",
+                "um I think we should go"
+            )
+        )
+    }
+
+    @Test
     fun leftoverAfterFlushedInterim_treatsContractionsAsOneWord() {
         assertNull(
             GeminiTranscriptionClient.leftoverAfterFlushedInterim("I don't.", "I dont")
