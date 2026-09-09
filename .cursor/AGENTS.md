@@ -53,9 +53,9 @@ Never hand-edit `.cursor/skills/gemini-*`; add an entry to that script instead, 
 These are local to this keyboard fork and are not part of the Gemini install:
 
 - `android-build-apk`, `android-workspace-setup`, `development`
-- `full-app-mode`, `key-hint-sizing`, `voice-transcription` (current shipping Soniox pipeline)
+- `full-app-mode`, `key-hint-sizing`, `voice-transcription` (current shipping Gemini Live pipeline)
 
-Gemini Live Transcribe (`gemini-3.5-transcribe-live`) is the Gemini counterpart to the Soniox realtime path. Use `gemini-live-api-dev` plus the Docs MCP when changing or evaluating that API; do not treat the Soniox skill as Gemini documentation.
+The shipping voice pipeline uses Gemini Live Transcribe (`gemini-3.5-transcribe-live`). The `voice-transcription` skill documents how HeliBoard uses it; `gemini-live-api-dev` plus the Docs MCP are the source of truth for the API itself.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

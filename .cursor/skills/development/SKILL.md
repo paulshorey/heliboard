@@ -11,7 +11,7 @@ description: Local development guide for HeliBoard — building, installing on d
 ./gradlew assembleDebug && ./gradlew installDebug
 
 # With debugging:
-./gradlew assembleDebug && ./gradlew installDebug && adb logcat | grep -E "(voice|soniox|transcri)"
+./gradlew assembleDebug && ./gradlew installDebug && adb logcat | grep -E "(voice|Gemini|transcri)"
 ```
 
 ## Debug Gradle

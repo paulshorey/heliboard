@@ -72,13 +72,13 @@ fun SetupAppScreen(
     var isImeEnabled by remember { mutableStateOf(false) }
     var isImeCurrent by remember { mutableStateOf(false) }
     var microphoneGranted by remember { mutableStateOf(false) }
-    var sonioxApiKey by remember { mutableStateOf("") }
+    var geminiApiKey by remember { mutableStateOf("") }
 
     fun refreshStatus() {
         isImeEnabled = UncachedInputMethodManagerUtils.isThisImeEnabled(context, imm)
         isImeCurrent = UncachedInputMethodManagerUtils.isThisImeCurrent(context, imm)
         microphoneGranted = PermissionsUtil.checkAllPermissionsGranted(context, Manifest.permission.RECORD_AUDIO)
-        sonioxApiKey = TranscriptionPreferences.readSonioxApiKey(prefs)
+        geminiApiKey = TranscriptionPreferences.readGeminiApiKey(prefs)
     }
 
     LaunchedEffect(prefChanged?.value) {
@@ -157,15 +157,15 @@ fun SetupAppScreen(
                     }
                 )
                 SetupRequirementItem(
-                    title = stringResource(R.string.soniox_api_key_title),
-                    summary = stringResource(R.string.soniox_api_key_summary),
-                    isComplete = sonioxApiKey.isNotBlank(),
+                    title = stringResource(R.string.gemini_api_key_title),
+                    summary = stringResource(R.string.gemini_api_key_summary),
+                    isComplete = geminiApiKey.isNotBlank(),
                 ) {
                     SetupKeyField(
-                        value = sonioxApiKey,
+                        value = geminiApiKey,
                         onValueChange = { newValue ->
-                            sonioxApiKey = newValue.trim()
-                            TranscriptionPreferences.writeSonioxApiKey(prefs, newValue)
+                            geminiApiKey = newValue.trim()
+                            TranscriptionPreferences.writeGeminiApiKey(prefs, newValue)
                         }
                     )
                 }

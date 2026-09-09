@@ -45,9 +45,11 @@ object TranscriptPostProcessor {
     }
 
     /**
-     * Remove common dictated filler fragments that Soniox returns as text.
+     * Remove common dictated filler fragments the transcription model returns
+     * as text.
      *
-     * Soniox typically smart-formats disfluencies as short comma-attached
+     * Gemini's smart mode removes most disfluencies itself, and verbatim mode
+     * deliberately keeps them, but either can still surface short comma-attached
      * fragments ("um,", "uh,"). Cleaning at paragraph level handles both
      * within-chunk fillers and fillers split across finalized chunks, because
      * [LatinIME][helium314.keyboard.latin.LatinIME] runs this pass after each

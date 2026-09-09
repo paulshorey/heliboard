@@ -377,7 +377,7 @@ A regression test (see §7) will assert the exact requirement‑3 ordering scena
     `edit_history_clear`, `edit_history_enabled_*`, `edit_history_truncated_note`,
     empty-state copy. Keep existing `fullapp_*` strings that still apply to live
     drafts.
-- `docs/soniox-transcription.md` is unrelated; update
+- `docs/gemini-transcription.md` is unrelated; update
   `.cursor/skills/full-app-mode/SKILL.md` and the relevant `AGENTS.md`
   files (`settings/`, `latin/`, `settings/screens/`, new `edithistory/`) to
   describe the split.

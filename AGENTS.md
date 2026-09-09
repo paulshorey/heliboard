@@ -1,6 +1,6 @@
 # HeliBoard
 
-HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds a Soniox-backed voice pipeline, smart auto-capitalization work, and a standalone full-app editing mode.
+HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds a Gemini Live voice pipeline, smart auto-capitalization work, and a standalone full-app editing mode.
 
 ## Repo map
 - `app/` - Android application module and the main Gradle project to build for product work.
@@ -12,7 +12,7 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
 - `app/src/main/res/` and `app/src/main/assets/` - Android resources, IME metadata, layout definitions, popup text, emoji data, and bundled dictionaries.
 - `app/src/main/jni/` - native dictionary/suggestion/proximity code used through JNI.
 - `app/src/test/` - JVM and Robolectric tests.
-- `docs/` - deeper design notes such as `input-simplified.md` and `soniox-transcription.md`.
+- `docs/` - deeper design notes such as `input-simplified.md` and `gemini-transcription.md`.
 - `tools/` - SDK setup, canonical APK build, release scripts, and the `tools:make-emoji-keys` helper module.
 - `.cursor/` - Cursor environment, Gemini Docs MCP (`mcp.json`), and agent skills (HeliBoard product skills plus Gemini API skills).
 - `skills-lock.json` - lockfile for the vendored `google-gemini/gemini-skills` packages; refresh them with `./tools/sync-gemini-skills.sh`.
@@ -24,7 +24,7 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
 - `app/src/main/java/helium314/keyboard/latin/inputlogic/EditorWordMirror.java` - mirrors the keyboard-owned current word into the host app.
 - `app/src/main/java/helium314/keyboard/latin/Suggest.kt` - suggestion request pipeline entry point.
 - `app/src/main/java/helium314/keyboard/latin/suggestions/SuggestionStripView.kt` + `app/src/main/java/helium314/keyboard/latin/utils/ToolbarUtils.kt` - suggestion strip, toolbar buttons, pinned keys, and voice/fullapp strip controls.
-- `app/src/main/java/helium314/keyboard/latin/voice/VoiceInputManager.kt` + `app/src/main/java/helium314/keyboard/latin/voice/SonioxTranscriptionClient.kt` - voice recording and realtime transcription.
+- `app/src/main/java/helium314/keyboard/latin/voice/VoiceInputManager.kt` + `app/src/main/java/helium314/keyboard/latin/voice/GeminiTranscriptionClient.kt` - voice recording and realtime transcription.
 - `app/src/main/java/helium314/keyboard/settings/FullappEditorActivity.kt` - standalone full-screen editor mode.
 - `app/src/main/java/helium314/keyboard/latin/settings/Settings.java` + `Settings.kt` + `Defaults.kt` + `TranscriptionPreferences.kt` - runtime preference keys, defaults, and typed access.
 - `app/src/main/java/helium314/keyboard/keyboard/internal/keyboard_parser/KeyboardParser.kt` + `app/src/main/assets/layouts/` - keyboard layout parsing and source layout data.
@@ -34,7 +34,7 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
 - There are two settings trees: `latin/settings` holds runtime preference keys, defaults, and snapshots; `settings/` holds the Compose UI and fullapp screens.
 - Ordinary typing, voice insertion, and fullapp sync should flow through `InputConnection`; do not write directly into the extract/fullapp text widgets.
 - `WordComposer` is the source of truth for the current word; `inputlogic/EditorWordMirror.java` is the bridge that mirrors it into the host editor.
-- Voice text intentionally bypasses `EditorWordMirror`: `LatinIME` first clears the typed-word state with `finishInput()`, then commits each finalized Soniox segment directly. Fullapp replay is another bypass, using raw `InputConnection` replacement when the IME reconnects to the original field.
+- Voice text intentionally bypasses `EditorWordMirror`: `LatinIME` first clears the typed-word state with `finishInput()`, then commits each finalized Gemini transcript segment directly. Fullapp replay is another bypass, using raw `InputConnection` replacement when the IME reconnects to the original field.
 - The manifest points the IME service at `res/xml/method_dummy.xml`, while real subtype/layout metadata lives in `res/xml/method.xml`; changes to subtypes or layout names usually also touch `assets/layouts/`.
 - Keyboard layout work often spans `keyboard/internal/keyboard_parser/`, `assets/layouts/`, and XML keyboard templates under `res/xml/`.
 - Native dictionary behavior is split between `latin/dictionary`, `latin/utils/JniUtils.java`, and `app/src/main/jni/`.

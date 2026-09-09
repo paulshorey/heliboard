@@ -18,6 +18,7 @@ import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.settings.SettingsSubtype
 import helium314.keyboard.latin.settings.SettingsSubtype.Companion.toSettingsSubtype
+import helium314.keyboard.latin.settings.TranscriptionPreferences
 import helium314.keyboard.latin.settings.createPrefKeyForBooleanSettings
 import helium314.keyboard.latin.utils.DeviceProtectedUtils
 import helium314.keyboard.latin.utils.DictionaryInfoUtils
@@ -584,19 +585,7 @@ object AppUpgrade {
                     !prefs.getBoolean(Settings.PREF_BIGRAM_PREDICTIONS, Defaults.PREF_BIGRAM_PREDICTIONS))
             }
         }
-        if (prefs.contains(Settings.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS) &&
-            prefs.getInt(
-                Settings.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS,
-                Defaults.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS
-            ) == Defaults.LEGACY_PREF_SONIOX_MAX_ENDPOINT_DELAY_MS
-        ) {
-            prefs.edit {
-                putInt(
-                    Settings.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS,
-                    Defaults.PREF_SONIOX_MAX_ENDPOINT_DELAY_MS
-                )
-            }
-        }
+        TranscriptionPreferences.migrateLegacyProviderPrefs(prefs)
         upgradeToolbarPrefs(prefs)
         LayoutUtilsCustom.onLayoutFileChanged() // just to be sure
         prefs.edit { putInt(Settings.PREF_VERSION_CODE, BuildConfig.VERSION_CODE) }

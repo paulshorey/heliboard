@@ -86,7 +86,7 @@ object Log {
     private val VOICE_DIAGNOSTIC_TAGS = setOf(
         "VoiceInputManager",
         "VoiceRecorder",
-        "SonioxTranscription",
+        "GeminiTranscription",
     )
 
     private const val LATIN_IME_TAG = "LatinIME"
@@ -102,13 +102,16 @@ object Log {
         "Microphone permission",
         "Gracefully stopping voice",
         "discarding voice",
-        "editor context for Soniox",
+        "editor context for voice vocabulary",
     )
 
     const val DEFAULT_VOICE_DIAGNOSTICS_MAX_LINES = 500
 
     private val RAW_TRANSCRIPT_PATTERN = Regex("""VOICE raw transcript=\[(.*)]""", RegexOption.DOT_MATCHES_ALL)
     private val API_KEY_PATTERN = Regex("""api_key\s*[:=]\s*"?[^\s,"}\]]+"?""", RegexOption.IGNORE_CASE)
+
+    /** Gemini passes the API key in the WebSocket query string (`?key=...`). */
+    private val URL_KEY_QUERY_PATTERN = Regex("""([?&])key=[^\s&"]+""", RegexOption.IGNORE_CASE)
 
     @JvmStatic
     fun isVoiceDiagnosticLine(line: LogLine): Boolean {
@@ -126,6 +129,7 @@ object Log {
             "VOICE raw transcript=[${content.length} chars]"
         }
         result = API_KEY_PATTERN.replace(result, "api_key=[redacted]")
+        result = URL_KEY_QUERY_PATTERN.replace(result, "$1key=[redacted]")
         return result
     }
 
