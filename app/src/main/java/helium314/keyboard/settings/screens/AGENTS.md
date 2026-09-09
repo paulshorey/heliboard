@@ -27,6 +27,7 @@ Feature-specific Compose screens for the settings app.
 
 ## Non-obvious notes
 - These screens are UI only; the actual preference keys/defaults live in `latin/settings/`.
+- `TextCorrectionScreen` no longer exposes `PREF_ALWAYS_SHOW_SUGGESTIONS`; host `TYPE_TEXT_FLAG_NO_SUGGESTIONS` still shows candidates but does not autocorrect or learn.
 - When adding a screen, also update navigation wiring in `SettingsNavHost.kt` and search/discoverability if appropriate.
 - `LayoutSlotEditor` in `SubtypeScreen.kt` is the single component for all layout slot editing. Every `LayoutType` (MAIN through CLIPBOARD_BOTTOM) gets identical add/edit/delete/fork affordances. The fork icon on built-in layouts creates a pre-filled copy via `LayoutEditDialog`. For MAIN slots, locale-aware `getContentWithPlus` is used; for other slots, plain `getContent` applies.
 - When forking a `+` layout (like `qwerty+`), `LayoutEditDialog` shows a caption warning that locale extras are baked into the copy.

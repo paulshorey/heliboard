@@ -147,7 +147,6 @@ public class SettingsValues {
     public final int mScoreLimitForAutocorrect;
     public final boolean mAutoCorrectShortcuts;
     private final boolean mSuggestionsEnabledPerUserSettings;
-    private final boolean mOverrideShowingSuggestions;
     public final boolean mSuggestClipboardContent;
     public final SettingsValuesForSuggestion mSettingsValuesForSuggestion;
     public final boolean mIncognitoModeEnabled;
@@ -199,8 +198,10 @@ public class SettingsValues {
         mBlockPotentiallyOffensive = prefs.getBoolean(Settings.PREF_BLOCK_POTENTIALLY_OFFENSIVE, Defaults.PREF_BLOCK_POTENTIALLY_OFFENSIVE);
         mUrlDetectionEnabled = prefs.getBoolean(Settings.PREF_URL_DETECTION, Defaults.PREF_URL_DETECTION);
         mAutoCorrectionEnabledPerUserSettings = prefs.getBoolean(Settings.PREF_AUTO_CORRECTION, Defaults.PREF_AUTO_CORRECTION);
+        final boolean moreAutoCorrection = prefs.getBoolean(Settings.PREF_MORE_AUTO_CORRECTION, Defaults.PREF_MORE_AUTO_CORRECTION);
         mAutoCorrectEnabled = mAutoCorrectionEnabledPerUserSettings
-                && (mInputAttributes.mInputTypeShouldAutoCorrect || prefs.getBoolean(Settings.PREF_MORE_AUTO_CORRECTION, Defaults.PREF_MORE_AUTO_CORRECTION))
+                && (mInputAttributes.mInputTypeShouldAutoCorrect
+                    || (moreAutoCorrection && !mInputAttributes.mIsNoSuggestionsField))
                 && (mUrlDetectionEnabled || !InputTypeUtils.isUriOrEmailType(mInputAttributes.mInputType));
         mCenterSuggestionTextToEnter = prefs.getBoolean(Settings.PREF_CENTER_SUGGESTION_TEXT_TO_ENTER, Defaults.PREF_CENTER_SUGGESTION_TEXT_TO_ENTER);
         mAutoCorrectionThreshold = mAutoCorrectEnabled
@@ -238,10 +239,8 @@ public class SettingsValues {
         mGestureFastTypingCooldown = prefs.getInt(Settings.PREF_GESTURE_FAST_TYPING_COOLDOWN, Defaults.PREF_GESTURE_FAST_TYPING_COOLDOWN);
         mGestureTrailFadeoutDuration = prefs.getInt(Settings.PREF_GESTURE_TRAIL_FADEOUT_DURATION, Defaults.PREF_GESTURE_TRAIL_FADEOUT_DURATION);
         mSuggestionStripHiddenPerUserSettings = mToolbarMode == ToolbarMode.HIDDEN || mToolbarMode == ToolbarMode.TOOLBAR_KEYS;
-        mOverrideShowingSuggestions = mInputAttributes.mMayOverrideShowingSuggestions
-                && prefs.getBoolean(Settings.PREF_ALWAYS_SHOW_SUGGESTIONS, Defaults.PREF_ALWAYS_SHOW_SUGGESTIONS);
         final boolean suggestionsEnabled = prefs.getBoolean(Settings.PREF_SHOW_SUGGESTIONS, Defaults.PREF_SHOW_SUGGESTIONS);
-        mSuggestionsEnabledPerUserSettings = suggestionsEnabled && (mInputAttributes.mShouldShowSuggestions || mOverrideShowingSuggestions)
+        mSuggestionsEnabledPerUserSettings = suggestionsEnabled && mInputAttributes.mShouldShowSuggestions
                 && !mSuggestionStripHiddenPerUserSettings;
         mSecondaryStripVisible = mToolbarMode != ToolbarMode.HIDDEN || ! mToolbarHidingGlobal;
         mIncognitoModeEnabled = prefs.getBoolean(Settings.PREF_ALWAYS_INCOGNITO_MODE, Defaults.PREF_ALWAYS_INCOGNITO_MODE) || mInputAttributes.mNoLearning
@@ -308,12 +307,21 @@ public class SettingsValues {
     }
 
     public boolean needsToLookupSuggestions() {
-        return (mInputAttributes.mShouldShowSuggestions || mOverrideShowingSuggestions)
+        return mInputAttributes.mShouldShowSuggestions
                 && (mAutoCorrectEnabled || mSuggestionsEnabledPerUserSettings);
     }
 
     public boolean isSuggestionsEnabledPerUserSettings() {
         return mSuggestionsEnabledPerUserSettings;
+    }
+
+    /**
+     * Whether committed words from this field should be added to personalized history.
+     * Lookup/display can still be on when the host set {@code TYPE_TEXT_FLAG_NO_SUGGESTIONS};
+     * those fields are treated as exact-entry and are not learned from.
+     */
+    public boolean shouldLearnFromCurrentField() {
+        return mSuggestionsEnabledPerUserSettings && !mInputAttributes.mIsNoSuggestionsField;
     }
 
     public boolean isWordSeparator(final int code) {
