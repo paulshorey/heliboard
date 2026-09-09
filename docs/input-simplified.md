@@ -115,6 +115,9 @@ Responsibilities:
 5. suggestions are refreshed from keyboard-owned state
 
 Important: the host editor does **not** need to expose a live composing span for this to work.
+`TYPE_TEXT_FLAG_NO_SUGGESTIONS` also does not block this path: the keyboard still tracks the
+current word and fills the suggestion strip. Password and non-text fields remain excluded.
+Autocorrect and personalized learning still honor that host flag.
 
 ### Divergent insertion paths
 

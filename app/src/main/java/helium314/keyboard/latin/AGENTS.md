@@ -57,6 +57,7 @@ This is the main IME engine. It owns the InputMethodService lifecycle, the curre
 ## Non-obvious notes
 - The simplified input model keeps the current word in `WordComposer`, not in the host editor.
 - `EditorWordMirror` in `inputlogic/` mirrors that current word into the host app using committed-text operations; bypassing it tends to break deletion, suggestions, and revert logic.
+- Suggestion lookup is driven by `WordComposer` plus `needsToLookupSuggestions()`. Host `TYPE_TEXT_FLAG_NO_SUGGESTIONS` no longer hides the strip or skips current-word tracking; password and non-text fields still do. Autocorrect and user-history learning still honor that host flag unless the field also set `TYPE_TEXT_FLAG_AUTO_CORRECT`. An empty 3-slot strip almost always means lookup was skipped, not that the host hid the current word.
 - Voice insertion is a deliberate bypass: `LatinIME.commitVoiceTranscriptionText()` calls `finishInput()` and then direct `commitText()` in one batch edit before paragraph post-processing.
 - Fullapp is a standalone draft view. It seeds from `InputConnection`, persists live sync-eligible drafts through `FullappEditorResult`, archives finished drafts into `latin/edithistory/EditHistoryStore`, and replays with raw `InputConnection` replacement on IME reconnect; the system extract view is not the fullapp source of truth.
 - Regular-keyboard typing is captured into the same read-only `EditHistoryStore` (debounced in `LatinIME`, gated by `PREF_EDIT_HISTORY_ENABLED` and the same privacy exclusions as email capture).
