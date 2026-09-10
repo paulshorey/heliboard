@@ -585,6 +585,21 @@ object AppUpgrade {
                     !prefs.getBoolean(Settings.PREF_BIGRAM_PREDICTIONS, Defaults.PREF_BIGRAM_PREDICTIONS))
             }
         }
+        if (oldVersion <= 3603) {
+            // These three-key layouts used to be the defaults. Move existing installs to the
+            // action-key variants so emoji and clipboard reliably expose the same persistent
+            // ABC / space / delete / enter row as the typing keyboard. Custom layouts and users
+            // who choose the legacy variants again after this upgrade remain untouched.
+            mapOf(
+                LayoutType.EMOJI_BOTTOM to ("emoji_bottom_row" to "emoji_bottom_row_with_action"),
+                LayoutType.CLIPBOARD_BOTTOM to ("clip_bottom_row" to "clip_bottom_row_with_action")
+            ).forEach { (type, names) ->
+                val key = Settings.PREF_LAYOUT_PREFIX + type.name
+                if (prefs.getString(key, null) == names.first) {
+                    prefs.edit { putString(key, names.second) }
+                }
+            }
+        }
         TranscriptionPreferences.migrateLegacyProviderPrefs(prefs)
         TranscriptionPreferences.migrateGeminiVoiceDefaults(prefs)
         upgradeToolbarPrefs(prefs)

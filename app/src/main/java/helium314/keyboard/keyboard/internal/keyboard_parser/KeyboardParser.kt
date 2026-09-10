@@ -16,6 +16,7 @@ import helium314.keyboard.keyboard.internal.keyboard_parser.floris.SimplePopups
 import helium314.keyboard.keyboard.internal.keyboard_parser.floris.TextKeyData
 import helium314.keyboard.latin.common.isEmoji
 import helium314.keyboard.latin.define.DebugFlags
+import helium314.keyboard.latin.R
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.utils.LayoutType
 import helium314.keyboard.latin.utils.LayoutUtilsCustom
@@ -59,30 +60,69 @@ class KeyboardParser(private val params: KeyboardParams, private val context: Co
         }
         val baseKeys = LayoutParser.parseLayout(layoutType, params, context)
         val keysInRows = createRows(baseKeys)
-        val heightRescale: Float
         if (params.mId.isEmojiClipBottomRow) {
-            heightRescale = 4f
-            // params rescale is not perfect, especially mTopPadding may cause 1 pixel offsets because it's already been converted to int once
-            params.mOccupiedHeight /= 5
-            params.mBaseHeight /= 5
-            params.mTopPadding = (params.mTopPadding / 5.0).roundToInt()
+            applyEmojiClipBottomRowGeometry(params, getTypingLayoutRowCount())
+            // Keys were sized as 1/DEFAULT_KEYBOARD_ROWS of the full keyboard; make them fill
+            // the one-row base computed above.
+            val heightRescale = KeyboardParams.DEFAULT_KEYBOARD_ROWS.toFloat()
+            keysInRows.forEach { row -> row.forEach { it.mHeight *= heightRescale } }
         } else {
             // rescale height if we have anything but the usual 4 rows
-            heightRescale = if (keysInRows.size != 4) 4f / keysInRows.size else 1f
-        }
-        if (heightRescale != 1f) {
-            keysInRows.forEach { row -> row.forEach { it.mHeight *= heightRescale } }
-            // Row slot heights shrink with mHeight, but mVerticalGap was computed from the full
-            // keyboard height in readAttributes(); scale it too so extra rows (e.g. number row)
-            // do not leave oversized inter-row gaps.
-            val scaledGap = (params.mVerticalGap * heightRescale).roundToInt().coerceAtLeast(0)
-            params.mVerticalGap = scaledGap
-            if (params.mOccupiedHeight > 0) {
-                params.mRelativeVerticalGap = scaledGap.toFloat() / params.mOccupiedHeight
+            val heightRescale = if (keysInRows.size != 4) 4f / keysInRows.size else 1f
+            if (heightRescale != 1f) {
+                keysInRows.forEach { row -> row.forEach { it.mHeight *= heightRescale } }
+                // Row slot heights shrink with mHeight, but mVerticalGap was computed from the full
+                // keyboard height in readAttributes(); scale it too so extra rows (e.g. number row)
+                // do not leave oversized inter-row gaps.
+                val scaledGap = (params.mVerticalGap * heightRescale).roundToInt().coerceAtLeast(0)
+                params.mVerticalGap = scaledGap
+                if (params.mOccupiedHeight > 0) {
+                    params.mRelativeVerticalGap = scaledGap.toFloat() / params.mOccupiedHeight
+                }
             }
         }
 
         return keysInRows
+    }
+
+    /**
+     * Shrink a full-panel keyboard down to the alphabet space-row slot plus the full bottom
+     * padding, so overlay ABC/space/delete/enter keys match the typing keyboard.
+     */
+    private fun applyEmojiClipBottomRowGeometry(params: KeyboardParams, rowCount: Int) {
+        val fullKeyboardGap = params.mVerticalGap
+        val fullKeyboardHeight = params.mOccupiedHeight
+        val numberRowTopGap = context.resources.getDimensionPixelSize(R.dimen.config_number_row_top_extra_gap)
+        val typingTopPadding = params.mTopPadding + numberRowTopGap
+        val typingBaseHeight = params.mBaseHeight - numberRowTopGap
+        val rowSlotFloat = typingBaseHeight.toFloat() / rowCount
+        val rowSlot = rowSlotFloat.toInt().coerceAtLeast(1)
+        val rowGap = (fullKeyboardGap * KeyboardParams.DEFAULT_KEYBOARD_ROWS.toFloat() / rowCount)
+            .roundToInt().coerceAtLeast(0)
+        val typingBottomRowTop = (typingTopPadding + (rowCount - 1) * rowSlotFloat).roundToInt()
+        val occupiedBottomRowHeight = (fullKeyboardHeight - typingBottomRowTop).coerceAtLeast(rowSlot)
+        params.mTopPadding = 0
+        // Preserve the exact final-row extent while keeping the normal KeyboardParams invariant
+        // baseHeight = occupiedHeight - paddings + verticalGap.
+        params.mBottomPadding = (occupiedBottomRowHeight - rowSlot + rowGap).coerceAtLeast(0)
+        params.mVerticalGap = rowGap
+        params.mOccupiedHeight = occupiedBottomRowHeight
+        params.mBaseHeight = rowSlot
+        if (params.mOccupiedHeight > 0) {
+            params.mRelativeVerticalGap = params.mVerticalGap.toFloat() / params.mOccupiedHeight
+        }
+        if (params.mDefaultRowHeight > 0) {
+            params.mDefaultAbsoluteRowHeight = params.mBaseHeight
+        }
+    }
+
+    /** Number of row slots produced by the active alphabet layout, including its functional row. */
+    private fun getTypingLayoutRowCount(): Int {
+        val mainRows = LayoutParser.parseLayout(LayoutType.MAIN, params, context)
+        if (mainRows.isEmpty()) return KeyboardParams.DEFAULT_KEYBOARD_ROWS + 1
+        // A legacy layout may end in a two-key comma/period row. createRows() replaces that row
+        // with the functional row; all other layouts receive a new functional row.
+        return (mainRows.size + if (mainRows.last().size == 2) 0 else 1).coerceAtLeast(1)
     }
 
     private fun createRows(baseKeys: MutableList<MutableList<KeyData>>): ArrayList<ArrayList<KeyParams>> {

@@ -158,6 +158,22 @@ public class KeyboardView extends View {
         return mKeyVisualAttributes;
     }
 
+    /**
+     * Apply additional visual attributes (typically from the main typing keyboard) after
+     * {@link #setKeyboard(Keyboard)} so overlay bottom-row labels match alphabet/symbols keys.
+     */
+    public void applyKeyVisualAttributes(@Nullable final KeyVisualAttributes attr) {
+        final Keyboard keyboard = getKeyboard();
+        if (keyboard == null) return;
+        final int keyHeight = keyboard.mMostCommonKeyHeight - keyboard.mVerticalGap;
+        final int scaledKeyHeight = (int) (keyHeight * mKeyScaleForText);
+        mKeyDrawParams.updateParams(scaledKeyHeight, mKeyVisualAttributes);
+        if (attr != null) {
+            mKeyDrawParams.updateParams(scaledKeyHeight, attr);
+        }
+        invalidateAllKeys();
+    }
+
     private static void blendAlpha(@NonNull final Paint paint, final int alpha) {
         final int color = paint.getColor();
         paint.setARGB((paint.getAlpha() * alpha) / Constants.Color.ALPHA_OPAQUE,

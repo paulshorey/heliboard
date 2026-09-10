@@ -33,10 +33,8 @@ import helium314.keyboard.keyboard.KeyboardActionListener;
 import helium314.keyboard.keyboard.KeyboardId;
 import helium314.keyboard.keyboard.KeyboardLayoutSet;
 import helium314.keyboard.keyboard.KeyboardSwitcher;
-import helium314.keyboard.keyboard.KeyboardView;
 import helium314.keyboard.keyboard.MainKeyboardView;
 import helium314.keyboard.keyboard.PointerTracker;
-import helium314.keyboard.keyboard.internal.KeyDrawParams;
 import helium314.keyboard.keyboard.internal.KeyVisualAttributes;
 import helium314.keyboard.keyboard.internal.keyboard_parser.floris.KeyCode;
 import helium314.keyboard.latin.AudioAndHapticFeedbackManager;
@@ -215,19 +213,32 @@ public final class EmojiPalettesView extends LinearLayout
                 R.styleable.EmojiPalettesView, defStyle, R.style.EmojiPalettesView);
         mEmojiCategory = new EmojiCategory(context, layoutSet, emojiPalettesViewAttr);
         emojiPalettesViewAttr.recycle();
-        setFitsSystemWindows(true);
+    }
+
+    @Override
+    protected void onFinishInflate() {
+        super.onFinishInflate();
+        // KeyboardView opts into system-window fitting in its constructor. Disable it before this
+        // hidden child ever receives insets; turning it off only when emoji opens can leave stale
+        // inset padding from an earlier layout pass.
+        final MainKeyboardView bottomRow = findViewById(R.id.bottom_row_keyboard);
+        bottomRow.setFitsSystemWindows(false);
     }
 
     @Override
     protected void onMeasure(final int widthMeasureSpec, final int heightMeasureSpec) {
-        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
         final Resources res = getContext().getResources();
-        // The main keyboard expands to the entire this {@link KeyboardView}.
         final int width = ResourceUtils.getKeyboardWidth(getContext(), Settings.getValues())
                 + getPaddingLeft() + getPaddingRight();
         final int height = ResourceUtils.getKeyboardLayoutHeightForPanel(res, Settings.getValues())
                 + getPaddingTop() + getPaddingBottom();
-        mEmojiCategoryPageIndicatorView.mWidth = width;
+        // Measure weighted children against the final panel size. Measuring with the parent's
+        // wrap-content spec first can let the pager consume the bottom-row space and clip it.
+        super.onMeasure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));
+        if (mEmojiCategoryPageIndicatorView != null) {
+            mEmojiCategoryPageIndicatorView.mWidth = width;
+        }
         setMeasuredDimension(width, height);
     }
 
@@ -249,10 +260,8 @@ public final class EmojiPalettesView extends LinearLayout
         if (initialized) return;
         mEmojiCategory.initialize();
         mTabStrip = (LinearLayout) KeyboardSwitcher.getInstance().getEmojiTabStrip();
-        if (Settings.getValues().mSecondaryStripVisible) {
-            for (final EmojiCategory.CategoryProperties properties : mEmojiCategory.getShownCategories()) {
-                addTab(mTabStrip, properties.mCategoryId);
-            }
+        for (final EmojiCategory.CategoryProperties properties : mEmojiCategory.getShownCategories()) {
+            addTab(mTabStrip, properties.mCategoryId);
         }
 
         mPager = findViewById(R.id.emoji_pager);
@@ -336,9 +345,7 @@ public final class EmojiPalettesView extends LinearLayout
                final EditorInfo editorInfo, final KeyboardActionListener keyboardActionListener) {
         initialize();
 
-        setupBottomRowKeyboard(editorInfo, keyboardActionListener);
-        final KeyDrawParams params = new KeyDrawParams();
-        params.updateParams(mEmojiLayoutParams.getBottomRowKeyboardHeight(), keyVisualAttr);
+        setupBottomRowKeyboard(editorInfo, keyboardActionListener, keyVisualAttr);
         setupSidePadding();
         initDictionaryFacilitator();
     }
@@ -356,13 +363,17 @@ public final class EmojiPalettesView extends LinearLayout
         mPager.getAdapter().notifyItemChanged(mEmojiCategory.getRecentTabId());
     }
 
-    private void setupBottomRowKeyboard(final EditorInfo editorInfo, final KeyboardActionListener keyboardActionListener) {
+    private void setupBottomRowKeyboard(final EditorInfo editorInfo,
+            final KeyboardActionListener keyboardActionListener,
+            final KeyVisualAttributes keyVisualAttr) {
         MainKeyboardView keyboardView = findViewById(R.id.bottom_row_keyboard);
+        keyboardView.setFitsSystemWindows(false);
         keyboardView.setKeyboardActionListener(keyboardActionListener);
         PointerTracker.switchTo(keyboardView);
         final KeyboardLayoutSet kls = KeyboardLayoutSet.Builder.buildEmojiClipBottomRow(getContext(), editorInfo);
         final Keyboard keyboard = kls.getKeyboard(KeyboardId.ELEMENT_EMOJI_BOTTOM_ROW);
         keyboardView.setKeyboard(keyboard);
+        keyboardView.applyKeyVisualAttributes(keyVisualAttr);
     }
 
     private void setupSidePadding() {
@@ -423,15 +434,13 @@ public final class EmojiPalettesView extends LinearLayout
                                 mEmojiCategory.getCurrentCategoryId()), ! initial && ! isAnimationsDisabled());
             }
 
-            if (Settings.getValues().mSecondaryStripVisible) {
-                final View old = mTabStrip.findViewWithTag((long) oldCategoryId);
-                final View current = mTabStrip.findViewWithTag((long) categoryId);
+            final View old = mTabStrip.findViewWithTag((long) oldCategoryId);
+            final View current = mTabStrip.findViewWithTag((long) categoryId);
 
-                if (old instanceof ImageView)
-                    Settings.getValues().mColors.setColor((ImageView) old, ColorType.EMOJI_CATEGORY);
-                if (current instanceof ImageView)
-                    Settings.getValues().mColors.setColor((ImageView) current, ColorType.EMOJI_CATEGORY_SELECTED);
-            }
+            if (old instanceof ImageView)
+                Settings.getValues().mColors.setColor((ImageView) old, ColorType.EMOJI_CATEGORY);
+            if (current instanceof ImageView)
+                Settings.getValues().mColors.setColor((ImageView) current, ColorType.EMOJI_CATEGORY_SELECTED);
         }
     }
 
