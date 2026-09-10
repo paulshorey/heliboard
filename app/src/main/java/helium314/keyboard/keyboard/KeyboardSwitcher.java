@@ -337,10 +337,9 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
 
     private void updateSecondaryToolbarVisibility(final int stripVisibility) {
         if (mSecondaryToolbarContainer == null) return;
-        // The Secondary Toolbar is only meaningful next to the main suggestion strip.
-        // Hide it whenever the strip is hidden (e.g. hidden toolbar mode, emoji /
-        // clipboard panels). Otherwise the SuggestionStripView controls its visibility
-        // based on whether any pinned keys are configured.
+        // Pinned keys are shared chrome for typing, emoji, and clipboard modes. The
+        // SuggestionStripView owns the configured/locked/empty predicates; this method owns the
+        // current mode's primary-strip visibility.
         if (stripVisibility != View.VISIBLE) {
             mSecondaryToolbarContainer.setVisibility(View.GONE);
         } else if (mSuggestionStripView != null) {
@@ -360,8 +359,8 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         // @see LatinIME#onComputeInset(android.inputmethodservice.InputMethodService.Insets)
         mKeyboardView.setVisibility(View.GONE);
         mSuggestionStripView.setVisibility(View.GONE);
-        mStripContainer.setVisibility(getSecondaryStripVisibility());
-        if (mSecondaryToolbarContainer != null) mSecondaryToolbarContainer.setVisibility(View.GONE);
+        mStripContainer.setVisibility(View.VISIBLE);
+        updateSecondaryToolbarVisibility(View.VISIBLE);
         mClipboardStripScrollView.setVisibility(View.GONE);
         mEmojiTabStripView.setVisibility(View.VISIBLE);
         mClipboardHistoryView.setVisibility(View.GONE);
@@ -383,8 +382,8 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         mKeyboardView.setVisibility(View.GONE);
         mEmojiTabStripView.setVisibility(View.GONE);
         mSuggestionStripView.setVisibility(View.GONE);
-        mStripContainer.setVisibility(getSecondaryStripVisibility());
-        if (mSecondaryToolbarContainer != null) mSecondaryToolbarContainer.setVisibility(View.GONE);
+        mStripContainer.setVisibility(View.VISIBLE);
+        updateSecondaryToolbarVisibility(View.VISIBLE);
         mClipboardStripScrollView.post(() -> mClipboardStripScrollView.fullScroll(HorizontalScrollView.FOCUS_RIGHT));
         mClipboardStripScrollView.setVisibility(View.VISIBLE);
         mEmojiPalettesView.setVisibility(View.GONE);

@@ -3,12 +3,18 @@ package helium314.keyboard
 
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodSubtype
+import android.view.LayoutInflater
+import android.view.View
+import androidx.viewpager2.widget.ViewPager2
 import com.android.inputmethod.keyboard.ProximityInfo
 import helium314.keyboard.keyboard.Key
 import helium314.keyboard.keyboard.Key.KeyParams
 import helium314.keyboard.keyboard.Keyboard
 import helium314.keyboard.keyboard.KeyboardId
 import helium314.keyboard.keyboard.KeyboardLayoutSet
+import helium314.keyboard.keyboard.MainKeyboardView
+import helium314.keyboard.keyboard.clipboard.ClipboardHistoryView
+import helium314.keyboard.keyboard.emoji.EmojiPalettesView
 import helium314.keyboard.keyboard.internal.KeySpecParser.KeySpecParserError
 import helium314.keyboard.keyboard.internal.KeyboardBuilder
 import helium314.keyboard.keyboard.internal.KeyboardParams
@@ -19,9 +25,12 @@ import helium314.keyboard.keyboard.internal.keyboard_parser.POPUP_KEYS_NORMAL
 import helium314.keyboard.keyboard.internal.keyboard_parser.addLocaleKeyTextsToParams
 import helium314.keyboard.keyboard.internal.keyboard_parser.floris.KeyCode
 import helium314.keyboard.latin.LatinIME
+import helium314.keyboard.latin.R
 import helium314.keyboard.latin.RichInputMethodSubtype
+import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.utils.LayoutUtilsCustom
 import helium314.keyboard.latin.utils.POPUP_KEYS_LAYOUT
+import helium314.keyboard.latin.utils.ResourceUtils
 import helium314.keyboard.latin.utils.SubtypeUtilsAdditional
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -576,6 +585,64 @@ f""", // no newline at the end
         assertTrue(keys[2].size >= 9, "Second alpha row should have at least 9 keys")
         assertTrue(keys[3].isNotEmpty(), "Third alpha row should exist")
         assertEquals(kb.sortedKeys.size, keys.sumOf { it.size })
+    }
+
+    @Test fun `overlay bottom row matches active alphabet functional row geometry`() {
+        val editorInfo = EditorInfo()
+        // These exercise the common five-row keyboard and layouts with extra authored rows.
+        for (layoutName in listOf("qwerty", "hungarian_extended_qwertz", "kannada_extended")) {
+            val subtype = SubtypeUtilsAdditional.createEmojiCapableAdditionalSubtype(
+                Locale.ENGLISH, layoutName, true
+            )
+            val (alphabet, alphabetRows) = buildKeyboard(editorInfo, subtype, KeyboardId.ELEMENT_ALPHABET)
+            val (overlay, overlayRows) = buildKeyboard(editorInfo, subtype, KeyboardId.ELEMENT_EMOJI_BOTTOM_ROW)
+            val alphabetSpace = assertNotNull(alphabet.getKey(' '.code), "$layoutName alphabet space")
+            val overlaySpace = assertNotNull(overlay.getKey(' '.code), "$layoutName overlay space")
+
+            assertEquals(1, overlayRows.size, "$layoutName overlay must stay one row")
+            assertEquals(alphabetRows.size, alphabet.sortedKeys.map { it.y }.distinct().size,
+                "$layoutName authored and rendered row counts")
+            assertEquals(alphabetSpace.height, overlaySpace.height,
+                "$layoutName visible functional-key height")
+            assertEquals(alphabetSpace.verticalGap, overlaySpace.verticalGap,
+                "$layoutName functional-row gap")
+            assertTrue(overlay.mOccupiedHeight >= overlaySpace.y + overlaySpace.height,
+                "$layoutName overlay must not clip its persistent bottom row")
+        }
+    }
+
+    @Test fun `weighted overlay bodies leave the bottom utility row visible`() {
+        val keyboard = KeyboardLayoutSet.Builder.buildEmojiClipBottomRow(latinIME, EditorInfo())
+            .getKeyboard(KeyboardId.ELEMENT_EMOJI_BOTTOM_ROW)
+        val targetWidth = ResourceUtils.getKeyboardWidth(latinIME, Settings.getValues())
+        val targetHeight = ResourceUtils.getKeyboardLayoutHeightForPanel(
+            latinIME.resources, Settings.getValues()
+        )
+        val widthSpec = View.MeasureSpec.makeMeasureSpec(targetWidth, View.MeasureSpec.EXACTLY)
+        val incomingWrapContentSpec = View.MeasureSpec.makeMeasureSpec(targetHeight, View.MeasureSpec.AT_MOST)
+
+        val emoji = LayoutInflater.from(latinIME)
+            .inflate(R.layout.emoji_palettes_view, null, false) as EmojiPalettesView
+        val emojiBottom = emoji.findViewById<MainKeyboardView>(R.id.bottom_row_keyboard)
+        emojiBottom.setKeyboard(keyboard)
+        emoji.measure(widthSpec, incomingWrapContentSpec)
+        val pager = emoji.findViewById<ViewPager2>(R.id.emoji_pager)
+        val indicator = emoji.findViewById<View>(R.id.emoji_category_page_id_view)
+        assertEquals(targetHeight, emoji.measuredHeight)
+        assertTrue(emojiBottom.measuredHeight > 0)
+        assertEquals(emoji.measuredHeight,
+            pager.measuredHeight + indicator.measuredHeight + emojiBottom.measuredHeight)
+
+        val clipboard = LayoutInflater.from(latinIME)
+            .inflate(R.layout.clipboard_history_view, null, false) as ClipboardHistoryView
+        val clipboardBottom = clipboard.findViewById<MainKeyboardView>(R.id.bottom_row_keyboard)
+        clipboardBottom.setKeyboard(keyboard)
+        clipboard.measure(widthSpec, incomingWrapContentSpec)
+        val listBody = clipboard.getChildAt(0)
+        assertEquals(targetHeight, clipboard.measuredHeight)
+        assertTrue(clipboardBottom.measuredHeight > 0)
+        assertEquals(clipboard.measuredHeight,
+            listBody.measuredHeight + clipboardBottom.measuredHeight)
     }
 
     @Test fun `custom symbol layout has hints enabled`() {

@@ -38,6 +38,7 @@ import helium314.keyboard.latin.utils.getCodeForToolbarKeyLongClick
 import helium314.keyboard.latin.utils.getEnabledClipboardToolbarKeys
 import helium314.keyboard.latin.utils.prefs
 import helium314.keyboard.latin.utils.setToolbarButtonsActivatedStateOnPrefChange
+import kotlin.math.sqrt
 
 @SuppressLint("CustomViewStyleable")
 class ClipboardHistoryView @JvmOverloads constructor(
@@ -69,18 +70,27 @@ class ClipboardHistoryView @JvmOverloads constructor(
         val keyboardViewAttr = context.obtainStyledAttributes(attrs, R.styleable.KeyboardView, defStyle, R.style.KeyboardView)
         keyBackgroundId = keyboardViewAttr.getResourceId(R.styleable.KeyboardView_keyBackground, 0)
         keyboardViewAttr.recycle()
-        if (Settings.getValues().mSecondaryStripVisible) {
-            getEnabledClipboardToolbarKeys(context.prefs())
-                .forEach { toolbarKeys.add(createToolbarKey(context, it)) }
-        }
+        getEnabledClipboardToolbarKeys(context.prefs())
+            .forEach { toolbarKeys.add(createToolbarKey(context, it)) }
+    }
+
+    override fun onFinishInflate() {
+        super.onFinishInflate()
+        // Disable KeyboardView's default inset handling before this hidden child can receive an
+        // inset pass. The panel itself already follows the same bottom-padding path as typing.
+        findViewById<MainKeyboardView>(R.id.bottom_row_keyboard).fitsSystemWindows = false
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
         val res = context.resources
-        // The main keyboard expands to the entire this {@link KeyboardView}.
         val width = ResourceUtils.getKeyboardWidth(context, Settings.getValues()) + paddingLeft + paddingRight
         val height = ResourceUtils.getKeyboardLayoutHeightForPanel(res, Settings.getValues()) + paddingTop + paddingBottom
+        // Resolve layout_weight against the final panel height so the list cannot consume and
+        // clip the persistent bottom row under an incoming wrap-content/AT_MOST measure spec.
+        super.onMeasure(
+            MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY)
+        )
         setMeasuredDimension(width, height)
     }
 
@@ -126,7 +136,7 @@ class ClipboardHistoryView @JvmOverloads constructor(
         toolbarKeys.forEach { it.layoutParams = toolbarKeyLayoutParams }
     }
 
-    private fun setupBottomRowKeyboard(editorInfo: EditorInfo, listener: KeyboardActionListener, keyVisualAttr: KeyVisualAttributes?) {
+    private fun setupBottomRowKeyboard(editorInfo: EditorInfo, listener: KeyboardActionListener, keyVisualAttr: KeyVisualAttributes?): Int {
         val keyboardView = findViewById<MainKeyboardView>(R.id.bottom_row_keyboard)
         keyboardView.fitsSystemWindows = false
         keyboardView.setKeyboardActionListener(listener)
@@ -134,8 +144,8 @@ class ClipboardHistoryView @JvmOverloads constructor(
         val kls = KeyboardLayoutSet.Builder.buildEmojiClipBottomRow(context, editorInfo)
         val keyboard = kls.getKeyboard(KeyboardId.ELEMENT_CLIPBOARD_BOTTOM_ROW)
         keyboardView.setKeyboard(keyboard)
-        val keyHeight = keyboard.mMostCommonKeyHeight - keyboard.mVerticalGap
-        keyboardView.applyKeyVisualAttributes(keyHeight, keyVisualAttr)
+        keyboardView.applyKeyVisualAttributes(keyVisualAttr)
+        return keyboard.mMostCommonKeyHeight - keyboard.mVerticalGap
     }
 
     fun setHardwareAcceleratedDrawingEnabled(enabled: Boolean) {
@@ -157,13 +167,13 @@ class ClipboardHistoryView @JvmOverloads constructor(
         historyManager.setHistoryChangeListener(this)
         clipboardAdapter.clipboardHistoryManager = historyManager
 
+        val bottomRowKeyHeight = setupBottomRowKeyboard(editorInfo, keyboardActionListener, keyVisualAttr)
         val params = KeyDrawParams()
-        params.updateParams(clipboardLayoutParams.bottomRowKeyboardHeight, keyVisualAttr)
+        val textScale = sqrt(1f / Settings.getValues().mKeyboardHeightScale)
+        params.updateParams((bottomRowKeyHeight * textScale).toInt(), keyVisualAttr)
         val settings = Settings.getInstance()
         settings.getCustomTypeface()?.let { params.mTypeface = it }
         setupClipKey(params)
-        setupBottomRowKeyboard(editorInfo, keyboardActionListener, keyVisualAttr)
-
         placeholderView.apply {
             typeface = params.mTypeface
             setTextColor(params.mTextColor)

@@ -220,7 +220,7 @@ public final class KeyboardLayoutSet {
             final Builder builder = new Builder(context, ei);
             builder.mParams.mMode = KeyboardId.MODE_TEXT;
             final int width = ResourceUtils.getKeyboardWidth(context, Settings.getValues());
-            // Parser shrinks this full panel height to one functional row plus bottom padding.
+            // Parser shrinks this full typing-area height to one functional row plus bottom padding.
             final int height = ResourceUtils.getKeyboardLayoutHeightForPanel(
                     context.getResources(), Settings.getValues());
             builder.setKeyboardGeometry(width, height);

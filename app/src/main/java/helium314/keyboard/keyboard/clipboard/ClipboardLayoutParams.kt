@@ -14,8 +14,6 @@ class ClipboardLayoutParams(ctx: Context) {
 
     private val keyVerticalGap: Int
     private val keyHorizontalGap: Int
-    val bottomRowKeyboardHeight: Int
-
     init {
         val res = ctx.resources
         val sv = Settings.getValues()
@@ -33,7 +31,6 @@ class ClipboardLayoutParams(ctx: Context) {
             keyHorizontalGap = res.getFraction(R.fraction.config_key_horizontal_gap_holo,
                 defaultKeyboardWidth, defaultKeyboardWidth).toInt()
         }
-        bottomRowKeyboardHeight = ResourceUtils.getPanelFunctionalRowKeyHeight(res, sv)
     }
 
     fun setListProperties(recycler: RecyclerView) {

@@ -19,10 +19,10 @@ internal class EmojiLayoutParams(res: Resources) {
 
     init {
         val sv = Settings.getValues()
-        val panelHeight = ResourceUtils.getKeyboardLayoutHeightForPanel(res, sv)
         emojiCategoryPageIdViewHeight = res.getDimension(R.dimen.config_emoji_category_page_id_height).toInt()
-        val occupiedBottomRow = ResourceUtils.getPanelFunctionalRowOccupiedHeight(res, sv)
-        emojiKeyboardHeight = (panelHeight - occupiedBottomRow - emojiCategoryPageIdViewHeight).coerceAtLeast(0)
+        // This height only seeds the emoji key template. The actual pager is weighted and is
+        // measured from the exact panel height, so it always consumes the remaining body space.
+        emojiKeyboardHeight = ResourceUtils.getKeyboardLayoutHeightForPanel(res, sv)
     }
 
     fun setEmojiListProperties(vp: ViewPager2) {
