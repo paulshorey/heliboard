@@ -174,9 +174,10 @@ user stops talking and nothing is written. The client backstops this:
   a final already arrived does not re-arm that flush. A session rotate waits
   for the current utterance when it can, then waits the leftover-flush window
   so a polished final can arrive before the outgoing socket is cancelled. If
-  `goAway` is already imminent, rotate immediately even while speaking. A deferred rotate is cancelled if the stream dies or a
-  replacement session starts first. `resumeRecording` clears a pending
-  pause-during-connect finalize so the new dictation is not closed on `setupComplete`.
+  `goAway` is already imminent, rotate immediately even while speaking. A
+  deferred rotate is cancelled if the stream dies or a replacement session
+  starts first. `resumeRecording` clears a pending pause-during-connect
+  finalize so the new dictation is not closed on `setupComplete`.
 - On **mic pause** the same `audioStreamEnd` is sent. A turn left open with no
   audio is the dominant cause of the Live API dropping the connection with 1011.
 - On **stop**, `finishStreaming()` sends it and then keeps reading for up to 8 s.
