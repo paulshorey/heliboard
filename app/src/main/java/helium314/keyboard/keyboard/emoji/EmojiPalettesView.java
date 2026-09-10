@@ -33,10 +33,8 @@ import helium314.keyboard.keyboard.KeyboardActionListener;
 import helium314.keyboard.keyboard.KeyboardId;
 import helium314.keyboard.keyboard.KeyboardLayoutSet;
 import helium314.keyboard.keyboard.KeyboardSwitcher;
-import helium314.keyboard.keyboard.KeyboardView;
 import helium314.keyboard.keyboard.MainKeyboardView;
 import helium314.keyboard.keyboard.PointerTracker;
-import helium314.keyboard.keyboard.internal.KeyDrawParams;
 import helium314.keyboard.keyboard.internal.KeyVisualAttributes;
 import helium314.keyboard.keyboard.internal.keyboard_parser.floris.KeyCode;
 import helium314.keyboard.latin.AudioAndHapticFeedbackManager;
@@ -215,7 +213,6 @@ public final class EmojiPalettesView extends LinearLayout
                 R.styleable.EmojiPalettesView, defStyle, R.style.EmojiPalettesView);
         mEmojiCategory = new EmojiCategory(context, layoutSet, emojiPalettesViewAttr);
         emojiPalettesViewAttr.recycle();
-        setFitsSystemWindows(true);
     }
 
     @Override
@@ -336,9 +333,7 @@ public final class EmojiPalettesView extends LinearLayout
                final EditorInfo editorInfo, final KeyboardActionListener keyboardActionListener) {
         initialize();
 
-        setupBottomRowKeyboard(editorInfo, keyboardActionListener);
-        final KeyDrawParams params = new KeyDrawParams();
-        params.updateParams(mEmojiLayoutParams.getBottomRowKeyboardHeight(), keyVisualAttr);
+        setupBottomRowKeyboard(editorInfo, keyboardActionListener, keyVisualAttr);
         setupSidePadding();
         initDictionaryFacilitator();
     }
@@ -356,13 +351,18 @@ public final class EmojiPalettesView extends LinearLayout
         mPager.getAdapter().notifyItemChanged(mEmojiCategory.getRecentTabId());
     }
 
-    private void setupBottomRowKeyboard(final EditorInfo editorInfo, final KeyboardActionListener keyboardActionListener) {
+    private void setupBottomRowKeyboard(final EditorInfo editorInfo,
+            final KeyboardActionListener keyboardActionListener,
+            final KeyVisualAttributes keyVisualAttr) {
         MainKeyboardView keyboardView = findViewById(R.id.bottom_row_keyboard);
+        keyboardView.setFitsSystemWindows(false);
         keyboardView.setKeyboardActionListener(keyboardActionListener);
         PointerTracker.switchTo(keyboardView);
         final KeyboardLayoutSet kls = KeyboardLayoutSet.Builder.buildEmojiClipBottomRow(getContext(), editorInfo);
         final Keyboard keyboard = kls.getKeyboard(KeyboardId.ELEMENT_EMOJI_BOTTOM_ROW);
         keyboardView.setKeyboard(keyboard);
+        final int keyHeight = keyboard.mMostCommonKeyHeight - keyboard.mVerticalGap;
+        keyboardView.applyKeyVisualAttributes(keyHeight, keyVisualAttr);
     }
 
     private void setupSidePadding() {

@@ -33,6 +33,7 @@ Visual keyboard system: key geometry, rendering, pointer tracking, layout switch
 - `KeyboardActionListenerImpl.kt` is the main seam from view events into text logic.
 - `KeyboardSwitcher` owns mode switches between the main keyboard, emoji palette, clipboard surface, and optional **Secondary Toolbar** container from `main_keyboard_frame.xml`; it exposes `getSecondaryToolbarHeight()` for IME layout math when that strip is visible.
 - Suggestion, emoji-tab, and clipboard strips share `strip_container`; visibility changes here must stay aligned with `SuggestionStripView` toolbar state and `SettingsValues.mSecondaryStripVisible`.
+- Emoji/clipboard overlays fill leftover typing-area height with a weight=1 grid above a functional row sized by `ResourceUtils.getPanelFunctionalRowOccupiedHeight`; they do not use `fitsSystemWindows`.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

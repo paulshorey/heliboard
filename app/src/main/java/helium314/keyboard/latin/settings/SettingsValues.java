@@ -32,6 +32,7 @@ import helium314.keyboard.latin.utils.ScriptUtils;
 import helium314.keyboard.latin.utils.SubtypeSettings;
 import helium314.keyboard.latin.utils.SubtypeUtilsKt;
 import helium314.keyboard.latin.utils.ToolbarMode;
+import helium314.keyboard.latin.utils.ToolbarUtilsKt;
 
 import java.util.List;
 import java.util.Locale;
@@ -138,6 +139,7 @@ public class SettingsValues {
     // Deduced settings
     public final boolean mSuggestionStripHiddenPerUserSettings;
     public final boolean mSecondaryStripVisible;
+    public final boolean mHasPinnedToolbarKeys;
     public final int mKeypressVibrationDuration;
     public final float mKeypressSoundVolume;
     public final boolean mAutoCorrectionEnabledPerUserSettings;
@@ -243,6 +245,7 @@ public class SettingsValues {
         mSuggestionsEnabledPerUserSettings = suggestionsEnabled && mInputAttributes.mShouldShowSuggestions
                 && !mSuggestionStripHiddenPerUserSettings;
         mSecondaryStripVisible = mToolbarMode != ToolbarMode.HIDDEN || ! mToolbarHidingGlobal;
+        mHasPinnedToolbarKeys = !ToolbarUtilsKt.getPinnedToolbarKeys(prefs).isEmpty();
         mIncognitoModeEnabled = prefs.getBoolean(Settings.PREF_ALWAYS_INCOGNITO_MODE, Defaults.PREF_ALWAYS_INCOGNITO_MODE) || mInputAttributes.mNoLearning
                 || mInputAttributes.mIsPasswordField;
         mEditHistoryEnabled = prefs.getBoolean(Settings.PREF_EDIT_HISTORY_ENABLED, Defaults.PREF_EDIT_HISTORY_ENABLED);

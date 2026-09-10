@@ -19,6 +19,7 @@ import helium314.keyboard.latin.define.DebugFlags
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.utils.LayoutType
 import helium314.keyboard.latin.utils.LayoutUtilsCustom
+import helium314.keyboard.latin.utils.ResourceUtils
 import helium314.keyboard.latin.utils.replaceFirst
 import helium314.keyboard.latin.utils.splitAt
 import helium314.keyboard.latin.utils.sumOf
@@ -59,30 +60,52 @@ class KeyboardParser(private val params: KeyboardParams, private val context: Co
         }
         val baseKeys = LayoutParser.parseLayout(layoutType, params, context)
         val keysInRows = createRows(baseKeys)
-        val heightRescale: Float
         if (params.mId.isEmojiClipBottomRow) {
-            heightRescale = 4f
-            // params rescale is not perfect, especially mTopPadding may cause 1 pixel offsets because it's already been converted to int once
-            params.mOccupiedHeight /= 5
-            params.mBaseHeight /= 5
-            params.mTopPadding = (params.mTopPadding / 5.0).roundToInt()
+            applyEmojiClipBottomRowGeometry(params)
+            // Keys were sized as 1/DEFAULT_KEYBOARD_ROWS of the full keyboard; make them fill
+            // the one-row base computed above.
+            val heightRescale = KeyboardParams.DEFAULT_KEYBOARD_ROWS.toFloat()
+            keysInRows.forEach { row -> row.forEach { it.mHeight *= heightRescale } }
         } else {
             // rescale height if we have anything but the usual 4 rows
-            heightRescale = if (keysInRows.size != 4) 4f / keysInRows.size else 1f
-        }
-        if (heightRescale != 1f) {
-            keysInRows.forEach { row -> row.forEach { it.mHeight *= heightRescale } }
-            // Row slot heights shrink with mHeight, but mVerticalGap was computed from the full
-            // keyboard height in readAttributes(); scale it too so extra rows (e.g. number row)
-            // do not leave oversized inter-row gaps.
-            val scaledGap = (params.mVerticalGap * heightRescale).roundToInt().coerceAtLeast(0)
-            params.mVerticalGap = scaledGap
-            if (params.mOccupiedHeight > 0) {
-                params.mRelativeVerticalGap = scaledGap.toFloat() / params.mOccupiedHeight
+            val heightRescale = if (keysInRows.size != 4) 4f / keysInRows.size else 1f
+            if (heightRescale != 1f) {
+                keysInRows.forEach { row -> row.forEach { it.mHeight *= heightRescale } }
+                // Row slot heights shrink with mHeight, but mVerticalGap was computed from the full
+                // keyboard height in readAttributes(); scale it too so extra rows (e.g. number row)
+                // do not leave oversized inter-row gaps.
+                val scaledGap = (params.mVerticalGap * heightRescale).roundToInt().coerceAtLeast(0)
+                params.mVerticalGap = scaledGap
+                if (params.mOccupiedHeight > 0) {
+                    params.mRelativeVerticalGap = scaledGap.toFloat() / params.mOccupiedHeight
+                }
             }
         }
 
         return keysInRows
+    }
+
+    /**
+     * Shrink a full-panel keyboard down to the alphabet space-row slot plus the full bottom
+     * padding, so overlay ABC/space/delete/enter keys match the typing keyboard.
+     */
+    private fun applyEmojiClipBottomRowGeometry(params: KeyboardParams) {
+        val rowCount = ResourceUtils.getTypingLayoutRowCount()
+        val rowSlot = ((params.mOccupiedHeight - params.mTopPadding - params.mBottomPadding) / rowCount)
+            .coerceAtLeast(0)
+        val fullBottom = params.mBottomPadding
+        val rowGap = (params.mVerticalGap / rowCount).coerceAtLeast(0)
+        params.mTopPadding = 0
+        params.mBottomPadding = fullBottom
+        params.mVerticalGap = rowGap
+        params.mOccupiedHeight = rowSlot + fullBottom
+        params.mBaseHeight = params.mOccupiedHeight - params.mTopPadding - params.mBottomPadding + params.mVerticalGap
+        if (params.mOccupiedHeight > 0) {
+            params.mRelativeVerticalGap = params.mVerticalGap.toFloat() / params.mOccupiedHeight
+        }
+        if (params.mDefaultRowHeight > 0) {
+            params.mDefaultAbsoluteRowHeight = params.mBaseHeight
+        }
     }
 
     private fun createRows(baseKeys: MutableList<MutableList<KeyData>>): ArrayList<ArrayList<KeyParams>> {

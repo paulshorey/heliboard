@@ -19,6 +19,7 @@ import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.view.WindowMetrics;
 
+import helium314.keyboard.keyboard.internal.KeyboardParams;
 import helium314.keyboard.latin.R;
 import helium314.keyboard.latin.settings.SettingsValues;
 
@@ -65,18 +66,52 @@ public final class ResourceUtils {
     }
 
     /**
+     * Row count of a typical baked-number-row alphabet/symbols keyboard, including the functional
+     * bottom row. Emoji/clipboard overlay geometry treats one of these slots as the ABC/space row.
+     */
+    public static int getTypingLayoutRowCount() {
+        return KeyboardParams.DEFAULT_KEYBOARD_ROWS + 1;
+    }
+
+    /**
      * Vertical space used for laying out emoji/clipboard panels and their bottom functional row.
-     * When the dual strip (suggestion + pinned) is shown, the pinned toolbar sits above the typing
-     * area but is not part of {@link #getKeyboardHeight}; add its nominal height so geometry matches
-     * the main keyboard frame.
+     * When the pinned Secondary Toolbar is actually shown on the typing keyboard, its height is
+     * added so hiding that strip in emoji/clipboard can give the extra space to the panel grid
+     * instead of leaving a gap. Do not reserve it when pinned keys are empty or the strip is hidden.
      */
     public static int getKeyboardLayoutHeightForPanel(final Resources res, final SettingsValues settingsValues) {
         return getSecondaryKeyboardHeight(res, settingsValues)
                 + secondaryToolbarLayoutReservePx(res, settingsValues);
     }
 
+    /**
+     * Occupied height of the emoji/clipboard functional bottom-row keyboard: one typing-row slot
+     * plus the full keyboard bottom padding, matching the alphabet space row including nav inset.
+     */
+    public static int getPanelFunctionalRowOccupiedHeight(final Resources res, final SettingsValues settingsValues) {
+        final int panelHeight = getKeyboardLayoutHeightForPanel(res, settingsValues);
+        final int topPadding = (int) res.getFraction(R.fraction.config_keyboard_top_padding_holo,
+                panelHeight, panelHeight);
+        final int bottomPadding = (int) (res.getFraction(R.fraction.config_keyboard_bottom_padding_holo,
+                panelHeight, panelHeight) * settingsValues.mBottomPaddingScale);
+        final int rowSlot = Math.max(0, (panelHeight - topPadding - bottomPadding) / getTypingLayoutRowCount());
+        return rowSlot + bottomPadding;
+    }
+
+    /** Visual key height of the overlay functional row, excluding the keyboard bottom padding. */
+    public static int getPanelFunctionalRowKeyHeight(final Resources res, final SettingsValues settingsValues) {
+        final int panelHeight = getKeyboardLayoutHeightForPanel(res, settingsValues);
+        final int topPadding = (int) res.getFraction(R.fraction.config_keyboard_top_padding_holo,
+                panelHeight, panelHeight);
+        final int bottomPadding = (int) (res.getFraction(R.fraction.config_keyboard_bottom_padding_holo,
+                panelHeight, panelHeight) * settingsValues.mBottomPaddingScale);
+        return Math.max(0, (panelHeight - topPadding - bottomPadding) / getTypingLayoutRowCount());
+    }
+
     private static int secondaryToolbarLayoutReservePx(final Resources res, final SettingsValues settingsValues) {
         if (!settingsValues.mSecondaryStripVisible) return 0;
+        if (settingsValues.mSuggestionStripHiddenPerUserSettings) return 0;
+        if (!settingsValues.mHasPinnedToolbarKeys) return 0;
         return (int) res.getDimension(R.dimen.config_secondary_toolbar_height);
     }
 

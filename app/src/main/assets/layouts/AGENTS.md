@@ -29,7 +29,7 @@ Runtime keyboard layouts. Files here define rows, popup sets, width hints, and p
 - `phone_symbols/phone_symbols.json` - phone symbols.
 - `symbols/symbols.txt` and `symbols_arabic.txt` - primary symbol layers.
 - `more_symbols/symbols_shifted.txt` - shifted symbols.
-- `clipboard_bottom/*.json` and `emoji_bottom/*.json` - bottom rows with and without action-key variants.
+- `clipboard_bottom/*.json` and `emoji_bottom/*.json` - bottom rows with and without action-key variants. Defaults are `emoji_bottom_row_with_action` and `clip_bottom_row_with_action`; the 3-key files remain selectable custom layouts.
 - `main/*.json` and `main/*.txt` - per-layout main keyboards; use a nearby layout with the same script or arrangement as the starting point for new work.
 
 ## Non-obvious notes

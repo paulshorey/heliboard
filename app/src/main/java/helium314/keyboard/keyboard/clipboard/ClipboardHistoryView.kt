@@ -73,7 +73,6 @@ class ClipboardHistoryView @JvmOverloads constructor(
             getEnabledClipboardToolbarKeys(context.prefs())
                 .forEach { toolbarKeys.add(createToolbarKey(context, it)) }
         }
-        fitsSystemWindows = true
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -127,13 +126,16 @@ class ClipboardHistoryView @JvmOverloads constructor(
         toolbarKeys.forEach { it.layoutParams = toolbarKeyLayoutParams }
     }
 
-    private fun setupBottomRowKeyboard(editorInfo: EditorInfo, listener: KeyboardActionListener) {
+    private fun setupBottomRowKeyboard(editorInfo: EditorInfo, listener: KeyboardActionListener, keyVisualAttr: KeyVisualAttributes?) {
         val keyboardView = findViewById<MainKeyboardView>(R.id.bottom_row_keyboard)
+        keyboardView.fitsSystemWindows = false
         keyboardView.setKeyboardActionListener(listener)
         PointerTracker.switchTo(keyboardView)
         val kls = KeyboardLayoutSet.Builder.buildEmojiClipBottomRow(context, editorInfo)
         val keyboard = kls.getKeyboard(KeyboardId.ELEMENT_CLIPBOARD_BOTTOM_ROW)
         keyboardView.setKeyboard(keyboard)
+        val keyHeight = keyboard.mMostCommonKeyHeight - keyboard.mVerticalGap
+        keyboardView.applyKeyVisualAttributes(keyHeight, keyVisualAttr)
     }
 
     fun setHardwareAcceleratedDrawingEnabled(enabled: Boolean) {
@@ -160,7 +162,7 @@ class ClipboardHistoryView @JvmOverloads constructor(
         val settings = Settings.getInstance()
         settings.getCustomTypeface()?.let { params.mTypeface = it }
         setupClipKey(params)
-        setupBottomRowKeyboard(editorInfo, keyboardActionListener)
+        setupBottomRowKeyboard(editorInfo, keyboardActionListener, keyVisualAttr)
 
         placeholderView.apply {
             typeface = params.mTypeface

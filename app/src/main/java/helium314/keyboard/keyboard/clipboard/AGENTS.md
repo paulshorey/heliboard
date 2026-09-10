@@ -13,7 +13,7 @@ Clipboard-history keyboard UI.
 - Data comes from `latin/database/` and `ClipboardHistoryManager.kt`; UI changes often need data-layer awareness too.
 - Clipboard UI is part of the keyboard surface, so it must respect the same density/theme/layout constraints as regular keys.
 - Clipboard toolbar keys are read from `PREF_CLIPBOARD_TOOLBAR_KEYS` and rendered with the same `ToolbarUtils.createToolbarKey()` path into `clipboard_strip`, which shares `strip_container` with suggestions and emoji tabs.
-- Panel height uses `ResourceUtils.getKeyboardLayoutHeightForPanel()` so clipboard rows align with the main keyboard when the pinned Secondary Toolbar is visible.
+- Panel height uses `ResourceUtils.getKeyboardLayoutHeightForPanel()`; the history list is `layout_weight=1` above a `LayoutType.CLIPBOARD_BOTTOM` row (default `clip_bottom_row_with_action`) sized with `getPanelFunctionalRowOccupiedHeight`. Overlay panels do not use `fitsSystemWindows`.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.
