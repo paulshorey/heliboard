@@ -35,8 +35,8 @@ object Defaults {
         LayoutType.NUMPAD_LANDSCAPE -> "numpad_landscape"
         LayoutType.PHONE -> "phone"
         LayoutType.PHONE_SYMBOLS -> "phone_symbols"
-        LayoutType.EMOJI_BOTTOM -> "emoji_bottom_row"
-        LayoutType.CLIPBOARD_BOTTOM -> "clip_bottom_row"
+        LayoutType.EMOJI_BOTTOM -> "emoji_bottom_row_with_action"
+        LayoutType.CLIPBOARD_BOTTOM -> "clip_bottom_row_with_action"
     }
 
     private const val DEFAULT_SIZE_SCALE = 1.0f // 100%

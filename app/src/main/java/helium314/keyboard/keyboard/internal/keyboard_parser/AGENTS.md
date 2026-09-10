@@ -28,7 +28,7 @@ Converts layout assets and XML metadata into typed keyboard models.
 - `locale_key_texts` files are behavior overlays: popup sets, `+` layout extra keys, localized labels, localized number rows, and TLD popups. Popup ordering is also affected by the active MorePopups tier and hint/popup-order prefs.
 - For `+` layouts, `LayoutParser` adjusts extra-key row indices so keys append to alphabet rows, not the baked number row. Fork/edit preview uses `LayoutUtils.getContentWithPlus()` and only works for simple text layouts, not JSON `+` layouts.
 - Custom symbol layouts (`isCustomLayout`) clear `LABEL_FLAGS_DISABLE_HINT_LABEL` so user-defined popup hints are visible.
-- Emoji palette pages come from `assets/emoji/*.txt`; the `EMOJI_BOTTOM` and `CLIPBOARD_BOTTOM` layout slots are separate bottom-row layouts under `assets/layouts/`.
+- Emoji palette pages come from `assets/emoji/*.txt`; the `EMOJI_BOTTOM` and `CLIPBOARD_BOTTOM` layout slots are separate bottom-row layouts under `assets/layouts/`. Defaults are the `*_with_action` variants so enter sits on the same edge as alphabet/symbols. `KeyboardParser` sizes those 1-row keyboards from the active MAIN layout's rendered row count, including matching vertical-gap scaling for layouts with extra authored rows.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.
