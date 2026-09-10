@@ -379,6 +379,38 @@ class GeminiTranscriptionClientStreamTest {
     }
 
     @Test
+    fun finalizeAfterAnAuthoritativeFinalDoesNotFlushTheNextInterim() {
+        enqueueServer(object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                serverReceived.add(text)
+                if (text.contains("\"setup\"")) {
+                    webSocket.send("""{"setupComplete":{}}""")
+                }
+            }
+        })
+
+        startClient()
+        awaitUntil { events.contains("ready") }
+        currentServerSocket!!.send(
+            """{"serverContent":{"inputTranscription":{"text":"Hello world."}}}"""
+        )
+        awaitUntil { transcripts.isNotEmpty() }
+        assertEquals("Hello world.", transcripts.single().text)
+
+        assertTrue(client.finalizeTurn())
+        shadowOf(Looper.getMainLooper()).idleFor(
+            Duration.ofMillis(GeminiTranscriptionClient.INTERIM_FLUSH_AFTER_FINALIZE_MS + 50)
+        )
+        currentServerSocket!!.send(
+            """{"serverContent":{"interimInputTranscription":{"text":"next phrase"}}}"""
+        )
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(200))
+
+        assertEquals(1, transcripts.size)
+        assertEquals("Hello world.", transcripts.single().text)
+    }
+
+    @Test
     fun reconnectFlushesAnArmedLeftoverInterimBeforeTheTokenChanges() {
         enqueueServer(object : WebSocketListener() {
             override fun onMessage(webSocket: WebSocket, text: String) {
