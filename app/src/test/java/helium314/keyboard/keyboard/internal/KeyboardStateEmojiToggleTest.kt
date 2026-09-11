@@ -64,6 +64,36 @@ class KeyboardStateEmojiToggleTest {
         assertEquals(listOf("alphabet"), actions.keyboardActions())
     }
 
+    @Test
+    fun emojiKey_restoresShiftLockAfterReturningFromPalette() {
+        val actions = RecordingSwitchActions()
+        val state = KeyboardState(actions)
+        state.onLoadKeyboard(0, null, false)
+        state.onReleaseKey(KeyCode.CAPS_LOCK, false, 0, null)
+        actions.clear()
+
+        state.onEvent(emojiEvent(), 0, null)
+        state.onEvent(emojiEvent(), 0, null)
+
+        assertEquals(listOf("emoji", "alphabet", "alphabetShiftLocked"), actions.keyboardActions())
+    }
+
+    @Test
+    fun emojiKey_restoresShiftLockWhenPhysicalShortcutLeftLockOn() {
+        val actions = RecordingSwitchActions()
+        val state = KeyboardState(actions)
+        state.onLoadKeyboard(0, null, false)
+        state.onReleaseKey(KeyCode.CAPS_LOCK, false, 0, null)
+        // Physical emoji shortcut shows the palette without going through KeyboardState,
+        // so shift-lock remains on in the state machine while emoji is visible.
+        actions.showingEmoji = true
+        actions.clear()
+
+        state.onEvent(emojiEvent(), 0, null)
+
+        assertEquals(listOf("alphabet", "alphabetShiftLocked"), actions.keyboardActions())
+    }
+
     private fun emojiEvent() = softwareKeyEvent(KeyCode.EMOJI)
 
     private fun softwareKeyEvent(keyCode: Int) =
@@ -75,7 +105,9 @@ class KeyboardStateEmojiToggleTest {
 
         fun clear() = actions.clear()
 
-        fun keyboardActions() = actions.filter { it == "alphabet" || it == "emoji" || it == "symbols" }
+        fun keyboardActions() = actions.filter {
+            it == "alphabet" || it == "alphabetShiftLocked" || it == "emoji" || it == "symbols"
+        }
 
         override fun setAlphabetKeyboard() {
             showingEmoji = false

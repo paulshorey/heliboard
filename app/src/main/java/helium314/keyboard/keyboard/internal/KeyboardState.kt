@@ -300,9 +300,20 @@ class KeyboardState(private val switchActions: SwitchActions) {
         // Use the displayed palette, not [mode]. Physical shortcuts can hide or show
         // emoji without updating KeyboardState, which would otherwise invert the toggle.
         if (switchActions.isShowingEmojiKeyboard) {
-            setAlphabetKeyboard(autoCapsFlags, recapitalizeMode)
+            returnToAlphabetFromEmoji(autoCapsFlags, recapitalizeMode)
         } else {
             setEmojiKeyboard()
+        }
+    }
+
+    /** Show alphabet and restore caps lock, including leftover lock from a physical shortcut. */
+    private fun returnToAlphabetFromEmoji(autoCapsFlags: Int, recapitalizeMode: RecapitalizeMode?) {
+        val restoreShiftLock = prevMainKeyboardWasShiftLocked || alphabetShiftState.isShiftLocked
+        alphabetShiftState.setShiftLocked(false)
+        prevMainKeyboardWasShiftLocked = false
+        setAlphabetKeyboard(autoCapsFlags, recapitalizeMode)
+        if (restoreShiftLock) {
+            setShiftLocked(true)
         }
     }
 
