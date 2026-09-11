@@ -11,6 +11,7 @@ Top-level test package for keyboard, parser, subtype, and IME behavior.
 - `XLinkTest.kt` - external-link/dictionary repository checks.
 
 ## Subfolders
+- `keyboard/internal/` - `KeyboardStateEmojiToggleTest.kt` for emoji-key toggle back to alphabet.
 - `latin/` - core IME pipeline tests.
 - `latin/edithistory/` - edit history store tests.
 - `settings/` - fullapp/settings result tests.

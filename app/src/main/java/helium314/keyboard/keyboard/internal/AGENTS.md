@@ -23,7 +23,7 @@ Internal mechanics behind keyboard rendering, previews, gesture trails, parser p
 - `KeyboardCodesSet.java` - canonical key code constants/set logic.
 - `KeyboardIconsSet.kt` - icon resolution for keys.
 - `KeyboardParams.java` - assembled keyboard parameter bundle.
-- `KeyboardState.kt` - high-level keyboard state machine.
+- `KeyboardState.kt` - high-level keyboard state machine. `KeyCode.EMOJI` toggles based on the visible palette (`SwitchActions.isShowingEmojiKeyboard`), not `mode`: first press opens emoji, a second press while it is showing returns to alphabet. Physical `onToggleKeyboard` updates the UI without this state machine, so `mode` can be stale.
 - `KeyDrawParams.java` - key drawing parameter holder.
 - `KeyPreviewChoreographer.java` - schedules key preview display.
 - `KeyPreviewDrawParams.java` - key preview drawing parameters.
