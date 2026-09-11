@@ -60,7 +60,7 @@ Cross-cutting helpers used across the IME. Search here before adding another gen
 - Layout resolution is layered: MAIN comes from the active subtype (`KeyboardLayoutSet` extra value, falling back to `qwerty`); non-MAIN slots resolve subtype override -> global `PREF_LAYOUT_*` -> `Defaults.LayoutType.default`.
 - Custom layout names are stored in prefs and filenames. `LayoutUtilsCustom.CUSTOM_LAYOUT_PREFIX` and its base36 naming scheme are a persistence contract; Latin-script MAIN layouts are shared as `custom.Latn.*`, while non-Latin MAIN layouts are locale-tagged.
 - Adding a toolbar key requires coordinated updates outside this file too: enum/default lists in `ToolbarUtils.kt`, icon lookup in `KeyboardIconsSet.kt`, source string, settings exposure, and upgrade/serialization handling when renaming.
-- The toolbar `EMOJI` key sends `KeyCode.EMOJI`. `KeyboardState` treats that as a toggle: emoji palette when not already there, alphabet keyboard when the palette is showing.
+- The toolbar `EMOJI` key sends `KeyCode.EMOJI`. `KeyboardState` toggles from the visible palette (`SwitchActions.isShowingEmojiKeyboard`), not `mode`, because physical `onToggleKeyboard` can change the UI without updating the state machine.
 - `ToolbarUtils` caches custom key codes in memory; `Settings.loadSettings()` clears that cache when prefs change.
 - This folder is intentionally broad, but new utilities should still be named for a concrete domain rather than as generic catch-alls.
 

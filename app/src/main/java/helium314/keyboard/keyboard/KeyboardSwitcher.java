@@ -632,6 +632,12 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
 
     // Implements {@link KeyboardState.SwitchActions}.
     @Override
+    public boolean isShowingEmojiKeyboard() {
+        return isShowingEmojiPalettes();
+    }
+
+    // Implements {@link KeyboardState.SwitchActions}.
+    @Override
     public boolean isInDoubleTapShiftKeyTimeout() {
         if (DEBUG_TIMER_ACTION) {
             Log.d(TAG, "isInDoubleTapShiftKeyTimeout");

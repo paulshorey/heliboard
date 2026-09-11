@@ -46,6 +46,12 @@ class KeyboardState(private val switchActions: SwitchActions) {
         fun startDoubleTapShiftKeyTimer()
         val isInDoubleTapShiftKeyTimeout: Boolean
         fun cancelDoubleTapShiftKeyTimer()
+        /**
+         * Whether the emoji palette is actually visible. Physical-key
+         * [helium314.keyboard.keyboard.KeyboardSwitcher.onToggleKeyboard] updates the UI without
+         * going through this state machine, so [mode] can be stale.
+         */
+        val isShowingEmojiKeyboard: Boolean
 
         fun setOneHandedModeEnabled(enabled: Boolean)
         fun switchOneHandedMode()
@@ -291,7 +297,9 @@ class KeyboardState(private val switchActions: SwitchActions) {
 
     /** Open the emoji palette, or return to the alphabet keyboard if it is already showing. */
     private fun toggleEmojiKeyboard(autoCapsFlags: Int, recapitalizeMode: RecapitalizeMode?) {
-        if (mode == Mode.EMOJI) {
+        // Use the displayed palette, not [mode]. Physical shortcuts can hide or show
+        // emoji without updating KeyboardState, which would otherwise invert the toggle.
+        if (switchActions.isShowingEmojiKeyboard) {
             setAlphabetKeyboard(autoCapsFlags, recapitalizeMode)
         } else {
             setEmojiKeyboard()

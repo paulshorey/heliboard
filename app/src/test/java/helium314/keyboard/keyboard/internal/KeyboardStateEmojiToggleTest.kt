@@ -37,6 +37,33 @@ class KeyboardStateEmojiToggleTest {
         assertEquals(listOf("emoji", "alphabet"), actions.keyboardActions())
     }
 
+    @Test
+    fun emojiKey_opensPaletteAfterPhysicalShortcutHidesItWithoutUpdatingMode() {
+        val actions = RecordingSwitchActions()
+        val state = KeyboardState(actions)
+        state.onLoadKeyboard(0, null, false)
+        state.onEvent(emojiEvent(), 0, null)
+        // Physical symbols shortcut changes the UI without going through KeyboardState.
+        actions.showingEmoji = false
+        actions.clear()
+
+        state.onEvent(emojiEvent(), 0, null)
+        assertEquals(listOf("emoji"), actions.keyboardActions())
+    }
+
+    @Test
+    fun emojiKey_returnsToAlphabetWhenPhysicalShortcutShowsPaletteWithoutUpdatingMode() {
+        val actions = RecordingSwitchActions()
+        val state = KeyboardState(actions)
+        state.onLoadKeyboard(0, null, false)
+        // Physical emoji shortcut shows the palette without going through KeyboardState.
+        actions.showingEmoji = true
+        actions.clear()
+
+        state.onEvent(emojiEvent(), 0, null)
+        assertEquals(listOf("alphabet"), actions.keyboardActions())
+    }
+
     private fun emojiEvent() = softwareKeyEvent(KeyCode.EMOJI)
 
     private fun softwareKeyEvent(keyCode: Int) =
@@ -44,18 +71,28 @@ class KeyboardStateEmojiToggleTest {
 
     private class RecordingSwitchActions : KeyboardState.SwitchActions {
         private val actions = mutableListOf<String>()
+        var showingEmoji = false
 
         fun clear() = actions.clear()
 
         fun keyboardActions() = actions.filter { it == "alphabet" || it == "emoji" || it == "symbols" }
 
-        override fun setAlphabetKeyboard() { actions.add("alphabet") }
+        override fun setAlphabetKeyboard() {
+            showingEmoji = false
+            actions.add("alphabet")
+        }
         override fun setAlphabetManualShiftedKeyboard() { actions.add("alphabetManual") }
         override fun setAlphabetAutomaticShiftedKeyboard() { actions.add("alphabetAutomatic") }
         override fun setAlphabetShiftLockedKeyboard() { actions.add("alphabetShiftLocked") }
         override fun setAlphabetShiftLockShiftedKeyboard() { actions.add("alphabetShiftLockShifted") }
-        override fun setEmojiKeyboard() { actions.add("emoji") }
-        override fun setClipboardKeyboard() { actions.add("clipboard") }
+        override fun setEmojiKeyboard() {
+            showingEmoji = true
+            actions.add("emoji")
+        }
+        override fun setClipboardKeyboard() {
+            showingEmoji = false
+            actions.add("clipboard")
+        }
         override fun setNumpadKeyboard() { actions.add("numpad") }
         override fun toggleNumpad(
             withSliding: Boolean,
@@ -65,8 +102,14 @@ class KeyboardStateEmojiToggleTest {
         ) {
             actions.add("toggleNumpad")
         }
-        override fun setSymbolsKeyboard() { actions.add("symbols") }
-        override fun setSymbolsShiftedKeyboard() { actions.add("symbolsShifted") }
+        override fun setSymbolsKeyboard() {
+            showingEmoji = false
+            actions.add("symbols")
+        }
+        override fun setSymbolsShiftedKeyboard() {
+            showingEmoji = false
+            actions.add("symbolsShifted")
+        }
         override fun requestUpdatingShiftState(
             autoCapsFlags: Int,
             recapitalizeMode: helium314.keyboard.latin.utils.RecapitalizeMode?
@@ -76,6 +119,7 @@ class KeyboardStateEmojiToggleTest {
         override fun startDoubleTapShiftKeyTimer() {}
         override val isInDoubleTapShiftKeyTimeout = false
         override fun cancelDoubleTapShiftKeyTimer() {}
+        override val isShowingEmojiKeyboard get() = showingEmoji
         override fun setOneHandedModeEnabled(enabled: Boolean) {}
         override fun switchOneHandedMode() {}
     }
