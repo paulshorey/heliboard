@@ -4,6 +4,7 @@ package helium314.keyboard.latin.utils
 import android.view.ContextThemeWrapper
 import android.view.LayoutInflater
 import android.view.View.MeasureSpec
+import android.view.ViewGroup
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import androidx.test.core.app.ApplicationProvider
@@ -48,7 +49,7 @@ class PinnedToolbarLayoutTest {
             R.style.KeyboardTheme_HoloBase
         )
         val container = LayoutInflater.from(context)
-            .inflate(R.layout.secondary_toolbar, null) as LinearLayout
+            .inflate(R.layout.secondary_toolbar, null) as ViewGroup
         val pinnedKeys = container.findViewById<LinearLayout>(R.id.pinned_keys)
         repeat(11) {
             val button = ImageButton(context)

@@ -13,6 +13,7 @@ import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
+import android.text.Editable;
 import android.view.ContextThemeWrapper;
 import android.view.Gravity;
 import android.view.LayoutInflater;
@@ -20,6 +21,8 @@ import android.view.View;
 import android.view.animation.AnimationUtils;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodSubtype;
+import android.widget.Button;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
@@ -31,10 +34,13 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import helium314.keyboard.event.Event;
+import helium314.keyboard.event.HapticEvent;
 import helium314.keyboard.keyboard.KeyboardLayoutSet.KeyboardLayoutSetException;
 import helium314.keyboard.keyboard.clipboard.ClipboardHistoryView;
 import helium314.keyboard.keyboard.emoji.EmojiPalettesView;
 import helium314.keyboard.keyboard.internal.KeyboardState;
+import helium314.keyboard.keyboard.internal.keyboard_parser.floris.KeyCode;
+import helium314.keyboard.latin.AudioAndHapticFeedbackManager;
 import helium314.keyboard.latin.InputView;
 import helium314.keyboard.latin.KeyboardWrapperView;
 import helium314.keyboard.latin.LatinIME;
@@ -42,6 +48,7 @@ import helium314.keyboard.latin.R;
 import helium314.keyboard.latin.RichInputMethodManager;
 import helium314.keyboard.latin.RichInputMethodSubtype;
 import helium314.keyboard.latin.WordComposer;
+import helium314.keyboard.latin.common.Constants;
 import helium314.keyboard.latin.settings.Settings;
 import helium314.keyboard.latin.settings.SettingsValues;
 import helium314.keyboard.latin.suggestions.SuggestionStripView;
@@ -69,6 +76,11 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
     private SuggestionStripView mSuggestionStripView;
     private FrameLayout mStripContainer;
     private View mSecondaryToolbarContainer;
+    private View mPinnedToolbarView;
+    private View mEmojiSearchPrototypeView;
+    private EditText mEmojiSearchField;
+    private Button mEmojiSearchSubmitButton;
+    private boolean mEmojiSearchInputActive;
     private ClipboardHistoryView mClipboardHistoryView;
     private TextView mFakeToastView;
     private ProgressBar mProcessingIndicator;
@@ -87,6 +99,46 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
     private int mCurrentOrientation;
     private int mCurrentDpi;
     private boolean mThemeNeedsReload;
+
+    /**
+     * Proof-of-concept input sink for the emoji search field. Query keystrokes deliberately stop
+     * here rather than reaching LatinIME/InputLogic and the host application's InputConnection.
+     */
+    private final KeyboardActionListener mEmojiSearchKeyboardActionListener = new KeyboardActionListener.Adapter() {
+        @Override
+        public void onPressKey(final int primaryCode, final int repeatCount,
+                final boolean isSinglePointer, final HapticEvent hapticEvent) {
+            AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(
+                    primaryCode, mKeyboardView, hapticEvent);
+        }
+
+        @Override
+        public void onLongPressKey(final int primaryCode) {
+            AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(
+                    primaryCode, mKeyboardView, HapticEvent.KEY_LONG_PRESS);
+        }
+
+        @Override
+        public void onCodeInput(final int primaryCode, final int x, final int y,
+                final boolean isKeyRepeat) {
+            if (!mEmojiSearchInputActive || mEmojiSearchField == null) return;
+            if (primaryCode == KeyCode.DELETE) {
+                deleteBeforeEmojiSearchCursor();
+            } else if (primaryCode == Constants.CODE_ENTER) {
+                submitEmojiSearchPrototype();
+            } else if (Character.isValidCodePoint(primaryCode)
+                    && !Character.isISOControl(primaryCode)) {
+                replaceEmojiSearchSelection(new String(Character.toChars(primaryCode)));
+            }
+        }
+
+        @Override
+        public void onTextInput(final String text) {
+            if (mEmojiSearchInputActive && text != null) {
+                replaceEmojiSearchSelection(text);
+            }
+        }
+    };
 
     @SuppressLint("StaticFieldLeak") // this is a keyboard, we want to keep it alive in background
     private static final KeyboardSwitcher sInstance = new KeyboardSwitcher();
@@ -201,6 +253,12 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         // Make {@link MainKeyboardView} visible and hide {@link EmojiPalettesView}.
         final SettingsValues currentSettingsValues = Settings.getValues();
         setMainKeyboardFrame(currentSettingsValues, toggleState);
+        setKeyboardModel(keyboardId, currentSettingsValues);
+    }
+
+    /** Updates the keyboard model without changing the surrounding emoji/suggestion chrome. */
+    private void setKeyboardModel(final int keyboardId,
+            @NonNull final SettingsValues currentSettingsValues) {
         // TODO: pass this object to setKeyboard instead of getting the current values.
         final MainKeyboardView keyboardView = mKeyboardView;
         final Keyboard oldKeyboard = keyboardView.getKeyboard();
@@ -213,6 +271,34 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         final int languageOnSpacebarFormatType = LanguageOnSpacebarUtils.getLanguageOnSpacebarFormatType(newKeyboard.mId.mSubtype);
         final boolean hasMultipleEnabledIMEsOrSubtypes = mRichImm.hasMultipleEnabledIMEsOrSubtypes(true);
         keyboardView.startDisplayLanguageOnSpacebar(subtypeChanged, languageOnSpacebarFormatType, hasMultipleEnabledIMEsOrSubtypes);
+    }
+
+    private void replaceEmojiSearchSelection(@NonNull final String text) {
+        if (mEmojiSearchField == null) return;
+        final Editable editable = mEmojiSearchField.getText();
+        final int selectionStart = Math.max(0, mEmojiSearchField.getSelectionStart());
+        final int selectionEnd = Math.max(0, mEmojiSearchField.getSelectionEnd());
+        final int start = Math.min(selectionStart, selectionEnd);
+        final int end = Math.max(selectionStart, selectionEnd);
+        editable.replace(start, end, text);
+        mEmojiSearchField.setSelection(start + text.length());
+    }
+
+    private void deleteBeforeEmojiSearchCursor() {
+        if (mEmojiSearchField == null) return;
+        final Editable editable = mEmojiSearchField.getText();
+        final int selectionStart = Math.max(0, mEmojiSearchField.getSelectionStart());
+        final int selectionEnd = Math.max(0, mEmojiSearchField.getSelectionEnd());
+        final int start = Math.min(selectionStart, selectionEnd);
+        final int end = Math.max(selectionStart, selectionEnd);
+        if (start != end) {
+            editable.delete(start, end);
+            mEmojiSearchField.setSelection(start);
+        } else if (start > 0) {
+            final int previousCodePoint = Character.offsetByCodePoints(editable, start, -1);
+            editable.delete(previousCodePoint, start);
+            mEmojiSearchField.setSelection(previousCodePoint);
+        }
     }
 
     public Keyboard getKeyboard() {
@@ -316,9 +402,11 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
     private void setMainKeyboardFrame(
             @NonNull final SettingsValues settingsValues,
             @NonNull final KeyboardSwitchState toggleState) {
+        cancelEmojiSearchPrototypeInput();
         final int visibility = isImeSuppressedByHardwareKeyboard(settingsValues, toggleState) ? View.GONE : View.VISIBLE;
         final int stripVisibility = settingsValues.mToolbarMode == ToolbarMode.HIDDEN ? View.GONE : View.VISIBLE;
         mStripContainer.setVisibility(stripVisibility);
+        showPinnedToolbarChrome();
         updateSecondaryToolbarVisibility(stripVisibility);
         PointerTracker.switchTo(mKeyboardView);
         mKeyboardView.setVisibility(visibility);
@@ -347,6 +435,62 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         }
     }
 
+    private void showPinnedToolbarChrome() {
+        if (mPinnedToolbarView != null) {
+            mPinnedToolbarView.setVisibility(View.VISIBLE);
+        }
+        if (mEmojiSearchPrototypeView != null) {
+            mEmojiSearchPrototypeView.setVisibility(View.GONE);
+        }
+    }
+
+    private void showEmojiSearchPrototypeChrome() {
+        if (mPinnedToolbarView != null) {
+            mPinnedToolbarView.setVisibility(View.GONE);
+        }
+        if (mEmojiSearchPrototypeView != null) {
+            mEmojiSearchPrototypeView.setVisibility(View.VISIBLE);
+        }
+        // The search prototype replaces the pinned row in emoji mode and must remain available
+        // even when the user has no configured pinned keys.
+        if (mSecondaryToolbarContainer != null) {
+            mSecondaryToolbarContainer.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void beginEmojiSearchPrototypeInput() {
+        if (mEmojiSearchInputActive || !isShowingEmojiPalettes()) return;
+        mEmojiSearchInputActive = true;
+        mEmojiPalettesView.stopEmojiPalettes();
+        mEmojiPalettesView.setVisibility(View.GONE);
+        mKeyboardView.setVisibility(View.VISIBLE);
+        PointerTracker.switchTo(mKeyboardView);
+        setKeyboardModel(KeyboardId.ELEMENT_ALPHABET, Settings.getValues());
+        mKeyboardView.setKeyboardActionListener(mEmojiSearchKeyboardActionListener);
+    }
+
+    private void submitEmojiSearchPrototype() {
+        if (!mEmojiSearchInputActive) return;
+        mEmojiSearchInputActive = false;
+        if (mEmojiSearchField != null) {
+            mEmojiSearchField.clearFocus();
+        }
+        if (mKeyboardView != null) {
+            mKeyboardView.setKeyboardActionListener(mLatinIME.mKeyboardActionListener);
+        }
+        setEmojiKeyboard();
+    }
+
+    private void cancelEmojiSearchPrototypeInput() {
+        mEmojiSearchInputActive = false;
+        if (mEmojiSearchField != null) {
+            mEmojiSearchField.clearFocus();
+        }
+        if (mKeyboardView != null && mLatinIME != null) {
+            mKeyboardView.setKeyboardActionListener(mLatinIME.mKeyboardActionListener);
+        }
+    }
+
     // Implements {@link KeyboardState.SwitchActions}.
     @Override
     public void setEmojiKeyboard() {
@@ -360,7 +504,7 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         mKeyboardView.setVisibility(View.GONE);
         mSuggestionStripView.setVisibility(View.GONE);
         mStripContainer.setVisibility(View.VISIBLE);
-        updateSecondaryToolbarVisibility(View.VISIBLE);
+        showEmojiSearchPrototypeChrome();
         mClipboardStripScrollView.setVisibility(View.GONE);
         mEmojiTabStripView.setVisibility(View.VISIBLE);
         mClipboardHistoryView.setVisibility(View.GONE);
@@ -383,6 +527,7 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         mEmojiTabStripView.setVisibility(View.GONE);
         mSuggestionStripView.setVisibility(View.GONE);
         mStripContainer.setVisibility(View.VISIBLE);
+        showPinnedToolbarChrome();
         updateSecondaryToolbarVisibility(View.VISIBLE);
         mClipboardStripScrollView.post(() -> mClipboardStripScrollView.fullScroll(HorizontalScrollView.FOCUS_RIGHT));
         mClipboardStripScrollView.setVisibility(View.VISIBLE);
@@ -784,6 +929,16 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         mSuggestionStripView = mCurrentInputView.findViewById(R.id.suggestion_strip_view);
         mStripContainer = mCurrentInputView.findViewById(R.id.strip_container);
         mSecondaryToolbarContainer = mCurrentInputView.findViewById(R.id.secondary_toolbar_container);
+        mPinnedToolbarView = mCurrentInputView.findViewById(R.id.pinned_keys);
+        mEmojiSearchPrototypeView = mCurrentInputView.findViewById(R.id.emoji_search_prototype);
+        mEmojiSearchField = mCurrentInputView.findViewById(R.id.emoji_search_field);
+        mEmojiSearchSubmitButton = mCurrentInputView.findViewById(R.id.emoji_search_submit);
+        mEmojiSearchInputActive = false;
+        mEmojiSearchField.setShowSoftInputOnFocus(false);
+        mEmojiSearchField.setOnFocusChangeListener((view, hasFocus) -> {
+            if (hasFocus) beginEmojiSearchPrototypeInput();
+        });
+        mEmojiSearchSubmitButton.setOnClickListener(view -> submitEmojiSearchPrototype());
 
         // Populate the Secondary Toolbar's pinned keys now that the whole input view
         // (which contains both the primary strip and the secondary toolbar) has been
