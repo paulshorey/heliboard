@@ -101,6 +101,11 @@ public class Key implements Comparable<Key> {
     private final int mX;
     /** Y coordinate of the top-left corner of the key in the keyboard layout, excluding the gap. */
     private final int mY;
+    /**
+     * Extra pixels added to the label baseline so the glyph sits slightly lower
+     * inside the key. Used for the baked number row; the key rectangle is unchanged.
+     */
+    private final int mLabelVisualInsetTop;
     /** Hit bounding box of the key */
     @NonNull
     private final Rect mHitBox = new Rect();
@@ -217,6 +222,7 @@ public class Key implements Comparable<Key> {
         // Horizontal gap is divided equally to both sides of the key.
         mX = x + mHorizontalGap / 2;
         mY = y;
+        mLabelVisualInsetTop = 0;
         mHitBox.set(x, y, x + width + 1, y + height);
         mKeyVisualAttributes = null;
 
@@ -245,6 +251,7 @@ public class Key implements Comparable<Key> {
         mVerticalGap = key.mVerticalGap;
         mX = key.mX;
         mY = key.mY;
+        mLabelVisualInsetTop = key.mLabelVisualInsetTop;
         mHitBox.set(key.mHitBox);
         mPopupKeys = popupKeys;
         mPopupKeysColumnAndFlags = key.mPopupKeysColumnAndFlags;
@@ -273,6 +280,7 @@ public class Key implements Comparable<Key> {
         mVerticalGap = key.mVerticalGap;
         mX = key.mX;
         mY = key.mY;
+        mLabelVisualInsetTop = key.mLabelVisualInsetTop;
         mHitBox.set(key.mHitBox);
         mPopupKeys = popupKeys;
         mPopupKeysColumnAndFlags = key.mPopupKeysColumnAndFlags;
@@ -332,6 +340,7 @@ public class Key implements Comparable<Key> {
         }
         // Horizontal gap is divided equally to both sides of the key.
         mX = Math.round(keyParams.xPos + horizontalGapFloat / 2);
+        mLabelVisualInsetTop = keyParams.mLabelVisualInsetTop;
         mHashCode = computeHashCode(this);
     }
 
@@ -348,6 +357,7 @@ public class Key implements Comparable<Key> {
         mVerticalGap = key.mVerticalGap;
         mX = key.mX;
         mY = key.mY;
+        mLabelVisualInsetTop = key.mLabelVisualInsetTop;
         mHitBox.set(key.mHitBox);
         mPopupKeys = popupKeys;
         mPopupKeysColumnAndFlags = key.mPopupKeysColumnAndFlags;
@@ -817,6 +827,14 @@ public class Key implements Comparable<Key> {
         return mY;
     }
 
+    /**
+     * Extra pixels added when drawing the label so the glyph sits lower inside
+     * the key. Zero for ordinary letter keys.
+     */
+    public int getLabelVisualInsetTop() {
+        return mLabelVisualInsetTop;
+    }
+
     public final int getDrawX() {
         final int x = getX();
         final OptionalAttributes attrs = mOptionalAttributes;
@@ -998,6 +1016,11 @@ public class Key implements Comparable<Key> {
          * Set from {@link helium314.keyboard.keyboard.internal.KeyboardBuilder}.
          */
         public int mSpaceVisualInsetTop;
+        /**
+         * Extra pixels added to the drawn label baseline on number-row keys.
+         * Does not change the key rectangle or hit box.
+         */
+        public int mLabelVisualInsetTop;
 
         // params that remains constant
         public final int mCode;
@@ -1296,6 +1319,7 @@ public class Key implements Comparable<Key> {
             mAbsoluteWidth = keyParams.mAbsoluteWidth;
             mAbsoluteHeight = keyParams.mAbsoluteHeight;
             mSpaceVisualInsetTop = keyParams.mSpaceVisualInsetTop;
+            mLabelVisualInsetTop = keyParams.mLabelVisualInsetTop;
             mPopupKeys = keyParams.mPopupKeys;
             mPopupKeysColumnAndFlags = keyParams.mPopupKeysColumnAndFlags;
             mBackgroundType = keyParams.mBackgroundType;
