@@ -289,6 +289,15 @@ class KeyboardState(private val switchActions: SwitchActions) {
         switchActions.setEmojiKeyboard()
     }
 
+    /** Open the emoji palette, or return to the alphabet keyboard if it is already showing. */
+    private fun toggleEmojiKeyboard(autoCapsFlags: Int, recapitalizeMode: RecapitalizeMode?) {
+        if (mode == Mode.EMOJI) {
+            setAlphabetKeyboard(autoCapsFlags, recapitalizeMode)
+        } else {
+            setEmojiKeyboard()
+        }
+    }
+
     private fun setClipboardKeyboard() {
         if (DebugFlags.DEBUG_ENABLED) {
             Log.d(TAG, "setClipboardKeyboard")
@@ -658,7 +667,7 @@ class KeyboardState(private val switchActions: SwitchActions) {
             // If the code is a letter, update keyboard shift state.
             updateAlphabetShiftState(autoCapsFlags, recapitalizeMode)
         } else when (code) {
-            KeyCode.EMOJI -> setEmojiKeyboard()
+            KeyCode.EMOJI -> toggleEmojiKeyboard(autoCapsFlags, recapitalizeMode)
             KeyCode.ALPHA -> setAlphabetKeyboard(autoCapsFlags, recapitalizeMode)
             // Note: Printing clipboard content is handled in InputLogic.handleFunctionalEvent
             KeyCode.CLIPBOARD -> if (Settings.getValues().mClipboardHistoryEnabled) setClipboardKeyboard()
