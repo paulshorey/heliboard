@@ -37,6 +37,12 @@ class PinnedToolbarLayoutTest {
 
     @Test
     fun elevenPinnedKeys_fitEvenlyOnNarrowPhoneWithoutOverflow() {
+        assertElevenKeysFitEvenly(320)
+        assertElevenKeysFitEvenly(360)
+        assertElevenKeysFitEvenly(411)
+    }
+
+    private fun assertElevenKeysFitEvenly(widthDp: Int) {
         val context = ContextThemeWrapper(
             ApplicationProvider.getApplicationContext(),
             R.style.KeyboardTheme_HoloBase
@@ -51,36 +57,35 @@ class PinnedToolbarLayoutTest {
         }
 
         val density = context.resources.displayMetrics.density
-        val narrowWidth = (320 * density).toInt()
+        val widthPx = (widthDp * density).toInt()
         val height = context.resources.getDimensionPixelSize(R.dimen.config_secondary_toolbar_height)
         container.measure(
-            MeasureSpec.makeMeasureSpec(narrowWidth, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(widthPx, MeasureSpec.EXACTLY),
             MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY)
         )
         container.layout(0, 0, container.measuredWidth, container.measuredHeight)
 
-        assertEquals(narrowWidth, container.width)
+        assertEquals(widthPx, container.width, "container width at ${widthDp}dp")
         assertEquals(11, pinnedKeys.childCount)
 
         val first = pinnedKeys.getChildAt(0)
         val last = pinnedKeys.getChildAt(pinnedKeys.childCount - 1)
-        val edgeInset = (1 * density).toInt()
-        assertTrue(
-            first.left + pinnedKeys.left <= edgeInset + 1,
-            "first key should sit near the left edge"
-        )
-        assertTrue(
-            container.width - (last.right + pinnedKeys.left) <= edgeInset + 1,
-            "last key should sit near the right edge"
-        )
+        val firstEdge = first.left + pinnedKeys.left
+        val lastEdge = container.width - (last.right + pinnedKeys.left)
+        assertEquals(container.paddingStart, firstEdge, "first key should use the strip start inset at ${widthDp}dp")
+        assertEquals(container.paddingEnd, lastEdge, "last key should use the strip end inset at ${widthDp}dp")
+        assertTrue(container.paddingStart > 0)
+        assertTrue(container.paddingEnd > 0)
+        assertTrue(container.paddingStart <= (2 * density).toInt() + 1)
+        assertTrue(container.paddingEnd <= (2 * density).toInt() + 1)
 
         val widths = (0 until pinnedKeys.childCount).map { pinnedKeys.getChildAt(it).width }
-        assertTrue(widths.max() - widths.min() <= 1, "pinned keys should share width evenly, got $widths")
+        assertTrue(widths.max() - widths.min() <= 1, "pinned keys should share width evenly at ${widthDp}dp, got $widths")
         for (i in 0 until pinnedKeys.childCount) {
             val child = pinnedKeys.getChildAt(i)
-            assertTrue(child.width > 0)
-            assertTrue(child.left >= 0)
-            assertTrue(child.right <= pinnedKeys.width)
+            assertTrue(child.width > 0, "key $i should have width at ${widthDp}dp")
+            assertTrue(child.left >= 0, "key $i should not overflow start at ${widthDp}dp")
+            assertTrue(child.right <= pinnedKeys.width, "key $i should not overflow end at ${widthDp}dp")
         }
     }
 }
