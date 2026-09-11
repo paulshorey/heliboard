@@ -76,7 +76,7 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
     private SuggestionStripView mSuggestionStripView;
     private FrameLayout mStripContainer;
     private View mSecondaryToolbarContainer;
-    private HorizontalScrollView mPinnedToolbarScrollView;
+    private View mPinnedToolbarView;
     private View mEmojiSearchPrototypeView;
     private EditText mEmojiSearchField;
     private Button mEmojiSearchSubmitButton;
@@ -436,8 +436,8 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
     }
 
     private void showPinnedToolbarChrome() {
-        if (mPinnedToolbarScrollView != null) {
-            mPinnedToolbarScrollView.setVisibility(View.VISIBLE);
+        if (mPinnedToolbarView != null) {
+            mPinnedToolbarView.setVisibility(View.VISIBLE);
         }
         if (mEmojiSearchPrototypeView != null) {
             mEmojiSearchPrototypeView.setVisibility(View.GONE);
@@ -445,8 +445,8 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
     }
 
     private void showEmojiSearchPrototypeChrome() {
-        if (mPinnedToolbarScrollView != null) {
-            mPinnedToolbarScrollView.setVisibility(View.GONE);
+        if (mPinnedToolbarView != null) {
+            mPinnedToolbarView.setVisibility(View.GONE);
         }
         if (mEmojiSearchPrototypeView != null) {
             mEmojiSearchPrototypeView.setVisibility(View.VISIBLE);
@@ -777,6 +777,12 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
 
     // Implements {@link KeyboardState.SwitchActions}.
     @Override
+    public boolean isShowingEmojiKeyboard() {
+        return isShowingEmojiPalettes();
+    }
+
+    // Implements {@link KeyboardState.SwitchActions}.
+    @Override
     public boolean isInDoubleTapShiftKeyTimeout() {
         if (DEBUG_TIMER_ACTION) {
             Log.d(TAG, "isInDoubleTapShiftKeyTimeout");
@@ -923,7 +929,7 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         mSuggestionStripView = mCurrentInputView.findViewById(R.id.suggestion_strip_view);
         mStripContainer = mCurrentInputView.findViewById(R.id.strip_container);
         mSecondaryToolbarContainer = mCurrentInputView.findViewById(R.id.secondary_toolbar_container);
-        mPinnedToolbarScrollView = mCurrentInputView.findViewById(R.id.pinned_toolbar_scroll_view);
+        mPinnedToolbarView = mCurrentInputView.findViewById(R.id.pinned_keys);
         mEmojiSearchPrototypeView = mCurrentInputView.findViewById(R.id.emoji_search_prototype);
         mEmojiSearchField = mCurrentInputView.findViewById(R.id.emoji_search_field);
         mEmojiSearchSubmitButton = mCurrentInputView.findViewById(R.id.emoji_search_submit);

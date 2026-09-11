@@ -6,6 +6,7 @@ import android.content.SharedPreferences
 import android.view.ViewGroup
 import android.widget.ImageButton
 import android.widget.ImageView
+import android.widget.LinearLayout
 import androidx.core.content.edit
 import androidx.core.view.forEach
 import helium314.keyboard.keyboard.internal.KeyboardIconsSet
@@ -29,6 +30,27 @@ fun createToolbarKey(context: Context, key: ToolbarKey): ImageButton {
     setToolbarButtonActivatedState(button)
     button.setImageDrawable(KeyboardIconsSet.instance.getNewDrawable(key.name, context))
     return button
+}
+
+/**
+ * Lay out a pinned secondary-toolbar key so every key shares the strip width
+ * evenly and stays visible on narrow screens.
+ *
+ * The suggestion-word style used by [createToolbarKey] sets a 44dp minWidth
+ * and 6dp horizontal padding. Together those overflow a typical phone before
+ * all 11 default pinned keys can fit, which previously forced horizontal
+ * scrolling. Clear both, use equal [LinearLayout] weights, and scale the icon
+ * down if the slot is narrower than the drawable.
+ */
+fun applyPinnedToolbarKeyLayout(button: ImageButton) {
+    button.layoutParams = LinearLayout.LayoutParams(
+        0,
+        LinearLayout.LayoutParams.MATCH_PARENT,
+        1f
+    )
+    button.minimumWidth = 0
+    button.setPaddingRelative(0, button.paddingTop, 0, button.paddingBottom)
+    button.scaleType = ImageView.ScaleType.CENTER_INSIDE
 }
 
 fun setToolbarButtonsActivatedStateOnPrefChange(buttonsGroup: ViewGroup, key: String?) {

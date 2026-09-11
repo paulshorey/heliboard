@@ -92,9 +92,9 @@ class KeyboardParser(private val params: KeyboardParams, private val context: Co
     private fun applyEmojiClipBottomRowGeometry(params: KeyboardParams, rowCount: Int) {
         val fullKeyboardGap = params.mVerticalGap
         val fullKeyboardHeight = params.mOccupiedHeight
-        val numberRowTopGap = context.resources.getDimensionPixelSize(R.dimen.config_number_row_top_extra_gap)
-        val typingTopPadding = params.mTopPadding + numberRowTopGap
-        val typingBaseHeight = params.mBaseHeight - numberRowTopGap
+        val toolbarGap = context.resources.getDimensionPixelSize(R.dimen.config_keyboard_toolbar_gap)
+        val typingTopPadding = params.mTopPadding + toolbarGap
+        val typingBaseHeight = params.mBaseHeight - toolbarGap
         val rowSlotFloat = typingBaseHeight.toFloat() / rowCount
         val rowSlot = rowSlotFloat.toInt().coerceAtLeast(1)
         val rowGap = (fullKeyboardGap * KeyboardParams.DEFAULT_KEYBOARD_ROWS.toFloat() / rowCount)

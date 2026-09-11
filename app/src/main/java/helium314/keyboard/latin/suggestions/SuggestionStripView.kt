@@ -49,6 +49,7 @@ import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.ToolbarKey
 import helium314.keyboard.latin.utils.ToolbarMode
 import helium314.keyboard.latin.utils.addPinnedKey
+import helium314.keyboard.latin.utils.applyPinnedToolbarKeyLayout
 import helium314.keyboard.latin.utils.createToolbarKey
 import helium314.keyboard.latin.utils.dpToPx
 import helium314.keyboard.latin.utils.getCodeForToolbarKey
@@ -254,10 +255,7 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         val colors = Settings.getValues().mColors
         for (pinnedKey in getPinnedToolbarKeys(context.prefs())) {
             val button = createToolbarKey(context, pinnedKey)
-            button.layoutParams = LinearLayout.LayoutParams(
-                resources.getDimensionPixelSize(R.dimen.config_suggestions_strip_edge_key_width),
-                LinearLayout.LayoutParams.MATCH_PARENT
-            )
+            applyPinnedToolbarKeyLayout(button)
             setupKey(button, colors)
             container.addView(button)
             val pinnedKeyInToolbar = toolbar.findViewWithTag<View>(pinnedKey)
@@ -655,8 +653,8 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         copy.scaleY = original.scaleY
         copy.contentDescription = original.contentDescription
         copy.setImageDrawable(original.drawable)
-        copy.layoutParams = original.layoutParams
         copy.isActivated = original.isActivated
+        applyPinnedToolbarKeyLayout(copy)
         setupKey(copy, Settings.getValues().mColors)
         pinnedKeys.addView(copy)
     }

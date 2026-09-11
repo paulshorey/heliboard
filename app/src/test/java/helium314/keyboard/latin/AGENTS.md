@@ -11,7 +11,7 @@ Core IME pipeline tests.
 - `SuggestTest.kt` - suggestion pipeline tests.
 
 ## Subfolders
-- `utils/` - focused utility tests.
+- `utils/` - focused utility tests, including `PinnedToolbarLayoutTest.kt` for even-width secondary-toolbar fitting on narrow screens.
 - `voice/` - transcription pipeline tests.
 
 ## Non-obvious notes

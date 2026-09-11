@@ -3,7 +3,7 @@
 Top-level test package for keyboard, parser, subtype, and IME behavior.
 
 ## Direct files
-- `KeyboardParserTest.kt` - parser/layout integration tests.
+- `KeyboardParserTest.kt` - parser/layout integration tests, including uniform number/letter row height and inter-row gap.
 - `KeySpecParserTest.kt` - key-spec parsing tests.
 - `LayoutTest.kt` - layout-type helper tests.
 - `Shadows.kt` - shared Robolectric shadows used across tests.
@@ -11,6 +11,7 @@ Top-level test package for keyboard, parser, subtype, and IME behavior.
 - `XLinkTest.kt` - external-link/dictionary repository checks.
 
 ## Subfolders
+- `keyboard/internal/` - `KeyboardStateEmojiToggleTest.kt` for emoji-key toggle back to alphabet.
 - `latin/` - core IME pipeline tests.
 - `latin/edithistory/` - edit history store tests.
 - `settings/` - fullapp/settings result tests.

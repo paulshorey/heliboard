@@ -34,7 +34,7 @@ Android resources: strings, themes, layouts, drawables, IME metadata, and densit
 
 ## `layout/` cheat sheet
 - `input_view.xml` - root IME layout.
-- `main_keyboard_frame.xml` - main keyboard frame/layout (suggestion strip, **Secondary Toolbar** host, then `KeyboardWrapperView`). `secondary_toolbar.xml` contains both the normal pinned-key scroller and the emoji-only local search-input prototype; only one is shown at a time.
+- `main_keyboard_frame.xml` - main keyboard frame/layout (suggestion strip, optional **Secondary Toolbar** host, then `KeyboardWrapperView`). `secondary_toolbar.xml` swaps between the normal full-width, even-weight pinned-key row and the emoji-only local search-input prototype.
 - `suggestions_strip.xml` + `strip_container.xml` + `suggestion_divider.xml` - suggestion strip layout pieces; `suggestions_strip.xml` also contains `custom_buttons_overlay` for the fixed voice-input mic/cancel/pause controls separate from scrollable toolbar keys.
 - `more_suggestions.xml` - expanded suggestions layout.
 - `popup_keys_keyboard.xml` and `popup_keys_keyboard_for_action_lxx.xml` - popup key layouts.
@@ -58,7 +58,7 @@ Android resources: strings, themes, layouts, drawables, IME metadata, and densit
 
 ## Non-obvious notes
 - `method.xml` is effectively part of keyboard layout configuration, not just Android boilerplate.
-- Strip and keyboard compactness tuning lives mainly in `values/config.xml` (and `values-sw*` / `values-land` overrides): `config_suggestions_strip_height`, `config_secondary_toolbar_height`, `config_default_keyboard_height`, `config_key_vertical_gap_*`, and `config_keyboard_*_padding_holo`.
+- Strip and keyboard compactness tuning lives mainly in `values/config.xml` (and `values-sw*` / `values-land` overrides): `config_suggestions_strip_height`, `config_secondary_toolbar_height`, `config_default_keyboard_height`, `config_key_vertical_gap_*`, and `config_keyboard_*_padding_holo`. Number-row glyph placement uses `values/dimens.xml` `config_number_row_label_inset_top` (label-only; key rectangles stay shared with letter rows). Space between the toolbar and the first key row is `config_keyboard_toolbar_gap`.
 - Many behavior changes touch both code and resources; for example, key hint sizing spans `values/`, drawables, and keyboard rendering code.
 - Default English/source strings belong in `values/`; translations should follow the same keys unless a locale genuinely needs a behavioral override.
 - When you change a themed icon or background, check whether the sibling theme variants need equivalent updates.

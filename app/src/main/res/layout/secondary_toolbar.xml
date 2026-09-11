@@ -2,34 +2,28 @@
 <!--
     SPDX-License-Identifier: GPL-3.0-only
 
-    Secondary toolbar: a horizontally scrollable row of "Pinned" toolbar buttons
-    shown just below the main suggestion / toolbar strip.
+    Secondary toolbar: a full-width row of pinned toolbar buttons shown just
+    below the main suggestion / toolbar strip. Keys share the available width
+    evenly so they stay on-screen on narrow phones; 1dp start/end padding
+    matches the first-row more-key and microphone edge inset.
 -->
 <FrameLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/secondary_toolbar_container"
     android:layout_width="match_parent"
     android:layout_height="@dimen/config_secondary_toolbar_height"
+    android:paddingStart="1dp"
+    android:paddingEnd="1dp"
     style="?attr/suggestionStripViewStyle">
 
-    <HorizontalScrollView
-        android:id="@+id/pinned_toolbar_scroll_view"
+    <LinearLayout
+        android:id="@+id/pinned_keys"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:scrollbars="none"
-        android:overScrollMode="never"
-        android:fillViewport="true"
-        style="?attr/suggestionStripViewStyle">
-
-        <LinearLayout
-            android:id="@+id/pinned_keys"
-            android:layout_width="wrap_content"
-            android:layout_height="match_parent"
-            android:orientation="horizontal"
-            android:minWidth="0dp"
-            style="?attr/suggestionWordStyle" />
-
-    </HorizontalScrollView>
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="0dp"
+        android:paddingEnd="0dp" />
 
     <!-- Emoji-search proof of concept. This is deliberately local-only: its text is populated
          by the keyboard view and is never connected to the host application's InputConnection. -->

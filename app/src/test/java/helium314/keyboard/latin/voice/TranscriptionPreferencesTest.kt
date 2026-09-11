@@ -159,6 +159,40 @@ class TranscriptionPreferencesTest {
         )
     }
 
+    @Test
+    fun migrateGeminiVoiceDefaults_bumpsLegacyOneSecondChunkSilence() {
+        val prefs = newPrefs()
+        prefs.edit().putInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, 1).commit()
+
+        TranscriptionPreferences.migrateGeminiVoiceDefaults(prefs)
+
+        assertEquals(
+            Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS,
+            prefs.getInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, -1)
+        )
+    }
+
+    @Test
+    fun migrateGeminiVoiceDefaults_leavesALaterUserChoiceOfOneSecond() {
+        val prefs = newPrefs()
+        TranscriptionPreferences.migrateGeminiVoiceDefaults(prefs)
+        prefs.edit().putInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, 1).commit()
+
+        TranscriptionPreferences.migrateGeminiVoiceDefaults(prefs)
+
+        assertEquals(1, prefs.getInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, -1))
+    }
+
+    @Test
+    fun migrateGeminiVoiceDefaults_keepsACustomChunkSilenceAboveTheOldDefault() {
+        val prefs = newPrefs()
+        prefs.edit().putInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, 4).commit()
+
+        TranscriptionPreferences.migrateGeminiVoiceDefaults(prefs)
+
+        assertEquals(4, prefs.getInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, -1))
+    }
+
     private fun newPrefs() = ApplicationProvider.getApplicationContext<Context>()
         .getSharedPreferences(
             "transcription_preferences_test_${System.nanoTime()}",
