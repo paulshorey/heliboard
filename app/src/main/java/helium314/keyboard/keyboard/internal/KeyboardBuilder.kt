@@ -106,9 +106,26 @@ open class KeyboardBuilder<KP : KeyboardParams>(protected val mContext: Context,
             addSplit()
         }
         applyMainKeyboardSpaceInset()
+        applyNumberRowLabelInset()
         addKeysToParams()
         expandSpacebarHitArea()
         return Keyboard(mParams)
+    }
+
+    /**
+     * Nudge number-row labels down inside the same key rectangle. Digits are
+     * vertically centered with the same "M" reference height as letters, so they
+     * look a little high. Only the baked first row of 5+ row alphabet/symbol
+     * keyboards is adjusted; 3-row layouts keep a letter first row untouched.
+     */
+    private fun applyNumberRowLabelInset() {
+        if (!mParams.mId.isAlphaOrSymbolKeyboard) return
+        if (keysInRows.size < 5) return
+        val inset = mResources.getDimensionPixelSize(R.dimen.config_number_row_label_inset_top)
+        if (inset <= 0) return
+        for (key in keysInRows.first()) {
+            if (!key.isSpacer) key.mLabelVisualInsetTop = inset
+        }
     }
 
     // determine key size and positions using relative width and height

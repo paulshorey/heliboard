@@ -606,6 +606,11 @@ f""", // no newline at the end
             "inter-row gaps should match within 1px rounding, got $gaps"
         )
         assertTrue(kb.mTopPadding <= 2, "number row should not get an extra first-row inset, topPadding=${kb.mTopPadding}")
+        val numberRowInset = rows.first().labelVisualInsetTop
+        assertTrue(numberRowInset > 0, "number-row labels should be nudged down inside the key")
+        rows.drop(1).forEach { key ->
+            assertEquals(0, key.labelVisualInsetTop, "letter/functional row '${key.label}' should keep a centered label")
+        }
     }
 
     @Test fun `overlay bottom row matches active alphabet functional row geometry`() {

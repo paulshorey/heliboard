@@ -36,7 +36,7 @@ Kept intact:
 
 - `app/src/main/java/helium314/keyboard/keyboard/internal/keyboard_parser/KeyboardParser.kt` — the `createRows()` method and `convertToLocalizedNumbers()`
 - `app/src/main/java/helium314/keyboard/keyboard/internal/keyboard_parser/LayoutParser.kt` — parses layout files, handles `+` layout offset
-- `app/src/main/java/helium314/keyboard/keyboard/internal/KeyboardBuilder.kt` — places alphabet/symbol rows from `mTopPadding` with a shared slot height and vertical gap (the old `config_number_row_top_extra_gap` first-row inset has been removed)
+- `app/src/main/java/helium314/keyboard/keyboard/internal/KeyboardBuilder.kt` — places alphabet/symbol rows from `mTopPadding` with a shared slot height and vertical gap (the old `config_number_row_top_extra_gap` first-row inset has been removed). Number-row glyphs get a 2dp label-only downward nudge via `config_number_row_label_inset_top`.
 - `app/src/main/assets/layouts/main/*.txt` and `*.json` — the baked layout files with number rows in row 1
 - `app/src/main/assets/layouts/symbols/symbols.txt` — also has a baked number row
 - `app/src/main/assets/locale_key_texts/*.txt` — `[number_row]` sections providing localized digit data

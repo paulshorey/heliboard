@@ -414,8 +414,9 @@ public class KeyboardView extends View {
             final float labelCharHeight = TypefaceUtils.getReferenceCharHeight(paint);
             final float labelCharWidth = TypefaceUtils.getReferenceCharWidth(paint);
 
-            // Vertical label text alignment.
-            labelBaseline = centerY + labelCharHeight / 2.0f;
+            // Vertical label text alignment. Number-row keys add a small top
+            // inset so digits (no descenders) sit closer to letter optical center.
+            labelBaseline = centerY + labelCharHeight / 2.0f + key.getLabelVisualInsetTop();
 
             // Horizontal label text alignment
             if (key.isAlignLabelOffCenter() && mShowsHints) {
