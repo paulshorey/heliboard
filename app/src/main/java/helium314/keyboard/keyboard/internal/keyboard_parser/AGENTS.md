@@ -22,8 +22,8 @@ Converts layout assets and XML metadata into typed keyboard models.
 - Android is pointed at `method_dummy.xml`, but runtime subtype/layout data is read from `R.xml.method` by app code and from user subtype prefs; do not rely on system IME subtype APIs to list the real catalog.
 - Layout resolution is not one file per language. MAIN comes from the subtype's `KeyboardLayoutSet` extra value (implicit `qwerty` if absent); other `LayoutType` slots resolve subtype override -> global default-layout pref -> `Defaults.LayoutType.default`.
 - Treat parser model changes as schema changes for the layout assets, not as isolated refactors.
-- `KeyboardParser` no longer prepends a number row at runtime. Layout files are the sole source of truth for row count: 4-row files render 4 rows (with baked-in number row); 3-row files render 3 rows. The `NUMBER_ROW` layout type has been fully removed.
-- When a layout has more or fewer than 4 rows, `KeyboardParser` rescales row heights; it also rescales `mVerticalGap` so the visible gap between rows matches the four-row baseline.
+- `KeyboardParser` no longer prepends a number row at runtime. Layout assets define authored row count (typical baked MAIN: 4 rows = number + 3 alpha); `createRows()` then adds the functional row, so English qwerty renders 5 slots. The `NUMBER_ROW` layout type is removed.
+- When rendered `keysInRows.size != 4`, row heights and `mVerticalGap` rescale against the four-row baseline so inter-row spacing stays uniform.
 - For 4+ row alphabet layouts, `KeyboardParser.convertToLocalizedNumbers` swaps Western digits in the baked top row with locale-specific digits (e.g. Persian/Bengali) when `mLocalizedNumberRow` is enabled.
 - `locale_key_texts` files are behavior overlays: popup sets, `+` layout extra keys, localized labels, localized number rows, and TLD popups. Popup ordering is also affected by the active MorePopups tier and hint/popup-order prefs.
 - For `+` layouts, `LayoutParser` adjusts extra-key row indices so keys append to alphabet rows, not the baked number row. Fork/edit preview uses `LayoutUtils.getContentWithPlus()` and only works for simple text layouts, not JSON `+` layouts.
