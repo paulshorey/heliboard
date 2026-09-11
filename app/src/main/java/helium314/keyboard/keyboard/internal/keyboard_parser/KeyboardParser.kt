@@ -16,7 +16,6 @@ import helium314.keyboard.keyboard.internal.keyboard_parser.floris.SimplePopups
 import helium314.keyboard.keyboard.internal.keyboard_parser.floris.TextKeyData
 import helium314.keyboard.latin.common.isEmoji
 import helium314.keyboard.latin.define.DebugFlags
-import helium314.keyboard.latin.R
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.utils.LayoutType
 import helium314.keyboard.latin.utils.LayoutUtilsCustom
@@ -92,9 +91,8 @@ class KeyboardParser(private val params: KeyboardParams, private val context: Co
     private fun applyEmojiClipBottomRowGeometry(params: KeyboardParams, rowCount: Int) {
         val fullKeyboardGap = params.mVerticalGap
         val fullKeyboardHeight = params.mOccupiedHeight
-        val numberRowTopGap = context.resources.getDimensionPixelSize(R.dimen.config_number_row_top_extra_gap)
-        val typingTopPadding = params.mTopPadding + numberRowTopGap
-        val typingBaseHeight = params.mBaseHeight - numberRowTopGap
+        val typingTopPadding = params.mTopPadding
+        val typingBaseHeight = params.mBaseHeight
         val rowSlotFloat = typingBaseHeight.toFloat() / rowCount
         val rowSlot = rowSlotFloat.toInt().coerceAtLeast(1)
         val rowGap = (fullKeyboardGap * KeyboardParams.DEFAULT_KEYBOARD_ROWS.toFloat() / rowCount)

@@ -587,6 +587,25 @@ f""", // no newline at the end
         assertEquals(kb.sortedKeys.size, keys.sumOf { it.size })
     }
 
+    @Test fun `qwerty number and letter rows share height and inter-row gap`() {
+        val editorInfo = EditorInfo()
+        val subtype = SubtypeUtilsAdditional.createEmojiCapableAdditionalSubtype(Locale.ENGLISH, "qwerty", true)
+        val (kb, _) = buildKeyboard(editorInfo, subtype, KeyboardId.ELEMENT_ALPHABET)
+        val rows = kb.sortedKeys
+            .filter { !it.isSpacer }
+            .groupBy { it.y }
+            .toSortedMap()
+            .values
+            .map { row -> row.maxBy { it.height } }
+        assertEquals(5, rows.size, "number + 3 letter + functional")
+        val heights = rows.map { it.height }
+        val gaps = rows.zipWithNext { key, next -> next.y - (key.y + key.height) }
+        assertEquals(1, heights.distinct().size, "every row should use the same visible key height, got $heights")
+        assertEquals(1, gaps.distinct().size, "every inter-row gap should match, got $gaps")
+        assertEquals(rows.first().verticalGap, gaps.single())
+        assertTrue(kb.mTopPadding <= 2, "number row should not get an extra first-row inset, topPadding=${kb.mTopPadding}")
+    }
+
     @Test fun `overlay bottom row matches active alphabet functional row geometry`() {
         val editorInfo = EditorInfo()
         // These exercise the common five-row keyboard and layouts with extra authored rows.
