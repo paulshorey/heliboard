@@ -3,6 +3,7 @@
 Cross-cutting helpers used across the IME. Search here before adding another generic utility.
 
 ## Direct files
+
 - `AsyncResultHolder.java` - tiny async result container.
 - `AutoCorrectionUtils.java` - auto-correction scoring/helpers.
 - `CapsModeUtils.java` - capitalization mode helpers.
@@ -49,22 +50,25 @@ Cross-cutting helpers used across the IME. Search here before adding another gen
 - `TextPlacement.java` - text placement/caret positioning helpers.
 - `TextRange.java` - text range value type.
 - `Timestamp.kt` - timestamp/time helpers.
-- `ToolbarUtils.kt` - toolbar/action-strip source of truth (`ToolbarKey`, `ToolbarMode`, default serialized prefs, key-code mapping, custom key-code cache).
+- `ToolbarUtils.kt` - toolbar/action-strip source of truth (`ToolbarKey`, `ToolbarMode`, default serialized prefs, key-code mapping, custom key-code cache, and `applyPinnedToolbarKeyLayout` for the even-width secondary-toolbar row).
 - `TypefaceUtils.java` - typeface loading/helpers.
 - `UncachedInputMethodManagerUtils.java` - direct IME manager helpers when cached state is stale.
 - `ViewLayoutUtils.java` - view measurement/layout helpers.
 
 ## Non-obvious notes
+
 - `JniUtils.java` is part of the dictionary/native contract; changes here are higher risk than a normal helper edit.
 - `DeviceProtectedUtils.java` matters because the app supports direct boot.
 - Layout resolution is layered: MAIN comes from the active subtype (`KeyboardLayoutSet` extra value, falling back to `qwerty`); non-MAIN slots resolve subtype override -> global `PREF_LAYOUT_*` -> `Defaults.LayoutType.default`.
 - Custom layout names are stored in prefs and filenames. `LayoutUtilsCustom.CUSTOM_LAYOUT_PREFIX` and its base36 naming scheme are a persistence contract; Latin-script MAIN layouts are shared as `custom.Latn.*`, while non-Latin MAIN layouts are locale-tagged.
 - Adding a toolbar key requires coordinated updates outside this file too: enum/default lists in `ToolbarUtils.kt`, icon lookup in `KeyboardIconsSet.kt`, source string, settings exposure, and upgrade/serialization handling when renaming.
+- Pinned secondary-toolbar keys must use `applyPinnedToolbarKeyLayout` (equal `LinearLayout` weights, zero minWidth) so they always fit the strip instead of overflowing into a horizontal scroll.
 - The toolbar `EMOJI` key sends `KeyCode.EMOJI`. `KeyboardState` toggles from the visible palette (`SwitchActions.isShowingEmojiKeyboard`), not `mode`, because physical `onToggleKeyboard` can change the UI without updating the state machine.
 - `ToolbarUtils` caches custom key codes in memory; `Settings.loadSettings()` clears that cache when prefs change.
 - This folder is intentionally broad, but new utilities should still be named for a concrete domain rather than as generic catch-alls.
 
 ## Keep this file current
+
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.
 - If a change here affects neighboring folders or a cross-folder contract, update those AGENTS.md files in the same PR.
 - Treat stale agent documentation as a bug.
