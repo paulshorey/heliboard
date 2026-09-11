@@ -605,7 +605,10 @@ f""", // no newline at the end
             gaps.max() - gaps.min() <= 1,
             "inter-row gaps should match within 1px rounding, got $gaps"
         )
-        assertTrue(kb.mTopPadding <= 2, "number row should not get an extra first-row inset, topPadding=${kb.mTopPadding}")
+        val toolbarGap = latinIME.resources.getDimensionPixelSize(R.dimen.config_keyboard_toolbar_gap)
+        assertTrue(toolbarGap > 0)
+        assertEquals(toolbarGap, kb.mTopPadding, "first row should sit below a small toolbar gap")
+        assertEquals(toolbarGap, rows.first().y)
         val numberRowInset = rows.first().labelVisualInsetTop
         assertTrue(numberRowInset > 0, "number-row labels should be nudged down inside the key")
         rows.drop(1).forEach { key ->

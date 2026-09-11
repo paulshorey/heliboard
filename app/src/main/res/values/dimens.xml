@@ -8,4 +8,6 @@
          centered with the same "M" reference height as letters, so they look
          a little high (no descenders). The key rectangle stays unchanged. -->
     <dimen name="config_number_row_label_inset_top">2dp</dimen>
+    <!-- Small gap between the suggestion/pinned toolbar and the first key row. -->
+    <dimen name="config_keyboard_toolbar_gap">4dp</dimen>
 </resources>

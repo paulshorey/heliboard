@@ -130,6 +130,13 @@ open class KeyboardBuilder<KP : KeyboardParams>(protected val mContext: Context,
 
     // determine key size and positions using relative width and height
     private fun determineAbsoluteValues() {
+        if (mParams.mId.isAlphaOrSymbolKeyboard) {
+            val toolbarGap = mResources.getDimensionPixelSize(R.dimen.config_keyboard_toolbar_gap)
+            if (toolbarGap > 0) {
+                mParams.mTopPadding += toolbarGap
+                mParams.mBaseHeight -= toolbarGap
+            }
+        }
         var currentY = mParams.mTopPadding.toFloat()
         for (row in keysInRows) {
             if (row.isEmpty()) continue
