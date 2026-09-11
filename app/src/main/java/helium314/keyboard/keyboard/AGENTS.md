@@ -31,8 +31,8 @@ Visual keyboard system: key geometry, rendering, pointer tracking, layout switch
 - The keyboard renderer is performance-sensitive; avoid allocations and broad invalidations in hot paths.
 - Layout assets and parser logic must stay aligned with `assets/layouts/` and `res/xml/method.xml`.
 - `KeyboardActionListenerImpl.kt` is the main seam from view events into text logic.
-- `KeyboardSwitcher` owns mode switches between the main keyboard, emoji palette, clipboard surface, and optional **Secondary Toolbar** container from `main_keyboard_frame.xml`; pinned keys remain visible beside emoji/clipboard whenever the same configured/locked/empty predicates allow them on the typing keyboard. It exposes `getSecondaryToolbarHeight()` for IME layout math when that strip is visible.
-- Suggestion, emoji-tab, and clipboard strips share `strip_container`; visibility changes here must stay aligned with `SuggestionStripView` toolbar state and `SettingsValues.mSecondaryStripVisible`.
+- `KeyboardSwitcher` owns mode switches between the main keyboard, emoji palette, clipboard surface, and optional **Secondary Toolbar** container from `main_keyboard_frame.xml`. Clipboard shares the configured pinned keys; emoji temporarily replaces that row with a local-only search-field prototype. It exposes `getSecondaryToolbarHeight()` for IME layout math when that strip is visible.
+- Suggestion, emoji-tab, and clipboard strips share `strip_container`; visibility changes here must stay aligned with `SuggestionStripView` toolbar state and `SettingsValues.mSecondaryStripVisible`. The emoji search prototype is in the separate secondary-toolbar host.
 - Emoji/clipboard overlays measure weighted grid/list children against the exact typing-area height, above a parser-sized persistent functional row; they do not use `fitsSystemWindows`.
 
 ## Keep this file current

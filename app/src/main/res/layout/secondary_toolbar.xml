@@ -5,22 +5,63 @@
     Secondary toolbar: a horizontally scrollable row of "Pinned" toolbar buttons
     shown just below the main suggestion / toolbar strip.
 -->
-<HorizontalScrollView
+<FrameLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/secondary_toolbar_container"
     android:layout_width="match_parent"
     android:layout_height="@dimen/config_secondary_toolbar_height"
-    android:scrollbars="none"
-    android:overScrollMode="never"
-    android:fillViewport="true"
     style="?attr/suggestionStripViewStyle">
 
+    <HorizontalScrollView
+        android:id="@+id/pinned_toolbar_scroll_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scrollbars="none"
+        android:overScrollMode="never"
+        android:fillViewport="true"
+        style="?attr/suggestionStripViewStyle">
+
+        <LinearLayout
+            android:id="@+id/pinned_keys"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:minWidth="0dp"
+            style="?attr/suggestionWordStyle" />
+
+    </HorizontalScrollView>
+
+    <!-- Emoji-search proof of concept. This is deliberately local-only: its text is populated
+         by the keyboard view and is never connected to the host application's InputConnection. -->
     <LinearLayout
-        android:id="@+id/pinned_keys"
-        android:layout_width="wrap_content"
+        android:id="@+id/emoji_search_prototype"
+        android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="horizontal"
-        android:minWidth="0dp"
-        style="?attr/suggestionWordStyle" />
+        android:gravity="center_vertical"
+        android:paddingStart="6dp"
+        android:paddingEnd="6dp"
+        android:visibility="gone"
+        style="?attr/suggestionStripViewStyle">
 
-</HorizontalScrollView>
+        <EditText
+            android:id="@+id/emoji_search_field"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:hint="@string/emoji_search_prototype_hint"
+            android:inputType="text"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:textSize="16sp" />
+
+        <Button
+            android:id="@+id/emoji_search_submit"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:minWidth="0dp"
+            android:text="@string/label_search_key" />
+
+    </LinearLayout>
+
+</FrameLayout>
