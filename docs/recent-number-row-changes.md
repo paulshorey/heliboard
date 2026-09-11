@@ -36,7 +36,7 @@ Kept intact:
 
 - `app/src/main/java/helium314/keyboard/keyboard/internal/keyboard_parser/KeyboardParser.kt` — the `createRows()` method and `convertToLocalizedNumbers()`
 - `app/src/main/java/helium314/keyboard/keyboard/internal/keyboard_parser/LayoutParser.kt` — parses layout files, handles `+` layout offset
-- `app/src/main/java/helium314/keyboard/keyboard/internal/KeyboardBuilder.kt` — line 117 adds `config_number_row_top_extra_gap` padding (still references number row concept)
+- `app/src/main/java/helium314/keyboard/keyboard/internal/KeyboardBuilder.kt` — places alphabet/symbol rows from `mTopPadding` with a shared slot height and vertical gap, plus `config_keyboard_toolbar_gap` above the first row so keys are not flush with the toolbar. Number-row glyphs get a 2dp label-only downward nudge via `config_number_row_label_inset_top`.
 - `app/src/main/assets/layouts/main/*.txt` and `*.json` — the baked layout files with number rows in row 1
 - `app/src/main/assets/layouts/symbols/symbols.txt` — also has a baked number row
 - `app/src/main/assets/locale_key_texts/*.txt` — `[number_row]` sections providing localized digit data
@@ -44,5 +44,5 @@ Kept intact:
 ### Potential risk areas
 
 1.  `convertToLocalizedNumbers` guard: It checks `baseKeys.size < 4` and returns early. If a layout somehow parses as 3 rows, localization won't run — but since `addNumberRowOrPopupKeys` (the old 3-row hint path) was also removed, 3-row layouts now get neither baked digits nor digit hints.
-2.  `KeyboardBuilder.kt` top gap: Line 117 still adds `config_number_row_top_extra_gap` (3dp) when `true` (was formerly `Settings.getValues().mShowsNumberRow`, pinned to `true` in Part 2). This always adds the gap now, which is correct for baked 4-row layouts but might be wrong if something else changed.
+2.  First-row spacing: the old `config_number_row_top_extra_gap` (3dp above the baked number row) has been removed so number and letter rows share the same height and inter-row gap. Overlay bottom-row math in `KeyboardParser.applyEmojiClipBottomRowGeometry` no longer subtracts that inset.
 3.  Shift-state behavior on number row keys: The baked `.txt` format doesn't support `shift_state_selector`. The old runtime-prepended `number_row.json` used `shift_state_selector` to show `!` when shifted and `1`normally. Baked `.txt` files use `1 ! ¹ ½ ...` (plain text format), where `!` is just a popup, not a shift-state variant. The `.json` layouts (like `azerty.json`) do have proper `shift_state_selector` entries baked in.

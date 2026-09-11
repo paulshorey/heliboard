@@ -46,6 +46,12 @@ class KeyboardState(private val switchActions: SwitchActions) {
         fun startDoubleTapShiftKeyTimer()
         val isInDoubleTapShiftKeyTimeout: Boolean
         fun cancelDoubleTapShiftKeyTimer()
+        /**
+         * Whether the emoji palette is actually visible. Physical-key
+         * [helium314.keyboard.keyboard.KeyboardSwitcher.onToggleKeyboard] updates the UI without
+         * going through this state machine, so [mode] can be stale.
+         */
+        val isShowingEmojiKeyboard: Boolean
 
         fun setOneHandedModeEnabled(enabled: Boolean)
         fun switchOneHandedMode()
@@ -287,6 +293,17 @@ class KeyboardState(private val switchActions: SwitchActions) {
         prevMainKeyboardWasShiftLocked = alphabetShiftState.isShiftLocked
         alphabetShiftState.setShiftLocked(false)
         switchActions.setEmojiKeyboard()
+    }
+
+    /** Open the emoji palette, or return to the alphabet keyboard if it is already showing. */
+    private fun toggleEmojiKeyboard(autoCapsFlags: Int, recapitalizeMode: RecapitalizeMode?) {
+        // Use the displayed palette, not [mode]. Physical shortcuts can hide or show
+        // emoji without updating KeyboardState, which would otherwise invert the toggle.
+        if (switchActions.isShowingEmojiKeyboard) {
+            setAlphabetKeyboard(autoCapsFlags, recapitalizeMode)
+        } else {
+            setEmojiKeyboard()
+        }
     }
 
     private fun setClipboardKeyboard() {
@@ -658,7 +675,7 @@ class KeyboardState(private val switchActions: SwitchActions) {
             // If the code is a letter, update keyboard shift state.
             updateAlphabetShiftState(autoCapsFlags, recapitalizeMode)
         } else when (code) {
-            KeyCode.EMOJI -> setEmojiKeyboard()
+            KeyCode.EMOJI -> toggleEmojiKeyboard(autoCapsFlags, recapitalizeMode)
             KeyCode.ALPHA -> setAlphabetKeyboard(autoCapsFlags, recapitalizeMode)
             // Note: Printing clipboard content is handled in InputLogic.handleFunctionalEvent
             KeyCode.CLIPBOARD -> if (Settings.getValues().mClipboardHistoryEnabled) setClipboardKeyboard()

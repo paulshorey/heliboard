@@ -23,7 +23,7 @@ Internal mechanics behind keyboard rendering, previews, gesture trails, parser p
 - `KeyboardCodesSet.java` - canonical key code constants/set logic.
 - `KeyboardIconsSet.kt` - icon resolution for keys.
 - `KeyboardParams.java` - assembled keyboard parameter bundle.
-- `KeyboardState.kt` - high-level keyboard state machine.
+- `KeyboardState.kt` - high-level keyboard state machine. `KeyCode.EMOJI` toggles based on the visible palette (`SwitchActions.isShowingEmojiKeyboard`), not `mode`: first press opens emoji, a second press while it is showing returns to alphabet. Physical `onToggleKeyboard` updates the UI without this state machine, so `mode` can be stale.
 - `KeyDrawParams.java` - key drawing parameter holder.
 - `KeyPreviewChoreographer.java` - schedules key preview display.
 - `KeyPreviewDrawParams.java` - key preview drawing parameters.
@@ -50,7 +50,7 @@ Internal mechanics behind keyboard rendering, previews, gesture trails, parser p
 - This folder is mostly plumbing beneath `MainKeyboardView`; many classes are hot-path and allocation-sensitive.
 - Parser output, icon resolution, and draw params must stay consistent with resource and asset naming conventions.
 - `KeyboardParser` rescales per-row relative heights when the layout has more or fewer than four rows; it also scales `KeyboardParams.mVerticalGap` with the same factor so inter-row spacing stays consistent for baked number-row and special 3-row layouts. Emoji/clipboard bottom rows are a separate path: they keep the full keyboard bottom padding and derive one functional-row slot from the active main layout's authored row count.
-- `KeyboardBuilder` adds a small gap above the first row for alphabet/symbol layouts when `R.dimen.config_number_row_top_extra_gap` is positive; this is based on resource dimensions and baked row geometry, not a runtime number-row toggle. It may also set `Key.KeyParams.mSpaceVisualInsetTop` on wide bottom-row space keys when `R.dimen.config_spacebar_visual_inset_top` is positive so drawing and hit-testing skip a strip at the top of the slot; the default is zero so the space key uses the full row slot.
+- Alphabet/symbol rows share one slot height and one vertical gap. `KeyboardBuilder` adds `R.dimen.config_keyboard_toolbar_gap` above the first row so keys are not flush with the suggestion/pinned toolbar; overlay bottom-row math in `KeyboardParser.applyEmojiClipBottomRowGeometry` uses the same gap. Digits still look a little high because labels are centered on an "M" reference height, so `applyNumberRowLabelInset()` adds `R.dimen.config_number_row_label_inset_top` to the drawn baseline on the first row of 5+ row alphabet/symbol keyboards without changing the key rectangle. It may still set `Key.KeyParams.mSpaceVisualInsetTop` on wide bottom-row space keys when `R.dimen.config_spacebar_visual_inset_top` is positive so drawing and hit-testing skip a strip at the top of the slot; the default is zero so the space key uses the full row slot.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

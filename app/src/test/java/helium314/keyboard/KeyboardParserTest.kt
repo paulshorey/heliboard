@@ -587,6 +587,35 @@ f""", // no newline at the end
         assertEquals(kb.sortedKeys.size, keys.sumOf { it.size })
     }
 
+    @Test fun `qwerty number and letter rows share height and inter-row gap`() {
+        val editorInfo = EditorInfo()
+        val subtype = SubtypeUtilsAdditional.createEmojiCapableAdditionalSubtype(Locale.ENGLISH, "qwerty", true)
+        val (kb, _) = buildKeyboard(editorInfo, subtype, KeyboardId.ELEMENT_ALPHABET)
+        val rows = kb.sortedKeys
+            .filter { !it.isSpacer }
+            .groupBy { it.y }
+            .toSortedMap()
+            .values
+            .map { row -> row.maxBy { it.height } }
+        assertEquals(5, rows.size, "number + 3 letter + functional")
+        val heights = rows.map { it.height }
+        val gaps = rows.zipWithNext { key, next -> next.y - (key.y + key.height) }
+        assertEquals(1, heights.distinct().size, "every row should use the same visible key height, got $heights")
+        assertTrue(
+            gaps.max() - gaps.min() <= 1,
+            "inter-row gaps should match within 1px rounding, got $gaps"
+        )
+        val toolbarGap = latinIME.resources.getDimensionPixelSize(R.dimen.config_keyboard_toolbar_gap)
+        assertTrue(toolbarGap > 0)
+        assertEquals(toolbarGap, kb.mTopPadding, "first row should sit below a small toolbar gap")
+        assertEquals(toolbarGap, rows.first().y)
+        val numberRowInset = rows.first().labelVisualInsetTop
+        assertTrue(numberRowInset > 0, "number-row labels should be nudged down inside the key")
+        rows.drop(1).forEach { key ->
+            assertEquals(0, key.labelVisualInsetTop, "letter/functional row '${key.label}' should keep a centered label")
+        }
+    }
+
     @Test fun `overlay bottom row matches active alphabet functional row geometry`() {
         val editorInfo = EditorInfo()
         // These exercise the common five-row keyboard and layouts with extra authored rows.
