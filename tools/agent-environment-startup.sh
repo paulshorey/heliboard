@@ -123,11 +123,10 @@ java_major_version() {
 
 detect_java_home() {
   local candidate
-  if [[ -n "${JAVA_HOME:-}" && -x "${JAVA_HOME}/bin/javac" ]]; then
-    printf '%s\n' "$JAVA_HOME"
-    return 0
-  fi
+  # Codex universal and other mise-based images install pinned JDKs here even
+  # when their inherited JAVA_HOME still points at a newer default.
   for candidate in \
+      "${HOME}"/.local/share/mise/installs/java/21* \
       /usr/lib/jvm/java-21-openjdk-amd64 \
       /usr/lib/jvm/java-21-openjdk \
       /usr/lib/jvm/java-17-openjdk-amd64 \
@@ -138,6 +137,10 @@ detect_java_home() {
       return 0
     fi
   done
+  if [[ -n "${JAVA_HOME:-}" && -x "${JAVA_HOME}/bin/javac" ]]; then
+    printf '%s\n' "$JAVA_HOME"
+    return 0
+  fi
   if have_cmd javac; then
     dirname "$(dirname "$(readlink -f "$(command -v javac)")")"
     return 0
@@ -192,10 +195,13 @@ install_host_packages() {
     git
     python3
     sqlite3
-    openjdk-21-jdk
     build-essential
     file
   )
+
+  if ! detect_java_home >/dev/null; then
+    packages+=(openjdk-21-jdk)
+  fi
 
   if ! debian_like; then
     warn "Host is not Debian/Ubuntu; install JDK 21, curl, unzip, git, python3, and sqlite3 yourself"
