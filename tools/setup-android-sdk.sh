@@ -21,8 +21,9 @@ if [[ ! -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]]; then
   mv "$tmpdir/cmdline-tools/"* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
 fi
 
-# Accept licenses non-interactively
-yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" --licenses 2>/dev/null || true
+# Accept licenses non-interactively without flooding cloud-agent terminals with
+# the full text of every historical Android license.
+yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" --licenses >/dev/null 2>&1 || true
 
 # Install required components (compileSdk 35, build-tools 35, NDK 28)
 echo "Installing platform 35, build-tools 35.0.0, NDK 28.0.13004108..."
