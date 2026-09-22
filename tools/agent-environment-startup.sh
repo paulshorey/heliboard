@@ -221,9 +221,22 @@ install_host_packages() {
   fi
 
   log "Installing host packages: ${missing[*]}"
+  local apt_log
+  apt_log="$(mktemp)"
+  trap 'rm -f "${apt_log}"' RETURN
+  # Avoid dpkg's PTY progress stream overwhelming cloud-agent web terminals.
+  # Print the captured output only when an install step fails.
   # shellcheck disable=SC2086
-  DEBIAN_FRONTEND=noninteractive $prefix apt-get update -y
-  DEBIAN_FRONTEND=noninteractive $prefix apt-get install -y --no-install-recommends "${missing[@]}"
+  if ! DEBIAN_FRONTEND=noninteractive $prefix apt-get -qq -o Dpkg::Use-Pty=0 update -y >"${apt_log}" 2>&1; then
+    cat "${apt_log}" >&2
+    die "apt-get update failed"
+  fi
+  # shellcheck disable=SC2086
+  if ! DEBIAN_FRONTEND=noninteractive $prefix apt-get -qq -o Dpkg::Use-Pty=0 install -y --no-install-recommends "${missing[@]}" >"${apt_log}" 2>&1; then
+    cat "${apt_log}" >&2
+    die "apt-get install failed"
+  fi
+  log "Host packages are ready"
 }
 
 configure_android_sdk() {
