@@ -21,6 +21,7 @@ SKIP_APT="${HELIBOARD_AGENT_SKIP_APT:-0}"
 SKIP_SDK="${HELIBOARD_AGENT_SKIP_SDK:-0}"
 SKIP_COMPILE="${HELIBOARD_AGENT_SKIP_COMPILE:-0}"
 RUN_TESTS="${HELIBOARD_AGENT_RUN_TESTS:-0}"
+FULL_TESTS="${HELIBOARD_AGENT_FULL_TESTS:-0}"
 BUILD_APK="${HELIBOARD_AGENT_BUILD_APK:-0}"
 
 usage() {
@@ -36,8 +37,9 @@ Options:
   --skip-sdk        Do not install or refresh the Android SDK
   --skip-compile    Do not warm Gradle / compile Kotlin
   --quick           Same as --skip-compile
-  --verify          Also run JVM/Robolectric unit tests
+  --verify          Also run a Robolectric smoke suite (InputLogic + voice)
   --tests           Same as --verify
+  --full-tests      Run :app:testRunTestsUnitTest (CI variant; some debug-only tests are skipped)
   --apk             Also write dist/HeliBoard.apk
 
 Environment:
@@ -47,12 +49,13 @@ Environment:
   HELIBOARD_AGENT_SKIP_SDK=1
   HELIBOARD_AGENT_SKIP_COMPILE=1
   HELIBOARD_AGENT_RUN_TESTS=1
+  HELIBOARD_AGENT_FULL_TESTS=1
   HELIBOARD_AGENT_BUILD_APK=1
 
 After a successful run:
   source ./.android-env
   ./gradlew :app:compileDebugKotlin
-  ./gradlew :app:testDebugUnitTest
+  ./gradlew :app:testDebugUnitTest --tests helium314.keyboard.latin.InputLogicTest
   ./tools/build-dist-apk.sh
 
 This project has no server database to start. Clipboard history uses the
@@ -84,6 +87,7 @@ parse_args() {
       --skip-sdk) SKIP_SDK=1 ;;
       --skip-compile|--quick) SKIP_COMPILE=1 ;;
       --verify|--tests) RUN_TESTS=1 ;;
+      --full-tests) FULL_TESTS=1 ;;
       --apk) BUILD_APK=1 ;;
       *) die "unknown argument: $1 (try --help)" ;;
     esac
@@ -296,8 +300,16 @@ warm_or_build() {
   fi
 
   if truthy "$RUN_TESTS"; then
-    log "Running JVM/Robolectric unit tests"
-    ./gradlew --stacktrace :app:testDebugUnitTest
+    log "Running Robolectric smoke tests (InputLogic + voice)"
+    ./gradlew --stacktrace :app:testDebugUnitTest \
+      --tests helium314.keyboard.latin.InputLogicTest \
+      --tests 'helium314.keyboard.latin.voice.*'
+  fi
+
+  if truthy "$FULL_TESTS"; then
+    # runTests is the CI variant: it skips known-failing / network-spamming checks.
+    log "Running JVM/Robolectric unit tests (runTests variant)"
+    ./gradlew --stacktrace :app:testRunTestsUnitTest
   fi
 
   if truthy "$BUILD_APK"; then
@@ -325,7 +337,7 @@ Load env in this shell:
 
 Build / run:
   ./gradlew :app:compileDebugKotlin
-  ./gradlew :app:testDebugUnitTest
+  ./gradlew :app:testDebugUnitTest --tests helium314.keyboard.latin.InputLogicTest
   ./tools/build-dist-apk.sh
   ./gradlew installDebug          # only when an adb device/emulator is attached
 

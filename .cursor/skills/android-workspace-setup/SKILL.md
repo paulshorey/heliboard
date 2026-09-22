@@ -29,7 +29,7 @@ The setup is handled by `./tools/setup-android-sdk.sh`, which:
 
 ## Manual setup (CI or other environments)
 
-1. On a fresh Linux agent, prefer `./tools/agent-environment-startup.sh`. It installs host packages, JDK 21, and the Android SDK, then writes a portable `.android-env`. Add `--verify` to run `./gradlew :app:testDebugUnitTest`, or `--apk` to produce `dist/HeliBoard.apk`.
+1. On a fresh Linux agent, prefer `./tools/agent-environment-startup.sh`. It installs host packages, JDK 21, and the Android SDK, then writes a portable `.android-env`. Add `--verify` to run the InputLogic + voice Robolectric smoke suite, `--full-tests` for `:app:testRunTestsUnitTest`, or `--apk` to produce `dist/HeliBoard.apk`.
 2. SDK-only: run `./tools/setup-android-sdk.sh` once. This installs the Android SDK to `<repo>/.android-sdk` (or `$ANDROID_SDK_ROOT` if already set), creates `local.properties` with `sdk.dir`, and sets `ANDROID_HOME`/`ANDROID_SDK_ROOT` when sourced.
 3. After setup, `./gradlew :app:compileDebugKotlin` works out of the box (Gradle reads `local.properties`).
 4. To get env vars in the current shell: `source ./.android-env` or `source ./tools/setup-android-sdk.sh` (idempotent if SDK already installed).
