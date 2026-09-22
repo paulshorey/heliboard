@@ -108,6 +108,7 @@ public class SettingsValues {
     public final boolean mIsSplitKeyboardEnabled;
     public final float mSplitKeyboardSpacerRelativeWidth;
     public final boolean mQuickPinToolbarKeys;
+    public final boolean mShowPinnedToolbar;
     public final int mScreenMetrics;
     public final boolean mAddToPersonalDictionary;
     public final boolean mUseContactsDictionary;
@@ -224,6 +225,7 @@ public class SettingsValues {
                 ? Math.min(Math.max((displayWidthDp - 600) / 600f + 0.15f, 0.15f), 0.35f) * Settings.readSplitSpacerScale(prefs, isLandscape)
                 : 0f;
         mQuickPinToolbarKeys = mToolbarMode == ToolbarMode.EXPANDABLE && prefs.getBoolean(Settings.PREF_QUICK_PIN_TOOLBAR_KEYS, Defaults.PREF_QUICK_PIN_TOOLBAR_KEYS);
+        mShowPinnedToolbar = prefs.getBoolean(Settings.PREF_SHOW_PINNED_TOOLBAR, Defaults.PREF_SHOW_PINNED_TOOLBAR);
         mScreenMetrics = Settings.readScreenMetrics(res);
 
         // Compute other readable settings

@@ -50,7 +50,7 @@ Cross-cutting helpers used across the IME. Search here before adding another gen
 - `TextPlacement.java` - text placement/caret positioning helpers.
 - `TextRange.java` - text range value type.
 - `Timestamp.kt` - timestamp/time helpers.
-- `ToolbarUtils.kt` - toolbar/action-strip source of truth (`ToolbarKey`, `ToolbarMode`, default serialized prefs, key-code mapping, custom key-code cache, and `applyPinnedToolbarKeyLayout` for the even-width secondary-toolbar row).
+- `ToolbarUtils.kt` - toolbar/action-strip source of truth (`ToolbarKey`, `ToolbarMode`, default serialized prefs, key-code mapping, custom key-code cache, `shouldShowPinnedToolbarRow` for the second-row visibility contract, and `applyPinnedToolbarKeyLayout` for the even-width secondary-toolbar row).
 - `TypefaceUtils.java` - typeface loading/helpers.
 - `UncachedInputMethodManagerUtils.java` - direct IME manager helpers when cached state is stale.
 - `ViewLayoutUtils.java` - view measurement/layout helpers.

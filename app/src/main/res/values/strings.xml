@@ -469,6 +469,10 @@
     <string name="fullapp_editor_hint">Dictate or type…</string>
     <!-- Title of the setting to set clipboard toolbar keys -->
     <string name="clipboard_toolbar_keys">Select clipboard toolbar keys</string>
+    <!-- Title of the setting to show the pinned toolbar row -->
+    <string name="show_pinned_toolbar">Show pinned toolbar</string>
+    <!-- Description of the show_pinned_toolbar setting -->
+    <string name="show_pinned_toolbar_summary">Show pinned keys in a second toolbar row</string>
     <!-- Title of the setting to set pinned toolbar keys -->
     <string name="pinned_toolbar_keys">Select pinned toolbar keys</string>
     <!-- Title of the setting to quick-pin toolbar keys -->

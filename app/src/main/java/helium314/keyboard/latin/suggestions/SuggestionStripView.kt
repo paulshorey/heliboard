@@ -60,6 +60,7 @@ import helium314.keyboard.latin.utils.prefs
 import helium314.keyboard.latin.utils.removeFirst
 import helium314.keyboard.latin.utils.removePinnedKey
 import helium314.keyboard.latin.utils.setToolbarButtonsActivatedStateOnPrefChange
+import helium314.keyboard.latin.utils.shouldShowPinnedToolbarRow
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.min
 
@@ -274,10 +275,13 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
 
     private fun updateSecondaryToolbarVisibility() {
         val container = secondaryToolbarContainer ?: return
-        val locked = isDeviceLocked(context)
-        val hidden = Settings.getValues().mSuggestionStripHiddenPerUserSettings
-        val empty = pinnedKeys.childCount == 0
-        container.isVisible = !locked && !hidden && !empty
+        val settings = Settings.getValues()
+        container.isVisible = shouldShowPinnedToolbarRow(
+            showPinnedToolbar = settings.mShowPinnedToolbar,
+            suggestionStripHidden = settings.mSuggestionStripHiddenPerUserSettings,
+            deviceLocked = isDeviceLocked(context),
+            hasPinnedKeys = pinnedKeys.childCount > 0,
+        )
     }
 
     private lateinit var listener: Listener
@@ -389,6 +393,9 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         setToolbarButtonsActivatedStateOnPrefChange(toolbar, key)
         if (key == Settings.PREF_PINNED_TOOLBAR_KEYS) {
             populatePinnedKeys()
+        }
+        if (key == Settings.PREF_SHOW_PINNED_TOOLBAR) {
+            updateSecondaryToolbarVisibility()
         }
     }
 

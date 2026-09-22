@@ -33,7 +33,7 @@ Visual keyboard system: key geometry, rendering, pointer tracking, layout switch
 - `KeyboardActionListenerImpl.kt` is the main seam from view events into text logic.
 - `KeyboardSwitcher` switches main keyboard, emoji palette, and clipboard; it keeps the **Secondary Toolbar** visible on overlays when the same predicates allow it on the typing keyboard, exposes `getSecondaryToolbarHeight()` for IME layout math, and implements `SwitchActions.isShowingEmojiKeyboard` via `isShowingEmojiPalettes()`.
 - `KeyCode.EMOJI` toggles in `KeyboardState` from that visible-palette signal, not `KeyboardState.mode`. Physical `onToggleKeyboard` bypasses the state machine and can hide the IME while emoji is showing.
-- Suggestion, emoji-tab, and clipboard strips share `strip_container`; visibility changes here must stay aligned with `SuggestionStripView` toolbar state and `SettingsValues.mSecondaryStripVisible`.
+- Suggestion, emoji-tab, and clipboard strips share `strip_container`; visibility changes here must stay aligned with `SuggestionStripView` toolbar state and `SettingsValues.mSecondaryStripVisible`. The pinned second row additionally honors `SettingsValues.mShowPinnedToolbar` (`PREF_SHOW_PINNED_TOOLBAR`, default on).
 - Emoji/clipboard overlays measure weighted grid/list children against the exact typing-area height, above a parser-sized persistent functional row; they do not use `fitsSystemWindows`.
 
 ## Keep this file current

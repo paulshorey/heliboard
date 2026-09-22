@@ -9,6 +9,7 @@ Core IME pipeline tests.
 - `ScriptUtilsTest.kt` - script utility tests.
 - `StringUtilsTest.kt` - string helper tests.
 - `SuggestTest.kt` - suggestion pipeline tests.
+- `ShowPinnedToolbarSettingTest.kt` - `PREF_SHOW_PINNED_TOOLBAR` default (on) and second-row visibility contract.
 
 ## Subfolders
 - `utils/` - focused utility tests, including `PinnedToolbarLayoutTest.kt` for even-width secondary-toolbar fitting on narrow screens.
