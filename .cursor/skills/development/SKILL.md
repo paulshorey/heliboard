@@ -12,7 +12,7 @@ description: Local development guide for HeliBoard — building, installing on d
 source ./.android-env
 ```
 
-Use `--verify` to run unit tests after setup, or `--apk` to write `dist/HeliBoard.apk`. Clipboard history is on-device SQLite (`heliboard.db`); there is no hosted database or long-running app process.
+Use `--verify` to run the InputLogic + voice smoke tests after setup, `--full-tests` for the CI unit-test variant, or `--apk` to write `dist/HeliBoard.apk`. Clipboard history is on-device SQLite (`heliboard.db`); there is no hosted database or long-running app process.
 
 ## Quick Build & Install
 
