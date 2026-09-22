@@ -5,6 +5,15 @@ description: Local development guide for HeliBoard — building, installing on d
 
 # HeliBoard Development Guide
 
+## Cloud-agent bootstrap (other Linux hosts)
+
+```bash
+./tools/agent-environment-startup.sh
+source ./.android-env
+```
+
+Use `--verify` to run unit tests after setup, or `--apk` to write `dist/HeliBoard.apk`. Clipboard history is on-device SQLite (`heliboard.db`); there is no hosted database or long-running app process.
+
 ## Quick Build & Install
 
 ```bash
