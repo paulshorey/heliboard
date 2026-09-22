@@ -3,7 +3,8 @@
 # Run this script before building. Creates local.properties and installs required components.
 set -e
 
-ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/workspace/.android-sdk}"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$PROJECT_ROOT/.android-sdk}"
 CMDLINE_TOOLS_URL="https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
 
 echo "Android SDK will be installed to: $ANDROID_SDK_ROOT"
@@ -32,7 +33,6 @@ echo "Installing platform 35, build-tools 35.0.0, NDK 28.0.13004108..."
   "ndk;28.0.13004108"
 
 # Create local.properties
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOCAL_PROPERTIES="$PROJECT_ROOT/local.properties"
 echo "sdk.dir=$ANDROID_SDK_ROOT" > "$LOCAL_PROPERTIES"
 echo "Created $LOCAL_PROPERTIES"

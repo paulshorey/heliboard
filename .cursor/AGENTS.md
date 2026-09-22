@@ -3,7 +3,7 @@
 Cursor project config for this repo: cloud-agent environment, committed MCP servers, and agent skills.
 
 ## Direct files
-- `environment.json` - Cursor cloud-agent install/env (Android SDK path and setup script).
+- `environment.json` - Cursor cloud-agent install/env (Android SDK path and setup script). Other Linux agent hosts should use `../tools/agent-environment-startup.sh` instead of copying this file.
 - `mcp.json` - project-level MCP servers. Currently the public **Gemini Docs MCP** at `https://gemini-api-docs-mcp.dev` (server name `gemini-docs`).
 - `skills/` - project skills loaded by Cursor. Includes HeliBoard product skills plus installed Gemini API skills.
 - `plans/` - historical implementation notes; not runtime config.
