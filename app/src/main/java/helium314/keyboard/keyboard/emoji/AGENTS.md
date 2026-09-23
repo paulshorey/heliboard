@@ -17,7 +17,7 @@ Emoji palette pages, categories, and supporting UI widgets.
 - The UI here depends on asset data under `app/src/main/assets/emoji/` and generated emoji resources.
 - Check API gating when updating emoji data so older Android versions do not show unsupported glyphs.
 - `EmojiPalettesView#onMeasure` remeasures the `layout_weight=1` pager with an exact `ResourceUtils.getKeyboardLayoutHeightForPanel` height, leaving the parser-sized `LayoutType.EMOJI_BOTTOM` row (default `emoji_bottom_row_with_action`) persistently visible.
-- Emoji category tabs always occupy `emoji_tab_strip` inside the shared `strip_container`; the pinned Secondary Toolbar remains available below it. Overlay panels and their nested bottom-row view do not use `fitsSystemWindows`.
+- Emoji category tabs always occupy `emoji_tab_strip` inside the shared `strip_container`; the secondary row currently shows an emoji-search input prototype instead of pinned keys. Focusing it temporarily displays the active alphabet keyboard with a local-only listener, and submitting returns to the emoji pager. Overlay panels and their nested bottom-row view do not use `fitsSystemWindows`.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

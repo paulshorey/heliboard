@@ -31,9 +31,8 @@ Visual keyboard system: key geometry, rendering, pointer tracking, layout switch
 - The keyboard renderer is performance-sensitive; avoid allocations and broad invalidations in hot paths.
 - Layout assets and parser logic must stay aligned with `assets/layouts/` and `res/xml/method.xml`.
 - `KeyboardActionListenerImpl.kt` is the main seam from view events into text logic.
-- `KeyboardSwitcher` switches main keyboard, emoji palette, and clipboard; it keeps the **Secondary Toolbar** visible on overlays when the same predicates allow it on the typing keyboard, exposes `getSecondaryToolbarHeight()` for IME layout math, and implements `SwitchActions.isShowingEmojiKeyboard` via `isShowingEmojiPalettes()`.
-- `KeyCode.EMOJI` toggles in `KeyboardState` from that visible-palette signal, not `KeyboardState.mode`. Physical `onToggleKeyboard` bypasses the state machine and can hide the IME while emoji is showing.
-- Suggestion, emoji-tab, and clipboard strips share `strip_container`; visibility changes here must stay aligned with `SuggestionStripView` toolbar state and `SettingsValues.mSecondaryStripVisible`.
+- `KeyboardSwitcher` owns mode switches between the main keyboard, emoji palette, clipboard surface, and optional **Secondary Toolbar** container from `main_keyboard_frame.xml`. Typing and clipboard modes share the configured equal-width pinned keys; emoji temporarily replaces that row with a local-only search-field prototype. It exposes `getSecondaryToolbarHeight()` for IME layout math when that strip is visible, and implements `SwitchActions.isShowingEmojiKeyboard` via `isShowingEmojiPalettes()`. The toolbar/layout `KeyCode.EMOJI` path is a toggle in `KeyboardState` based on the visible palette (`isShowingEmojiPalettes`), not `KeyboardState.mode`. Physical `onToggleKeyboard` still bypasses the state machine (and can hide the IME when emoji is already showing).
+- Suggestion, emoji-tab, and clipboard strips share `strip_container`; visibility changes here must stay aligned with `SuggestionStripView` toolbar state and `SettingsValues.mSecondaryStripVisible`. The emoji search prototype is in the separate secondary-toolbar host.
 - Emoji/clipboard overlays measure weighted grid/list children against the exact typing-area height, above a parser-sized persistent functional row; they do not use `fitsSystemWindows`.
 
 ## Keep this file current

@@ -34,7 +34,7 @@ Android resources: strings, themes, layouts, drawables, IME metadata, and densit
 
 ## `layout/` cheat sheet
 - `input_view.xml` - root IME layout.
-- `main_keyboard_frame.xml` - main keyboard frame/layout (suggestion strip, optional **Secondary Toolbar** for pinned keys, then `KeyboardWrapperView`). The secondary toolbar is a full-width even-weight row (`secondary_toolbar.xml`), not a horizontally scrolling strip.
+- `main_keyboard_frame.xml` - main keyboard frame/layout (suggestion strip, optional **Secondary Toolbar** host, then `KeyboardWrapperView`). `secondary_toolbar.xml` swaps between the normal full-width, even-weight pinned-key row and the emoji-only local search-input prototype.
 - `suggestions_strip.xml` + `strip_container.xml` + `suggestion_divider.xml` - suggestion strip layout pieces; `suggestions_strip.xml` also contains `custom_buttons_overlay` for the fixed voice-input mic/cancel/pause controls separate from scrollable toolbar keys.
 - `more_suggestions.xml` - expanded suggestions layout.
 - `popup_keys_keyboard.xml` and `popup_keys_keyboard_for_action_lxx.xml` - popup key layouts.
