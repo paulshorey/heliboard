@@ -241,6 +241,9 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
     }
 
     public void onHideWindow() {
+        if (mEmojiSearchInputActive) {
+            setEmojiKeyboard();
+        }
         if (mKeyboardView != null) {
             mKeyboardView.onHideWindow();
         }
@@ -471,20 +474,15 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
 
     private void submitEmojiSearchPrototype() {
         if (!mEmojiSearchInputActive) return;
-        mEmojiSearchInputActive = false;
-        if (mEmojiSearchField != null) {
-            mEmojiSearchField.clearFocus();
-        }
-        if (mKeyboardView != null) {
-            mKeyboardView.setKeyboardActionListener(mLatinIME.mKeyboardActionListener);
-        }
         setEmojiKeyboard();
     }
 
     private void cancelEmojiSearchPrototypeInput() {
         mEmojiSearchInputActive = false;
-        if (mEmojiSearchField != null) {
-            mEmojiSearchField.clearFocus();
+        if (mEmojiSearchField != null && mEmojiSearchField.hasFocus()) {
+            // Give focus a stable destination so the next tap can focus the field again.
+            mCurrentInputView.setFocusableInTouchMode(true);
+            mCurrentInputView.requestFocus();
         }
         if (mKeyboardView != null && mLatinIME != null) {
             mKeyboardView.setKeyboardActionListener(mLatinIME.mKeyboardActionListener);
@@ -497,6 +495,7 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
         if (DEBUG_ACTION) {
             Log.d(TAG, "setEmojiKeyboard");
         }
+        cancelEmojiSearchPrototypeInput();
         mMainKeyboardFrame.setVisibility(View.VISIBLE);
         // The visibility of {@link #mKeyboardView} must be aligned with {@link #MainKeyboardFrame}.
         // @see #getVisibleKeyboardView() and
@@ -691,7 +690,7 @@ public final class KeyboardSwitcher implements KeyboardState.SwitchActions {
 
     public void reloadMainKeyboard() {
         // Reload the entire keyboard, and switch to the previous layout
-        final boolean wasEmoji = isShowingEmojiPalettes();
+        final boolean wasEmoji = mEmojiSearchInputActive || isShowingEmojiPalettes();
         final boolean wasClipboard = isShowingClipboardHistory();
         loadKeyboard(mLatinIME.getCurrentInputEditorInfo(), Settings.getValues(),
                 mLatinIME.getCurrentAutoCapsState(), mLatinIME.getCurrentRecapitalizeState(), null);
