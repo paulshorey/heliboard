@@ -2166,6 +2166,19 @@ public class LatinIME extends InputMethodService implements
             // guard in onUpdateSelection to kill the recording session.
             mInputLogic.mConnection.beginBatchEdit();
             mInputLogic.finishInput();
+
+            // A pause can make Gemini finalize a sentence with "." before it
+            // hears a separately dictated punctuation mark. Replace that period
+            // only for a standalone voice punctuation segment. Do this at
+            // insertion time so earlier text is untouched and a selection still
+            // follows normal commitText replacement behavior.
+            if (text.length() == 1 && "!?,:;".indexOf(text.charAt(0)) >= 0
+                    && !mInputLogic.mConnection.hasSelection()) {
+                final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
+                if (before != null && before.length() == 1 && before.charAt(0) == '.') {
+                    mInputLogic.mConnection.deleteTextBeforeCursor(1);
+                }
+            }
             mInputLogic.mConnection.commitText(text, 1);
 
             runTranscriptPostProcessing();
