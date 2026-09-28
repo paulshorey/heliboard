@@ -121,6 +121,51 @@ class InputLogicTest {
         checkConnectionConsistency()
     }
 
+    @Test fun separateVoiceExclamationReplacesPreviousPeriod() {
+        reset()
+        setText("That was great")
+
+        commitVoiceTranscriptionTextMethod.invoke(latinIME, ".")
+        commitVoiceTranscriptionTextMethod.invoke(latinIME, "!")
+
+        assertEquals("That was great!", getText())
+        checkConnectionConsistency()
+    }
+
+    @Test fun separateVoicePunctuationReplacesPreviousPeriod() {
+        for (mark in listOf('?', ',', ':', ';')) {
+            reset()
+            setText("That was great")
+
+            commitVoiceTranscriptionTextMethod.invoke(latinIME, ".")
+            commitVoiceTranscriptionTextMethod.invoke(latinIME, mark.toString())
+
+            assertEquals("That was great$mark", getText(), "mark=$mark")
+            checkConnectionConsistency()
+        }
+    }
+
+    @Test fun multiCharacterVoiceSegmentDoesNotReplacePreviousPeriod() {
+        reset()
+        setText("Done.")
+
+        commitVoiceTranscriptionTextMethod.invoke(latinIME, "?!")
+
+        assertEquals("Done.?!", getText())
+        checkConnectionConsistency()
+    }
+
+    @Test fun voiceExclamationKeepsSelectedTextReplacement() {
+        reset()
+        setText("Done. later")
+        setCursorPosition(6, 11)
+
+        commitVoiceTranscriptionTextMethod.invoke(latinIME, "!")
+
+        assertEquals("Done. !", getText())
+        checkConnectionConsistency()
+    }
+
     @Test fun clipboardPasteTrimsWhitespaceAndDoesNotAppendSpace() {
         reset()
         val clipboardManager = latinIME.getSystemService(ClipboardManager::class.java)
