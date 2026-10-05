@@ -40,6 +40,7 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
 - MAI integration changes must follow the [Microsoft Speech SDK guide](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming-speech-sdk). Configure a Speech resource key and matching region, select the fixed model, and close input/wait for EOF before disposing recognition. SDK operations run off the main thread; native dictation is gated to supported Android versions/ABIs.
 - The closest folder-local `AGENTS.md` is usually more detailed than this root file; follow it once you know which subtree you are in.
 - Build the canonical installable artifact with `./tools/build-dist-apk.sh`, which writes `dist/HeliBoard.apk`.
+- An optional local `.env` contains `SPEECH_KEY` and `SPEECH_REGION` for manual access. Keep it Git-ignored with owner-only permissions; never commit or embed its credentials in an APK. Android still reads its own Transcription settings.
 - For a Linux cloud-agent machine that is not this Cursor environment, run `./tools/agent-environment-startup.sh` (then `source ./.android-env`). Clipboard history is on-device SQLite (`heliboard.db`); there is no server database or long-running app process to start.
 
 ## Suggested reading order
