@@ -127,7 +127,7 @@ android {
 }
 
 dependencies {
-    // OkHttp for the Gemini Live API realtime WebSocket stream
+    // OkHttp for the MAI Realtime transcription WebSocket stream
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     // androidx
@@ -156,7 +156,7 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.mockito:mockito-core:5.17.0")
     testImplementation("org.robolectric:robolectric:4.14.1")
-    // Local WebSocket server for the Gemini Live streaming lifecycle tests
+    // Local WebSocket server for the MAI streaming lifecycle tests
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("androidx.test:runner:1.6.2")
     testImplementation("androidx.test:core:1.6.1")

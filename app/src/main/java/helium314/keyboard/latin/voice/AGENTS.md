@@ -1,36 +1,29 @@
 # latin/voice
 
-Gemini Live realtime transcription pipeline (`gemini-3.5-transcribe-live`).
+Microsoft MAI-Transcribe-2-Streaming dictation through Azure's Realtime WebSocket API.
 
 ## Direct files
-- `GeminiTranscriptionClient.kt` - Live API WebSocket client, tiered `setup` payload, base64 audio framing, transcript reassembly from `serverContent.inputTranscription`.
-- `TranscriptSegment.kt` - finalized transcript chunk shared between the client and the IME pipeline.
-- `TranscriptPostProcessor.kt` - local cleanup/formatting for finalized transcript text.
-- `VoiceContextVocabulary.kt` - builds `inputAudioTranscription.customVocabulary` from user terms, built-in terms, and proper nouns harvested from editor text.
-- `VoiceInputManager.kt` - record/stream/orchestrate voice sessions and deliver finalized text.
-- `VoiceRecorder.kt` - microphone capture of PCM audio.
+- `MaiTranscriptionClient.kt` - authenticated WebSocket, session configuration, PCM append/commit events, ordered completed transcripts, and connection/commit timeouts.
+- `TranscriptSegment.kt` - completed text passed into the IME, including punctuation attachment metadata.
+- `TranscriptPostProcessor.kt` - local spoken-punctuation, paragraph-command, and filler cleanup.
+- `VoiceInputManager.kt` - microphone lifecycle, bounded startup audio buffer, silence commits, pause/stop draining, reconnection, and session rotation.
+- `VoiceRecorder.kt` - mono PCM16 at 16 kHz with adaptive local silence detection.
 
-## Non-obvious notes
-- This pipeline is tuned for **accuracy over latency** on purpose. Dictated text lands directly in the user's editor, so do not trade transcript quality for responsiveness.
-- Voice recording starts from the fixed right-edge mic in `suggestions_strip.xml` (`R.id.voice_input_key`), not from `ToolbarKey.VOICE`; the toolbar VOICE key switches to Android's shortcut/voice IME.
-- Final insertion happens in `LatinIME`, not in this folder: `prepareVoiceTranscriptionText()` handles leading spaces, mid-sentence casing, and trailing punctuation before `commitVoiceTranscriptionText()` clears typed-word state with `finishInput()` and commits directly through `InputConnection`.
-- Paragraph-level cleanup runs after commit through `runTranscriptPostProcessing()` / `TranscriptPostProcessor.processCurrentParagraph()`, covering spoken punctuation, paragraph commands, and leftover comma-attached fillers such as "um," / "uh,".
-- Preference keys/defaults live in `latin/settings/`, while the settings screens live in `settings/screens/TranscriptionScreen.kt`, `settings/screens/VoiceVocabularyScreen.kt`, and `settings/screens/VoiceDiagnosticsScreen.kt`.
-- **`inputAudioTranscription` is a sibling of `generationConfig` in `setup`, never a child.** Nesting it closes the socket with 1007, and Google's own Live Translate guide documents the broken shape. `responseModalities` must be `["TEXT"]` and *does* belong inside `generationConfig`.
-- The transcribe model's documented feature list is narrower than the `setup` proto it accepts, and an unsupported field is a hard 1007. `SetupTier` (`FULL` → `NO_SYSTEM_INSTRUCTION` → `NO_REALTIME_CONFIG` → `MINIMAL`) plus the retry in `retrySetupWithLowerTier` keep that from killing voice input; the working tier is cached in `negotiatedSetupTier`. Put any new `setup` field in the tier matching how well-documented it is for this model.
-- Audio must wait for `{"setupComplete":{}}`. `VoiceInputManager` buffers chunks until `onStreamReady` fires, unlike the previous provider where the stream was usable as soon as the config frame was queued.
-- Audio goes out as **JSON text frames** with unwrapped base64 (`okio ByteString.base64()`), never as binary frames.
-- `serverContent.inputTranscription` is the normal commit path. `interimInputTranscription` is speculative while the speaker is talking; after `audioStreamEnd`, a leftover interim is flushed if no final arrives (SMART mode otherwise holds an unfinished tail waiting for the next word). A late polished final of the same words is dropped, including SMART rewrites that drop a leading filler or change the first word. A single shared tail word is not enough to treat an unrelated final as polish. `finalizeTurn` must not re-arm leftover flush after an authoritative final — local silence often fires after the server already closed the turn, and re-arming would commit the next utterance's first interim. A rotate (`goAway` / 9-minute cap) waits for the current utterance to finish when possible, then waits the leftover-flush window so a polished final can arrive before the outgoing socket is cancelled. If `goAway` is already imminent (force window ≤ rotate delay), rotate immediately even while speaking. `rotateAfterSpeechStops` is cleared on disconnect and at the start of every new stream so a deferred rotate cannot tear down the replacement socket. `resumeRecording` clears `finalizeTurnWhenStreamReady` so a pause-during-connect followed by resume does not send `audioStreamEnd` as soon as the socket is ready. `modelTurn` is ignored so a generated response cannot leak into the editor. A single server event can carry several of these fields, so each is checked independently.
-- Finalized transcripts have arrived both as per-utterance deltas and as text that grows per message, and the semantics changed between model generations. `TranscriptAccumulator` compares each transcript against the previous one, emitting only the suffix for a prefix-extension, everything for unrelated text, and nothing for an identical repeat. `turnComplete` resets it.
-- `attachesToPrevious` covers leading attaching punctuation and mid-word resumption (`head` then `heading` yields `ing`, not `head ing`).
-- Turn finalization is Hybrid VAD: server VAD stays enabled for accurate onset with prefix padding, but is configured patient about ending speech (`END_SENSITIVITY_LOW`, `silenceDurationMs` default 1500). `audioStreamEnd` is the client's backstop, sent after local silence, on mic pause, and on stop. A stale-interim backup (2 s) is gated on `VoiceRecorder.isCurrentlySpeaking == false` so it cannot hold audio while the user is still talking. After `audioStreamEnd`, leftover-interim flush is armed until that turn is flushed, a final arrives, or `onNewSpeechTurn()` runs. Outbound audio is held until speech resumes (with a 300 ms prefix buffer) so silent PCM does not reopen the turn. If no final arrives within 800 ms, the leftover interim is committed. A late polished final is deduped even after `turnComplete`; speech resume clears that marker.
-- Sending `audioStreamEnd` on **mic pause** is not optional: a turn left open with no incoming audio is the dominant cause of the Live API dropping the connection with 1011. There is no application-level keepalive in this protocol.
-- Sessions are capped at 10 minutes. `goAway.timeLeft` arrives as a protobuf-Duration **string** (`"30s"`). `VoiceInputManager.scheduleSessionRotate` opens a fresh connection before the deadline and after 9 minutes; rotation does not consume a reconnect attempt.
-- `VoiceContextVocabulary` sends **only harvested words**, never the editor text itself. Neither `systemInstruction` nor a seeded `clientContent` history is a documented input for this model, and feeding an already-typed paragraph to a generative model risks it echoing that text back as transcription.
-- `VoiceInputManager` preserves FIFO transcript delivery, coalesces the oldest transcript entries if its queue reaches 64, and drops the oldest buffered audio chunks if the stream is not ready after 300 chunks.
-- `GeminiTranscriptionClient.streamingEndpoint` exists so `GeminiTranscriptionClientStreamTest` can point the client at a local WebSocket server. Nothing in production changes it.
-- The API key travels in the WebSocket query string, so `Log.redactVoiceDiagnosticMessage` strips `key=` from URLs as well as `api_key=` from JSON.
-- `tools/gemini-live-smoke-test.py` sends these exact payloads to the real endpoint; use it with a working `GEMINI_API_KEY` to confirm anything the unit tests cannot.
+## Protocol and lifecycle contracts
+- Follow the [official Realtime guide](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming-realtime). The model is `MAI-Transcribe-2-Streaming`; `session.audio.input.transcription.model` contains the user's Azure deployment name.
+- Connect to `wss://<resource>.services.ai.azure.com/mai/v1/realtime?intent=transcription` with an `api-key` header. Never put credentials in URLs or logs.
+- Wait for `session.created`, send `session.update`, and release buffered audio only after `session.updated`. Configure `audio/pcm` at 16000 Hz, with `turn_detection` and `noise_reduction` explicitly null.
+- `input_audio_buffer.append` carries nonempty base64 PCM16 without a WAV header. The recorder emits 100 ms chunks, matching Microsoft's sample's latency/overhead tradeoff.
+- Local silence, pause, and stop request `input_audio_buffer.commit`. No commit is sent for an empty audio buffer. Silent audio is held after a speech boundary, with a 300 ms prefix retained for the next onset.
+- Only `conversation.item.input_audio_transcription.completed.transcript` reaches the editor. Intermediate hypotheses and deltas are held; never promote an intermediate after timeout or failure. `input_audio_buffer.committed` is only an acknowledgement.
+- Completed results drain in commit order. Deduplicate by `item_id`, not by transcript text: repeated dictated phrases are valid. The documented minimal events can omit `item_id` and are matched in FIFO order.
+- All client state, timers, and callbacks run on the main looper. Connection/session tokens suppress stale events after cancellation, new recording, or rotation.
+- Stop drains every outstanding completion before closing; `hasPendingProcessing()` stays true while finalization or startup is pending. Pause keeps the socket available. Rotation at 55 minutes drains the outgoing connection while new microphone chunks buffer, then opens a replacement before the one-hour limit.
+- Retry only recoverable failures without uploaded unfinalized audio, with at most three retries. Already-uploaded speech cannot safely be replayed after a broken connection; report incomplete dictation. Startup audio is bounded at 300 chunks; overflow and stalled socket uploads stop with an error instead of dropping speech.
+- The fixed right-edge mic invokes this pipeline. `ToolbarKey.VOICE` invokes the system shortcut voice IME.
+- `LatinIME` calls `finishInput()` then commits completed text through `InputConnection`, followed by local paragraph post-processing in the same batch edit.
+- Settings live in `latin/settings/TranscriptionPreferences.kt` and `settings/screens/TranscriptionScreen.kt`. No editor context is sent to the service.
+- `MaiTranscriptionClient` accepts an internal endpoint override for local MockWebServer tests; production always derives its secure URL from the resource root setting. Use `tools/mai-streaming-smoke-test.py` for credentialed service verification.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

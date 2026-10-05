@@ -194,7 +194,7 @@ public class LatinIME extends InputMethodService implements
 
     private final ClipboardHistoryManager mClipboardHistoryManager = new ClipboardHistoryManager(this);
 
-    // Voice input manager (local recording + Gemini Live transcription)
+    // Voice input manager (local recording + MAI streaming transcription)
     private VoiceInputManager mVoiceInputManager;
     // Wake lock to prevent CPU sleep during voice recording
     private PowerManager.WakeLock mVoiceWakeLock;
@@ -586,7 +586,6 @@ public class LatinIME extends InputMethodService implements
         // Initialize voice input manager
         mVoiceInputManager = new VoiceInputManager(this);
         setupVoiceInputListener();
-        mVoiceInputManager.setPriorTextProvider(this::buildVoiceContextText);
 
         // Register to receive ringer mode change.
         final IntentFilter filter = new IntentFilter();
@@ -2167,7 +2166,7 @@ public class LatinIME extends InputMethodService implements
             mInputLogic.mConnection.beginBatchEdit();
             mInputLogic.finishInput();
 
-            // A pause can make Gemini finalize a sentence with "." before it
+            // A pause can make MAI finalize a sentence with "." before it
             // hears a separately dictated punctuation mark. Replace that period
             // only for a standalone voice punctuation segment. Do this at
             // insertion time so earlier text is untouched and a selection still
@@ -2294,34 +2293,6 @@ public class LatinIME extends InputMethodService implements
                 || c == '\t'
                 || c == '/'
                 || c == '\\';
-    }
-
-    /**
-     * Maximum chars of editor text scanned to seed Gemini's speech-biasing
-     * vocabulary. Only harvested terms are sent, never this text itself, so the
-     * window can be generous.
-     */
-    private static final int VOICE_CONTEXT_TEXT_LOOKBACK = 4000;
-
-    /**
-     * Provider hook for {@link VoiceInputManager#setPriorTextProvider}. Reads
-     * up to {@link #VOICE_CONTEXT_TEXT_LOOKBACK} characters of editor text
-     * before the cursor. {@code VoiceContextVocabulary} harvests proper nouns
-     * and acronyms from it so dictated names come back spelled and capitalized
-     * the way the user already typed them.
-     */
-    @Nullable
-    private String buildVoiceContextText() {
-        try {
-            if (mInputLogic == null || mInputLogic.mConnection == null) return null;
-            final CharSequence before =
-                    mInputLogic.mConnection.getTextBeforeCursor(VOICE_CONTEXT_TEXT_LOOKBACK, 0);
-            if (before == null || before.length() == 0) return null;
-            return before.toString();
-        } catch (Exception e) {
-            Log.e(TAG, "Error reading editor context for voice vocabulary: " + e.getMessage());
-            return null;
-        }
     }
 
     /**

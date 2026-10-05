@@ -1,22 +1,18 @@
-# app/src/test/java/helium314/keyboard/latin/voice
+# latin/voice tests
 
-Tests for the Gemini Live voice pipeline.
+MAI-Transcribe-2-Streaming protocol and local transcript processing regression tests.
 
 ## Direct files
-- `GeminiTranscriptionClientTest.kt` - `setup` wire format, audio framing, language resolution, server-message parsing, and transcript assembly.
-- `GeminiTranscriptionClientStreamTest.kt` - end-to-end WebSocket lifecycle against a local `MockWebServer`, including the close-code-1007 setup-tier fallback and leftover-interim flush after `audioStreamEnd`.
-- `TranscriptPostProcessorTest.kt` - finalized-text cleanup tests.
-- `TranscriptionPreferencesTest.kt` - Gemini preference defaults, sanitization, and cleanup of previous providers' keys.
-- `VoiceContextVocabularyTest.kt` - editor-derived speech-biasing vocabulary.
+- `MaiTranscriptionClientTest.kt` - endpoint construction, deployment configuration, PCM format, null VAD/noise reduction, and language hints.
+- `MaiTranscriptionClientStreamTest.kt` - real WebSocket frames against MockWebServer: header authentication, handshake gating, completion draining, pause/resume, ordered and repeated segments, cancellation, errors, and timeouts.
+- `VoiceInputManagerTest.kt` - mocked microphone callbacks through a real local socket, covering startup/pause/stop, retry backoff, prefix draining, cancellation, and session rotation.
+- `TranscriptionPreferencesTest.kt` - Azure settings defaults, storage, validation, and sanitization.
+- `TranscriptPostProcessorTest.kt` - spoken punctuation, paragraph commands, and filler cleanup.
 
-## Non-obvious notes
-- Voice bugs split cleanly between transport/session setup and local post-processing; keep that distinction clear in new tests.
-- `GeminiTranscriptionClientTest.kt` needs Robolectric even though it tests pure functions: the client builds payloads with `org.json`, which is an unimplemented stub on the plain JVM test classpath.
-- `GeminiTranscriptionClientTest.kt` should keep asserting the two `setup` placement rules that fail catastrophically at runtime — `inputAudioTranscription` beside `generationConfig`, and `responseModalities: ["TEXT"]` inside it — plus that each `SetupTier` drops exactly one feature.
-- `GeminiTranscriptionClientStreamTest.kt` points `GeminiTranscriptionClient.streamingEndpoint` at `MockWebServer` and restores it in `@After`. It also resets `negotiatedSetupTier`, which is process-wide state that would otherwise leak between tests.
-- Robolectric's main looper is paused, and the client posts callbacks there from OkHttp's reader thread, so the stream tests pump with `awaitUntil { }` (idle the looper, check, sleep) instead of a bare latch.
-- `VoiceContextVocabularyTest.kt` covers what must *not* be biased as much as what must: common words, sentence-initial capitals, digits, and URL/path/email/identifier fragments.
-- Neither suite can confirm what Google's server does with a given `setup` field. Use `tools/gemini-live-smoke-test.py` with a real `GEMINI_API_KEY` for that.
+## Notes
+- Protocol tests use Robolectric because org.json is stubbed in plain Android JVM tests.
+- The main looper is paused; asynchronous socket tests pump it in `awaitUntil` and use protocol barriers rather than assuming a network callback already ran.
+- Service acceptance and recognition accuracy require `tools/mai-streaming-smoke-test.py` with a configured Azure deployment; local tests verify the documented wire protocol and application behavior.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

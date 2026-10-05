@@ -23,7 +23,7 @@ import kotlin.math.sqrt
  * based on adaptive silence detection.
  *
  * Audio format: PCM 16-bit little-endian, 16 kHz, mono — the native input format
- * for the Gemini Live API and for most streaming speech APIs.
+ * accepted by MAI-Transcribe-2-Streaming.
  */
 class VoiceRecorder(private val context: Context) {
 

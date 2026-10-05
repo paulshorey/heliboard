@@ -160,29 +160,11 @@ object Defaults {
     const val PREF_REMOVE_REDUNDANT_POPUPS = false
     const val PREF_SPACE_BAR_TEXT = ""
     const val PREF_TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss"
-    const val PREF_GEMINI_API_KEY = ""
-    // Smart transcription: Gemini removes filler words, resolves spoken
-    // self-corrections, and applies punctuation, casing and list formatting.
-    // Verbatim is available for users who want the literal words instead.
-    const val PREF_GEMINI_TRANSCRIPTION_MODE = "SMART"
-    // Server-side end-of-speech window. Google documents that short windows split
-    // one utterance into fragments and cost accuracy because the model loses
-    // cross-fragment context, so this defaults well above the API's own default
-    // and trades latency for correct sentence structure.
-    const val PREF_GEMINI_END_OF_SPEECH_SILENCE_MS = 1500
-    // Off by default: Google recommends sending an explicit language hint because
-    // auto-detection misfires on short utterances, which is the common case for
-    // keyboard dictation. The hint comes from the active keyboard subtype.
-    const val PREF_GEMINI_AUTO_DETECT_LANGUAGE = false
-    // Seed `customVocabulary` with proper nouns already present in the editor so
-    // dictated names match the spelling and casing the user typed.
-    const val PREF_GEMINI_USE_EDITOR_CONTEXT = true
-    // User-editable Gemini `customVocabulary`, stored as a single string with one
-    // term per line. The built-in term list is added on top of this in the client.
-    const val PREF_GEMINI_CUSTOM_VOCABULARY = ""
-    // Local pause that triggers an early turn finalize (Gemini `audioStreamEnd`).
-    // Two seconds keeps the server's own semantic end-of-speech detection in
-    // charge for normal speech and only steps in when it has not fired.
+    const val PREF_MAI_API_KEY = ""
+    const val PREF_MAI_ENDPOINT = ""
+    const val PREF_MAI_DEPLOYMENT = ""
+    const val PREF_MAI_AUTO_DETECT_LANGUAGE = false
+    // Local silence requests a completed MAI transcript through input_audio_buffer.commit.
     const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 2
     const val PREF_VOICE_SILENCE_THRESHOLD = 220
     const val PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = 30

@@ -86,7 +86,7 @@ object Log {
     private val VOICE_DIAGNOSTIC_TAGS = setOf(
         "VoiceInputManager",
         "VoiceRecorder",
-        "GeminiTranscription",
+        "MaiTranscription",
     )
 
     private const val LATIN_IME_TAG = "LatinIME"
@@ -102,15 +102,14 @@ object Log {
         "Microphone permission",
         "Gracefully stopping voice",
         "discarding voice",
-        "editor context for voice vocabulary",
     )
 
     const val DEFAULT_VOICE_DIAGNOSTICS_MAX_LINES = 500
 
     private val RAW_TRANSCRIPT_PATTERN = Regex("""VOICE raw transcript=\[(.*)]""", RegexOption.DOT_MATCHES_ALL)
-    private val API_KEY_PATTERN = Regex("""api_key\s*[:=]\s*"?[^\s,"}\]]+"?""", RegexOption.IGNORE_CASE)
+    private val API_KEY_PATTERN = Regex("""api[-_]key\s*[:=]\s*"?[^\s,"}\]]+"?""", RegexOption.IGNORE_CASE)
 
-    /** Gemini passes the API key in the WebSocket query string (`?key=...`). */
+    /** Defense in depth for resource credentials appearing in diagnostic URLs. */
     private val URL_KEY_QUERY_PATTERN = Regex("""([?&])key=[^\s&"]+""", RegexOption.IGNORE_CASE)
 
     @JvmStatic

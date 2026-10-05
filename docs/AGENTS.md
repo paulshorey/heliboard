@@ -3,9 +3,9 @@
 Longer-form architecture notes that complement the shorter folder-local AGENTS files.
 
 ## Direct files
+- `mai-transcription.md` - MAI Realtime protocol, configuration, session lifecycle, final transcript insertion, and validation.
 - `input-simplified.md` - explains the mirror-based current-word architecture and why the host editor is treated as a committed-text sink.
 - `recent-number-row-changes.md` - number-row bake migration notes and layout/parser troubleshooting.
-- `gemini-transcription.md` - end-to-end Gemini Live voice pipeline, setup-tier degradation, accuracy levers, local pre/post-processing, IME insertion guards, and configuration notes.
 - `general-edit-history-plan.md` - implementation plan for generalizing the fullapp edit history into a bounded, general-purpose edit history that also captures regular-keyboard typing, without breaking fullapp draft sync.
 
 ## Non-obvious notes
