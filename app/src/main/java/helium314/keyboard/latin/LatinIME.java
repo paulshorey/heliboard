@@ -2093,7 +2093,6 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onTranscriptionResult(@NonNull String text, boolean attachesToPrevious) {
                 try {
-                    Log.i(TAG, "VOICE raw transcript=[" + text + "]");
                     final String trimmed = text.trim();
                     if (trimmed.isEmpty()) {
                         Log.i(TAG, "VOICE_STEP_4 empty transcription result — nothing to insert");

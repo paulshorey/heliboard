@@ -110,6 +110,58 @@ class VoiceInputManagerTest {
         assertTrue(manager.isIdle); assertFalse(manager.hasPendingProcessing())
         assertFalse(events.any { it.startsWith("text:") }); assertTrue("cancelled" in events)
     }
+    @Test fun restartDuringDrainCapturesImmediatelyAndPreservesBothSessionsInOrder() {
+        start(); recording.onAudioChunk(byteArrayOf(1, 0)); manager.stopRecording(); pump()
+        val outgoing = active
+        assertTrue(outgoing.inputFinished)
+        assertTrue(manager.startRecording()); assertTrue(manager.isRecording)
+        recording.onAudioChunk(byteArrayOf(2, 0))
+        assertEquals(1, sessions.size); assertEquals(1, outgoing.audio.size)
+        outgoing.final("Outgoing phrase."); outgoing.ended(); pump()
+        assertEquals(2, sessions.size); active.ready(); pump()
+        assertEquals(listOf<Byte>(2, 0), active.audio.single().toList())
+        manager.stopRecording(); pump(); end("New phrase.")
+        assertTrue(manager.isIdle)
+        assertEquals(listOf("text:Outgoing phrase.", "text:New phrase."), events.filter { it.startsWith("text:") })
+        assertFalse("cancelled" in events)
+    }
+    @Test fun secondStopDuringRestartDrainStillDeliversTheNewRecording() {
+        start(); recording.onAudioChunk(byteArrayOf(1, 0)); manager.stopRecording(); pump()
+        manager.toggleRecording(); recording.onAudioChunk(byteArrayOf(2, 0)); manager.toggleRecording(); pump()
+        assertEquals(VoiceInputManager.State.IDLE, manager.state)
+        end("First."); active.ready(); pump()
+        assertTrue(active.inputFinished); assertEquals(1, active.audio.size)
+        end("Second."); assertTrue(manager.isIdle)
+        assertEquals(listOf("text:First.", "text:Second."), events.filter { it.startsWith("text:") })
+    }
+    @Test fun restartBeforeStartupFinishesKeepsTheBufferedTailAndContinuesTheOpenSession() {
+        manager.startRecording(); recording.onAudioChunk(byteArrayOf(1, 0)); manager.stopRecording()
+        assertTrue(manager.startRecording()); recording.onAudioChunk(byteArrayOf(2, 0)); pump()
+        active.ready(); pump()
+        assertEquals(1, sessions.size); assertEquals(2, active.audio.size)
+        assertFalse(active.inputFinished); assertTrue(manager.isRecording)
+        manager.stopRecording(); pump(); end("Both phrases."); assertTrue(manager.isIdle)
+    }
+    @Test fun restartWithInputStillOpenPreservesTheOriginalRotationDeadline() {
+        start(); recording.onSpeechStarted(); recording.onAudioChunk(byteArrayOf(1, 0))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMinutes(54))
+        manager.stopRecording(); assertTrue(manager.startRecording()); recording.onSpeechStarted(); pump()
+        assertFalse(active.inputFinished); assertEquals(1, sessions.size)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMinutes(1))
+        assertTrue(active.inputFinished); assertTrue(manager.isRecording)
+    }
+    @Test fun missingCommitAcknowledgementDrainsAndResumesWithoutCancellingTheMicrophone() {
+        start(); recording.onSpeechStarted(); recording.onAudioChunk(byteArrayOf(1, 0)); manager.pauseRecording(); pump()
+        active.final("Complete phrase.", end = 0, token = 0); pump()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(61))
+        assertTrue(active.inputFinished); assertTrue(manager.isPaused)
+        manager.resumeRecording(); recording.onAudioChunk(byteArrayOf(2, 0))
+        active.final("Tail.", id = "tail"); active.ended(); pump()
+        assertEquals(2, sessions.size); active.ready(); pump()
+        assertEquals(1, active.audio.size); manager.stopRecording(); pump(); end("Continued.")
+        assertTrue(manager.isIdle); assertFalse(events.any { it.startsWith("error:") })
+        assertEquals(listOf("text:Complete phrase.", "text:Tail.", "text:Continued."), events.filter { it.startsWith("text:") })
+    }
     @Test fun startupBufferOverflowReportsFailureInsteadOfDroppingSpeech() {
         manager.startRecording()
         repeat(301) { recording.onAudioChunk(byteArrayOf(1, 0)) }

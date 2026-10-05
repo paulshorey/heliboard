@@ -4,6 +4,7 @@ package helium314.keyboard.latin.voice
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.settings.TranscriptionPreferences
@@ -50,6 +51,7 @@ class VoiceInputManager internal constructor(
     private var stopRequested = false
     private var holdUntilSpeech = false
     private var reconnectAttempts = 0
+    private var connectionReadyAt = 0L
     private var reconnect: Runnable? = null
     private var rotation: Runnable? = null
     private var autoStopSilenceMs = Defaults.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS * 1000L
@@ -76,14 +78,26 @@ class VoiceInputManager internal constructor(
     }
 
     fun startRecording(): Boolean {
-        if (!isIdle) return false
+        if (currentState != State.IDLE) return false
         if (!recorder.hasRecordPermission()) {
             listener?.onPermissionRequired()
             return false
         }
-        config = TranscriptionPreferences.readMaiConfig(context.prefs())
+        val continuing = !isIdle
+        if (!continuing) config = TranscriptionPreferences.readMaiConfig(context.prefs())
         client.configurationError(config)?.let { listener?.onError(it); return false }
-        invalidateSession()
+        if (!continuing) invalidateSession()
+        else {
+            // A mic restart must preserve the outgoing session's finals. Capture now
+            // and buffer until its EOF; if input is still open, simply keep using it.
+            stopRequested = false
+            if (draining) rotating = true
+            holdUntilSpeech = false
+            releaseHeldPrefix()
+            val previousSession = sessionId
+            flushAudio()
+            if (previousSession != sessionId) return false
+        }
         val activeSession = sessionId
         reloadRecorderConfig()
         recorder.setCallback(object : VoiceRecorder.RecordingCallback {
@@ -134,7 +148,8 @@ class VoiceInputManager internal constructor(
         }
         updateState(State.RECORDING)
         startAutoStop()
-        connect()
+        if (!ready && !connecting && !draining) connect()
+        else if (ready) scheduleRotation()
         return true
     }
 
@@ -205,6 +220,7 @@ class VoiceInputManager internal constructor(
                 if (!isCurrent()) return
                 connecting = false
                 ready = true
+                connectionReadyAt = SystemClock.elapsedRealtime()
                 reconnectAttempts = 0
                 flushAudio()
                 if (!isCurrent() || !ready) return
@@ -250,6 +266,10 @@ class VoiceInputManager internal constructor(
                 }
                 stopRequested = false
                 notifyIdle()
+            }
+            override fun onStreamDrainRequired() {
+                if (!isCurrent() || !ready) return
+                if (stopRequested) finishConnection() else drainForReplacement()
             }
         })
     }
@@ -307,14 +327,20 @@ class VoiceInputManager internal constructor(
         rotation = Runnable {
             rotation = null
             if (activeSession != sessionId || stopRequested || !ready) return@Runnable
-            Log.i(TAG, "Draining MAI session before periodic rotation")
-            rotating = true
-            ready = false
-            draining = true
-            // Buffer newly captured audio while all outgoing commits finish. Open the
-            // replacement only after onStreamClosed, so no final phrase is abandoned.
-            client.finishStreaming()
-        }.also { handler.postDelayed(it, MaiTranscriptionClient.SESSION_ROTATE_AFTER_MS) }
+            drainForReplacement()
+        }.also { handler.postDelayed(it, (MaiTranscriptionClient.SESSION_ROTATE_AFTER_MS -
+            (SystemClock.elapsedRealtime() - connectionReadyAt)).coerceAtLeast(0)) }
+    }
+
+    private fun drainForReplacement() {
+        cancelRotation()
+        Log.i(TAG, "Draining MAI session before replacement")
+        rotating = true
+        ready = false
+        draining = true
+        // Capture continues into the bounded buffer. Open the replacement after
+        // EOF so outgoing final results precede the next session's transcript.
+        client.finishStreaming()
     }
 
     private fun failSession(error: String) {
@@ -338,6 +364,7 @@ class VoiceInputManager internal constructor(
         stopRequested = false
         holdUntilSpeech = false
         reconnectAttempts = 0
+        connectionReadyAt = 0
         pendingAudio.clear()
         heldPrefix.clear()
         if (hadPending) listener?.onPendingProcessingCancelled()

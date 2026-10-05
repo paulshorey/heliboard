@@ -5,10 +5,10 @@ MAI-Transcribe-2-Streaming SDK lifecycle and local transcript regression tests.
 ## Direct files
 - `FakeMaiSpeechSession.kt` - device-independent SDK seam for deterministic callbacks and recorded audio/commit/EOF operations.
 - `MaiTranscriptionClientTest.kt` - Speech endpoint construction, locale hints, and Android/ABI gating.
-- `MaiTranscriptionClientStreamTest.kt` - startup readiness, advisory commit tokens/offsets, NoMatch, EOF draining, deduplication/repetitions, cancellation, failures, and deadlines.
-- `VoiceInputManagerTest.kt` - microphone callbacks, startup/pause/stop, backoff, onset prefix, cancellation, buffering limits, and rotation.
+- `MaiTranscriptionClientStreamTest.kt` - startup readiness, advisory commit tokens/offsets, missing acknowledgments and bounded EOF fallback, NoMatch, EOF draining, deduplication/repetitions, cancellation, failures, and deadlines.
+- `VoiceInputManagerTest.kt` - microphone callbacks, startup/pause/stop, restart during drain and before startup, backoff, onset prefix, cancellation, buffering limits, and session replacement/rotation.
 - `TranscriptionPreferencesTest.kt` - Speech key/region defaults, storage, and validation.
-- `TranscriptPostProcessorTest.kt` - spoken punctuation, paragraph commands, and filler cleanup.
+- `TranscriptPostProcessorTest.kt` - spoken punctuation, em-dash preservation across cleanup passes, paragraph commands, and filler cleanup.
 
 ## Notes
 - Lifecycle tests use Robolectric with a paused main looper. No device-native SDK objects are created in these JVM tests.

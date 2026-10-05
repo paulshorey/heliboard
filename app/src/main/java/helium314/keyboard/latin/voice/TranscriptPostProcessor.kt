@@ -18,7 +18,6 @@ object TranscriptPostProcessor {
     val rules: List<Rule> = buildRules()
 
     private val disfluencyReplacements = listOf(
-        Rule("—", ""),
         Rule(", hmm.", ""),
         Rule(" hmm.", ""),
         Rule("hmm.", ""),

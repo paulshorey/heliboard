@@ -32,15 +32,29 @@ The model detects language automatically when no hint is configured. When automa
 
 Only `RecognizedSpeech` final results reach the editor. `NoMatch` settles processing without inserting text. The SDK's intermediate hypotheses never enter the editor. Duplicate result IDs are ignored; identical text with different IDs is preserved for deliberate repetitions.
 
-Local silence and pause request `PushAudioInputStream.commit()` only for new, unfinalized audio. This SDK API is advisory: a positive token correlates a subsequent final result; zero means the request was rejected. Tokens are not guaranteed to be echoed. Final audio offsets also settle pending boundaries. A boundary left unconfirmed for 60 seconds reports incomplete dictation.
+Local silence and pause request `PushAudioInputStream.commit()` only for new, unfinalized audio. This SDK API is advisory: a positive token can correlate a subsequent final result; zero means the request was rejected. Tokens are not guaranteed to be echoed. Final audio offsets also settle pending boundaries. Microsoft documents these offsets as covering submitted segments, which can include silence; the app does not assume every final reaches the requested boundary.
+
+When a boundary remains unconfirmed for 60 seconds, or the pending-boundary count reaches 64, the manager closes input and drains the session to definitive EOF. It keeps receiving outgoing finals and buffers new microphone audio before starting a replacement. Missing an advisory acknowledgment alone never reports lost speech. A failure to reach EOF within the separate 60-second drain deadline is an error.
 
 Pause commits speech and retains the SDK session for resume. Stop drains queued microphone callbacks, closes the push input stream, and **waits for EOF/session termination** while final results continue arriving. It does not immediately stop recognition, which could discard the last words. EOF settles remaining advisory boundaries, including non-speech input. The application drain deadline is 60 seconds, not a service latency guarantee.
+
+A mic restart during drain immediately resumes local capture and buffers new audio until outgoing EOF. The next SDK session starts afterward, preserving transcript order. A restart before input has closed continues the open session and keeps its buffered tail. Cancel remains the explicit way to discard pending results.
 
 Cancellation, destruction, and editor changes invalidate tokens immediately. Stale SDK callbacks cannot insert into a new editor. Session rotation after 55 minutes closes/drains the outgoing input while new microphone chunks buffer, then starts a replacement.
 
 The SDK handles transient recovery itself. The manager's bounded backoff only restarts a failed session without uploaded unconfirmed audio. An unrecoverable failure with unfinished speech reports incomplete dictation. Authentication failures stop immediately. Raw SDK error details are not logged because they may contain sensitive text or credentials.
 
 `LatinIME` clears typed-word state with `finishInput()`, commits completed text through `InputConnection` in a batch edit, and runs local spoken-punctuation, paragraph, and filler cleanup. The toolbar VOICE action remains Android's system voice IME shortcut.
+
+## Sentence structure and punctuation
+
+The streaming model supplies punctuation in its final text. Local cleanup preserves that punctuation, including em dashes, apart from explicit spoken commands and editor-aware insertion adjustments. Only confirmed finals enter the editor; provisional text can still change as more audio context arrives.
+
+The current [MAI streaming SDK guide](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming-speech-sdk) explicitly says `OutputFormat` and `ProfanityOption` are ignored. It does not document a punctuation-strength option, custom prompts, phrase lists, or semantic-segmentation settings for this model. Do not apply generic Azure Speech options without verifying MAI support. `transcribeStyle: clean` is documented for the [file-transcription API](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe), not this streaming SDK integration.
+
+For users whose sentences are split at thinking pauses, try increasing **Chunk silence duration** from the two-second default to three or four seconds. This delays explicit commit requests and the local silence gate, letting more audio arrive together; it cannot force the model's own sentence boundaries. Treat this as a tuning experiment with a tradeoff in final-result latency, not a guaranteed accuracy improvement. Keep auto-stop longer than the chunk-silence duration. Use the correct keyboard-language hint for consistent single-language dictation, and automatic detection for mixed-language speech.
+
+Compare the same recordings at different settings, including multi-clause sentences, short pauses, questions, names, and dictated punctuation. Measure both final-text quality and the delay after speaking before changing defaults. No live quality comparison has established a better default yet.
 
 ## Validation
 
@@ -53,7 +67,7 @@ Run:
 ./tools/build-dist-apk.sh
 ```
 
-Tests use `FakeMaiSpeechSession` to exercise startup gating, final delivery, NoMatch, advisory commits, EOF draining, cancellation, startup backoff, rotation, and configuration without loading device-native libraries in the JVM. Compiling and packaging against the published SDK verifies API compatibility. Cloud access, recognition quality, latency, and JNI execution still require a live service/device check.
+Tests use `FakeMaiSpeechSession` to exercise startup gating, final delivery, NoMatch, advisory commits without token/timing confirmation, EOF draining and replacement, mic restart during drain, cancellation, startup backoff, rotation, punctuation preservation, and configuration without loading device-native libraries in the JVM. Compiling and packaging against the published SDK verifies API compatibility. Cloud access, recognition quality, latency, and JNI execution still require a live service/device check.
 
 For a credentialed service check, install `azure-cognitiveservices-speech==1.52.0` in a compatible Python environment and set `SPEECH_KEY` and `SPEECH_REGION` outside the repository. Run:
 

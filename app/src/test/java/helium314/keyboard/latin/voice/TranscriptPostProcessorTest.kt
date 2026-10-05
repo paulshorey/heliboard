@@ -315,6 +315,18 @@ class TranscriptPostProcessorTest {
         )
     }
 
+    @Test
+    fun `preserves model em dash without joining adjacent words`() {
+        assertNull(TranscriptPostProcessor.processCurrentParagraph("Wait—please stop."))
+        assertNull(TranscriptPostProcessor.processCurrentParagraph("This matters — a lot."))
+    }
+
+    @Test
+    fun `dictated dash survives cleanup after the next completed segment`() {
+        val first = process("Something. Dash.")
+        assertEquals("Something — more detail.", process(first + "more detail."))
+    }
+
     // --- Open quote / Close quote ---
 
     @Test

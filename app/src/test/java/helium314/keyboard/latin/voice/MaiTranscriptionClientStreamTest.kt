@@ -29,6 +29,7 @@ class MaiTranscriptionClientStreamTest {
         override fun onPendingProcessingChanged() { events.add("pending:${client.hasPendingProcessing}") }
         override fun onStreamError(error: String, retryable: Boolean) { events.add("error:$retryable:$error") }
         override fun onStreamClosed() { events.add("closed") }
+        override fun onStreamDrainRequired() { events.add("drain"); client.finishStreaming() }
     }
     private fun pump() = shadowOf(Looper.getMainLooper()).idle()
     private fun ready() { session.ready(); pump() }
@@ -80,6 +81,38 @@ class MaiTranscriptionClientStreamTest {
         ready(); client.sendAudioChunk(byteArrayOf(1, 0)); client.finalizeTurn(); pump()
         session.final("Complete.", token = 0); pump()
         assertFalse(client.hasPendingProcessing)
+    }
+    @Test fun unacknowledgedSilenceBoundaryDrainsWithoutFailingOrDiscardingLaterFinals() {
+        ready(); client.sendAudioChunk(ByteArray(3200)); client.finalizeTurn(); pump()
+        // A final can stop before the requested boundary and omit the advisory token.
+        session.final("First phrase.", "first", end = 1600, token = 0); pump()
+        client.sendAudioChunk(ByteArray(3200))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1_100))
+        assertTrue(session.inputFinished); assertFalse(session.closed)
+        assertFalse(events.any { it.startsWith("error:") })
+        session.final("Remaining words.", "second", token = 0); session.ended(); pump()
+        assertEquals(listOf("text:First phrase.", "text:Remaining words."), events.filter { it.startsWith("text:") })
+        assertFalse(client.hasPendingProcessing); assertEquals("closed", events.last())
+    }
+    @Test fun rejectedCommitAndNoMatchWithoutOffsetsUseEofInsteadOfAssumingCompletion() {
+        ready(); client.sendAudioChunk(byteArrayOf(1, 0)); client.finalizeTurn(); pump()
+        session.listener.onCommitRequested(0, 2)
+        session.final("", end = 0, token = 0); pump()
+        assertTrue(client.hasPendingProcessing)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1_100))
+        assertTrue(session.inputFinished)
+        session.ended(); pump()
+        assertFalse(events.any { it.startsWith("error:") || it.startsWith("text:") })
+        assertFalse(client.hasPendingProcessing)
+    }
+    @Test fun pendingCommitLimitRequestsDrainWithoutLosingUploadedSpeech() {
+        ready()
+        repeat(64) { client.sendAudioChunk(byteArrayOf(1, 0)); assertTrue(client.finalizeTurn()); pump() }
+        client.sendAudioChunk(byteArrayOf(1, 0)); assertFalse(client.finalizeTurn())
+        assertTrue(session.inputFinished); assertFalse(session.closed)
+        session.final("All buffered speech.", token = 0); session.ended(); pump()
+        assertTrue("text:All buffered speech." in events)
+        assertFalse(events.any { it.startsWith("error:") })
     }
     @Test fun cancellationDiscardsQueuedCallbacksIncludingEof() {
         ready(); client.sendAudioChunk(byteArrayOf(1, 0)); client.finishStreaming()

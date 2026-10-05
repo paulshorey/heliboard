@@ -49,6 +49,8 @@ class MaiTranscriptionClient internal constructor(
         fun onPendingProcessingChanged()
         fun onStreamError(error: String, retryable: Boolean)
         fun onStreamClosed()
+        /** Keep microphone capture buffered while closing input to obtain definitive EOF. */
+        fun onStreamDrainRequired()
     }
 
     private data class Boundary(val endBytes: Long, val requestedAt: Long, var token: Int = 0)
@@ -137,7 +139,7 @@ class MaiTranscriptionClient internal constructor(
     fun finalizeTurn(): Boolean {
         if (!ready || finishing || totalBytes <= committedBytes || totalBytes <= finalizedBytes) return false
         if (boundaries.size >= MAX_PENDING_COMMITS) {
-            fail("MAI has too many pending transcripts. Stop and try again.", false)
+            requestDrain()
             return false
         }
         committedBytes = totalBytes
@@ -199,8 +201,17 @@ class MaiTranscriptionClient internal constructor(
         if (finishing) return // Preserve the EOF drain deadline while results arrive.
         clearTimeout()
         val oldest = boundaries.firstOrNull() ?: return
-        armTimeout((completionTimeoutMs - (SystemClock.elapsedRealtime() - oldest.requestedAt)).coerceAtLeast(0),
-            "Azure Speech timed out waiting for a final transcript.")
+        val token = connectionToken
+        timeout = Runnable { if (token == connectionToken) requestDrain() }.also {
+            handler.postDelayed(it,
+                (completionTimeoutMs - (SystemClock.elapsedRealtime() - oldest.requestedAt)).coerceAtLeast(0))
+        }
+    }
+    private fun requestDrain() {
+        clearTimeout()
+        // Inline commits are advisory, so missing progress is not an error or proof
+        // of lost speech. Close input and retain every final until definitive EOF.
+        callback?.onStreamDrainRequired()
     }
     private fun armTimeout(delay: Long, message: String) {
         clearTimeout()
