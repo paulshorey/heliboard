@@ -11,11 +11,11 @@ Preference keys, defaults, runtime snapshots, and transcription-specific prefere
 - `SettingsValues.java` - loaded settings snapshot for runtime logic.
 - `SettingsValuesForSuggestion.java` - suggestion-specific settings snapshot.
 - `SpacingAndPunctuations.java` - punctuation/spacing rules loaded from settings/resources.
-- `TranscriptionPreferences.kt` - typed access to the Azure Speech resource key, region, and language detection.
+- `TranscriptionPreferences.kt` - typed access to the Azure Speech resource key, region, language detection, and millisecond chunk silence with saved-value conversion.
 
 ## Non-obvious notes
 - MAI preferences are `PREF_MAI_API_KEY` (empty), `PREF_MAI_REGION` (`centralus`), and `PREF_MAI_AUTO_DETECT_LANGUAGE` (false). Validation checks the key and supported region; onboarding routes to the full Transcription screen. The region must match the resource that issued the key.
-- Local voice preferences `PREF_VOICE_CHUNK_SILENCE_SECONDS` (2), `PREF_VOICE_SILENCE_THRESHOLD` (220), and `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` (30) configure microphone silence detection and advisory Speech SDK commits.
+- Local voice preferences `PREF_VOICE_CHUNK_SILENCE_MS` (1000 ms, range 100–30000), `PREF_VOICE_SILENCE_THRESHOLD` (100), and `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` (30) configure microphone silence detection and advisory Speech SDK commits. Read/write chunk silence through `TranscriptionPreferences`: it converts saved seconds once, preserves existing millisecond values, and removes the seconds key. Unset values use the current default; explicit user settings remain intact.
 - This is not the settings UI package; Compose screens live in `helium314.keyboard.settings`.
 - `PREF_EDIT_HISTORY_ENABLED` gates regular-keyboard edit-history capture in `LatinIME` (default on). Password, no-learning, and incognito fields are always excluded.
 - `PREF_EDIT_HISTORY_RETENTION_HOURS` (default 24; `EDIT_HISTORY_RETENTION_HOURS_NO_LIMIT` = 721 for “no limit”) ages out both `EditHistoryStore` entries/pending slots and live `FullappEditorResult` drafts.

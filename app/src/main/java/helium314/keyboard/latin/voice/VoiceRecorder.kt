@@ -10,6 +10,8 @@ import android.media.MediaRecorder
 import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
+import helium314.keyboard.latin.settings.Defaults
+import helium314.keyboard.latin.settings.TranscriptionPreferences
 import helium314.keyboard.latin.utils.Log
 import kotlin.concurrent.thread
 import kotlin.math.sqrt
@@ -49,7 +51,6 @@ class VoiceRecorder(private val context: Context) {
          * This is more robust than a single fixed threshold across environments.
          */
         private const val INITIAL_NOISE_FLOOR = 120.0
-        private const val DEFAULT_SILENCE_THRESHOLD = 220.0
         private const val SPEECH_HYSTERESIS = 140.0
         private const val SPEECH_MARGIN = 260.0
         private const val SILENCE_MARGIN = 140.0
@@ -71,10 +72,6 @@ class VoiceRecorder(private val context: Context) {
          *  10 iterations at 100ms = every 1 second. */
         private const val NOISE_FLOOR_RECALC_INTERVAL = 10
 
-        /** Default silence duration (ms) before declaring speech stopped. */
-        private const val DEFAULT_SILENCE_DURATION_MS = 1000L
-        private const val MIN_SILENCE_DURATION_MS = 1000L
-        private const val MAX_SILENCE_DURATION_MS = 30_000L
         private const val MIN_ALLOWED_SILENCE_THRESHOLD = 40.0
         private const val MAX_ALLOWED_SILENCE_THRESHOLD = 5000.0
 
@@ -109,8 +106,8 @@ class VoiceRecorder(private val context: Context) {
     }
 
     private data class SilenceConfig(
-        val silenceDurationMs: Long = DEFAULT_SILENCE_DURATION_MS,
-        val silenceThreshold: Double = DEFAULT_SILENCE_THRESHOLD
+        val silenceDurationMs: Long = Defaults.PREF_VOICE_CHUNK_SILENCE_MS.toLong(),
+        val silenceThreshold: Double = Defaults.PREF_VOICE_SILENCE_THRESHOLD.toDouble()
     )
 
     private var audioRecord: AudioRecord? = null
@@ -134,7 +131,10 @@ class VoiceRecorder(private val context: Context) {
      * Update silence detection configuration for subsequent recording sessions.
      */
     fun updateSilenceConfig(silenceDurationMs: Long, silenceThreshold: Double) {
-        val sanitizedDuration = silenceDurationMs.coerceIn(MIN_SILENCE_DURATION_MS, MAX_SILENCE_DURATION_MS)
+        val sanitizedDuration = silenceDurationMs.coerceIn(
+            TranscriptionPreferences.MIN_VOICE_CHUNK_SILENCE_MS.toLong(),
+            TranscriptionPreferences.MAX_VOICE_CHUNK_SILENCE_MS.toLong()
+        )
         val sanitizedThreshold = silenceThreshold.coerceIn(
             MIN_ALLOWED_SILENCE_THRESHOLD,
             MAX_ALLOWED_SILENCE_THRESHOLD

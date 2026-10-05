@@ -15,11 +15,13 @@ import org.junit.runner.RunWith
 import org.mockito.Mockito
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.util.ReflectionHelpers
 
 @RunWith(RobolectricTestRunner::class)
 class VoiceInputManagerTest {
     private lateinit var manager: VoiceInputManager
     private lateinit var recording: VoiceRecorder.RecordingCallback
+    private lateinit var recorder: VoiceRecorder
     private val sessions = mutableListOf<FakeMaiSpeechSession>()
     private val events = mutableListOf<String>()
     private val active get() = sessions.last()
@@ -27,7 +29,7 @@ class VoiceInputManagerTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.prefs().edit().clear().commit()
         TranscriptionPreferences.writeMaiApiKey(context.prefs(), "test-key")
-        val recorder = Mockito.mock(VoiceRecorder::class.java)
+        recorder = Mockito.mock(VoiceRecorder::class.java)
         Mockito.`when`(recorder.hasRecordPermission()).thenReturn(true)
         Mockito.`when`(recorder.startRecording()).thenReturn(true)
         Mockito.doAnswer { recording = it.getArgument(0); null }
@@ -134,6 +136,65 @@ class VoiceInputManagerTest {
         end("Second."); assertTrue(manager.isIdle)
         assertEquals(listOf("text:First.", "text:Second."), events.filter { it.startsWith("text:") })
     }
+    @Test fun microphoneInitializationFailureDuringRestartPreservesOutgoingFinals() {
+        start(); recording.onAudioChunk(byteArrayOf(1, 0)); manager.stopRecording(); pump()
+        val outgoing = active
+        Mockito.doAnswer {
+            recording.onRecordingError("Failed to initialize audio recording")
+            false
+        }.`when`(recorder).startRecording()
+        assertFalse(manager.startRecording()); pump()
+        assertFalse(outgoing.closed); assertTrue(manager.hasPendingProcessing())
+        end("Preserved outgoing phrase.")
+        assertTrue(manager.isIdle); assertEquals(1, sessions.size)
+        assertTrue("text:Preserved outgoing phrase." in events)
+        assertEquals(1, events.count { it.startsWith("error:") }); assertFalse("cancelled" in events)
+    }
+    @Test fun failedRestartWithoutRecorderErrorAlsoPreservesOutgoingFinals() {
+        start(); recording.onAudioChunk(byteArrayOf(1, 0)); manager.stopRecording(); pump()
+        Mockito.`when`(recorder.startRecording()).thenReturn(false)
+        assertFalse(manager.startRecording()); pump()
+        assertFalse(active.closed); end("Preserved phrase.")
+        assertTrue(manager.isIdle); assertTrue("text:Preserved phrase." in events)
+        assertEquals(1, events.count { it.startsWith("error:") }); assertFalse("cancelled" in events)
+    }
+    @Test fun failedRestartBeforeInputClosesDrainsTheExistingSession() {
+        start(); recording.onAudioChunk(byteArrayOf(1, 0)); manager.stopRecording()
+        Mockito.`when`(recorder.startRecording()).thenReturn(false)
+        assertFalse(manager.startRecording()); pump()
+        assertTrue(active.inputFinished); assertFalse(active.closed)
+        end("Tail before restart.")
+        assertTrue(manager.isIdle); assertTrue("text:Tail before restart." in events)
+        assertFalse("cancelled" in events)
+    }
+    @Test fun emptyReadFailureDuringRestartDrainsOutgoingAndBufferedSpeechInOrder() {
+        start(); recording.onAudioChunk(byteArrayOf(1, 0)); manager.stopRecording(); pump()
+        val outgoing = active
+        assertTrue(manager.startRecording()); recording.onAudioChunk(byteArrayOf(2, 0))
+        recording.onRecordingError("Microphone produced no readable audio"); pump()
+        assertEquals(VoiceInputManager.State.IDLE, manager.state)
+        assertFalse(outgoing.closed); end("Outgoing phrase.")
+        active.ready(); pump()
+        assertTrue(active.inputFinished); assertEquals(listOf<Byte>(2, 0), active.audio.single().toList())
+        end("Buffered phrase.")
+        assertTrue(manager.isIdle)
+        assertEquals(listOf("text:Outgoing phrase.", "text:Buffered phrase."), events.filter { it.startsWith("text:") })
+        assertEquals(1, events.count { it.startsWith("error:") }); assertFalse("cancelled" in events)
+    }
+    @Test fun restartBufferOverflowPreservesOutgoingAndAcceptedBufferedAudio() {
+        start(); recording.onAudioChunk(byteArrayOf(1, 0)); manager.stopRecording(); pump()
+        val outgoing = active
+        assertTrue(manager.startRecording())
+        repeat(302) { recording.onAudioChunk(byteArrayOf(2, 0)) }; pump()
+        assertEquals(VoiceInputManager.State.IDLE, manager.state)
+        assertFalse(outgoing.closed); end("Outgoing phrase.")
+        active.ready(); pump()
+        assertEquals(300, active.audio.size); assertTrue(active.inputFinished)
+        end("Buffered speech.")
+        assertTrue(manager.isIdle)
+        assertEquals(listOf("text:Outgoing phrase.", "text:Buffered speech."), events.filter { it.startsWith("text:") })
+        assertEquals(1, events.count { it.startsWith("error:") }); assertFalse("cancelled" in events)
+    }
     @Test fun restartBeforeStartupFinishesKeepsTheBufferedTailAndContinuesTheOpenSession() {
         manager.startRecording(); recording.onAudioChunk(byteArrayOf(1, 0)); manager.stopRecording()
         assertTrue(manager.startRecording()); recording.onAudioChunk(byteArrayOf(2, 0)); pump()
@@ -162,10 +223,25 @@ class VoiceInputManagerTest {
         assertTrue(manager.isIdle); assertFalse(events.any { it.startsWith("error:") })
         assertEquals(listOf("text:Complete phrase.", "text:Tail.", "text:Continued."), events.filter { it.startsWith("text:") })
     }
-    @Test fun startupBufferOverflowReportsFailureInsteadOfDroppingSpeech() {
+    @Test fun startupBufferOverflowStopsCaptureAndDrainsAcceptedSpeech() {
         manager.startRecording()
-        repeat(301) { recording.onAudioChunk(byteArrayOf(1, 0)) }
-        assertTrue(manager.isIdle); assertTrue(events.any { it.contains("audio buffer filled") })
-        assertTrue(active.closed)
+        repeat(301) { recording.onAudioChunk(byteArrayOf(1, 0)) }; pump()
+        assertEquals(VoiceInputManager.State.IDLE, manager.state)
+        assertTrue(events.any { it.contains("audio buffer filled") }); assertFalse(active.closed)
+        active.ready(); pump()
+        assertEquals(300, active.audio.size); assertTrue(active.inputFinished)
+        end("Accepted speech."); assertTrue(manager.isIdle)
+        assertTrue("text:Accepted speech." in events); assertFalse("cancelled" in events)
+    }
+    @Test fun subsecondSilenceSettingReachesRecorderWithoutRounding() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        TranscriptionPreferences.writeVoiceChunkSilenceMs(context.prefs(), 750)
+        manager.startRecording()
+        Mockito.verify(recorder).updateSilenceConfig(750L, 100.0)
+        val realRecorder = VoiceRecorder(context)
+        realRecorder.updateSilenceConfig(750L, 100.0)
+        val config = ReflectionHelpers.getField<Any>(realRecorder, "silenceConfig")
+        assertEquals(750L, ReflectionHelpers.getField<Long>(config, "silenceDurationMs"))
+        assertEquals(100.0, ReflectionHelpers.getField<Double>(config, "silenceThreshold"))
     }
 }

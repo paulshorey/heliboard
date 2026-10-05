@@ -178,7 +178,7 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
     public static final String PREF_MAI_API_KEY = "mai_api_key";
     public static final String PREF_MAI_REGION = "mai_region";
     public static final String PREF_MAI_AUTO_DETECT_LANGUAGE = "mai_auto_detect_language";
-    public static final String PREF_VOICE_CHUNK_SILENCE_SECONDS = "voice_chunk_silence_seconds";
+    public static final String PREF_VOICE_CHUNK_SILENCE_MS = "voice_chunk_silence_ms";
     public static final String PREF_VOICE_SILENCE_THRESHOLD = "voice_silence_threshold";
     public static final String PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = "voice_auto_stop_silence_seconds";
 

@@ -19,11 +19,13 @@ Microsoft MAI-Transcribe-2-Streaming dictation directly through Azure Speech SDK
 - Only final RecognizedSpeech results reach the editor. Deduplicate result IDs, allowing equal text in separate results. Intermediate results never reach the editor.
 - Main-looper session tokens suppress stale SDK events. JNI operations and stop/disposal run on the serial worker.
 - Stop closes push input and waits for EOF/session termination before disposal. Processing remains active through finalization. Mic restart during drain captures immediately and buffers until outgoing EOF, preserving final-text order. Pause retains the session for resume. Rotation at 55 minutes drains outgoing input while new chunks buffer.
+- Microphone startup/read failures and local buffer overflow stop capture and report one error while preserving the outgoing session and accepted buffered audio through EOF. A local capture error must not call `cancelAll`; explicit cancellation and unrecoverable SDK failure still invalidate sessions.
 - Use a 30-second startup deadline, 60-second boundary fallback to drain, and a separate 60-second EOF deadline. The 64-boundary limit also requests drain. Do not treat a deadline as a recognition latency guarantee.
 - The SDK owns ACKs and replay/recovery of unconfirmed audio. The app's three retries apply only when no uploaded audio remains unfinalized. Failures with unfinished speech report incomplete dictation.
 - Never log raw SDK cancellation details, credentials, or transcripts. Diagnostics contain lifecycle, error codes, and text lengths.
 - LatinIME clears typed-word state with finishInput(), commits finals through InputConnection, and performs local paragraph cleanup. Preserve model punctuation, including em dashes. No editor context is sent upstream. The streaming guide documents no punctuation-strength or clean-style configuration; OutputFormat and ProfanityOption are ignored.
 - Settings live in `latin/settings/TranscriptionPreferences.kt` and `settings/screens/TranscriptionScreen.kt`. The fixed mic invokes this pipeline; ToolbarKey.VOICE invokes Android's system voice IME shortcut.
+- Chunk silence uses milliseconds throughout preferences, UI, manager, and recorder: default 1000 ms, supported range 100–30000 ms. The default RMS silence threshold is 100. Auto-stop remains in seconds. Recorder defaults share `Defaults.kt`; subsecond values must not be rounded or clamped to one second.
 - JVM tests inject `FakeMaiSpeechSession`; device-native libraries require Android validation. `tools/mai-streaming-smoke-test.py` checks the service through the Python SDK with environment credentials.
 
 ## Keep this file current

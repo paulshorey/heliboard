@@ -39,7 +39,7 @@ Run commands with credentials supplied only to that child process:
 ./tools/azure-speech-local.sh run -- python3 /path/to/your-speech-tool.py
 ```
 
-The helper sets `SPEECH_KEY` and `SPEECH_REGION` for the command and uses the isolated environment's Python. It does not export the key globally or change shell startup files. `status` reports availability without printing the key. To configure a device, `./tools/azure-speech-local.sh copy-key` deliberately copies it to the macOS clipboard; paste it into **Settings → Transcription → Azure Speech API key** and use the profile's region. Installing or rebuilding an APK does not transfer Mac credentials to Android.
+The helper sets `SPEECH_KEY` and `SPEECH_REGION` for the command and uses the isolated environment's Python. It does not export the key globally or change shell startup files. `status` reports availability without printing the key, including `key_available: false` for a missing entry. Credentialed commands still fail when the key is absent, and Keychain access errors remain errors. To configure a device, `./tools/azure-speech-local.sh copy-key` deliberately copies it to the macOS clipboard; paste it into **Settings → Transcription → Azure Speech API key** and use the profile's region. Installing or rebuilding an APK does not transfer Mac credentials to Android.
 
 Azure CLI management uses a separate interactive `az login --tenant YOUR_TENANT`, followed by `az account set --subscription YOUR_SUBSCRIPTION_ID`. Speech SDK authentication uses the resource key and region and does not require a CLI sign-in.
 
@@ -50,6 +50,8 @@ The Android Gradle dependency is `com.microsoft.cognitiveservices.speech:client-
 SDK dictation requires **Android 8.0/API 26 or newer** on one of those architectures. The keyboard's overall minimum remains API 21. Unsupported devices receive a dictation error before SDK creation. The SDK's context provider does not load its native recognition libraries at app startup.
 
 `VoiceRecorder` emits headerless, signed little-endian PCM16, mono at 16 kHz in 100 ms chunks. `VoiceInputManager` buffers up to 300 startup chunks and stops with an explicit error on overflow. It retains a 300 ms onset prefix after local silence. Local silence, pause, and auto-stop remain configurable.
+
+**Chunk silence duration** uses milliseconds in the UI, stored preferences, and recording configuration. Its default is **1000 ms**, and its range is **100–30000 ms**; values such as **750 ms** remain subsecond in the recorder. Silence detection evaluates audio every 100 ms, so observed boundaries follow that cadence. Saved durations in seconds are converted once without changing the user's chosen duration. **Silence threshold** defaults to **100 RMS**. Auto-stop remains in seconds, defaulting to 30 seconds. Explicit saved settings survive upgrades.
 
 `MaiTranscriptionClient` owns main-looper lifecycle state and stale-session guards. `AzureMaiSpeechSession` in `MaiSpeechSession.kt` owns the SDK's `SpeechConfig`, `AudioStreamFormat`, `PushAudioInputStream`, `AudioConfig`, and `SpeechRecognizer`. JNI operations, startup waits, and cleanup run on a serial background executor. The upload work queue is bounded to 256 KB. The SDK owns acknowledgement handling and recovery of unconfirmed audio; the app must not add an audio replay loop.
 
@@ -67,6 +69,8 @@ Pause commits speech and retains the SDK session for resume. Stop drains queued 
 
 A mic restart during drain immediately resumes local capture and buffers new audio until outgoing EOF. The next SDK session starts afterward, preserving transcript order. A restart before input has closed continues the open session and keeps its buffered tail. Cancel remains the explicit way to discard pending results.
 
+A microphone initialization/read failure or local audio-buffer overflow stops capture and reports one error without cancelling the outgoing recognizer. Already uploaded speech continues to final results and EOF. Accepted buffered audio drains through a replacement when needed, in order; audio exceeding the buffer limit cannot be retained. The existing SDK startup and EOF deadlines remain in effect.
+
 Cancellation, destruction, and editor changes invalidate tokens immediately. Stale SDK callbacks cannot insert into a new editor. Session rotation after 55 minutes closes/drains the outgoing input while new microphone chunks buffer, then starts a replacement.
 
 The SDK handles transient recovery itself. The manager's bounded backoff only restarts a failed session without uploaded unconfirmed audio. An unrecoverable failure with unfinished speech reports incomplete dictation. Authentication failures stop immediately. Raw SDK error details are not logged because they may contain sensitive text or credentials.
@@ -79,7 +83,7 @@ The streaming model supplies punctuation in its final text. Local cleanup preser
 
 The current [MAI streaming SDK guide](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming-speech-sdk) explicitly says `OutputFormat` and `ProfanityOption` are ignored. It does not document a punctuation-strength option, custom prompts, phrase lists, or semantic-segmentation settings for this model. Do not apply generic Azure Speech options without verifying MAI support. `transcribeStyle: clean` is documented for the [file-transcription API](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe), not this streaming SDK integration.
 
-For users whose sentences are split at thinking pauses, try increasing **Chunk silence duration** from the two-second default to three or four seconds. This delays explicit commit requests and the local silence gate, letting more audio arrive together; it cannot force the model's own sentence boundaries. Treat this as a tuning experiment with a tradeoff in final-result latency, not a guaranteed accuracy improvement. Keep auto-stop longer than the chunk-silence duration. Use the correct keyboard-language hint for consistent single-language dictation, and automatic detection for mixed-language speech.
+For users whose sentences are split at thinking pauses, try increasing **Chunk silence duration** from the **1000 ms** default to **3000 or 4000 ms**. This delays explicit commit requests and the local silence gate, letting more audio arrive together; it cannot force the model's own sentence boundaries. Treat this as a tuning experiment with a tradeoff in final-result latency, not a guaranteed accuracy improvement. Keep auto-stop longer than the chunk-silence duration, accounting for its seconds unit. Use the correct keyboard-language hint for consistent single-language dictation, and automatic detection for mixed-language speech.
 
 Compare the same recordings at different settings, including multi-clause sentences, short pauses, questions, names, and dictated punctuation. Measure both final-text quality and the delay after speaking before changing defaults. No live quality comparison has established a better default yet.
 
@@ -91,6 +95,7 @@ Run:
 ./gradlew :app:testDebugNoMinifyUnitTest \
   --tests 'helium314.keyboard.latin.voice.*' \
   --tests 'helium314.keyboard.latin.utils.LogVoiceDiagnosticsTest'
+python3 -B -m unittest discover -s tools -p 'test_azure_speech_local.py'
 ./tools/build-dist-apk.sh
 ```
 

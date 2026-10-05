@@ -61,7 +61,7 @@ class VoiceInputManager internal constructor(
 
     val isRecording: Boolean get() = currentState == State.RECORDING
     val isPaused: Boolean get() = currentState == State.PAUSED
-    val isIdle: Boolean get() = currentState == State.IDLE && !connecting && !draining && !stopRequested
+    val isIdle: Boolean get() = currentState == State.IDLE && !ready && !connecting && !draining && !stopRequested
     val state: State get() = currentState
 
     fun hasPendingProcessing(): Boolean = pendingAudio.isNotEmpty() || connecting || draining ||
@@ -100,6 +100,16 @@ class VoiceInputManager internal constructor(
         }
         val activeSession = sessionId
         reloadRecorderConfig()
+        var captureFailed = false
+        fun failCapture(error: String) {
+            if (activeSession != sessionId || captureFailed) return
+            captureFailed = true
+            // A local capture failure must not cancel speech already sent to Azure.
+            // Stop capture and drain both the outgoing session and any buffered tail.
+            stopRecording()
+            Log.e(TAG, error)
+            listener?.onError(error)
+        }
         recorder.setCallback(object : VoiceRecorder.RecordingCallback {
             override fun onRecordingStarted() {
                 if (activeSession == sessionId) Log.i(TAG, "VOICE_STEP_1 microphone started")
@@ -112,7 +122,7 @@ class VoiceInputManager internal constructor(
                     return
                 }
                 if (pendingAudio.size >= MAX_PENDING_AUDIO_CHUNKS) {
-                    failSession("Voice audio buffer filled before the connection became ready. Try again.")
+                    failCapture("Voice audio buffer filled before the connection became ready. Try again.")
                     return
                 }
                 pendingAudio.addLast(pcmData)
@@ -139,11 +149,11 @@ class VoiceInputManager internal constructor(
                 if (activeSession == sessionId) Log.i(TAG, "Microphone stopped")
             }
             override fun onRecordingError(error: String) {
-                if (activeSession == sessionId) failSession(error)
+                failCapture(error)
             }
         })
-        if (!recorder.startRecording()) {
-            invalidateSession()
+        if (!recorder.startRecording() || captureFailed) {
+            failCapture("Failed to start microphone recording. Try again.")
             return false
         }
         updateState(State.RECORDING)
@@ -374,8 +384,7 @@ class VoiceInputManager internal constructor(
     private fun reloadRecorderConfig() {
         val prefs = context.prefs()
         recorder.updateSilenceConfig(
-            prefs.getInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS)
-                .coerceIn(1, 30) * 1000L,
+            TranscriptionPreferences.readVoiceChunkSilenceMs(prefs).toLong(),
             prefs.getInt(Settings.PREF_VOICE_SILENCE_THRESHOLD, Defaults.PREF_VOICE_SILENCE_THRESHOLD)
                 .coerceIn(40, 5000).toDouble(),
         )

@@ -96,7 +96,7 @@ def main():
         return configure(args)
     data = profile()
     if args.action == 'status':
-        print(json.dumps({**data, 'key_available': bool(speech_key(data)),
+        print(json.dumps({**data, 'key_available': bool(keychain().get_password(SERVICE, data['resource'])),
                           'key_storage': 'macOS Keychain', 'profile': str(PROFILE)}, indent=2))
         return 0
     if args.action == 'copy-key':

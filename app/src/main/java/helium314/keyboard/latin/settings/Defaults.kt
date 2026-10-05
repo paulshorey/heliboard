@@ -164,8 +164,8 @@ object Defaults {
     const val PREF_MAI_REGION = "centralus"
     const val PREF_MAI_AUTO_DETECT_LANGUAGE = false
     // Local silence requests a completed MAI transcript through the Speech SDK push stream.
-    const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 2
-    const val PREF_VOICE_SILENCE_THRESHOLD = 220
+    const val PREF_VOICE_CHUNK_SILENCE_MS = 1000
+    const val PREF_VOICE_SILENCE_THRESHOLD = 100
     const val PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = 30
     const val PREF_EDIT_HISTORY_ENABLED = true
     /** Keep edit history and live fullapp drafts for this many hours by default. */

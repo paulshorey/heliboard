@@ -25,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
@@ -61,13 +62,8 @@ fun TranscriptionScreen(
     var maiAutoDetectLanguage by remember {
         mutableStateOf(TranscriptionPreferences.readMaiAutoDetectLanguage(prefs))
     }
-    var chunkSilenceSeconds by remember {
-        mutableStateOf(
-            prefs.getInt(
-                Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS,
-                Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS
-            ).toString()
-        )
+    var chunkSilenceMs by remember {
+        mutableStateOf(TranscriptionPreferences.readVoiceChunkSilenceMs(prefs).toString())
     }
     var silenceThreshold by remember {
         mutableStateOf(
@@ -134,26 +130,23 @@ fun TranscriptionScreen(
                     },
                 )
                 InlineTextField(
-                    label = stringResource(R.string.voice_chunk_silence_seconds_title),
-                    summary = stringResource(R.string.voice_chunk_silence_seconds_summary),
-                    value = chunkSilenceSeconds,
+                    label = stringResource(R.string.voice_chunk_silence_ms_title),
+                    summary = stringResource(R.string.voice_chunk_silence_ms_summary),
+                    value = chunkSilenceMs,
                     onValueChange = { newValue ->
-                        chunkSilenceSeconds = newValue
+                        chunkSilenceMs = newValue
                         newValue.toIntOrNull()?.let { parsed ->
-                            prefs.edit {
-                                putInt(
-                                    Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS,
-                                    parsed.coerceIn(1, 30)
-                                )
-                            }
+                            TranscriptionPreferences.writeVoiceChunkSilenceMs(prefs, parsed)
                         }
                     },
+                    keyboardType = KeyboardType.Number,
                     minLines = 1,
                     maxLines = 1
                 )
 
                 InlineTextField(
                     label = stringResource(R.string.voice_silence_threshold_title),
+                    keyboardType = KeyboardType.Number,
                     value = silenceThreshold,
                     onValueChange = { newValue ->
                         silenceThreshold = newValue
@@ -172,6 +165,7 @@ fun TranscriptionScreen(
 
                 InlineTextField(
                     label = stringResource(R.string.voice_auto_stop_silence_seconds_title),
+                    keyboardType = KeyboardType.Number,
                     value = autoStopSilenceSeconds,
                     onValueChange = { newValue ->
                         autoStopSilenceSeconds = newValue
@@ -245,6 +239,7 @@ private fun InlineTextField(
     minLines: Int = 1,
     maxLines: Int = 3,
     secret: Boolean = false,
+    keyboardType: KeyboardType = KeyboardType.Text,
 ) {
     Column(
         modifier = Modifier
@@ -276,8 +271,7 @@ private fun InlineTextField(
             visualTransformation = if (secret) androidx.compose.ui.text.input.PasswordVisualTransformation()
                 else androidx.compose.ui.text.input.VisualTransformation.None,
             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                keyboardType = if (secret) androidx.compose.ui.text.input.KeyboardType.Password
-                    else androidx.compose.ui.text.input.KeyboardType.Text,
+                keyboardType = if (secret) KeyboardType.Password else keyboardType,
                 autoCorrectEnabled = false,
             ),
         )

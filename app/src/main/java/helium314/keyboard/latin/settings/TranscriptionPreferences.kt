@@ -7,6 +7,31 @@ import androidx.core.content.edit
 /** Speech resource credentials for direct MAI-Transcribe-2-Streaming access. */
 object TranscriptionPreferences {
     val supportedRegions = setOf("centralus", "swedencentral", "southeastasia")
+    const val MIN_VOICE_CHUNK_SILENCE_MS = 100
+    const val MAX_VOICE_CHUNK_SILENCE_MS = 30_000
+    private const val LEGACY_CHUNK_SILENCE_SECONDS = "voice_chunk_silence_seconds"
+
+    fun readVoiceChunkSilenceMs(prefs: SharedPreferences): Int {
+        if (prefs.contains(LEGACY_CHUNK_SILENCE_SECONDS)) {
+            val milliseconds = if (prefs.contains(Settings.PREF_VOICE_CHUNK_SILENCE_MS)) {
+                prefs.getInt(Settings.PREF_VOICE_CHUNK_SILENCE_MS, Defaults.PREF_VOICE_CHUNK_SILENCE_MS)
+            } else {
+                // Convert saved durations before changing units; clamp before multiplication.
+                prefs.getInt(LEGACY_CHUNK_SILENCE_SECONDS, 1).coerceIn(1, 30) * 1000
+            }
+            writeVoiceChunkSilenceMs(prefs, milliseconds)
+        }
+        return prefs.getInt(Settings.PREF_VOICE_CHUNK_SILENCE_MS, Defaults.PREF_VOICE_CHUNK_SILENCE_MS)
+            .coerceIn(MIN_VOICE_CHUNK_SILENCE_MS, MAX_VOICE_CHUNK_SILENCE_MS)
+    }
+
+    fun writeVoiceChunkSilenceMs(prefs: SharedPreferences, milliseconds: Int) {
+        prefs.edit {
+            putInt(Settings.PREF_VOICE_CHUNK_SILENCE_MS,
+                milliseconds.coerceIn(MIN_VOICE_CHUNK_SILENCE_MS, MAX_VOICE_CHUNK_SILENCE_MS))
+            remove(LEGACY_CHUNK_SILENCE_SECONDS)
+        }
+    }
 
     data class MaiConfig(
         val apiKey: String,

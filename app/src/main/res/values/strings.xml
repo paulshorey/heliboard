@@ -299,8 +299,8 @@
     <string name="voice_diagnostics_export">Export</string>
     <string name="voice_diagnostics_auto_refresh">Auto-refresh while viewing</string>
     <string name="voice_diagnostics_line_count">%1$d line(s) shown</string>
-    <string name="voice_chunk_silence_seconds_title">Chunk silence duration (seconds)</string>
-    <string name="voice_chunk_silence_seconds_summary">Local silence duration before requesting a completed MAI transcript. Longer pauses preserve more sentence context.</string>
+    <string name="voice_chunk_silence_ms_title">Chunk silence duration (milliseconds)</string>
+    <string name="voice_chunk_silence_ms_summary">Local silence duration before requesting a completed MAI transcript. Enter 100–30000 ms; 1000 ms is 1 second and 750 ms is 0.75 seconds. Longer pauses preserve more sentence context.</string>
     <string name="voice_silence_threshold_title">Silence threshold (RMS loudness)</string>
     <string name="voice_auto_stop_silence_seconds_title">Auto-stop silence duration (seconds)</string>
     <string name="setup_app_breadcrumb">Settings -&gt; Setup this app</string>
