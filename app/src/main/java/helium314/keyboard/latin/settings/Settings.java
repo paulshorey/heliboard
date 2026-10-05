@@ -176,8 +176,7 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
 
     // Voice Input (MAI streaming transcription)
     public static final String PREF_MAI_API_KEY = "mai_api_key";
-    public static final String PREF_MAI_ENDPOINT = "mai_endpoint";
-    public static final String PREF_MAI_DEPLOYMENT = "mai_deployment";
+    public static final String PREF_MAI_REGION = "mai_region";
     public static final String PREF_MAI_AUTO_DETECT_LANGUAGE = "mai_auto_detect_language";
     public static final String PREF_VOICE_CHUNK_SILENCE_SECONDS = "voice_chunk_silence_seconds";
     public static final String PREF_VOICE_SILENCE_THRESHOLD = "voice_silence_threshold";

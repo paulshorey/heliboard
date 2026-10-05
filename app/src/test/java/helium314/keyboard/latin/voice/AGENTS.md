@@ -1,18 +1,19 @@
 # latin/voice tests
 
-MAI-Transcribe-2-Streaming protocol and local transcript processing regression tests.
+MAI-Transcribe-2-Streaming SDK lifecycle and local transcript regression tests.
 
 ## Direct files
-- `MaiTranscriptionClientTest.kt` - endpoint construction, deployment configuration, PCM format, null VAD/noise reduction, and language hints.
-- `MaiTranscriptionClientStreamTest.kt` - real WebSocket frames against MockWebServer: header authentication, handshake gating, completion draining, pause/resume, ordered and repeated segments, cancellation, errors, and timeouts.
-- `VoiceInputManagerTest.kt` - mocked microphone callbacks through a real local socket, covering startup/pause/stop, retry backoff, prefix draining, cancellation, and session rotation.
-- `TranscriptionPreferencesTest.kt` - Azure settings defaults, storage, validation, and sanitization.
+- `FakeMaiSpeechSession.kt` - device-independent SDK seam for deterministic callbacks and recorded audio/commit/EOF operations.
+- `MaiTranscriptionClientTest.kt` - Speech endpoint construction, locale hints, and Android/ABI gating.
+- `MaiTranscriptionClientStreamTest.kt` - startup readiness, advisory commit tokens/offsets, NoMatch, EOF draining, deduplication/repetitions, cancellation, failures, and deadlines.
+- `VoiceInputManagerTest.kt` - microphone callbacks, startup/pause/stop, backoff, onset prefix, cancellation, buffering limits, and rotation.
+- `TranscriptionPreferencesTest.kt` - Speech key/region defaults, storage, and validation.
 - `TranscriptPostProcessorTest.kt` - spoken punctuation, paragraph commands, and filler cleanup.
 
 ## Notes
-- Protocol tests use Robolectric because org.json is stubbed in plain Android JVM tests.
-- The main looper is paused; asynchronous socket tests pump it in `awaitUntil` and use protocol barriers rather than assuming a network callback already ran.
-- Service acceptance and recognition accuracy require `tools/mai-streaming-smoke-test.py` with a configured Azure deployment; local tests verify the documented wire protocol and application behavior.
+- Lifecycle tests use Robolectric with a paused main looper. No device-native SDK objects are created in these JVM tests.
+- Compile/package against the pinned Android AAR to verify API compatibility. Service acceptance requires a configured Speech resource; use `tools/mai-streaming-smoke-test.py` with the Python SDK.
+- Android native execution, microphone behavior, and latency require a supported device. Local tests cannot establish recognition quality.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

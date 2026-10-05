@@ -282,17 +282,15 @@
     <string name="fullapp_drafts_ime_options">IME options: 0x%s</string>
     <!-- Private IME options label in the fullapp drafts screen -->
     <string name="fullapp_drafts_private_ime_options">Private IME options: %s</string>
-    <string name="mai_transcription_summary">Microsoft MAI-Transcribe-2-Streaming converts microphone audio to text using your Azure model deployment.</string>
-    <string name="mai_endpoint_title">Azure resource endpoint</string>
-    <string name="mai_endpoint_summary">Resource root URL from Microsoft Foundry, for example https://your-resource.services.ai.azure.com</string>
-    <string name="mai_deployment_title">MAI deployment name</string>
-    <string name="mai_deployment_summary">The name you gave your MAI-Transcribe-2-Streaming deployment in Microsoft Foundry.</string>
-    <string name="mai_api_key_title">Azure API key</string>
-    <string name="mai_api_key_summary">Resource key from Microsoft Foundry. The key must belong to the resource that hosts your MAI deployment.</string>
+    <string name="mai_transcription_summary">Microsoft MAI-Transcribe-2-Streaming converts microphone audio to text directly through Azure Speech. Dictation requires Android 8.0 or newer on a supported processor.</string>
+    <string name="mai_region_title">Azure Speech region</string>
+    <string name="mai_region_summary">Enter centralus, swedencentral, or southeastasia to match the region of your Speech resource.</string>
+    <string name="mai_api_key_title">Azure Speech API key</string>
+    <string name="mai_api_key_summary">Copy KEY 1 or KEY 2 from your Azure Speech resource under Keys and Endpoint.</string>
     <string name="mai_auto_detect_language_title">Detect spoken language</string>
     <string name="mai_auto_detect_language_summary">Let MAI detect the spoken language. When off, send the current keyboard language as a hint.</string>
     <string name="mai_setup_title">Set up MAI voice transcription</string>
-    <string name="mai_setup_summary">Enter your Azure resource endpoint, API key, and MAI-Transcribe-2-Streaming deployment name in Transcription settings.</string>
+    <string name="mai_setup_summary">Enter your Azure Speech resource key and matching region in Transcription settings.</string>
     <string name="voice_diagnostics_title">Voice diagnostics</string>
     <string name="voice_diagnostics_summary">View recent transcription log lines to debug voice input on this device.</string>
     <string name="voice_diagnostics_privacy_note">May contain dictated text and editor context. Stays on device until you export it.</string>

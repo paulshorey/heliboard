@@ -61,13 +61,13 @@ object TranscriptPostProcessor {
 
 ## MAI voice transcription
 
-HeliBoard uses [Microsoft MAI-Transcribe-2-Streaming](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming) through Azure's Realtime WebSocket API.
+HeliBoard uses [Microsoft MAI-Transcribe-2-Streaming](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming) directly through **Azure Speech SDK 1.52.0** for Android.
 
-Deploy the model in Microsoft Foundry, then enter your **Azure resource endpoint**, **deployment name**, and **resource API key** in **Settings → Transcription**. Use a resource root such as `https://your-resource.services.ai.azure.com`; the deployment name is the one you chose in Foundry. Grant microphone permission and tap the fixed right-edge mic to dictate. Onboarding links to the same configuration screen.
+Create an Azure Speech resource in **Central US**, **Sweden Central**, or **Southeast Asia**. Enter its **API key** and matching **region** (`centralus`, `swedencentral`, or `southeastasia`) in **Settings → Transcription**. Grant microphone permission and tap the fixed right-edge mic. Microsoft hosts the model; no model deployment name is needed. SDK dictation requires Android 8.0+ on ARM or x86-64; the keyboard remains available on older supported Android versions.
 
-The app streams mono 16 kHz PCM audio, requests completed transcripts at local pauses, and inserts completed segments into the editor. Pause commits speech and allows resume on the same connection. Stop keeps processing until all requested final results have arrived. Local punctuation and filler cleanup runs after each insertion. Language detection, local pause duration, silence threshold, and auto-stop are configurable.
+The app streams mono 16 kHz PCM audio, requests finals at local pauses, and inserts completed segments through the editor. Pause allows resume on the same SDK session. Stop closes the audio input and waits for final results before disposing the recognizer. Language hints, local silence controls, auto-stop, and transcript formatting remain configurable.
 
-See [the MAI pipeline guide](docs/mai-transcription.md) for architecture, error handling, settings, protocol tests, and a credentialed smoke test. [Microsoft's Realtime guide](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming-realtime) provides deployment prerequisites and current service capabilities.
+See [the MAI pipeline guide](docs/mai-transcription.md) for account setup, architecture, lifecycle tests, and a credentialed check. [Microsoft's Speech SDK guide](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming-speech-sdk) provides current model capabilities and supported regions.
 
 ## Related docs
 

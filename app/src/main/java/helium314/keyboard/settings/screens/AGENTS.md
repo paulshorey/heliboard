@@ -21,7 +21,7 @@ Feature-specific Compose screens for the settings app.
 - `SubtypeScreen.kt` - subtype detail/configuration screen. Contains `LayoutSlotEditor`, a reusable composable that provides add/edit/delete/fork controls for any `LayoutType` slot. All layout types (MAIN, SYMBOLS, FUNCTIONAL, etc.) use this unified component with identical affordances.
 - `TextCorrectionScreen.kt` - text correction/autocorrect settings screen.
 - `ToolbarScreen.kt` - toolbar customization screen.
-- `TranscriptionScreen.kt` - MAI Azure endpoint, deployment, masked API key, language detection, local silence controls, and diagnostics.
+- `TranscriptionScreen.kt` - MAI Azure Speech region, masked resource key, language detection, local silence controls, and diagnostics.
 - `VoiceDiagnosticsScreen.kt` - on-device viewer for recent voice/transcription diagnostic log lines.
 
 ## Non-obvious notes

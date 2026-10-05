@@ -82,7 +82,7 @@ class VoiceInputManager internal constructor(
             return false
         }
         config = TranscriptionPreferences.readMaiConfig(context.prefs())
-        config.validationError()?.let { listener?.onError(it); return false }
+        client.configurationError(config)?.let { listener?.onError(it); return false }
         invalidateSession()
         val activeSession = sessionId
         reloadRecorderConfig()
@@ -115,7 +115,7 @@ class VoiceInputManager internal constructor(
                 if (activeSession != sessionId || !isRecording) return
                 startAutoStop()
                 // Also hold during configuration: onStreamReady will upload buffered speech
-                // and commit it even if silence happened before the handshake completed.
+                // and commit it even if silence happened before SDK startup completed.
                 holdUntilSpeech = true
                 heldPrefix.clear()
                 flushAudio()
@@ -307,7 +307,7 @@ class VoiceInputManager internal constructor(
         rotation = Runnable {
             rotation = null
             if (activeSession != sessionId || stopRequested || !ready) return@Runnable
-            Log.i(TAG, "Draining MAI session before its one-hour limit")
+            Log.i(TAG, "Draining MAI session before periodic rotation")
             rotating = true
             ready = false
             draining = true

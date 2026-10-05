@@ -1,68 +1,66 @@
 # MAI voice transcription
 
-HeliBoard sends microphone audio to a user-configured Azure deployment of **Microsoft MAI-Transcribe-2-Streaming** through its Realtime WebSocket API. The app receives full completed segments and inserts them through the active editor's `InputConnection`.
+HeliBoard sends microphone audio directly to **Microsoft MAI-Transcribe-2-Streaming** using **Azure Speech SDK 1.52.0** for Android. Microsoft hosts the model; the app needs a Speech resource key and matching region. Completed segments enter the active editor through `InputConnection`.
 
-## Configure Azure and HeliBoard
+## Azure setup
 
-Create a Microsoft Foundry resource and deploy MAI-Transcribe-2-Streaming using the [official setup and Realtime guide](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming-realtime). Microsoft currently labels the model a public preview; check the guide for current availability and service limits.
+1. Sign in to [the Azure portal](https://portal.azure.com/) with a Microsoft or organizational account and an Azure subscription with billing enabled.
+2. Create a **Speech** resource and a resource group. Select **Central US** (`centralus`), **Sweden Central** (`swedencentral`), or **Southeast Asia** (`southeastasia`). Use the region nearest the device, among the supported regions.
+3. Select a pricing tier suitable for paid usage and review the current [Speech pricing](https://azure.microsoft.com/pricing/details/speech/). Do not assume the standard Speech free allowance covers this preview model.
+4. Open the resource's **Keys and Endpoint** page. Copy KEY 1 or KEY 2 and note its region.
+5. In **HeliBoard Settings → Transcription**, enter the **Azure Speech API key** and **Azure Speech region**. Grant microphone permission and use the fixed right-edge microphone.
 
-In **Settings → Transcription**, enter:
+The app defaults the region to `centralus`; the value must match the resource that issued the key. There is no model deployment name or server to manage. Onboarding routes to the same Transcription screen. Local validation checks required configuration but does not establish cloud access.
 
-| Setting | Value |
-| --- | --- |
-| Azure resource endpoint | Your HTTPS resource root, for example `https://your-resource.services.ai.azure.com` |
-| MAI deployment name | The exact deployment name from Foundry; this can differ from the model's catalog name |
-| Azure API key | A key for that resource |
-| Detect spoken language | Off sends the keyboard language as a hint; on requests automatic detection |
+Use the [official MAI Speech SDK guide](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming-speech-sdk) for current regions, capabilities, and preview status. The model is in public preview. The integration selects `MAI-Transcribe-2-Streaming` explicitly, and constructs `wss://<region>.stt.speech.microsoft.com/speech/universal/v2` from the region. The SDK authenticates with the resource key.
 
-The endpoint must be a resource root without credentials, a query, fragment, or additional path. HeliBoard constructs `/mai/v1/realtime?intent=transcription` and supplies the key in an `api-key` handshake header. The key field is masked and credentials are never included in application logs. Keys are stored in the app's existing private preferences; do not embed a resource key in the APK, source, or scripts.
+Keys are masked in settings and stored in the app's existing private preferences. Never embed a shared billing key in an APK, source, or script. Each installation can use its owner's resource key. A centrally billed deployment should provide short-lived authorization tokens through an authenticated backend rather than distributing a shared key.
 
-Onboarding links to the complete Transcription screen and marks configuration complete only when all required values pass local validation. Validation does not authenticate against Azure: resource access and deployment availability are checked when a recording connects.
+## Android integration
 
-## App flow
+The Android Gradle dependency is `com.microsoft.cognitiveservices.speech:client-sdk:1.52.0`. Kotlin calls the SDK's Java API directly. The package includes consumer shrinker rules and device-native libraries for `arm64-v8a`, `armeabi-v7a`, and `x86_64`.
 
-`VoiceRecorder` starts local recording immediately, while `VoiceInputManager` opens `MaiTranscriptionClient`. It records signed little-endian PCM16, mono at 16 kHz, in 100 ms chunks. The manager holds up to 300 startup chunks until the session is configured. A full buffer stops recording with an explicit error; it never drops old speech to make room.
+SDK dictation requires **Android 8.0/API 26 or newer** on one of those architectures. The keyboard's overall minimum remains API 21. Unsupported devices receive a dictation error before SDK creation. The SDK's context provider does not load its native recognition libraries at app startup.
 
-The client waits for `session.created`, sends `session.update`, then waits for `session.updated` before declaring readiness. Its session specifies the deployment, PCM format, optional language, and null turn detection and noise reduction. Audio is sent as base64 JSON append events without a WAV header. See the [Microsoft Realtime protocol guide](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming-realtime) for the event schema.
+`VoiceRecorder` emits headerless, signed little-endian PCM16, mono at 16 kHz in 100 ms chunks. `VoiceInputManager` buffers up to 300 startup chunks and stops with an explicit error on overflow. It retains a 300 ms onset prefix after local silence. Local silence, pause, and auto-stop remain configurable.
 
-The recorder's adaptive RMS detector triggers a commit at a speech boundary. After a silence commit, the manager holds silent audio and retains a 300 ms prefix for the next onset. The default boundary is two seconds; the silence threshold and auto-stop timeout remain adjustable in Transcription settings. The local detector controls when HeliBoard requests a completed segment.
+`MaiTranscriptionClient` owns main-looper lifecycle state and stale-session guards. `AzureMaiSpeechSession` in `MaiSpeechSession.kt` owns the SDK's `SpeechConfig`, `AudioStreamFormat`, `PushAudioInputStream`, `AudioConfig`, and `SpeechRecognizer`. JNI operations, startup waits, and cleanup run on a serial background executor. The upload work queue is bounded to 256 KB. The SDK owns acknowledgement handling and recovery of unconfirmed audio; the app must not add an audio replay loop.
 
-The app inserts only full `completed.transcript` results. Delta and intermediate events do not enter the editor, so formatting never operates on an unfinished word. A `committed` acknowledgement leaves the result pending. Outstanding commits form a FIFO queue; identified results can arrive out of order and still reach the editor in commit order. Duplicate item IDs are ignored. Equal text in different commits is preserved, including deliberate repetitions. Minimal events without an item ID use FIFO matching.
+The model detects language automatically when no hint is configured. When automatic detection is disabled, the client supplies the current keyboard's BCP-47 locale as a recognition hint. No editor text or recognition vocabulary is sent to the service.
 
-## Pause, stop, cancellation, and rotation
+## Final results and lifecycle
 
-Pause stops microphone capture and commits queued speech while leaving the connection available for resume. Stop allows already queued recorder callbacks to upload the final audio, sends a final nonempty commit, and keeps receiving until every outstanding completion has arrived. The keyboard's processing state stays active while a connection, queued audio, or final result is pending.
+Only `RecognizedSpeech` final results reach the editor. `NoMatch` settles processing without inserting text. The SDK's intermediate hypotheses never enter the editor. Duplicate result IDs are ignored; identical text with different IDs is preserved for deliberate repetitions.
 
-Cancel, editor-context changes, and destruction invalidate the recording and connection tokens. Queued network events cannot insert text after cancellation. New recordings wait for a stopping session to drain unless the user cancels it.
+Local silence and pause request `PushAudioInputStream.commit()` only for new, unfinalized audio. This SDK API is advisory: a positive token correlates a subsequent final result; zero means the request was rejected. Tokens are not guaranteed to be echoed. Final audio offsets also settle pending boundaries. A boundary left unconfirmed for 60 seconds reports incomplete dictation.
 
-The client has a 30-second handshake timeout and a 60-second deadline for each outstanding commit. A timeout reports incomplete dictation and discards provisional text. These are application deadlines, not promises about service latency. Connections rotate after 55 minutes to stay within the service's one-hour session limit. Rotation drains the outgoing connection while newly captured audio buffers, then opens its replacement.
+Pause commits speech and retains the SDK session for resume. Stop drains queued microphone callbacks, closes the push input stream, and **waits for EOF/session termination** while final results continue arriving. It does not immediately stop recognition, which could discard the last words. EOF settles remaining advisory boundaries, including non-speech input. The application drain deadline is 60 seconds, not a service latency guarantee.
 
-A recoverable connection failure before speech is accepted uses up to three retries, with 500 ms, one-second, and two-second backoff. Auth/configuration failures stop immediately. A failed stream containing uploaded unfinalized speech stops with an incomplete-segment error: the app cannot safely reconstruct what Azure processed. Buffered audio has a fixed memory bound, and the client also rejects uploads when the socket's outgoing queue falls behind.
+Cancellation, destruction, and editor changes invalidate tokens immediately. Stale SDK callbacks cannot insert into a new editor. Session rotation after 55 minutes closes/drains the outgoing input while new microphone chunks buffer, then starts a replacement.
 
-## Editor insertion and local formatting
+The SDK handles transient recovery itself. The manager's bounded backoff only restarts a failed session without uploaded unconfirmed audio. An unrecoverable failure with unfinished speech reports incomplete dictation. Authentication failures stop immediately. Raw SDK error details are not logged because they may contain sensitive text or credentials.
 
-`LatinIME` prepares each completed segment for surrounding spaces and casing, clears the typed-word state with `finishInput()`, and commits through `InputConnection` in a batch edit. `TranscriptPostProcessor` handles local spoken punctuation, paragraph commands, and comma-attached fillers after insertion. This keeps ordinary typing's `WordComposer` and `EditorWordMirror` contracts intact. No editor text or recognition vocabulary is sent to the service.
-
-The fixed right-edge microphone controls this pipeline. The configurable toolbar VOICE action still invokes Android's system voice IME shortcut.
+`LatinIME` clears typed-word state with `finishInput()`, commits completed text through `InputConnection` in a batch edit, and runs local spoken-punctuation, paragraph, and filler cleanup. The toolbar VOICE action remains Android's system voice IME shortcut.
 
 ## Validation
 
-Run protocol, preference, and formatting regressions:
+Run:
 
 ```bash
 ./gradlew :app:testDebugNoMinifyUnitTest \
   --tests 'helium314.keyboard.latin.voice.*' \
   --tests 'helium314.keyboard.latin.utils.LogVoiceDiagnosticsTest'
+./tools/build-dist-apk.sh
 ```
 
-`MaiTranscriptionClientStreamTest` uses a real local WebSocket through MockWebServer. It verifies header authentication, readiness, PCM framing, explicit commits, finalization, ordered/repeated phrases, timeout errors, and cancellation. These checks do not prove recognition quality or cloud access.
+Tests use `FakeMaiSpeechSession` to exercise startup gating, final delivery, NoMatch, advisory commits, EOF draining, cancellation, startup backoff, rotation, and configuration without loading device-native libraries in the JVM. Compiling and packaging against the published SDK verifies API compatibility. Cloud access, recognition quality, latency, and JNI execution still require a live service/device check.
 
-For a credentialed service check, install `websockets` in a Python 3.11+ environment and set `AZURE_MAI_ENDPOINT`, `AZURE_MAI_API_KEY`, and `AZURE_MAI_DEPLOYMENT_NAME` outside the repository. Run:
+For a credentialed service check, install `azure-cognitiveservices-speech==1.52.0` in a compatible Python environment and set `SPEECH_KEY` and `SPEECH_REGION` outside the repository. Run:
 
 ```bash
-python3 tools/mai-streaming-smoke-test.py --pcm /path/to/mono-16khz.pcm --language en
+python3 tools/mai-streaming-smoke-test.py --pcm /path/to/mono-16khz.pcm --language en-US
 ```
 
-The input must be headerless mono 16 kHz signed PCM16. The tool paces audio, requests periodic commits, and drains every completed result before closing. An empty language hint enables automatic detection. It prints completed transcripts for inspection and returns failure on service error, invalid input, or finalization timeout.
+Use headerless 16 kHz mono PCM16. Omitting `--language` uses automatic detection. The tool paces audio, closes the input, and waits for final results/session termination. It prints final transcripts intentionally, and returns failure on service errors or drain timeout.
 
-On a device, also check microphone permission, a short phrase, pause/resume, stop immediately after the last word, repeated phrases, a connection failure, and editor switches. Inspect Settings → Transcription → Voice diagnostics for lengths and lifecycle messages without raw transcript payloads or keys. Build the canonical APK with `./tools/build-dist-apk.sh`.
+On a supported Android device, check a short phrase, pause/resume, stop immediately after the last word, repeated phrases, network interruption, and editor switches. Inspect Settings → Transcription → Voice diagnostics for lifecycle and length messages without raw transcripts or credentials.

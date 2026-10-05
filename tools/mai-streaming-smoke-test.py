@@ -1,109 +1,76 @@
 #!/usr/bin/env python3
-"""Stream headerless mono 16 kHz PCM16 to an Azure MAI deployment.
-
-Requires websockets. Credentials are read only from AZURE_MAI_* environment variables.
-"""
+"""Credentialed MAI-Transcribe-2-Streaming Speech SDK check with PCM16 input."""
 import argparse
-import asyncio
-import base64
-import json
 import os
 from pathlib import Path
-from urllib.parse import urlsplit
-
-
-async def transcribe(args):
-    from websockets.asyncio.client import connect
-
-    endpoint = urlsplit(os.environ.get("AZURE_MAI_ENDPOINT", "").strip())
-    if (endpoint.scheme not in {"https", "wss"} or not endpoint.hostname
-            or endpoint.username is not None or endpoint.password is not None
-            or endpoint.path not in {"", "/"} or endpoint.query or endpoint.fragment):
-        raise ValueError("AZURE_MAI_ENDPOINT must be an HTTPS/WSS resource root URL")
-    key = os.environ.get("AZURE_MAI_API_KEY", "").strip()
-    deployment = os.environ.get("AZURE_MAI_DEPLOYMENT_NAME", "").strip()
-    if not key or not deployment:
-        raise ValueError("Set AZURE_MAI_API_KEY and AZURE_MAI_DEPLOYMENT_NAME")
-    pcm = args.pcm.read_bytes()
-    if not pcm or len(pcm) % 2 or pcm.startswith(b"RIFF"):
-        raise ValueError("Input must be nonempty headerless mono 16 kHz PCM16")
-    if len(pcm) > 32000 * 3600:
-        raise ValueError("Input exceeds the one-hour session limit")
-    url = endpoint._replace(scheme="wss", path="/mai/v1/realtime", query="intent=transcription").geturl()
-    async with connect(url, additional_headers={"api-key": key}, max_size=2**20) as ws:
-        async def event():
-            result = json.loads(await ws.recv())
-            if result.get("type") in {"error", "conversation.item.input_audio_transcription.failed"}:
-                # Server errors can echo secrets. Do not print raw errors.
-                raise RuntimeError("MAI rejected the session or audio; verify the resource and deployment")
-            return result
-
-        async def wait_for(expected):
-            async with asyncio.timeout(30):
-                while (await event()).get("type") != expected:
-                    pass
-
-        await wait_for("session.created")
-        await ws.send(json.dumps({"type": "session.update", "session": {"type": "transcription",
-            "audio": {"input": {"format": {"type": "audio/pcm", "rate": 16000},
-                "transcription": {"model": deployment, "language": args.language or None},
-                "turn_detection": None, "noise_reduction": None}}}}))
-        await wait_for("session.updated")
-        pending = 0
-        all_done = asyncio.Event()
-        all_done.set()
-
-        async def commit():
-            nonlocal pending
-            pending += 1
-            all_done.clear()
-            await ws.send(json.dumps({"type": "input_audio_buffer.commit"}))
-
-        async def upload():
-            since_commit = 0
-            for offset in range(0, len(pcm), 3200):
-                chunk = pcm[offset:offset + 3200]
-                await ws.send(json.dumps({"type": "input_audio_buffer.append", "audio": base64.b64encode(chunk).decode("ascii")}))
-                since_commit += len(chunk)
-                if since_commit >= 32000 * 3:
-                    await commit()
-                    since_commit = 0
-                await asyncio.sleep(len(chunk) / 32000)
-            if since_commit:
-                await commit()
-            async with asyncio.timeout(60):
-                await all_done.wait()
-
-        async def receive():
-            nonlocal pending
-            while True:
-                result = await event()
-                if result.get("type") == "conversation.item.input_audio_transcription.completed":
-                    print(result.get("transcript", ""), flush=True)
-                    pending -= 1
-                    if pending == 0:
-                        all_done.set()
-
-        # A service error must interrupt the sender, including its final drain wait.
-        async with asyncio.TaskGroup() as group:
-            receiver = group.create_task(receive())
-            await upload()
-            receiver.cancel()
+import sys
+import threading
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--pcm", type=Path, required=True)
-    parser.add_argument("--language", default="", help="Optional language hint, e.g. en")
+    parser.add_argument('--pcm', type=Path, required=True)
+    parser.add_argument('--language', help='Optional BCP-47 recognition hint, e.g. en-US')
     args = parser.parse_args()
+    key = os.environ.get('SPEECH_KEY', '').strip()
+    region = os.environ.get('SPEECH_REGION', '').strip().lower()
+    if not key or region not in {'centralus', 'swedencentral', 'southeastasia'}:
+        parser.error('Set SPEECH_KEY and a supported SPEECH_REGION outside the repository.')
+    data = args.pcm.read_bytes()
+    if not data or len(data) % 2 or data.startswith(b'RIFF'):
+        parser.error('Input must be nonempty headerless mono 16 kHz PCM16.')
+    import azure.cognitiveservices.speech as speechsdk
+    if speechsdk.__version__ != '1.52.0':
+        parser.error('Install azure-cognitiveservices-speech==1.52.0 for this check.')
+    config = speechsdk.SpeechConfig(subscription=key,
+        endpoint=f'wss://{region}.stt.speech.microsoft.com/speech/universal/v2')
+    config.model = 'MAI-Transcribe-2-Streaming'
+    if args.language:
+        config.speech_recognition_language = args.language
+    stream = speechsdk.audio.PushAudioInputStream(
+        stream_format=speechsdk.audio.AudioStreamFormat(samples_per_second=16000, bits_per_sample=16, channels=1))
+    recognizer = speechsdk.SpeechRecognizer(speech_config=config,
+        audio_config=speechsdk.audio.AudioConfig(stream=stream))
+    done = threading.Event()
+    errors = []
+    def recognized(event):
+        if event.result.reason == speechsdk.ResultReason.RecognizedSpeech:
+            print('Final:', event.result.text, flush=True)
+    def canceled(event):
+        if event.cancellation_details.reason == speechsdk.CancellationReason.Error:
+            # Do not expose raw service details, which can contain secrets or transcript text.
+            errors.append(str(event.cancellation_details.code))
+        done.set()
+    recognizer.recognized.connect(recognized)
+    recognizer.canceled.connect(canceled)
+    recognizer.session_stopped.connect(lambda event: done.set())
+    input_closed = False
     try:
-        asyncio.run(transcribe(args))
-    except KeyboardInterrupt:
-        parser.exit(130, "Stopped.\n")
+        recognizer.start_continuous_recognition_async().get()
+        for start in range(0, len(data), 3200):
+            if done.is_set():
+                break
+            chunk = data[start:start + 3200]
+            stream.write(chunk)
+            done.wait(len(chunk) / 32000)
+        stream.close()
+        input_closed = True
+        if not done.wait(60):
+            print('Azure Speech finalization timed out.', file=sys.stderr)
+            return 1
+        if errors:
+            print('Azure Speech failed:', ', '.join(errors), file=sys.stderr)
+            return 1
+        return 0
+    finally:
+        if not input_closed:
+            stream.close()
+        recognizer.stop_continuous_recognition_async().get()
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
     except Exception:
-        # Avoid library exception strings that may include request headers or transcripts.
-        parser.exit(1, "MAI smoke test failed. Check input, connectivity, credentials, deployment, and finalization timeout.\n")
-
-
-if __name__ == "__main__":
-    main()
+        print('Speech SDK check failed. Verify the input, credentials, SDK version, and connection.', file=sys.stderr)
+        sys.exit(1)

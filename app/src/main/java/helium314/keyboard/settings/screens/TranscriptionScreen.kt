@@ -57,8 +57,7 @@ fun TranscriptionScreen(
         Log.v("irrelevant", "stupid way to trigger recomposition on preference change")
 
     var maiApiKey by remember { mutableStateOf(TranscriptionPreferences.readMaiApiKey(prefs)) }
-    var maiEndpoint by remember { mutableStateOf(TranscriptionPreferences.readMaiEndpoint(prefs)) }
-    var maiDeployment by remember { mutableStateOf(TranscriptionPreferences.readMaiDeployment(prefs)) }
+    var maiRegion by remember { mutableStateOf(TranscriptionPreferences.readMaiRegion(prefs)) }
     var maiAutoDetectLanguage by remember {
         mutableStateOf(TranscriptionPreferences.readMaiAutoDetectLanguage(prefs))
     }
@@ -104,17 +103,10 @@ fun TranscriptionScreen(
                     modifier = Modifier.padding(vertical = 8.dp),
                 )
                 InlineTextField(
-                    label = stringResource(R.string.mai_endpoint_title),
-                    summary = stringResource(R.string.mai_endpoint_summary),
-                    value = maiEndpoint,
-                    onValueChange = { maiEndpoint = it; TranscriptionPreferences.writeMaiEndpoint(prefs, it) },
-                    maxLines = 1,
-                )
-                InlineTextField(
-                    label = stringResource(R.string.mai_deployment_title),
-                    summary = stringResource(R.string.mai_deployment_summary),
-                    value = maiDeployment,
-                    onValueChange = { maiDeployment = it; TranscriptionPreferences.writeMaiDeployment(prefs, it) },
+                    label = stringResource(R.string.mai_region_title),
+                    summary = stringResource(R.string.mai_region_summary),
+                    value = maiRegion,
+                    onValueChange = { maiRegion = it; TranscriptionPreferences.writeMaiRegion(prefs, it) },
                     maxLines = 1,
                 )
                 InlineTextField(

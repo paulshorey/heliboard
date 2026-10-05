@@ -161,10 +161,9 @@ object Defaults {
     const val PREF_SPACE_BAR_TEXT = ""
     const val PREF_TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss"
     const val PREF_MAI_API_KEY = ""
-    const val PREF_MAI_ENDPOINT = ""
-    const val PREF_MAI_DEPLOYMENT = ""
+    const val PREF_MAI_REGION = "centralus"
     const val PREF_MAI_AUTO_DETECT_LANGUAGE = false
-    // Local silence requests a completed MAI transcript through input_audio_buffer.commit.
+    // Local silence requests a completed MAI transcript through the Speech SDK push stream.
     const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 2
     const val PREF_VOICE_SILENCE_THRESHOLD = 220
     const val PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = 30

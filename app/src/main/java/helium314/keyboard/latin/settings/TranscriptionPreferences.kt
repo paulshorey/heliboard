@@ -3,29 +3,28 @@ package helium314.keyboard.latin.settings
 
 import android.content.SharedPreferences
 import androidx.core.content.edit
-import helium314.keyboard.latin.voice.MaiTranscriptionClient
 
-/** Azure resource credentials and deployment settings for MAI-Transcribe-2-Streaming. */
+/** Speech resource credentials for direct MAI-Transcribe-2-Streaming access. */
 object TranscriptionPreferences {
+    val supportedRegions = setOf("centralus", "swedencentral", "southeastasia")
+
     data class MaiConfig(
         val apiKey: String,
-        val endpoint: String,
-        val deployment: String,
+        val region: String,
         val autoDetectLanguage: Boolean,
     ) {
         fun validationError(): String? {
-            if (apiKey.isBlank() || endpoint.isBlank() || deployment.isBlank()) {
-                return "Configure the Azure endpoint, API key, and MAI deployment in Settings → Transcription."
+            if (apiKey.isBlank()) return "Enter your Azure Speech API key in Settings → Transcription."
+            if (apiKey.any { it == '\r' || it == '\n' }) return "Azure Speech API key must be a single line."
+            if (region !in supportedRegions) {
+                return "Choose Central US, Sweden Central, or Southeast Asia to match your Azure Speech resource."
             }
-            if (apiKey.any { it == '\r' || it == '\n' }) return "Azure API key must be a single line."
-            return try { MaiTranscriptionClient.buildStreamingUrl(endpoint); null }
-                catch (e: IllegalArgumentException) { e.message }
+            return null
         }
     }
 
     fun readMaiConfig(prefs: SharedPreferences) = MaiConfig(
-        readMaiApiKey(prefs), readMaiEndpoint(prefs), readMaiDeployment(prefs),
-        readMaiAutoDetectLanguage(prefs),
+        readMaiApiKey(prefs), readMaiRegion(prefs), readMaiAutoDetectLanguage(prefs),
     )
 
     fun readMaiApiKey(prefs: SharedPreferences): String =
@@ -33,15 +32,10 @@ object TranscriptionPreferences {
     fun writeMaiApiKey(prefs: SharedPreferences, value: String) {
         prefs.edit { putString(Settings.PREF_MAI_API_KEY, value.trim()) }
     }
-    fun readMaiEndpoint(prefs: SharedPreferences): String =
-        prefs.getString(Settings.PREF_MAI_ENDPOINT, Defaults.PREF_MAI_ENDPOINT)?.trim().orEmpty()
-    fun writeMaiEndpoint(prefs: SharedPreferences, value: String) {
-        prefs.edit { putString(Settings.PREF_MAI_ENDPOINT, value.trim()) }
-    }
-    fun readMaiDeployment(prefs: SharedPreferences): String =
-        prefs.getString(Settings.PREF_MAI_DEPLOYMENT, Defaults.PREF_MAI_DEPLOYMENT)?.trim().orEmpty()
-    fun writeMaiDeployment(prefs: SharedPreferences, value: String) {
-        prefs.edit { putString(Settings.PREF_MAI_DEPLOYMENT, value.trim()) }
+    fun readMaiRegion(prefs: SharedPreferences): String =
+        prefs.getString(Settings.PREF_MAI_REGION, Defaults.PREF_MAI_REGION)?.trim()?.lowercase().orEmpty()
+    fun writeMaiRegion(prefs: SharedPreferences, value: String) {
+        prefs.edit { putString(Settings.PREF_MAI_REGION, value.trim().lowercase()) }
     }
     fun readMaiAutoDetectLanguage(prefs: SharedPreferences): Boolean =
         prefs.getBoolean(Settings.PREF_MAI_AUTO_DETECT_LANGUAGE, Defaults.PREF_MAI_AUTO_DETECT_LANGUAGE)

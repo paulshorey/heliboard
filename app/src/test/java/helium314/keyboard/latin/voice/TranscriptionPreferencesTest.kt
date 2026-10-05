@@ -4,11 +4,7 @@ package helium314.keyboard.latin.voice
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import helium314.keyboard.latin.settings.TranscriptionPreferences
-import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertNotNull
-import kotlin.test.assertNull
-import kotlin.test.assertTrue
+import kotlin.test.*
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -18,37 +14,31 @@ import org.robolectric.RobolectricTestRunner
 class TranscriptionPreferencesTest {
     private val prefs = ApplicationProvider.getApplicationContext<Context>()
         .getSharedPreferences("mai-test", Context.MODE_PRIVATE)
-
     @Before fun reset() { prefs.edit().clear().commit() }
-
-    @Test fun requiresAnEndpointDeploymentAndResourceKey() {
+    @Test fun requiresOnlyResourceKeyAndMatchingRegion() {
         val config = TranscriptionPreferences.readMaiConfig(prefs)
         assertEquals("", config.apiKey)
-        assertEquals("", config.endpoint)
-        assertEquals("", config.deployment)
+        assertEquals("centralus", config.region)
         assertFalse(config.autoDetectLanguage)
         assertNotNull(config.validationError())
     }
-
-    @Test fun trimsAndPersistsResourceConfiguration() {
+    @Test fun trimsAndPersistsSpeechResourceConfiguration() {
         TranscriptionPreferences.writeMaiApiKey(prefs, " test-key ")
-        TranscriptionPreferences.writeMaiEndpoint(prefs, " https://resource.services.ai.azure.com/ ")
-        TranscriptionPreferences.writeMaiDeployment(prefs, " dictation ")
+        TranscriptionPreferences.writeMaiRegion(prefs, " SwedenCentral ")
         TranscriptionPreferences.writeMaiAutoDetectLanguage(prefs, true)
         val config = TranscriptionPreferences.readMaiConfig(prefs)
         assertEquals("test-key", config.apiKey)
-        assertEquals("https://resource.services.ai.azure.com/", config.endpoint)
-        assertEquals("dictation", config.deployment)
+        assertEquals("swedencentral", config.region)
         assertTrue(config.autoDetectLanguage)
         assertNull(config.validationError())
     }
-
-    @Test fun rejectsInsecureOrDecoratedResourceUrlsAndMultilineKeys() {
-        for (endpoint in listOf("http://resource.azure.com", "https://user:pass@resource.azure.com",
-            "https://resource.azure.com/path", "https://resource.azure.com/?api-key=secret",
-            "https://resource.azure.com/#fragment", "not a url")) {
-            assertNotNull(TranscriptionPreferences.MaiConfig("key", endpoint, "dictation", false).validationError())
+    @Test fun rejectsUnsupportedRegionsAndMultilineKeys() {
+        for (region in listOf("eastus2", "", "centralus/path", "user:pass@host")) {
+            assertNotNull(TranscriptionPreferences.MaiConfig("key", region, false).validationError())
         }
-        assertNotNull(TranscriptionPreferences.MaiConfig("key\ninjected", "https://resource.azure.com", "dictation", false).validationError())
+        assertNotNull(TranscriptionPreferences.MaiConfig("key\ninjected", "centralus", false).validationError())
+        for (region in TranscriptionPreferences.supportedRegions) {
+            assertNull(TranscriptionPreferences.MaiConfig("key", region, false).validationError())
+        }
     }
 }

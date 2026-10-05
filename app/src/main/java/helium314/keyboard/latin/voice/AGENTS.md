@@ -1,29 +1,30 @@
 # latin/voice
 
-Microsoft MAI-Transcribe-2-Streaming dictation through Azure's Realtime WebSocket API.
+Microsoft MAI-Transcribe-2-Streaming dictation directly through Azure Speech SDK 1.52.0.
 
 ## Direct files
-- `MaiTranscriptionClient.kt` - authenticated WebSocket, session configuration, PCM append/commit events, ordered completed transcripts, and connection/commit timeouts.
-- `TranscriptSegment.kt` - completed text passed into the IME, including punctuation attachment metadata.
-- `TranscriptPostProcessor.kt` - local spoken-punctuation, paragraph-command, and filler cleanup.
-- `VoiceInputManager.kt` - microphone lifecycle, bounded startup audio buffer, silence commits, pause/stop draining, reconnection, and session rotation.
+- `MaiTranscriptionClient.kt` - main-looper lifecycle, supported device/region validation, advisory boundaries, final results, deduplication, and deadlines.
+- `MaiSpeechSession.kt` - injectable SDK seam and `AzureMaiSpeechSession`, which owns native SDK objects and a serial worker for JNI calls/cleanup.
+- `TranscriptSegment.kt` - completed text passed to the IME with punctuation attachment metadata.
+- `TranscriptPostProcessor.kt` - local spoken punctuation, paragraph commands, and filler cleanup.
+- `VoiceInputManager.kt` - microphone lifecycle, bounded startup buffer, silence/pause boundaries, EOF draining, startup backoff, and rotation.
 - `VoiceRecorder.kt` - mono PCM16 at 16 kHz with adaptive local silence detection.
 
-## Protocol and lifecycle contracts
-- Follow the [official Realtime guide](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming-realtime). The model is `MAI-Transcribe-2-Streaming`; `session.audio.input.transcription.model` contains the user's Azure deployment name.
-- Connect to `wss://<resource>.services.ai.azure.com/mai/v1/realtime?intent=transcription` with an `api-key` header. Never put credentials in URLs or logs.
-- Wait for `session.created`, send `session.update`, and release buffered audio only after `session.updated`. Configure `audio/pcm` at 16000 Hz, with `turn_detection` and `noise_reduction` explicitly null.
-- `input_audio_buffer.append` carries nonempty base64 PCM16 without a WAV header. The recorder emits 100 ms chunks, matching Microsoft's sample's latency/overhead tradeoff.
-- Local silence, pause, and stop request `input_audio_buffer.commit`. No commit is sent for an empty audio buffer. Silent audio is held after a speech boundary, with a 300 ms prefix retained for the next onset.
-- Only `conversation.item.input_audio_transcription.completed.transcript` reaches the editor. Intermediate hypotheses and deltas are held; never promote an intermediate after timeout or failure. `input_audio_buffer.committed` is only an acknowledgement.
-- Completed results drain in commit order. Deduplicate by `item_id`, not by transcript text: repeated dictated phrases are valid. The documented minimal events can omit `item_id` and are matched in FIFO order.
-- All client state, timers, and callbacks run on the main looper. Connection/session tokens suppress stale events after cancellation, new recording, or rotation.
-- Stop drains every outstanding completion before closing; `hasPendingProcessing()` stays true while finalization or startup is pending. Pause keeps the socket available. Rotation at 55 minutes drains the outgoing connection while new microphone chunks buffer, then opens a replacement before the one-hour limit.
-- Retry only recoverable failures without uploaded unfinalized audio, with at most three retries. Already-uploaded speech cannot safely be replayed after a broken connection; report incomplete dictation. Startup audio is bounded at 300 chunks; overflow and stalled socket uploads stop with an error instead of dropping speech.
-- The fixed right-edge mic invokes this pipeline. `ToolbarKey.VOICE` invokes the system shortcut voice IME.
-- `LatinIME` calls `finishInput()` then commits completed text through `InputConnection`, followed by local paragraph post-processing in the same batch edit.
-- Settings live in `latin/settings/TranscriptionPreferences.kt` and `settings/screens/TranscriptionScreen.kt`. No editor context is sent to the service.
-- `MaiTranscriptionClient` accepts an internal endpoint override for local MockWebServer tests; production always derives its secure URL from the resource root setting. Use `tools/mai-streaming-smoke-test.py` for credentialed service verification.
+## SDK and lifecycle contracts
+- Follow [Microsoft's MAI Speech SDK guide](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming-speech-sdk) and the pinned Java SDK API. Select `MAI-Transcribe-2-Streaming` explicitly.
+- Authenticate `SpeechConfig.fromEndpoint` with the resource key and `wss://<region>.stt.speech.microsoft.com/speech/universal/v2`. Regions are centralus, swedencentral, and southeastasia; key and region must match.
+- SDK dictation supports Android API 26+ and ARM32/ARM64/x86-64. The app minimum remains API 21. Avoid creating native objects on unsupported devices.
+- Start continuous recognition on the worker, then release buffered audio. Push headerless PCM16 in 100 ms chunks. Bound startup audio to 300 chunks and queued worker audio to 256 KB.
+- Local silence and pause request `PushAudioInputStream.commit()` only for new unfinalized audio. Requests are advisory; final offsets and echoed commit tokens settle boundaries. NoMatch settles without insertion.
+- Only final RecognizedSpeech results reach the editor. Deduplicate result IDs, allowing equal text in separate results. Intermediate results never reach the editor.
+- Main-looper session tokens suppress stale SDK events. JNI operations and stop/disposal run on the serial worker.
+- Stop closes push input and waits for EOF/session termination before disposal. Processing remains active through finalization. Pause retains the session for resume. Rotation at 55 minutes drains outgoing input while new chunks buffer.
+- Use a 30-second startup deadline and 60-second boundary/EOF deadlines. Do not treat a deadline as a recognition latency guarantee.
+- The SDK owns ACKs and replay/recovery of unconfirmed audio. The app's three retries apply only when no uploaded audio remains unfinalized. Failures with unfinished speech report incomplete dictation.
+- Never log raw SDK cancellation details, credentials, or transcripts. Diagnostics contain lifecycle, error codes, and text lengths.
+- LatinIME clears typed-word state with finishInput(), commits finals through InputConnection, and performs local paragraph cleanup. No editor context is sent upstream.
+- Settings live in `latin/settings/TranscriptionPreferences.kt` and `settings/screens/TranscriptionScreen.kt`. The fixed mic invokes this pipeline; ToolbarKey.VOICE invokes Android's system voice IME shortcut.
+- JVM tests inject `FakeMaiSpeechSession`; device-native libraries require Android validation. `tools/mai-streaming-smoke-test.py` checks the service through the Python SDK with environment credentials.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.
