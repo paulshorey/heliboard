@@ -12,9 +12,36 @@ HeliBoard sends microphone audio directly to **Microsoft MAI-Transcribe-2-Stream
 
 The app defaults the region to `centralus`; the value must match the resource that issued the key. There is no model deployment name or server to manage. Onboarding routes to the same Transcription screen. Local validation checks required configuration but does not establish cloud access.
 
-Use the [official MAI Speech SDK guide](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming-speech-sdk) for current regions, capabilities, and preview status. The model is in public preview. The integration selects `MAI-Transcribe-2-Streaming` explicitly, and constructs `wss://<region>.stt.speech.microsoft.com/speech/universal/v2` from the region. The SDK authenticates with the resource key.
+Use the [official MAI Speech SDK guide](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming-speech-sdk) for current regions, capabilities, and preview status. The model is in public preview. The integration selects the case-sensitive service identifier `mai-transcribe-2-streaming` explicitly, and constructs `wss://<region>.stt.speech.microsoft.com/speech/universal/v2` from the region. The SDK authenticates with the resource key.
+
+The model's display name is **MAI-Transcribe-2-Streaming**. Microsoft's current examples also use that capitalization as the SDK selector. A live Central US check on October 5, 2026 with SDK 1.52.0 rejected that selector with `Unknown speech.context.model.name`; changing only the selector to `mai-transcribe-2-streaming` returned a successful final transcript. The Android client and smoke test use this verified lowercase service ID.
 
 Keys are masked in settings and stored in the app's existing private preferences. Never embed a shared billing key in an APK, source, or script. Each installation can use its owner's resource key. A centrally billed deployment should provide short-lived authorization tokens through an authenticated backend rather than distributing a shared key.
+
+## Local macOS credentials
+
+Use the repository helper to install an isolated Python Speech SDK environment and store your existing resource key in the native macOS Keychain:
+
+```bash
+./tools/azure-speech-local.sh setup
+./tools/azure-speech-local.sh configure \
+  --region centralus --resource YOUR_SPEECH_RESOURCE \
+  --tenant YOUR_TENANT --subscription YOUR_SUBSCRIPTION_ID
+./tools/azure-speech-local.sh status
+```
+
+`configure` prompts for the key without echoing it. Automation can supply it over stdin with `--key-stdin`; do not put a literal key in a command, shell history, or argument. The key is stored under Keychain service `HeliBoard.AzureSpeech` and account matching the resource name. The metadata file `~/Library/Application Support/HeliBoard/azure-speech.json` contains region, resource, and optional tenant/subscription identifiers. The Python environment is in the same directory under `speech-venv`. Neither location is part of the repository.
+
+Run commands with credentials supplied only to that child process:
+
+```bash
+./tools/azure-speech-local.sh smoke-test --pcm /path/to/mono-16khz.pcm --language en-US
+./tools/azure-speech-local.sh run -- python3 /path/to/your-speech-tool.py
+```
+
+The helper sets `SPEECH_KEY` and `SPEECH_REGION` for the command and uses the isolated environment's Python. It does not export the key globally or change shell startup files. `status` reports availability without printing the key. To configure a device, `./tools/azure-speech-local.sh copy-key` deliberately copies it to the macOS clipboard; paste it into **Settings → Transcription → Azure Speech API key** and use the profile's region. Installing or rebuilding an APK does not transfer Mac credentials to Android.
+
+Azure CLI management uses a separate interactive `az login --tenant YOUR_TENANT`, followed by `az account set --subscription YOUR_SUBSCRIPTION_ID`. Speech SDK authentication uses the resource key and region and does not require a CLI sign-in.
 
 ## Android integration
 

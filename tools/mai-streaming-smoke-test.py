@@ -24,7 +24,8 @@ def main():
         parser.error('Install azure-cognitiveservices-speech==1.52.0 for this check.')
     config = speechsdk.SpeechConfig(subscription=key,
         endpoint=f'wss://{region}.stt.speech.microsoft.com/speech/universal/v2')
-    config.model = 'MAI-Transcribe-2-Streaming'
+    # The service accepts this lowercase ID; its title-cased display name is rejected.
+    config.model = 'mai-transcribe-2-streaming'
     if args.language:
         config.speech_recognition_language = args.language
     stream = speechsdk.audio.PushAudioInputStream(

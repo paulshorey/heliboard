@@ -14,7 +14,7 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
 - `app/src/test/` - JVM and Robolectric tests.
 - `docs/` - deeper design notes such as `input-simplified.md` and `mai-transcription.md`.
 - `.cursor/` - Cursor cloud environment and HeliBoard product skills.
-- `tools/` - SDK setup, portable cloud-agent startup, canonical APK build, release scripts, and the `tools:make-emoji-keys` helper module.
+- `tools/` - SDK setup, local macOS Speech Keychain configuration, portable cloud-agent startup, canonical APK build, release scripts, and the `tools:make-emoji-keys` helper module.
 
 ## High-value entry points
 - `app/src/main/AndroidManifest.xml` - declares the IME service, spell checker service, settings activities, receivers, and direct-boot behavior.

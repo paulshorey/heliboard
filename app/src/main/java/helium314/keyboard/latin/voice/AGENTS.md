@@ -11,7 +11,7 @@ Microsoft MAI-Transcribe-2-Streaming dictation directly through Azure Speech SDK
 - `VoiceRecorder.kt` - mono PCM16 at 16 kHz with adaptive local silence detection.
 
 ## SDK and lifecycle contracts
-- Follow [Microsoft's MAI Speech SDK guide](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming-speech-sdk) and the pinned Java SDK API. Select `MAI-Transcribe-2-Streaming` explicitly.
+- Follow [Microsoft's MAI Speech SDK guide](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming-speech-sdk) and the pinned Java SDK API. Select the case-sensitive service identifier `mai-transcribe-2-streaming` explicitly. A live Central US check accepted this lowercase ID and rejected the title-cased display name used in Microsoft's examples; see `docs/mai-transcription.md`.
 - Authenticate `SpeechConfig.fromEndpoint` with the resource key and `wss://<region>.stt.speech.microsoft.com/speech/universal/v2`. Regions are centralus, swedencentral, and southeastasia; key and region must match.
 - SDK dictation supports Android API 26+ and ARM32/ARM64/x86-64. The app minimum remains API 21. Avoid creating native objects on unsupported devices.
 - Start continuous recognition on the worker, then release buffered audio. Push headerless PCM16 in 100 ms chunks. Bound startup audio to 300 chunks and queued worker audio to 256 KB.

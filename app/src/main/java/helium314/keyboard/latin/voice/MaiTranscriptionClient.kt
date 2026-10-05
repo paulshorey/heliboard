@@ -19,7 +19,8 @@ class MaiTranscriptionClient internal constructor(
         private const val TAG = "MaiTranscription"
         private const val START_TIMEOUT_MS = 30_000L
         private const val MAX_PENDING_COMMITS = 64
-        const val MODEL = "MAI-Transcribe-2-Streaming"
+        // The service model identifier is case-sensitive; use its verified lowercase ID.
+        const val MODEL = "mai-transcribe-2-streaming"
         const val SESSION_ROTATE_AFTER_MS = 55 * 60 * 1000L
 
         fun buildSpeechEndpoint(region: String): String {
