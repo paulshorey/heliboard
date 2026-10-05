@@ -19,7 +19,7 @@ class MaiTranscriptionClientStreamTest {
     private val events = mutableListOf<String>()
     @Before fun setUp() {
         session = FakeMaiSpeechSession()
-        client = MaiTranscriptionClient({ session }, 1_000L, { null })
+        client = MaiTranscriptionClient({ session }, 1_000L, { null }, progressTimeoutMs = 120_000L)
         client.startStreaming(MaiConfig("test-key", "centralus", false), "en-US", callback())
     }
     @After fun tearDown() { client.cancelAll() }
@@ -27,7 +27,9 @@ class MaiTranscriptionClientStreamTest {
         override fun onStreamReady() { events.add("ready") }
         override fun onTranscriptionResult(segment: TranscriptSegment) { events.add("text:${segment.text}") }
         override fun onPendingProcessingChanged() { events.add("pending:${client.hasPendingProcessing}") }
-        override fun onStreamError(error: String, retryable: Boolean) { events.add("error:$retryable:$error") }
+        override fun onStreamError(error: String, incomplete: Boolean) { events.add("error:$incomplete:$error") }
+        override fun onAudioWriteAvailable() { events.add("capacity") }
+        override fun onFinalConfirmationStalled() { events.add("stalled"); client.finishStreaming() }
         override fun onStreamClosed() { events.add("closed") }
         override fun onStreamDrainRequired() { events.add("drain"); client.finishStreaming() }
     }
@@ -122,29 +124,29 @@ class MaiTranscriptionClientStreamTest {
     }
     @Test fun brokenSessionNeverReplaysUploadedUnconfirmedSpeech() {
         ready(); client.sendAudioChunk(byteArrayOf(1, 0))
-        session.listener.onError("Connection failed.", true); pump()
-        assertTrue(events.any { it.startsWith("error:false:") && it.contains("could not be finalized") })
+        session.listener.onError("Connection failed."); pump()
+        assertTrue(events.any { it.startsWith("error:true:") && it.contains("could not be finalized") })
         assertFalse(client.hasPendingProcessing)
     }
-    @Test fun initialConnectionFailureCanBeRetried() {
-        session.listener.onError("Connection failed.", true); pump()
-        assertTrue(events.any { it.startsWith("error:true:") })
+    @Test fun initialConnectionFailureReportsNoUnfinalizedAudio() {
+        session.listener.onError("Connection failed."); pump()
+        assertTrue(events.any { it.startsWith("error:false:") })
     }
     @Test fun unexpectedSessionStopReportsUnfinalizedAudio() {
         ready(); client.sendAudioChunk(byteArrayOf(1, 0)); session.ended(); pump()
-        assertTrue(events.any { it.startsWith("error:false:") })
+        assertTrue(events.any { it.startsWith("error:true:") })
         assertFalse("closed" in events)
     }
     @Test fun eofTimeoutDoesNotPromoteAnyProvisionalText() {
         ready(); client.sendAudioChunk(byteArrayOf(1, 0)); client.finishStreaming()
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1_100))
-        assertTrue(events.any { it.startsWith("error:false:") && it.contains("draining") })
+        assertTrue(events.any { it.startsWith("error:true:") && it.contains("draining") })
         assertFalse(events.any { it.startsWith("text:") })
     }
     @Test fun invalidPcmOrBackpressureStopsWithExplicitError() {
         ready(); session.acceptWrites = false
         assertFalse(client.sendAudioChunk(byteArrayOf(1, 0)))
-        assertTrue(events.any { it.contains("upload fell behind") })
+        assertTrue(events.any { it.contains("could not accept") })
     }
     @Test fun unsupportedPlatformDoesNotCreateNativeSession() {
         client.cancelAll()
@@ -154,4 +156,45 @@ class MaiTranscriptionClientStreamTest {
         assertFalse(created)
         assertTrue(events.any { it.contains("Unsupported device.") })
     }
+    @Test fun unfinalizedAudioDeadlineCannotBeExtendedByNewAudioOrCommitCallbacks() {
+        client.cancelAll(); events.clear(); session = FakeMaiSpeechSession()
+        client = MaiTranscriptionClient({ session }, 60_000L, { null }, progressTimeoutMs = 1_000L)
+        client.startStreaming(MaiConfig("key", "centralus", true), null, callback()); ready()
+        client.sendAudioChunk(ByteArray(3200))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(600))
+        client.sendAudioChunk(ByteArray(3200)); client.finalizeTurn(); pump()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(500))
+        assertTrue(session.inputFinished); assertFalse(session.closed)
+        assertTrue("stalled" in events); assertFalse(events.any { it.startsWith("error:") })
+        session.final("Accepted tail."); session.ended(); pump()
+        assertTrue("text:Accepted tail." in events); assertEquals("closed", events.last())
+    }
+    @Test fun finalProgressSettlesOldestDeadlineAndNoMatchDoesNotInsertAGap() {
+        client.cancelAll(); events.clear(); session = FakeMaiSpeechSession()
+        client = MaiTranscriptionClient({ session }, 60_000L, { null }, progressTimeoutMs = 1_000L)
+        client.startStreaming(MaiConfig("key", "centralus", true), null, callback()); ready()
+        client.sendAudioChunk(ByteArray(3200))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(600))
+        session.final("", token = 0); pump()
+        client.sendAudioChunk(ByteArray(3200))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(600))
+        assertFalse(events.any { it.startsWith("error:") })
+        session.final("After silence.", id = "second", token = 0); pump()
+        assertTrue("text:After silence." in events)
+    }
+    @Test fun backpressureIsNotAnAcknowledgmentOrFailureAndRetriedChunkIsCountedOnce() {
+        ready(); session.backpressure = true
+        assertFalse(client.sendAudioChunk(ByteArray(3200))); assertFalse(client.hasPendingProcessing)
+        assertFalse(events.any { it.startsWith("error:") })
+        session.backpressure = false; session.listener.onWriteAvailable(); pump()
+        assertTrue("capacity" in events)
+        assertTrue(client.sendAudioChunk(ByteArray(3200))); assertEquals(3200, session.audio.single().size)
+    }
+    @Test fun inconsistentFinalTimingStopsBeforeAppendingOutOfOrderText() {
+        ready(); client.sendAudioChunk(ByteArray(3200)); session.final("First.", end = 1600, token = 0); pump()
+        session.final("Old suffix.", id = "older", end = 800, token = 0); pump()
+        assertEquals(listOf("text:First."), events.filter { it.startsWith("text:") })
+        assertTrue(events.any { it.contains("inconsistent audio timing") })
+    }
+
 }

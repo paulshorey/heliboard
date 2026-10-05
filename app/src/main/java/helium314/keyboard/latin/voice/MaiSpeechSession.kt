@@ -3,6 +3,7 @@ package helium314.keyboard.latin.voice
 
 import com.microsoft.cognitiveservices.speech.CancellationErrorCode
 import com.microsoft.cognitiveservices.speech.CancellationReason
+import com.microsoft.cognitiveservices.speech.Connection
 import com.microsoft.cognitiveservices.speech.ResultReason
 import com.microsoft.cognitiveservices.speech.SpeechConfig
 import com.microsoft.cognitiveservices.speech.SpeechRecognizer
@@ -16,19 +17,20 @@ import java.net.URI
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
 
 /** Test seam around the SDK; callbacks may arrive on a background thread. */
 internal interface MaiSpeechSession {
+    enum class WriteResult { ACCEPTED, BACKPRESSURE, CLOSED }
     interface Listener {
         fun onReady()
         fun onFinal(resultId: String, text: String, audioEndBytes: Long, commitToken: Int)
         fun onCommitRequested(token: Int, audioEndBytes: Long)
         fun onEnded()
-        fun onError(message: String, retryable: Boolean)
+        fun onError(message: String)
+        fun onWriteAvailable()
     }
     fun start(config: MaiConfig, language: String?, listener: Listener)
-    fun write(audio: ByteArray): Boolean
+    fun write(audio: ByteArray): WriteResult
     fun commit(audioEndBytes: Long)
     fun finishInput()
     fun close()
@@ -38,14 +40,19 @@ internal interface MaiSpeechSession {
 internal class AzureMaiSpeechSession : MaiSpeechSession {
     private val worker = Executors.newSingleThreadExecutor { task -> Thread(task, "MAI-Speech-SDK") }
     private val closed = AtomicBoolean(false)
-    private val queuedBytes = AtomicInteger(0)
+    private val failed = AtomicBoolean(false)
     private var listener: MaiSpeechSession.Listener? = null
     private var speechConfig: SpeechConfig? = null
     private var audioFormat: AudioStreamFormat? = null
     private var stream: PushAudioInputStream? = null
     private var audioConfig: AudioConfig? = null
     private var recognizer: SpeechRecognizer? = null
-    private var inputClosed = false
+    private var connection: Connection? = null
+    private val inputClosed = AtomicBoolean(false)
+    private val ended = AtomicBoolean(false)
+    private val audioWriter = BoundedAudioWriter(worker, { closed.get() || failed.get() },
+        { stream!!.write(it) }, { listener?.onWriteAvailable() },
+        { fail("Azure Speech could not accept microphone audio. Dictation stopped.") })
 
     override fun start(config: MaiConfig, language: String?, listener: MaiSpeechSession.Listener) {
         this.listener = listener
@@ -58,20 +65,28 @@ internal class AzureMaiSpeechSession : MaiSpeechSession {
             audioConfig = AudioConfig.fromStreamInput(stream)
             val active = SpeechRecognizer(speechConfig, audioConfig)
             recognizer = active
+            connection = Connection.fromRecognizer(active).also { transport ->
+                transport.disconnected.addEventListener { _, _ ->
+                    // Closing input deliberately can disconnect as recognition reaches EOF.
+                    // While input is open, do not allow the SDK to silently reconnect capture.
+                    if (!inputClosed.get() && !ended.get())
+                        fail("Azure Speech disconnected. Dictation stopped; check your internet connection.")
+                }
+            }
             active.recognized.addEventListener { _, event ->
                 val result = event.result
                 if (result.reason == ResultReason.RecognizedSpeech || result.reason == ResultReason.NoMatch) {
                     val ticks = result.offset.add(result.duration)
                     val endBytes = ticks.multiply(BigInteger.valueOf(VoiceRecorder.SAMPLE_RATE * 2L))
                         .divide(BigInteger.valueOf(10_000_000L)).toLong()
-                    if (!closed.get()) listener.onFinal(result.resultId,
+                    if (!closed.get() && !failed.get()) listener.onFinal(result.resultId,
                         if (result.reason == ResultReason.RecognizedSpeech) result.text else "",
                         endBytes, result.commitToken)
                 }
             }
             // Intermediate hypotheses deliberately stay inside the SDK.
             active.canceled.addEventListener { _, event ->
-                if (closed.get()) return@addEventListener
+                if (closed.get() || failed.get()) return@addEventListener
                 if (event.reason == CancellationReason.Error) {
                     val code = event.errorCode
                     val message = when (code) {
@@ -83,29 +98,22 @@ internal class AzureMaiSpeechSession : MaiSpeechSession {
                         else -> "Azure Speech connection failed (${code.name}). Check your internet connection."
                     }
                     // errorDetails may echo credentials or text; never log or forward it.
-                    listener.onError(message, code in setOf(CancellationErrorCode.ConnectionFailure,
-                        CancellationErrorCode.ServiceTimeout, CancellationErrorCode.ServiceError,
-                        CancellationErrorCode.ServiceUnavailable, CancellationErrorCode.TooManyRequests))
-                } else if (event.reason == CancellationReason.EndOfStream) listener.onEnded()
+                    fail(message)
+                } else if (event.reason == CancellationReason.EndOfStream) {
+                    ended.set(true)
+                    listener.onEnded()
+                }
             }
-            active.sessionStopped.addEventListener { _, _ -> if (!closed.get()) listener.onEnded() }
+            active.sessionStopped.addEventListener { _, _ ->
+                ended.set(true)
+                if (!closed.get() && !failed.get()) listener.onEnded()
+            }
             active.startContinuousRecognitionAsync().get(30, TimeUnit.SECONDS)
-            if (!closed.get()) listener.onReady()
+            if (!closed.get() && !failed.get()) listener.onReady()
         }
     }
 
-    override fun write(audio: ByteArray): Boolean {
-        if (closed.get()) return false
-        if (queuedBytes.addAndGet(audio.size) > 256_000) {
-            queuedBytes.addAndGet(-audio.size)
-            return false
-        }
-        submit {
-            try { stream!!.write(audio) }
-            finally { queuedBytes.addAndGet(-audio.size) }
-        }
-        return true
-    }
+    override fun write(audio: ByteArray) = audioWriter.write(audio)
 
     override fun commit(audioEndBytes: Long) = submit {
         // Advisory request: 0 means it was rejected, not a recognition failure.
@@ -115,8 +123,7 @@ internal class AzureMaiSpeechSession : MaiSpeechSession {
 
     override fun finishInput() = submit {
         // EOF must precede waiting for sessionStopped. Stopping now can lose the tail.
-        if (!inputClosed) {
-            inputClosed = true
+        if (inputClosed.compareAndSet(false, true)) {
             stream!!.close()
         }
     }
@@ -126,8 +133,8 @@ internal class AzureMaiSpeechSession : MaiSpeechSession {
         worker.execute {
             try { recognizer?.stopContinuousRecognitionAsync()?.get(5, TimeUnit.SECONDS) }
             catch (_: Exception) { /* Release handles even after a failed stop. */ }
-            for (release in listOf<() -> Unit>({ recognizer?.close() }, { audioConfig?.close() },
-                { if (!inputClosed) stream?.close() }, { audioFormat?.close() }, { speechConfig?.close() })) {
+            for (release in listOf<() -> Unit>({ connection?.close() }, { recognizer?.close() }, { audioConfig?.close() },
+                { if (!inputClosed.get()) stream?.close() }, { audioFormat?.close() }, { speechConfig?.close() })) {
                 try { release() } catch (_: Exception) { /* Continue releasing other JNI handles. */ }
             }
         }
@@ -135,15 +142,18 @@ internal class AzureMaiSpeechSession : MaiSpeechSession {
     }
 
     private fun submit(action: () -> Unit) {
-        if (closed.get()) return
+        if (closed.get() || failed.get()) return
         worker.execute {
-            if (closed.get()) return@execute
+            if (closed.get() || failed.get()) return@execute
             try { action() }
             catch (_: Exception) {
-                if (!closed.get()) listener?.onError("Azure Speech SDK could not complete dictation. Check the resource settings and connection.", false)
+                fail("Azure Speech SDK could not complete dictation. Check the resource settings and connection.")
             } catch (_: LinkageError) {
-                if (!closed.get()) listener?.onError("Azure Speech SDK is unavailable on this device.", false)
+                fail("Azure Speech SDK is unavailable on this device.")
             }
         }
+    }
+    private fun fail(message: String) {
+        if (!closed.get() && failed.compareAndSet(false, true)) listener?.onError(message)
     }
 }

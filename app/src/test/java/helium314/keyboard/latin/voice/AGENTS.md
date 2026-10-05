@@ -3,10 +3,13 @@
 MAI-Transcribe-2-Streaming SDK lifecycle and local transcript regression tests.
 
 ## Direct files
-- `FakeMaiSpeechSession.kt` - device-independent SDK seam for deterministic callbacks and recorded audio/commit/EOF operations.
+- `BoundedAudioWriterTest.kt` - real byte-capacity accounting, capacity notifications, ordered resumption, write failure containment, and cancellation/rejected executor.
+- `FakeVoiceNetworkMonitor.kt` - deterministic network preflight/loss seam.
+- `VoiceNetworkMonitorTest.kt` - validation, default-network handoff, registration cleanup, and stale observer suppression.
+- `FakeMaiSpeechSession.kt` - device-independent SDK seam for deterministic callbacks and recorded audio/commit/EOF operations; deferred writes exercise the same bounded writer as the SDK adapter.
 - `MaiTranscriptionClientTest.kt` - Speech endpoint construction, locale hints, and Android/ABI gating.
-- `MaiTranscriptionClientStreamTest.kt` - startup readiness, advisory commit tokens/offsets, missing acknowledgments and bounded EOF fallback, NoMatch, EOF draining, deduplication/repetitions, cancellation, failures, and deadlines.
-- `VoiceInputManagerTest.kt` - microphone callbacks, startup/pause/stop, restart failures and overflow while retaining draining transcripts/buffered audio, backoff, onset prefix, cancellation, buffering limits, session replacement/rotation, and subsecond recorder configuration.
+- `MaiTranscriptionClientStreamTest.kt` - startup readiness, advisory commit tokens/offsets, missing acknowledgments and bounded EOF fallback, NoMatch, EOF draining, deduplication/repetitions, cancellation, terminal failures, backpressure, inconsistent timing, and oldest-audio deadlines.
+- `VoiceInputManagerTest.kt` - microphone callbacks, startup/pause/stop, restart failures and overflow while retaining draining transcripts/buffered audio, offline/network/service failure stops and markers, full-size PCM backpressure and upload deadlines, quiet audio delivery after local silence, cancellation, buffering limits, session replacement/rotation, and subsecond recorder configuration.
 - `TranscriptionPreferencesTest.kt` - Speech key/region defaults, storage, validation, and bounded/idempotent conversion of saved silence seconds to milliseconds.
 - `TranscriptPostProcessorTest.kt` - spoken punctuation, em-dash preservation across cleanup passes, paragraph commands, and filler cleanup.
 

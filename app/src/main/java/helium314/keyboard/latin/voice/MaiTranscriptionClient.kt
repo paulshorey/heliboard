@@ -14,6 +14,7 @@ class MaiTranscriptionClient internal constructor(
     private val sessionFactory: () -> MaiSpeechSession = { AzureMaiSpeechSession() },
     private val completionTimeoutMs: Long = 60_000L,
     private val platformError: () -> String? = { deviceSupportError() },
+    private val progressTimeoutMs: Long = 30_000L,
 ) {
     companion object {
         private const val TAG = "MaiTranscription"
@@ -48,13 +49,17 @@ class MaiTranscriptionClient internal constructor(
         fun onStreamReady()
         fun onTranscriptionResult(segment: TranscriptSegment)
         fun onPendingProcessingChanged()
-        fun onStreamError(error: String, retryable: Boolean)
+        fun onStreamError(error: String, incomplete: Boolean)
+        fun onAudioWriteAvailable()
+        /** Stop new capture while preserving accepted audio for definitive EOF. */
+        fun onFinalConfirmationStalled()
         fun onStreamClosed()
         /** Keep microphone capture buffered while closing input to obtain definitive EOF. */
         fun onStreamDrainRequired()
     }
 
     private data class Boundary(val endBytes: Long, val requestedAt: Long, var token: Int = 0)
+    private data class AudioProgress(val endBytes: Long, val acceptedAt: Long)
     private val handler = Handler(Looper.getMainLooper())
     private var connectionToken = 0L
     private var session: MaiSpeechSession? = null
@@ -68,6 +73,10 @@ class MaiTranscriptionClient internal constructor(
     private val completedIds = HashSet<String>()
     private val completedTokens = HashSet<Int>()
     private var timeout: Runnable? = null
+    private val unfinalizedAudio = ArrayDeque<AudioProgress>()
+    private var progressTimeout: Runnable? = null
+    private var lastResultEndBytes = 0L
+    private var awaitingIntegrityDrain = false
 
     val hasPendingProcessing: Boolean get() = finishing || totalBytes > finalizedBytes || boundaries.isNotEmpty()
     internal fun configurationError(config: MaiConfig): String? = platformError() ?: config.validationError()
@@ -75,7 +84,7 @@ class MaiTranscriptionClient internal constructor(
     fun startStreaming(config: MaiConfig, languageTag: String?, callback: StreamingCallback) {
         cancelAll()
         this.callback = callback
-        configurationError(config)?.let { fail(it, false); return }
+        configurationError(config)?.let { fail(it); return }
         val active = sessionFactory()
         session = active
         val token = connectionToken
@@ -90,6 +99,12 @@ class MaiTranscriptionClient internal constructor(
             }
             override fun onFinal(resultId: String, text: String, audioEndBytes: Long, commitToken: Int) = post(token) {
                 if (resultId.isNotEmpty() && !completedIds.add(resultId)) return@post
+                if (audioEndBytes < 0 || audioEndBytes > totalBytes ||
+                    (audioEndBytes > 0 && audioEndBytes < lastResultEndBytes)) {
+                    fail("Azure Speech returned inconsistent audio timing. Dictation stopped.")
+                    return@post
+                }
+                lastResultEndBytes = maxOf(lastResultEndBytes, audioEndBytes)
                 if (commitToken > 0) completedTokens.add(commitToken)
                 finalizedBytes = maxOf(finalizedBytes, audioEndBytes.coerceAtMost(totalBytes))
                 settleBoundaries()
@@ -111,29 +126,35 @@ class MaiTranscriptionClient internal constructor(
             }
             private val tokenOfConnection = token
             override fun onEnded() = post(token) {
-                if (!finishing) { fail("Azure Speech ended the dictation session unexpectedly.", true); return@post }
+                if (!finishing) { fail("Azure Speech ended the dictation session unexpectedly."); return@post }
                 // EOF is the SDK's definitive drain signal, even for advisory commits
                 // that never echo a token or speech that produces NoMatch.
                 val listener = this@MaiTranscriptionClient.callback
                 cancelAll()
                 listener?.onStreamClosed()
             }
-            override fun onError(message: String, retryable: Boolean) = post(token) { fail(message, retryable) }
+            override fun onError(message: String) = post(token) { fail(message) }
+            override fun onWriteAvailable() = post(token) { this@MaiTranscriptionClient.callback?.onAudioWriteAvailable() }
         })
         Log.i(TAG, "VOICE_STEP_3 starting direct Azure Speech dictation")
     }
 
     fun sendAudioChunk(pcmData: ByteArray): Boolean {
         if (!ready || finishing) return false
-        if (pcmData.isEmpty() || pcmData.size % 2 != 0) {
-            fail("Microphone audio must contain complete PCM16 samples.", false)
+        if (pcmData.isEmpty() || pcmData.size % 2 != 0 || pcmData.size > 3200) {
+            fail("Microphone audio must contain at most 100 ms of complete PCM16 samples.")
             return false
         }
-        if (session?.write(pcmData) != true) {
-            fail("Voice upload fell behind. Try again on a faster connection.", false)
-            return false
+        when (session?.write(pcmData)) {
+            MaiSpeechSession.WriteResult.ACCEPTED -> Unit
+            MaiSpeechSession.WriteResult.BACKPRESSURE -> return false // Caller retains the FIFO head.
+            else -> { fail("Azure Speech could not accept microphone audio. Dictation stopped."); return false }
         }
+        val wasPending = hasPendingProcessing
         totalBytes += pcmData.size
+        unfinalizedAudio.addLast(AudioProgress(totalBytes, SystemClock.elapsedRealtime()))
+        armProgressTimeout()
+        if (!wasPending) callback?.onPendingProcessingChanged()
         return true
     }
 
@@ -156,6 +177,7 @@ class MaiTranscriptionClient internal constructor(
         if (!ready || finishing) return
         finishing = true
         ready = false
+        clearProgressTimeout()
         session?.finishInput()
         // Never call stopContinuousRecognition here: it may truncate buffered audio.
         armTimeout(completionTimeoutMs, "Azure Speech timed out draining the final audio.")
@@ -165,6 +187,7 @@ class MaiTranscriptionClient internal constructor(
     fun cancelAll() {
         connectionToken++
         clearTimeout()
+        clearProgressTimeout()
         session?.close()
         session = null
         callback = null
@@ -176,6 +199,9 @@ class MaiTranscriptionClient internal constructor(
         boundaries.clear()
         completedIds.clear()
         completedTokens.clear()
+        unfinalizedAudio.clear()
+        lastResultEndBytes = 0
+        awaitingIntegrityDrain = false
     }
 
     private fun settleBoundaries() {
@@ -186,16 +212,40 @@ class MaiTranscriptionClient internal constructor(
             }
         }
         while (boundaries.firstOrNull()?.endBytes?.let { it <= finalizedBytes } == true) boundaries.removeFirst()
+        settleAudioProgress()
     }
 
-    private fun fail(message: String, retryable: Boolean) {
+    private fun fail(message: String) {
         val pendingAudio = totalBytes > finalizedBytes || boundaries.isNotEmpty()
         val listener = callback
         cancelAll()
         val description = if (pendingAudio) "$message The last voice segment could not be finalized." else message
         Log.e(TAG, description)
-        // The SDK already retries/replays unconfirmed audio. App retries are startup-only.
-        listener?.onStreamError(description, retryable && !pendingAudio)
+        // A detected failure is terminal even when the SDK might reconnect.
+        listener?.onStreamError(description, pendingAudio)
+    }
+
+    private fun settleAudioProgress() {
+        while (unfinalizedAudio.firstOrNull()?.endBytes?.let { it <= finalizedBytes } == true)
+            unfinalizedAudio.removeFirst()
+        armProgressTimeout()
+    }
+    private fun armProgressTimeout() {
+        clearProgressTimeout()
+        if (finishing || awaitingIntegrityDrain) return
+        val oldest = unfinalizedAudio.firstOrNull() ?: return
+        val token = connectionToken
+        progressTimeout = Runnable {
+            if (token == connectionToken) {
+                awaitingIntegrityDrain = true
+                callback?.onFinalConfirmationStalled()
+            }
+        }.also { handler.postDelayed(it,
+            (progressTimeoutMs - (SystemClock.elapsedRealtime() - oldest.acceptedAt)).coerceAtLeast(0)) }
+    }
+    private fun clearProgressTimeout() {
+        progressTimeout?.let { handler.removeCallbacks(it) }
+        progressTimeout = null
     }
 
     private fun armCompletionTimeout() {
@@ -217,7 +267,7 @@ class MaiTranscriptionClient internal constructor(
     private fun armTimeout(delay: Long, message: String) {
         clearTimeout()
         val token = connectionToken
-        timeout = Runnable { if (token == connectionToken) fail(message, true) }
+        timeout = Runnable { if (token == connectionToken) fail(message) }
             .also { handler.postDelayed(it, delay) }
     }
     private fun clearTimeout() { timeout?.let { handler.removeCallbacks(it) }; timeout = null }

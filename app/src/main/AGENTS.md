@@ -13,6 +13,7 @@ This folder contains the shipping Android app: manifest, assets, Java/Kotlin sou
 
 ## Non-obvious notes
 - The manifest points the IME service at `@xml/method_dummy`; subtype/layout metadata lives in the XML resource tree rather than in code.
+- Dictation uses normal `ACCESS_NETWORK_STATE` permission for validated-network preflight and session-scoped loss monitoring; SDK transport events separately monitor Azure reachability.
 - The app is direct-boot aware and uses device-protected storage, so some settings/data access must work before credential unlock.
 - The spell checker is a separate Android entry point from `LatinIME` and can diverge if its config/docs are ignored.
 
