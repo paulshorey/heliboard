@@ -4,10 +4,14 @@ Tests for the Gemini Live voice pipeline.
 
 ## Direct files
 - `GeminiTranscriptionClientTest.kt` - `setup` wire format, audio framing, language resolution, server-message parsing, and transcript assembly.
-- `GeminiTranscriptionClientStreamTest.kt` - end-to-end WebSocket lifecycle against a local `MockWebServer`, including the close-code-1007 setup-tier fallback and leftover-interim flush after `audioStreamEnd`.
+- `GeminiTranscriptionClientStreamTest.kt` - end-to-end WebSocket lifecycle against a local `MockWebServer`, including the close-code-1007 setup-tier fallback authoritative-only insertion, malformed response handling, and failure during drain.
 - `TranscriptPostProcessorTest.kt` - finalized-text cleanup tests.
 - `TranscriptionPreferencesTest.kt` - Gemini preference defaults, sanitization, and cleanup of previous providers' keys.
 - `VoiceContextVocabularyTest.kt` - editor-derived speech-biasing vocabulary.
+
+- `GeminiAudioQueueTest.kt` - production bounded sender, queue acceptance/backpressure/failure, stale frames, and EOF queue deadline.
+- `VoiceInputManagerTest.kt` - acknowledged transcript FIFO, audio/control FIFO, terminal failures, restart/drain guards, and anchored deadlines using injected recorder/client/network dependencies.
+- `VoiceNetworkMonitorTest.kt` - validated internet, route loss/handoff, stale observations, and API-21 receiver cleanup.
 
 ## Non-obvious notes
 - Voice bugs split cleanly between transport/session setup and local post-processing; keep that distinction clear in new tests.
@@ -17,6 +21,10 @@ Tests for the Gemini Live voice pipeline.
 - Robolectric's main looper is paused, and the client posts callbacks there from OkHttp's reader thread, so the stream tests pump with `awaitUntil { }` (idle the looper, check, sleep) instead of a bare latch.
 - `VoiceContextVocabularyTest.kt` covers what must *not* be biased as much as what must: common words, sentence-initial capitals, digits, and URL/path/email/identifier fragments.
 - Neither suite can confirm what Google's server does with a given `setup` field. Use `tools/gemini-live-smoke-test.py` with a real `GEMINI_API_KEY` for that.
+
+- Manager fakes capture the actual callbacks and drive the paused main looper. Client `internal` methods have mangled JVM names; Mockito answers normalize them with `substringBefore('$')`.
+- API-21 network tests use `android.app.Application` to isolate the monitor from unrelated app subtype initialization.
+- InputLogic tests cover host commit/delete rejection, exceptions, cache refresh, balanced batches, and literal interruption markers. Acceptance means the editor call succeeded, not proof of semantic completeness upstream.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

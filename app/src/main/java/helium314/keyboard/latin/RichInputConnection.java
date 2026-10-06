@@ -317,7 +317,8 @@ public final class RichInputConnection implements PrivateCommandPerformer {
      * @param text The text to commit. This may include styles.
      * @param newCursorPosition The new cursor position around the text.
      */
-    public void commitText(final CharSequence text, final int newCursorPosition) {
+    public boolean commitText(final CharSequence text, final int newCursorPosition) {
+        if (!isConnected()) return false;
         if (DEBUG_BATCH_NESTING) checkBatchEdit();
         if (DEBUG_PREVIOUS_TEXT) checkConsistencyForDebug();
         if (DebugFlags.DEBUG_ENABLED)
@@ -351,7 +352,29 @@ public final class RichInputConnection implements PrivateCommandPerformer {
                     }
                 }
             }
-            mIC.commitText(mTempObjectForCommitText, newCursorPosition);
+            try {
+                final boolean accepted = mIC.commitText(mTempObjectForCommitText, newCursorPosition);
+                if (!accepted) refreshAfterFailedEdit();
+                return accepted;
+            } catch (RuntimeException e) {
+                refreshAfterFailedEdit();
+                throw e;
+            }
+        }
+        return false;
+    }
+
+    private void refreshAfterFailedEdit() {
+        // A rejected/throwing host call may have partially changed the editor.
+        // Recover both cached text and cursor from it, never from our prediction.
+        try {
+            reloadTextCache();
+            reloadCursorPosition();
+        } catch (RuntimeException ignored) {
+            mCommittedTextBeforeComposingText.setLength(0);
+            mComposingText.setLength(0);
+            mExpectedSelStart = INVALID_CURSOR_POSITION;
+            mExpectedSelEnd = INVALID_CURSOR_POSITION;
         }
     }
 
@@ -558,7 +581,8 @@ public final class RichInputConnection implements PrivateCommandPerformer {
         }
     }
 
-    public void deleteTextBeforeCursor(final int beforeLength) {
+    public boolean deleteTextBeforeCursor(final int beforeLength) {
+        if (!isConnected()) return false;
         if (DEBUG_BATCH_NESTING) checkBatchEdit();
         // TODO: the following is incorrect if the cursor is not immediately after the composition.
         //  Right now we never come here in this case because we reset the composing state before we
@@ -584,10 +608,15 @@ public final class RichInputConnection implements PrivateCommandPerformer {
             mExpectedSelEnd -= mExpectedSelStart;
             mExpectedSelStart = 0;
         }
-        if (isConnected()) {
-            mIC.deleteSurroundingText(beforeLength, 0);
+        try {
+            final boolean accepted = mIC.deleteSurroundingText(beforeLength, 0);
+            if (!accepted) refreshAfterFailedEdit();
+            if (DEBUG_PREVIOUS_TEXT) checkConsistencyForDebug();
+            return accepted;
+        } catch (RuntimeException e) {
+            refreshAfterFailedEdit();
+            throw e;
         }
-        if (DEBUG_PREVIOUS_TEXT) checkConsistencyForDebug();
     }
 
     /**

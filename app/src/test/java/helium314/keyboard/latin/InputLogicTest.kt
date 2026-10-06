@@ -166,6 +166,77 @@ class InputLogicTest {
         checkConnectionConsistency()
     }
 
+    @Test fun voiceCommitRejectionIsReportedAndDoesNotAdvanceTheCache() {
+        reset()
+        setText("confirmed")
+        rejectCommit = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, " rejected"))
+        assertEquals("confirmed", getText())
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun voiceCommitExceptionClosesTheBatchAndReportsFailure() {
+        reset()
+        setText("confirmed")
+        throwOnCommit = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, " rejected"))
+        assertEquals("confirmed", getText())
+        assertEquals(0, batchEdit)
+    }
+
+    @Test fun rejectedVoicePunctuationDeletionDoesNotWriteAReplacement() {
+        reset()
+        setText("Confirmed.")
+        rejectDelete = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "!"))
+        assertEquals("Confirmed.", getText())
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun rejectedParagraphCleanupStopsAfterTheAcceptedOriginalInsertion() {
+        reset()
+        setText("hello ")
+        rejectDelete = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "Comma."))
+        assertEquals("hello Comma.", getText())
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun rejectedParagraphReplacementReportsFailureAfterDeletion() {
+        reset()
+        setText("hello ")
+        rejectSecondCommit = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "Comma."))
+        assertEquals("", text)
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun hostBatchStartExceptionIsBalancedInsideTheWrapper() {
+        reset()
+        setText("confirmed")
+        throwOnBatchStart = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, " rejected"))
+        assertEquals("confirmed", text)
+        val nesting = RichInputConnection::class.java.getDeclaredField("mNestLevel").apply { isAccessible = true }
+        assertEquals(0, nesting.getInt(connection))
+        assertEquals(0, batchEdit)
+    }
+
+    @Test fun interruptionMarkerNeverRunsParagraphCleanup() {
+        reset()
+        setText("um, confirmed prefix")
+        val method = LatinIME::class.java.getDeclaredMethod("commitVoiceText", String::class.java, Boolean::class.javaPrimitiveType)
+            .apply { isAccessible = true }
+        assertEquals(true, method.invoke(latinIME, "[Dictation interrupted]", false))
+        assertEquals("um, confirmed prefix [Dictation interrupted]", getText())
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
     @Test fun clipboardPasteTrimsWhitespaceAndDoesNotAppendSpace() {
         reset()
         val clipboardManager = latinIME.getSystemService(ClipboardManager::class.java)
@@ -953,6 +1024,12 @@ class InputLogicTest {
         batchEdit = 0
         currentInputType = InputType.TYPE_CLASS_TEXT
         lastAddedWord = ""
+        rejectCommit = false
+        throwOnCommit = false
+        rejectDelete = false
+        rejectSecondCommit = false
+        commitCalls = 0
+        throwOnBatchStart = false
 
         // reset settings
         latinIME.prefs().edit { clear() }
@@ -1175,6 +1252,13 @@ private val composingText get() = if (composingStart == -1 || composingEnd == -1
     else text.substring(composingStart, composingEnd)
 
 // essentially this is the text field we're editing in
+private var rejectCommit = false
+private var throwOnCommit = false
+private var rejectDelete = false
+private var rejectSecondCommit = false
+private var commitCalls = 0
+private var throwOnBatchStart = false
+
 private val ic = object : InputConnection {
     // pretty clear (though this may be slow depending on the editor)
     // bad return value here is likely the cause for that weird bug improved/fixed by fixIncorrectLength
@@ -1210,6 +1294,9 @@ private val ic = object : InputConnection {
         return true // always true
     }
     override fun commitText(p0: CharSequence, p1: Int): Boolean {
+        if (throwOnCommit) error("editor disconnected")
+        commitCalls++
+        if (rejectCommit || (rejectSecondCommit && commitCalls == 2)) return false
         if (selectionStart != selectionEnd) {
             text = textBeforeCursor + textAfterCursor
             selectionEnd = selectionStart
@@ -1225,6 +1312,7 @@ private val ic = object : InputConnection {
     // just tells the text field that we add many updated, and that the editor should not
     // send status updates until batch edit ended (not actually used for this simulation)
     override fun beginBatchEdit(): Boolean {
+        if (throwOnBatchStart) error("editor disconnected")
         ++batchEdit
         return true // always true
     }
@@ -1251,6 +1339,7 @@ private val ic = object : InputConnection {
     // chars, not codepoints or glyphs
     // todo: may delete only one half of a surrogate pair, but this should be avoided by RichInputConnection (maybe throw error)
     override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
+        if (rejectDelete) return false
         // delete only before or after selection
         text = textBeforeCursor.substring(0, textBeforeCursor.length - beforeLength) +
                 text.substring(selectionStart, selectionEnd) +

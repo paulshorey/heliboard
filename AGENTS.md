@@ -34,6 +34,7 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
 - There are two settings trees: `latin/settings` holds runtime preference keys, defaults, and snapshots; `settings/` holds the Compose UI and fullapp screens.
 - Ordinary typing, voice insertion, and fullapp sync should flow through `InputConnection`; do not write directly into the extract/fullapp text widgets.
 - `WordComposer` is the source of truth for the current word; `inputlogic/EditorWordMirror.java` is the bridge that mirrors it into the host editor.
+- Gemini dictation uses one connection per recording, bounded audio/control and acknowledged transcript FIFOs, terminal failure with a literal interruption marker, and explicit restart. Interims never become editor text; no reconnect or automatic rotation. See `docs/gemini-transcription.md`.
 - Voice text intentionally bypasses `EditorWordMirror`: `LatinIME` first clears the typed-word state with `finishInput()`, then commits each finalized Gemini transcript segment directly. Fullapp replay is another bypass, using raw `InputConnection` replacement when the IME reconnects to the original field.
 - The manifest points the IME service at `res/xml/method_dummy.xml`, while real subtype/layout metadata lives in `res/xml/method.xml`; changes to subtypes or layout names usually also touch `assets/layouts/`.
 - Keyboard layout work often spans `keyboard/internal/keyboard_parser/`, `assets/layouts/`, and XML keyboard templates under `res/xml/`.

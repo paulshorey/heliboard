@@ -13,233 +13,104 @@ import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.prefs
 
 /**
- * Manages the voice input workflow:
- *
- * 1. Record audio locally via [VoiceRecorder] (starts instantly).
- * 2. Stream raw PCM chunks to the Gemini Live API over WebSocket.
- * 3. Receive finalized transcripts from Gemini in stream order.
- * 4. Deliver transcript text to [VoiceInputListener.onTranscriptionResult].
+ * One recording owns one Live connection. All capture, control, transcript and
+ * editor acknowledgment events are serialized on the main looper. A failed
+ * connection is never resumed: Live has no per-audio delivery acknowledgment.
  */
-class VoiceInputManager(private val context: Context) {
+class VoiceInputManager internal constructor(
+    private val context: Context,
+    private val voiceRecorder: VoiceRecorder,
+    private val transcriptionClient: GeminiTranscriptionClient,
+    private val networkMonitor: VoiceNetworkMonitor,
+) {
+    constructor(context: Context) : this(
+        context, VoiceRecorder(context), GeminiTranscriptionClient(), AndroidVoiceNetworkMonitor(context)
+    )
 
     companion object {
         private const val TAG = "VoiceInputManager"
-
         private const val MIN_CHUNK_SILENCE_SECONDS = 1
         private const val MAX_CHUNK_SILENCE_SECONDS = 30
         private const val MIN_AUTO_STOP_SILENCE_SECONDS = 5
         private const val MAX_AUTO_STOP_SILENCE_SECONDS = 300
         private const val MIN_SILENCE_THRESHOLD = 40
         private const val MAX_SILENCE_THRESHOLD = 5000
-
-        /** Maximum buffered raw PCM chunks while waiting for socket readiness. */
-        private const val MAX_PENDING_AUDIO_CHUNKS = 300
-
-        /** Maximum finalized transcripts waiting to be forwarded to the listener. */
-        private const val MAX_PENDING_TRANSCRIPTS = 64
-
-        private const val MAX_STREAM_RECONNECT_ATTEMPTS = 3
-        private const val STREAM_RECONNECT_BASE_DELAY_MS = 500L
-        private const val STREAM_CONNECT_TIMEOUT_MS = 12_000L
-
-        /**
-         * How long to wait for Gemini to respond after audio is sent or a turn
-         * finalize is requested. Logged as VOICE_RESPONSE in the voice
-         * diagnostics export when exceeded.
-         *
-         * Generous on purpose: the session is configured to prefer a correct
-         * transcript over a fast one, so a slow reply is expected behaviour and
-         * this timer only exists to surface a genuinely dead stream.
-         */
-        private const val GEMINI_RESPONSE_TIMEOUT_MS = 15_000L
-
-        /**
-         * Grace period subtracted from a `goAway` notice so the replacement
-         * session is open before the old connection is terminated.
-         */
-        private const val SESSION_ROTATE_LEAD_MS = 1_500L
-
-        /**
-         * When `goAway` is imminent, force rotation even if the user is still
-         * talking so the socket is not aborted mid-handshake.
-         */
-        private const val SESSION_ROTATE_FORCE_LEAD_MS = 400L
-
-        /**
-         * If Gemini keeps updating an interim hypothesis and then goes quiet
-         * without a final — typical of SMART mode waiting for the next word —
-         * finalize the turn even when local RMS silence did not fire.
-         */
-        private const val STALE_INTERIM_FINALIZE_MS = 2_000L
-
-        /**
-         * Audio chunks (~100 ms) kept while outbound audio is held after
-         * `audioStreamEnd`, so the next utterance still has prefix padding.
-         */
-        private const val PREFIX_HOLD_CHUNKS = 3
+        internal const val MAX_PENDING_AUDIO_BYTES = 960_000 // 30 s of PCM16 at 16 kHz
+        internal const val MAX_PENDING_TRANSCRIPTS = 64
+        internal const val STREAM_CONNECT_TIMEOUT_MS = 12_000L
+        internal const val PROGRESS_TIMEOUT_MS = 30_000L
+        internal const val DRAIN_TIMEOUT_MS = 15_000L
+        private const val AUDIO_RETRY_MS = 25L
+        internal const val INTERRUPTION_MARKER = "[Dictation interrupted]"
     }
 
-    private data class AwaitingGeminiResponse(
-        val sessionId: Long,
-        val reason: String,
-        val startedAtMs: Long,
-        val timeoutMs: Long,
-    )
-
-    enum class State {
-        IDLE,       // Not doing anything
-        RECORDING,  // Actively recording (microphone is live)
-        PAUSED      // Recording paused by user
-    }
+    enum class State { IDLE, RECORDING, PAUSED }
 
     interface VoiceInputListener {
         fun onStateChanged(state: State)
-
-        /** A transcript unit was finalized — process and insert this text. */
-        fun onTranscriptionResult(text: String, attachesToPrevious: Boolean)
-
-        /** Voice processing is actively running (transcripts are pending delivery). */
+        /** Return only after the editor accepts the complete insertion. */
+        fun onTranscriptionResult(text: String, attachesToPrevious: Boolean): Boolean
+        /** Insert literally, without transcript cleanup or paragraph replacement. */
+        fun onTranscriptionInterrupted(marker: String): Boolean
         fun onProcessingStarted()
-
-        /** No queued transcription work remains at manager level. */
         fun onProcessingIdle()
-
-        /** Transcripts queued for the previous session were dropped (cancel, new session, etc.). */
         fun onPendingProcessingCancelled()
-
         fun onError(error: String)
         fun onPermissionRequired()
     }
 
-    /**
-     * Supplies the most recent editor text before the cursor, used to seed
-     * Gemini's `customVocabulary` with words the user has already typed. Called
-     * on the main thread from [startStreamingSession], including reconnects, so
-     * callers should return the freshest available text. Returning null or a
-     * blank string omits the editor-derived terms.
-     */
-    fun interface PriorTextProvider {
-        fun getPriorText(): String?
+    fun interface PriorTextProvider { fun getPriorText(): String? }
+
+    private sealed interface Outbound {
+        data class Audio(val pcm: ByteArray, val capturedAtMs: Long) : Outbound
+        data class End(val finish: Boolean) : Outbound
     }
 
-    private data class PendingAudioChunk(
-        val sessionId: Long,
-        val pcmData: ByteArray
-    )
-
-    private data class PendingTranscript(
-        val sessionId: Long,
-        val text: String,
-        val attachesToPrevious: Boolean
-    )
-
-    private val voiceRecorder = VoiceRecorder(context)
-    private val transcriptionClient = GeminiTranscriptionClient()
     private var listener: VoiceInputListener? = null
     private var priorTextProvider: PriorTextProvider? = null
     private val mainHandler = Handler(Looper.getMainLooper())
-
     private var currentState = State.IDLE
     private var activeSessionId = 0L
+    private var sessionOpen = false
+    private var acceptingAudio = false
+    private var isStreamingReady = false
+    private var isStreamingConnecting = false
+    private var isSessionStopping = false
+    private var waitingForClose = false
+    private var hasCapturedAudio = false
+    private var unconfirmedSpeech = false
+    private var hasFinalizedCurrentSilence = false
+    private var isDispatchingTranscripts = false
+    private var pendingAudioBytes = 0
+    private val outbound = ArrayDeque<Outbound>()
+    private val pendingTranscripts = ArrayDeque<TranscriptSegment>()
+    private var audioRetry: Runnable? = null
+    private var connectTimeout: Runnable? = null
+    private var responseTimeout: Runnable? = null
+    private var finalTimeout: Runnable? = null
+    private var sessionLimit: Runnable? = null
+    private var drainTimeout: Runnable? = null
 
-    // Local speech-boundary detection window used by VoiceRecorder callbacks.
-    // Gemini segments turns server-side; local silence drives an early turn
-    // finalize at speech boundaries and auto-stop after a longer pause.
     private var chunkSilenceDurationMs = Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS * 1000L
     private var chunkSilenceThreshold = Defaults.PREF_VOICE_SILENCE_THRESHOLD.toDouble()
     private var autoStopSilenceMs = Defaults.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS * 1000L
     private var geminiConfig: GeminiConfig = TranscriptionPreferences.readGeminiConfig(context.prefs())
-
-    // Streaming state
-    private var streamSessionId = 0L
-    private var isStreamingReady = false
-    private var isStreamingConnecting = false
-    private var finalizeWhenStreamReady = false
-    /** Pause happened before `setupComplete`; finalize the turn as soon as the socket is ready. */
-    private var finalizeTurnWhenStreamReady = false
-    /** 9-minute / goAway rotate is waiting for the current utterance to finish. */
-    private var rotateAfterSpeechStops = false
-    private var isSessionStopping = false
-    private var sessionApiKey = ""
-    private var streamReconnectAttempts = 0
-    private var pendingReconnectRunnable: Runnable? = null
-    private var pendingStreamConnectTimeoutRunnable: Runnable? = null
-    private var pendingSessionRotateRunnable: Runnable? = null
-    private var pendingForceRotateRunnable: Runnable? = null
-    private var pendingRotateAfterFinalizeRunnable: Runnable? = null
-
-    // Buffered audio while stream is not yet open
-    private val pendingAudioChunks = ArrayDeque<PendingAudioChunk>()
-
-    // Finalized transcript delivery queue (strict FIFO)
-    private val pendingTranscripts = ArrayDeque<PendingTranscript>()
-    private var isDispatchingTranscripts = false
-
-    // Local-VAD-driven early turn finalize. Gemini's own end-of-speech detection
-    // is deliberately configured to be patient so mid-sentence pauses do not
-    // split an utterance, which means a trailing phrase can sit unfinalized. When
-    // the recorder reports local silence we send `audioStreamEnd` so the tail is
-    // committed. Fires once per speech-stop transition, re-armed on the next
-    // speech onset.
-    private var hasFinalizedCurrentSilence = false
-
-    // After Hybrid VAD `audioStreamEnd`, further silent PCM immediately reopens
-    // the turn and SMART mode starts waiting for the next word again. Hold
-    // outbound audio until speech resumes, keeping a short prefix so the first
-    // syllable of the next utterance is not clipped.
-    private var holdAudioUntilSpeech = false
-    private val heldAudioPrefix = ArrayDeque<PendingAudioChunk>()
-    private var staleInterimFinalizeRunnable: Runnable? = null
-
-    // Tracks round-trip latency to Gemini (stream connect, audio, finalize).
-    private var awaitingGeminiResponse: AwaitingGeminiResponse? = null
-    private var geminiResponseTimeoutRunnable: Runnable? = null
-    private var streamConnectStartedAtMs: Long = 0L
-
-    // New paragraph timer removed — inserting line breaks on silence caused
-    // form submissions and other unintended side effects in host apps.
-
-    // Auto-stop timer — stop recording after prolonged silence (no speech)
     private val autoStopSilenceRunnable = Runnable {
-        if (currentState == State.RECORDING) {
-            Log.i(
-                TAG,
-                "Auto-stop timer fired after ${autoStopSilenceMs}ms of silence — stopping recording"
-            )
-            stopRecording()
-        }
+        if (currentState == State.RECORDING) stopRecording()
     }
 
     val isRecording: Boolean get() = currentState == State.RECORDING
     val isPaused: Boolean get() = currentState == State.PAUSED
-    val isIdle: Boolean
-        get() = currentState == State.IDLE &&
-            !voiceRecorder.isCurrentlyRecording &&
-            !isStreamingConnecting
+    val isIdle: Boolean get() = currentState == State.IDLE && !sessionOpen
     val state: State get() = currentState
 
-    fun hasPendingProcessing(): Boolean {
-        return pendingTranscripts.isNotEmpty() ||
-            pendingAudioChunks.isNotEmpty() ||
-            isStreamingConnecting ||
-            finalizeWhenStreamReady
-    }
+    fun hasPendingProcessing(): Boolean = sessionOpen && (
+        isSessionStopping || isStreamingConnecting || waitingForClose || unconfirmedSpeech ||
+            outbound.isNotEmpty() || pendingTranscripts.isNotEmpty() || isDispatchingTranscripts
+        )
 
-    fun setListener(listener: VoiceInputListener?) {
-        this.listener = listener
-    }
-
-    /**
-     * Register a provider that returns the editor text before the cursor, used
-     * to seed Gemini's `customVocabulary`. The provider is invoked synchronously
-     * on the main thread when a streaming session opens (including reconnects),
-     * so it must be cheap and must not block.
-     */
-    fun setPriorTextProvider(provider: PriorTextProvider?) {
-        this.priorTextProvider = provider
-    }
-
-    /** Toggle: IDLE → start, RECORDING → stop, PAUSED → resume. */
+    fun setListener(listener: VoiceInputListener?) { this.listener = listener }
+    fun setPriorTextProvider(provider: PriorTextProvider?) { priorTextProvider = provider }
     fun toggleRecording() {
         when (currentState) {
             State.IDLE -> startRecording()
@@ -248,883 +119,376 @@ class VoiceInputManager(private val context: Context) {
         }
     }
 
-    /**
-     * Start recording. Microphone starts immediately; Gemini connects in parallel.
-     */
     fun startRecording(): Boolean {
-        if (currentState != State.IDLE) {
-            Log.w(TAG, "Cannot start recording, current state: $currentState")
-            return false
-        }
-        Log.i(TAG, "VOICE_STEP_1 start recording requested")
+        // IDLE also means the mic has stopped while the previous connection drains.
+        if (!isIdle) return false
         if (!voiceRecorder.hasRecordPermission()) {
             listener?.onPermissionRequired()
             return false
         }
-
         val apiKey = getApiKey()
         if (apiKey.isBlank()) {
             listener?.onError("Gemini API key not configured. Please set it in Settings.")
             return false
         }
-
         reloadRuntimeConfig()
-        beginNewSession()
+        activeSessionId += 1
         val sessionId = activeSessionId
-        sessionApiKey = apiKey
-
-        voiceRecorder.setCallback(object : VoiceRecorder.RecordingCallback {
-            override fun onRecordingStarted() {
-                if (sessionId != activeSessionId) return
-                Log.i(TAG, "VOICE_STEP_1 recording callback received")
-                // State and auto-stop timer are set synchronously after
-                // voiceRecorder.startRecording() returns.
-            }
-
-            override fun onAudioChunk(pcmData: ByteArray) {
-                if (sessionId != activeSessionId) return
-                onAudioChunkCaptured(pcmData, sessionId)
-            }
-
-            override fun onSpeechStarted() {
-                if (sessionId != activeSessionId) return
-                cancelAutoStopTimer()
-                cancelStaleInterimFinalize()
-                // New speech means a new phrase is forming; allow the next
-                // silence to trigger another turn finalize. Also cancel any
-                // leftover-interim flush so it cannot commit this utterance.
-                hasFinalizedCurrentSilence = false
-                transcriptionClient.onNewSpeechTurn()
-                if (holdAudioUntilSpeech) {
-                    holdAudioUntilSpeech = false
-                    releaseHeldAudioPrefix(sessionId)
-                }
-                // A new utterance started during the leftover-flush wait.
-                // Keep the deferred rotate and wait for the next silence.
-                if (pendingRotateAfterFinalizeRunnable != null) {
-                    cancelRotateAfterTurnSettle()
-                }
-            }
-
-            override fun onSpeechStopped() {
-                if (sessionId != activeSessionId) return
-                startAutoStopTimer()
-                requestTurnFinalizeOnSilence(sessionId)
-                if (rotateAfterSpeechStops) {
-                    scheduleRotateAfterTurnSettle(sessionId)
-                }
-            }
-
-            override fun onRecordingStopped() {
-                if (sessionId != activeSessionId) return
-                Log.i(TAG, "Audio recording stopped")
-            }
-
-            override fun onRecordingError(error: String) {
-                if (sessionId != activeSessionId) return
-                Log.e(TAG, "Recording error: $error")
-                stopRecordingInternal(cancelPending = true)
-                listener?.onError(error)
-            }
-        })
-
-        startStreamingSession(sessionId, apiKey)
-
-        if (!voiceRecorder.startRecording()) {
-            Log.e(TAG, "Failed to start audio recording")
-            stopRecordingInternal(cancelPending = true)
-            listener?.onError("Failed to start recording")
+        if (!networkMonitor.start {
+                if (isCurrent(sessionId)) failSession("Internet connection lost. Tap the mic to start again.")
+            }) {
+            networkMonitor.stop()
+            listener?.onError("Internet access is required for dictation.")
             return false
         }
-
-        // Enter RECORDING immediately after AudioRecord starts so lifecycle guards
-        // don't treat this startup window as idle.
+        sessionOpen = true
+        acceptingAudio = true
+        hasCapturedAudio = false
+        unconfirmedSpeech = false
+        hasFinalizedCurrentSilence = false
+        voiceRecorder.setCallback(object : VoiceRecorder.RecordingCallback {
+            override fun onRecordingStarted() { }
+            override fun onAudioChunk(pcmData: ByteArray) {
+                if (!isCurrent(sessionId) || !acceptingAudio) return
+                if (pcmData.isEmpty() || pcmData.size % 2 != 0) {
+                    failSession("Invalid microphone audio")
+                    return
+                }
+                hasCapturedAudio = true
+                if (voiceRecorder.isCurrentlySpeaking) noteUnconfirmedSpeech(sessionId)
+                if (pcmData.size > MAX_PENDING_AUDIO_BYTES - pendingAudioBytes) {
+                    failSession("Voice audio queue is full. Dictation stopped before skipping audio.")
+                    return
+                }
+                outbound.addLast(Outbound.Audio(pcmData, SystemClock.elapsedRealtime()))
+                pendingAudioBytes += pcmData.size
+                flushOutbound(sessionId)
+            }
+            override fun onSpeechStarted() {
+                // A queued onset can follow a stop/pause tap but precede the
+                // recorder-tail barrier. It still represents pending speech.
+                if (!isCurrent(sessionId) || !acceptingAudio) return
+                cancelAutoStopTimer()
+                hasFinalizedCurrentSilence = false
+                noteUnconfirmedSpeech(sessionId)
+            }
+            override fun onSpeechStopped() {
+                if (!isCurrent(sessionId) || currentState != State.RECORDING) return
+                startAutoStopTimer()
+                if (!hasFinalizedCurrentSilence) {
+                    hasFinalizedCurrentSilence = true
+                    enqueueEnd(sessionId, finish = false)
+                }
+            }
+            override fun onRecordingStopped() { }
+            override fun onRecordingError(error: String) {
+                if (isCurrent(sessionId)) failSession(error)
+            }
+        })
+        startStreamingSession(sessionId, apiKey)
+        if (!isCurrent(sessionId)) return false
+        if (!voiceRecorder.startRecording()) {
+            if (isCurrent(sessionId)) failSession("Failed to start recording")
+            return false
+        }
+        // A synchronous recorder error may already have invalidated this session.
+        if (!isCurrent(sessionId)) return false
         updateState(State.RECORDING)
         startAutoStopTimer()
-
         return true
     }
 
     fun stopRecording() {
-        if (isIdle) return
-        Log.i(TAG, "Stopping recording")
-        stopRecordingInternal(cancelPending = false)
+        if (!sessionOpen || isSessionStopping) return
+        val sessionId = activeSessionId
+        isSessionStopping = true
+        cancelAutoStopTimer()
+        sessionLimit?.let(mainHandler::removeCallbacks)
+        sessionLimit = null
+        voiceRecorder.stopRecording()
+        updateState(State.IDLE)
+        listener?.onProcessingStarted()
+        // AudioRecord.stop/join ensures the recorder's last posted chunks precede
+        // this barrier. Retain those chunks, then enqueue EOF behind all of them.
+        mainHandler.post {
+            if (!isCurrent(sessionId)) return@post
+            acceptingAudio = false
+            enqueueEnd(sessionId, finish = true)
+        }
     }
 
-    fun cancelRecording() {
-        Log.i(TAG, "Cancelling recording")
-        stopRecordingInternal(cancelPending = true)
-    }
-
+    fun cancelRecording() { endSession(cancelled = true) }
     fun pauseRecording() {
-        if (currentState != State.RECORDING) return
+        if (!isRecording || !sessionOpen) return
+        val sessionId = activeSessionId
         cancelAutoStopTimer()
         voiceRecorder.pauseRecording()
-        cancelPendingReconnect()
-        streamReconnectAttempts = 0
-        finalizeWhenStreamReady = false
-        // A turn left open with no incoming audio is what makes the Live API
-        // drop the connection, so close it out before the mic goes quiet.
-        if (isStreamingReady) {
-            transcriptionClient.finalizeTurn()
-        } else if (isStreamingConnecting) {
-            finalizeTurnWhenStreamReady = true
-        }
         updateState(State.PAUSED)
-    }
-
-    fun resumeRecording() {
-        if (currentState != State.PAUSED) return
-        finalizeTurnWhenStreamReady = false
-        if (!isStreamingReady && !isStreamingConnecting && sessionApiKey.isNotBlank()) {
-            startStreamingSession(activeSessionId, sessionApiKey, isReconnect = true)
+        mainHandler.post {
+            if (isCurrent(sessionId) && !isSessionStopping) enqueueEnd(sessionId, finish = false)
         }
+    }
+    fun resumeRecording() {
+        if (!isPaused || !sessionOpen || isSessionStopping) return
+        val sessionId = activeSessionId
         voiceRecorder.resumeRecording()
+        if (!isCurrent(sessionId)) return
+        hasFinalizedCurrentSilence = false
         updateState(State.RECORDING)
         startAutoStopTimer()
     }
-
     fun togglePause() {
         when (currentState) {
             State.RECORDING -> pauseRecording()
             State.PAUSED -> resumeRecording()
-            else -> {}
+            else -> { }
         }
     }
+    fun destroy() { cancelRecording(); listener = null }
 
-    fun destroy() {
-        stopRecordingInternal(cancelPending = true)
-        listener = null
-    }
+    private fun isCurrent(sessionId: Long) = sessionOpen && sessionId == activeSessionId
 
-    // ── Private helpers ────────────────────────────────────────────────
-
-    private fun beginNewSession() {
-        invalidateActiveSession("new recording session")
-    }
-
-    private fun invalidateActiveSession(reason: String) {
-        val hadPendingWork = hasPendingProcessing()
-        activeSessionId += 1
-        streamSessionId = 0L
-        isStreamingReady = false
-        isStreamingConnecting = false
-        finalizeWhenStreamReady = false
-        finalizeTurnWhenStreamReady = false
-        rotateAfterSpeechStops = false
-        isSessionStopping = false
-        sessionApiKey = ""
-        streamReconnectAttempts = 0
-        cancelPendingReconnect()
-        cancelStreamConnectTimeout()
-        cancelSessionRotateTimer()
-        cancelGeminiResponseWatchdog()
-        streamConnectStartedAtMs = 0L
-        pendingAudioChunks.clear()
-        pendingTranscripts.clear()
-        isDispatchingTranscripts = false
-        hasFinalizedCurrentSilence = false
-        holdAudioUntilSpeech = false
-        heldAudioPrefix.clear()
-        cancelStaleInterimFinalize()
-        transcriptionClient.cancelAll()
-        if (hadPendingWork) {
-            listener?.onPendingProcessingCancelled()
-        }
-        notifyProcessingIdleIfDrained()
-        Log.i(TAG, "Voice session invalidated ($reason), sessionId=$activeSessionId")
-    }
-
-    private fun stopRecordingInternal(cancelPending: Boolean) {
-        cancelAutoStopTimer()
-        cancelStaleInterimFinalize()
-        cancelStreamConnectTimeout()
-        cancelSessionRotateTimer()
-        holdAudioUntilSpeech = false
-        heldAudioPrefix.clear()
-
-        val sessionAtStop = activeSessionId
-        if (cancelPending) {
-            invalidateActiveSession("recording cancelled")
-        } else {
-            isSessionStopping = true
-            cancelPendingReconnect()
-        }
-
-        voiceRecorder.stopRecording()
-
-        if (!cancelPending) {
-            // Run after any queued onAudioChunk callbacks to avoid dropping the tail.
-            mainHandler.post {
-                if (sessionAtStop != activeSessionId) return@post
-                finalizeStreamingSession(sessionAtStop)
-            }
-        }
-
-        updateState(State.IDLE)
-    }
-
-    private fun startStreamingSession(sessionId: Long, apiKey: String, isReconnect: Boolean = false) {
-        if (sessionId != activeSessionId) return
-        cancelSessionRotateTimer()
+    private fun startStreamingSession(sessionId: Long, apiKey: String) {
         val editorContext = if (geminiConfig.useEditorContext) {
-            try {
-                priorTextProvider?.getPriorText()
-            } catch (e: Exception) {
-                Log.e(TAG, "Prior text provider threw: ${e.message}")
-                null
-            }
-        } else {
-            null
-        }
-        val sessionConfig = GeminiTranscriptionClient.buildSessionConfig(
+            try { priorTextProvider?.getPriorText() } catch (_: Exception) { null }
+        } else null
+        val config = GeminiTranscriptionClient.buildSessionConfig(
             languageTag = getCurrentLanguageTag(),
             autoDetectLanguage = geminiConfig.autoDetectLanguage,
             transcriptionMode = geminiConfig.transcriptionMode,
             endOfSpeechSilenceMs = geminiConfig.endOfSpeechSilenceMs,
             userVocabulary = geminiConfig.customVocabulary,
-            editorContext = editorContext
+            editorContext = editorContext,
         )
-        streamSessionId = sessionId
         isStreamingConnecting = true
-        isStreamingReady = false
-        rotateAfterSpeechStops = false
-        streamConnectStartedAtMs = SystemClock.elapsedRealtime()
-        scheduleStreamConnectTimeout(sessionId)
-        if (!isReconnect) {
-            finalizeWhenStreamReady = false
-        }
-
-        transcriptionClient.startStreaming(
-            apiKey = apiKey,
-            sessionConfig = sessionConfig,
-            callback = object : GeminiTranscriptionClient.StreamingCallback {
-                override fun onStreamReady() {
-                    if (sessionId != activeSessionId) return
-                    cancelPendingReconnect()
-                    cancelStreamConnectTimeout()
-                    streamReconnectAttempts = 0
-                    isStreamingConnecting = false
-                    isStreamingReady = true
-                    acknowledgeStreamConnect(sessionId)
-                    scheduleSessionRotate(
-                        sessionId,
-                        GeminiTranscriptionClient.SESSION_ROTATE_AFTER_MS
-                    )
-                    flushPendingAudio(sessionId)
-                    if (finalizeWhenStreamReady) {
-                        finalizeWhenStreamReady = false
-                        finalizeTurnWhenStreamReady = false
-                        finalizeStreamingSession(sessionId)
-                    } else if (currentState == State.PAUSED) {
-                        finalizeTurnWhenStreamReady = false
-                        transcriptionClient.finalizeTurn()
-                    } else {
-                        finalizeTurnWhenStreamReady = false
+        scheduleConnectTimeout(sessionId)
+        transcriptionClient.startStreaming(apiKey, config, object : GeminiTranscriptionClient.StreamingCallback {
+            override fun onStreamReady() {
+                if (!isCurrent(sessionId)) return
+                connectTimeout?.let(mainHandler::removeCallbacks)
+                connectTimeout = null
+                isStreamingConnecting = false
+                isStreamingReady = true
+                // Stop capture at the session limit; never replace a socket that
+                // could still be carrying an unconfirmed prefix.
+                sessionLimit = Runnable {
+                    if (isCurrent(sessionId) && !isSessionStopping) {
+                        listener?.onError("Dictation session limit reached. Tap the mic after processing finishes.")
+                        stopRecording()
                     }
+                }.also { mainHandler.postDelayed(it, GeminiTranscriptionClient.SESSION_CAPTURE_LIMIT_MS) }
+                flushOutbound(sessionId)
+            }
+            override fun onHandshakeRestarted() {
+                // Only schema negotiation before setupComplete can retry. No
+                // audio has crossed the connection yet. Keep the original deadline.
+            }
+            override fun onTranscriptionResult(segment: TranscriptSegment) {
+                if (!isCurrent(sessionId) || segment.text.isBlank()) return
+                if (pendingTranscripts.size >= MAX_PENDING_TRANSCRIPTS) {
+                    failSession("Voice text queue is full. Dictation stopped before skipping text.")
+                    return
                 }
-
-                override fun onHandshakeRestarted() {
-                    if (sessionId != activeSessionId) return
-                    if (!isStreamingConnecting || isStreamingReady) return
-                    scheduleStreamConnectTimeout(sessionId)
-                }
-
-                override fun onTranscriptionResult(segment: TranscriptSegment) {
-                    if (sessionId != activeSessionId) return
-                    cancelStaleInterimFinalize()
-                    enqueueTranscript(segment, sessionId)
-                }
-
-                override fun onInterimTranscription() {
-                    if (sessionId != activeSessionId) return
-                    if (currentState != State.RECORDING || isSessionStopping) return
-                    scheduleStaleInterimFinalize(sessionId)
-                }
-
-                override fun onServerResponse(hasTranscriptText: Boolean) {
-                    if (sessionId != activeSessionId) return
-                    acknowledgeGeminiResponse(sessionId, hasTranscriptText)
-                    if (hasTranscriptText) {
-                        cancelStaleInterimFinalize()
-                    }
-                }
-
-                override fun onSessionExpiring(timeLeftMs: Long) {
-                    if (sessionId != activeSessionId) return
-                    scheduleSessionRotate(
-                        sessionId,
-                        timeLeftMs - SESSION_ROTATE_LEAD_MS,
-                        forceAfterMs = timeLeftMs - SESSION_ROTATE_FORCE_LEAD_MS
-                    )
-                }
-
-                override fun onStreamError(error: String) {
-                    if (sessionId != activeSessionId) return
-                    handleStreamDisconnected(sessionId, error)
-                }
-
-                override fun onStreamClosed() {
-                    if (sessionId != activeSessionId) return
-                    handleStreamDisconnected(sessionId, null)
+                pendingTranscripts.addLast(segment)
+                processTranscripts(sessionId)
+                if (!isCurrent(sessionId)) return
+                unconfirmedSpeech = false
+                finalTimeout?.let(mainHandler::removeCallbacks)
+                finalTimeout = null
+                notifyProcessingIdleIfDrained()
+            }
+            override fun onInterimTranscription() {
+                if (isCurrent(sessionId)) noteUnconfirmedSpeech(sessionId)
+            }
+            override fun onServerResponse(hasTranscriptText: Boolean) {
+                if (!isCurrent(sessionId)) return
+                responseTimeout?.let(mainHandler::removeCallbacks)
+                responseTimeout = null
+                // Interim and turnComplete prove responsiveness, not audio coverage.
+            }
+            override fun onSessionExpiring(timeLeftMs: Long) {
+                if (!isCurrent(sessionId) || isSessionStopping) return
+                listener?.onError("Dictation session is ending. Tap the mic after processing finishes.")
+                stopRecording()
+            }
+            override fun onStreamError(error: String) {
+                if (isCurrent(sessionId)) failSession(error)
+            }
+            override fun onStreamClosed() {
+                if (!isCurrent(sessionId)) return
+                if (!waitingForClose || unconfirmedSpeech || outbound.isNotEmpty()) {
+                    failSession("Dictation ended before all pending speech was confirmed.")
+                } else {
+                    endSession(cancelled = false)
                 }
             }
-        )
+        })
     }
 
-    private fun finalizeStreamingSession(sessionId: Long) {
-        if (sessionId != activeSessionId) return
-        if (streamSessionId != sessionId) return
+    private fun enqueueEnd(sessionId: Long, finish: Boolean) {
+        if (!isCurrent(sessionId)) return
+        outbound.addLast(Outbound.End(finish))
+        flushOutbound(sessionId)
+    }
 
-        cancelSessionRotateTimer()
-
-        if (isStreamingReady) {
-            flushPendingAudio(sessionId)
-            scheduleGeminiResponseWatchdog(sessionId, "stop_finalize")
-            // Sends audioStreamEnd and then keeps reading, so a phrase spoken
-            // right before stop is not lost when the user taps stop without
-            // waiting for the local silence window.
-            transcriptionClient.finishStreaming()
-            return
+    private fun flushOutbound(sessionId: Long) {
+        if (!isCurrent(sessionId) || !isStreamingReady || waitingForClose) return
+        audioRetry?.let(mainHandler::removeCallbacks)
+        audioRetry = null
+        while (isCurrent(sessionId)) {
+            val next = outbound.firstOrNull() ?: break
+            when (next) {
+                is Outbound.Audio -> {
+                    if (SystemClock.elapsedRealtime() - next.capturedAtMs >= PROGRESS_TIMEOUT_MS) {
+                        failSession("Voice audio upload stalled")
+                        return
+                    }
+                    when (transcriptionClient.offerAudioChunk(next.pcm)) {
+                        GeminiTranscriptionClient.AudioSendResult.ACCEPTED -> {
+                            outbound.removeFirst()
+                            pendingAudioBytes -= next.pcm.size
+                            armResponseTimeout(sessionId)
+                        }
+                        GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE -> {
+                            // Keep the exact head until the bounded socket queue has
+                            // capacity. Controls and later audio cannot overtake it.
+                            audioRetry = Runnable { flushOutbound(sessionId) }.also {
+                                mainHandler.postDelayed(it, AUDIO_RETRY_MS)
+                            }
+                            return
+                        }
+                        GeminiTranscriptionClient.AudioSendResult.FAILED -> {
+                            failSession("Voice audio could not be sent")
+                            return
+                        }
+                    }
+                }
+                is Outbound.End -> {
+                    val sent = if (next.finish) transcriptionClient.finishStreaming()
+                        else transcriptionClient.finalizeTurn()
+                    if (!sent) {
+                        failSession("Voice turn could not be finalized")
+                        return
+                    }
+                    outbound.removeFirst()
+                    armResponseTimeout(sessionId)
+                    if (next.finish) {
+                        waitingForClose = true
+                        drainTimeout = Runnable {
+                            drainTimeout = null
+                            if (isCurrent(sessionId)) failSession("Transcription did not finish closing")
+                        }.also { mainHandler.postDelayed(it, DRAIN_TIMEOUT_MS) }
+                        listener?.onProcessingStarted()
+                        return
+                    }
+                }
+            }
         }
-
-        if (isStreamingConnecting) {
-            // Stop requested before the session is ready. Finalize once onStreamReady fires.
-            finalizeWhenStreamReady = true
-            return
-        }
-
-        if (shouldReconnectWhileStopping() &&
-            scheduleReconnect(sessionId, "finalize requested with closed stream", allowWhileStopping = true)
-        ) {
-            return
-        }
-
-        if (pendingAudioChunks.isNotEmpty()) {
-            val message = "Final voice segment could not be transcribed completely"
-            Log.e(TAG, "$message: stream was unavailable during finalize")
-            listener?.onError(message)
-        }
-        // If the socket already died/closed, transition to idle processing state.
-        pendingAudioChunks.clear()
         notifyProcessingIdleIfDrained()
     }
 
-    /**
-     * Ask Gemini to end the current turn after the local silence detector reports
-     * the speaker paused, by sending `audioStreamEnd` (the documented "Hybrid
-     * VAD" pattern). The session stays open and the next audio chunk reopens the
-     * stream.
-     *
-     * The server's own end-of-speech detection is configured to be patient so
-     * mid-sentence pauses do not fragment an utterance and cost accuracy. That
-     * patience means a trailing phrase can sit unfinalized, so the user's
-     * `PREF_VOICE_CHUNK_SILENCE_SECONDS` pause acts as the backstop that always
-     * commits it.
-     *
-     * Fires at most once per speech-stop transition (gated by
-     * [hasFinalizedCurrentSilence], re-armed on the next onSpeechStarted). The
-     * chunk-silence window itself keeps calls naturally spaced, so no extra
-     * global rate limit is needed — one would risk dropping a legitimate flush
-     * between rapid back-to-back phrases.
-     */
-    private fun requestTurnFinalizeOnSilence(sessionId: Long) {
-        if (sessionId != activeSessionId) return
-        if (currentState != State.RECORDING) return
-        if (isSessionStopping) return
-        if (!isStreamingReady || streamSessionId != sessionId) return
-        if (hasFinalizedCurrentSilence) return
-
-        // Make sure any buffered audio is delivered before the finalize so the
-        // tail is part of the turn Gemini closes.
-        flushPendingAudio(sessionId)
-        if (!isStreamingReady) return
-
-        if (transcriptionClient.finalizeTurn()) {
-            hasFinalizedCurrentSilence = true
-            // Stop sending silence immediately; the next audio chunk would
-            // reopen the turn and Gemini would wait for another word.
-            holdAudioUntilSpeech = true
-            heldAudioPrefix.clear()
-            Log.i(TAG, "Turn finalize requested after local silence")
-            scheduleGeminiResponseWatchdog(sessionId, "turn_finalize")
-        }
-    }
-
-    private fun releaseHeldAudioPrefix(sessionId: Long) {
-        if (heldAudioPrefix.isEmpty()) return
-        val prefix = ArrayList<PendingAudioChunk>(heldAudioPrefix.size)
-        while (heldAudioPrefix.isNotEmpty()) {
-            val chunk = heldAudioPrefix.removeFirst()
-            if (chunk.sessionId == sessionId) {
-                prefix.add(chunk)
-            }
-        }
-        for (i in prefix.indices.reversed()) {
-            pendingAudioChunks.addFirst(prefix[i])
-        }
-        if (isStreamingReady && streamSessionId == sessionId) {
-            flushPendingAudio(sessionId)
-        }
-    }
-
-    private fun scheduleStaleInterimFinalize(sessionId: Long) {
-        cancelStaleInterimFinalize()
-        if (sessionId != activeSessionId) return
-        if (currentState != State.RECORDING || isSessionStopping) return
-        val runnable = Runnable {
-            staleInterimFinalizeRunnable = null
-            if (sessionId != activeSessionId) return@Runnable
-            if (currentState != State.RECORDING || isSessionStopping) return@Runnable
-            // Holding audio after finalize is released only on onSpeechStarted.
-            // If local VAD still thinks the user is talking, that callback will
-            // not fire and later speech would be dropped. Only use this backup
-            // when the recorder is actually silent.
-            if (voiceRecorder.isCurrentlySpeaking) return@Runnable
-            Log.i(TAG, "Stale interim hypothesis — requesting turn finalize")
-            requestTurnFinalizeOnSilence(sessionId)
-        }
-        staleInterimFinalizeRunnable = runnable
-        mainHandler.postDelayed(runnable, STALE_INTERIM_FINALIZE_MS)
-    }
-
-    private fun cancelStaleInterimFinalize() {
-        val runnable = staleInterimFinalizeRunnable ?: return
-        mainHandler.removeCallbacks(runnable)
-        staleInterimFinalizeRunnable = null
-    }
-
-    private fun onAudioChunkCaptured(pcmData: ByteArray, sessionId: Long) {
-        if (sessionId != activeSessionId) return
-        if (pcmData.isEmpty()) return
-
-        if (holdAudioUntilSpeech) {
-            heldAudioPrefix.addLast(PendingAudioChunk(sessionId, pcmData))
-            while (heldAudioPrefix.size > PREFIX_HOLD_CHUNKS) {
-                heldAudioPrefix.removeFirst()
-            }
-            return
-        }
-
-        while (pendingAudioChunks.size >= MAX_PENDING_AUDIO_CHUNKS) {
-            pendingAudioChunks.removeFirst()
-            Log.w(
-                TAG,
-                "Dropped oldest buffered audio chunk " +
-                    "(buffer full at $MAX_PENDING_AUDIO_CHUNKS)"
-            )
-            listener?.onError("Voice audio buffer overflowed before transcription completed")
-        }
-        // VoiceRecorder already delivers a fresh chunk copy for each callback.
-        pendingAudioChunks.addLast(PendingAudioChunk(sessionId, pcmData))
-
-        if (isStreamingReady && streamSessionId == sessionId) {
-            flushPendingAudio(sessionId)
-        } else if (!isStreamingConnecting && !isSessionStopping) {
-            scheduleReconnectOrStop(sessionId, "audio queued while stream unavailable")
-        }
-    }
-
-    private fun flushPendingAudio(sessionId: Long) {
-        if (!isStreamingReady || streamSessionId != sessionId) return
-        var sentAny = false
-        while (true) {
-            val next = pendingAudioChunks.firstOrNull() ?: break
-            if (next.sessionId != sessionId) {
-                pendingAudioChunks.removeFirst()
-                continue
-            }
-            if (!transcriptionClient.sendAudioChunk(next.pcmData)) {
-                // Keep remaining queue; reconnect and retry in FIFO order.
-                isStreamingReady = false
-                isStreamingConnecting = false
-                Log.w(TAG, "Failed flushing buffered audio chunk; scheduling stream reconnect")
-                scheduleReconnectOrStop(sessionId, "audio send failed")
-                return
-            }
-            pendingAudioChunks.removeFirst()
-            sentAny = true
-        }
-        if (
-            sentAny &&
-            currentState == State.RECORDING &&
-            !isSessionStopping
-        ) {
-            scheduleGeminiResponseWatchdog(sessionId, "audio_pending")
-        }
-    }
-
-    private fun enqueueTranscript(segment: TranscriptSegment, sessionId: Long) {
-        if (sessionId != activeSessionId) {
-            Log.i(TAG, "Dropping transcript from stale session $sessionId")
-            return
-        }
-        val normalized = segment.text.trim()
-        if (normalized.isEmpty()) return
-
-        while (pendingTranscripts.size >= MAX_PENDING_TRANSCRIPTS) {
-            val oldest = pendingTranscripts.removeFirstOrNull()
-            val secondOldest = pendingTranscripts.removeFirstOrNull()
-            val merged = mergeTranscriptText(
-                first = oldest?.text,
-                second = secondOldest?.text,
-                secondAttachesToPrevious = secondOldest?.attachesToPrevious ?: false
-            )
-            val mergedSessionId = secondOldest?.sessionId ?: oldest?.sessionId ?: sessionId
-            if (merged.isNotEmpty()) {
-                pendingTranscripts.addFirst(
-                    PendingTranscript(
-                        sessionId = mergedSessionId,
-                        text = merged,
-                        attachesToPrevious = oldest?.attachesToPrevious ?: false
-                    )
-                )
-            }
-            Log.w(TAG, "Pending transcript queue full; coalesced oldest entries")
-        }
-        pendingTranscripts.addLast(
-            PendingTranscript(
-                sessionId = sessionId,
-                text = normalized,
-                attachesToPrevious = segment.attachesToPrevious
-            )
-        )
-        processNextTranscript()
-    }
-
-    private fun processNextTranscript() {
+    private fun processTranscripts(sessionId: Long) {
         if (isDispatchingTranscripts) return
         isDispatchingTranscripts = true
         try {
-            var notifiedProcessingStarted = false
-            while (true) {
-                val pending = pendingTranscripts.removeFirstOrNull() ?: break
-                if (pending.sessionId != activeSessionId) {
-                    Log.i(TAG, "Skipping transcript from stale session ${pending.sessionId}")
-                    continue
+            while (isCurrent(sessionId)) {
+                val head = pendingTranscripts.firstOrNull() ?: break
+                listener?.onProcessingStarted()
+                val accepted = try {
+                    listener?.onTranscriptionResult(head.text, head.attachesToPrevious) == true
+                } catch (e: Exception) {
+                    Log.e(TAG, "Editor voice insertion failed: ${e.message}")
+                    false
                 }
-                if (!notifiedProcessingStarted) {
-                    listener?.onProcessingStarted()
-                    notifiedProcessingStarted = true
+                if (!isCurrent(sessionId)) return
+                if (!accepted) {
+                    // The editor may have partially applied the operation. Do not
+                    // retry it, advance the FIFO, or attempt a marker in that editor.
+                    failSession("The editor rejected dictation. Dictation stopped.", mark = false)
+                    return
                 }
-                listener?.onTranscriptionResult(pending.text, pending.attachesToPrevious)
+                pendingTranscripts.removeFirst()
             }
         } finally {
             isDispatchingTranscripts = false
         }
-        notifyProcessingIdleIfDrained()
+    }
+
+    private fun noteUnconfirmedSpeech(sessionId: Long) {
+        unconfirmedSpeech = true
+        armResponseTimeout(sessionId)
+        listener?.onProcessingStarted()
+        if (finalTimeout != null) return
+        finalTimeout = Runnable {
+            finalTimeout = null
+            if (isCurrent(sessionId) && unconfirmedSpeech) {
+                failSession("No final transcript arrived for pending speech")
+            }
+        }.also { mainHandler.postDelayed(it, PROGRESS_TIMEOUT_MS) }
+    }
+
+    private fun armResponseTimeout(sessionId: Long) {
+        if (!unconfirmedSpeech || responseTimeout != null) return // PCM cannot postpone a stalled stream.
+        responseTimeout = Runnable {
+            responseTimeout = null
+            if (isCurrent(sessionId)) failSession("Transcription stopped responding")
+        }.also { mainHandler.postDelayed(it, PROGRESS_TIMEOUT_MS) }
+    }
+
+    private fun scheduleConnectTimeout(sessionId: Long) {
+        connectTimeout = Runnable {
+            connectTimeout = null
+            if (isCurrent(sessionId) && isStreamingConnecting) failSession("Transcription connection timed out")
+        }.also { mainHandler.postDelayed(it, STREAM_CONNECT_TIMEOUT_MS) }
+    }
+
+    private fun failSession(error: String, mark: Boolean = true) {
+        if (!sessionOpen) return
+        val insertMarker = mark && hasCapturedAudio
+        Log.e(TAG, "Dictation integrity failure: $error")
+        // Invalidate before stopping the mic or calling the editor: callbacks
+        // already queued by either transport or recorder become harmless.
+        endSession(cancelled = true)
+        if (insertMarker) {
+            try { listener?.onTranscriptionInterrupted(INTERRUPTION_MARKER) }
+            catch (e: Exception) { Log.e(TAG, "Could not insert interruption marker: ${e.message}") }
+        }
+        listener?.onError(error)
+    }
+
+    private fun endSession(cancelled: Boolean) {
+        val hadPendingWork = hasPendingProcessing()
+        sessionOpen = false
+        acceptingAudio = false
+        activeSessionId += 1
+        networkMonitor.stop()
+        cancelAutoStopTimer()
+        listOf(audioRetry, connectTimeout, responseTimeout, finalTimeout, sessionLimit, drainTimeout)
+            .forEach { it?.let(mainHandler::removeCallbacks) }
+        audioRetry = null
+        connectTimeout = null
+        responseTimeout = null
+        finalTimeout = null
+        sessionLimit = null
+        drainTimeout = null
+        isStreamingReady = false
+        isStreamingConnecting = false
+        isSessionStopping = false
+        waitingForClose = false
+        unconfirmedSpeech = false
+        outbound.clear()
+        pendingTranscripts.clear()
+        pendingAudioBytes = 0
+        transcriptionClient.cancelAll()
+        voiceRecorder.stopRecording()
+        updateState(State.IDLE)
+        if (cancelled && hadPendingWork) listener?.onPendingProcessingCancelled()
+        listener?.onProcessingIdle()
     }
 
     private fun notifyProcessingIdleIfDrained() {
-        if (
-            !isDispatchingTranscripts &&
-            pendingTranscripts.isEmpty() &&
-            pendingAudioChunks.isEmpty() &&
-            !isStreamingConnecting &&
-            !finalizeWhenStreamReady
-        ) {
-            listener?.onProcessingIdle()
-        }
+        if (!hasPendingProcessing()) listener?.onProcessingIdle()
     }
-
-    private fun mergeTranscriptText(
-        first: String?,
-        second: String?,
-        secondAttachesToPrevious: Boolean
-    ): String {
-        val left = first.orEmpty()
-        val right = second.orEmpty()
-        if (left.isEmpty()) return right
-        if (right.isEmpty()) return left
-        val needsSpace = !secondAttachesToPrevious &&
-            !left.last().isWhitespace() &&
-            !right.first().isWhitespace()
-        return if (needsSpace) "$left $right" else left + right
-    }
-
-    private fun handleStreamDisconnected(sessionId: Long, error: String?) {
-        if (sessionId != activeSessionId) return
-        rotateAfterSpeechStops = false
-        cancelGeminiResponseWatchdog()
-        cancelSessionRotateTimer()
-        if (pendingReconnectRunnable != null && isStreamingConnecting && !isStreamingReady) {
-            Log.i(TAG, "Ignoring duplicate stream disconnect callback while reconnect is already scheduled")
-            return
-        }
-        cancelStreamConnectTimeout()
-        isStreamingReady = false
-        isStreamingConnecting = false
-
-        if (currentState == State.PAUSED) {
-            Log.i(TAG, "Gemini stream disconnected while paused — waiting for resume")
-            notifyProcessingIdleIfDrained()
-            return
-        }
-
-        if (isSessionStopping) {
-            if (shouldReconnectWhileStopping() &&
-                scheduleReconnect(sessionId, error ?: "stream closed while stopping", allowWhileStopping = true)
-            ) {
-                return
-            }
-            if (pendingAudioChunks.isNotEmpty()) {
-                val message = "Final voice segment could not be transcribed completely"
-                Log.e(TAG, "$message: ${error ?: "stream closed"}")
-                listener?.onError(message)
-            }
-            pendingAudioChunks.clear()
-            notifyProcessingIdleIfDrained()
-            return
-        }
-
-        // Rejected/auth/client errors should fail fast instead of retrying the
-        // same invalid session repeatedly.
-        if (isUnrecoverableError(error)) {
-            pendingAudioChunks.clear()
-            val message = error ?: "Gemini stream rejected"
-            Log.e(TAG, "Unrecoverable stream error — stopping recording: $message")
-            listener?.onError(message)
-            stopRecordingInternal(cancelPending = true)
-            return
-        }
-
-        val sessionLikelyActive =
-            currentState != State.IDLE || voiceRecorder.isCurrentlyRecording
-
-        if (sessionLikelyActive && scheduleReconnect(sessionId, error ?: "stream closed")) {
-            return
-        }
-
-        pendingAudioChunks.clear()
-        val message = error ?: "Gemini stream closed"
-        Log.e(TAG, "Stream disconnected unrecoverably: $message")
-        listener?.onError(message)
-        stopRecordingInternal(cancelPending = true)
-    }
-
-    private fun isUnrecoverableError(error: String?): Boolean {
-        if (error == null) return false
-        val lower = error.lowercase()
-        return (lower.contains("invalid") && lower.contains("api key")) ||
-            lower.contains("not allowed to use") ||
-            lower.contains("missing api key") ||
-            lower.contains("unauthenticated") ||
-            lower.contains("unauthorized") ||
-            lower.contains("permission_denied") ||
-            lower.contains("authentication failed") ||
-            lower.contains("connection rejected") ||
-            lower.contains("is not available for this key") ||
-            lower.contains("rejected the request") ||
-            lower.contains("rejected this api key") ||
-            lower.contains("rejected the transcription session setup") ||
-            lower.contains("requires billing") ||
-            lower.contains("rate limited") ||
-            lower.contains("too many requests")
-    }
-
-    private fun scheduleReconnectOrStop(sessionId: Long, reason: String) {
-        if (sessionId != activeSessionId) return
-        val allowWhileStopping = shouldReconnectWhileStopping()
-        if (isSessionStopping && !allowWhileStopping) return
-        if (scheduleReconnect(sessionId, reason, allowWhileStopping = allowWhileStopping)) return
-
-        pendingAudioChunks.clear()
-        val message = if (allowWhileStopping) {
-            "Final voice segment could not be transcribed completely"
-        } else {
-            "Gemini stream unavailable: $reason"
-        }
-        Log.e(TAG, message)
-        listener?.onError(message)
-        stopRecordingInternal(cancelPending = true)
-    }
-
-    private fun scheduleReconnect(
-        sessionId: Long,
-        reason: String,
-        allowWhileStopping: Boolean = false
-    ): Boolean {
-        if (sessionId != activeSessionId) return false
-        if (isSessionStopping && !allowWhileStopping) return false
-        if (streamReconnectAttempts >= MAX_STREAM_RECONNECT_ATTEMPTS) {
-            Log.e(
-                TAG,
-                "Reconnect attempts exhausted ($MAX_STREAM_RECONNECT_ATTEMPTS), reason=$reason"
-            )
-            return false
-        }
-        if (sessionApiKey.isBlank()) {
-            Log.e(TAG, "Cannot reconnect stream: missing Gemini API key")
-            return false
-        }
-        cancelPendingReconnect()
-        streamReconnectAttempts += 1
-        val delayMs = STREAM_RECONNECT_BASE_DELAY_MS * (1L shl (streamReconnectAttempts - 1))
-        isStreamingConnecting = true
-        Log.w(
-            TAG,
-            "Scheduling Gemini reconnect in ${delayMs}ms " +
-                "(attempt $streamReconnectAttempts/$MAX_STREAM_RECONNECT_ATTEMPTS, reason=$reason)"
-        )
-        val reconnectRunnable = Runnable {
-            pendingReconnectRunnable = null
-            if (sessionId != activeSessionId) {
-                return@Runnable
-            }
-            if (isSessionStopping && !allowWhileStopping) {
-                return@Runnable
-            }
-            val sessionStillActive =
-                currentState != State.IDLE ||
-                    voiceRecorder.isCurrentlyRecording ||
-                    (allowWhileStopping && shouldReconnectWhileStopping())
-            if (!sessionStillActive) {
-                Log.i(TAG, "Skipping reconnect: voice session no longer active")
-                isStreamingConnecting = false
-                return@Runnable
-            }
-            startStreamingSession(sessionId, sessionApiKey, isReconnect = true)
-        }
-        pendingReconnectRunnable = reconnectRunnable
-        mainHandler.postDelayed(reconnectRunnable, delayMs)
-        return true
-    }
-
-    private fun shouldReconnectWhileStopping(): Boolean {
-        return isSessionStopping && (pendingAudioChunks.isNotEmpty() || finalizeWhenStreamReady)
-    }
-
-    private fun cancelPendingReconnect() {
-        val runnable = pendingReconnectRunnable ?: return
-        mainHandler.removeCallbacks(runnable)
-        pendingReconnectRunnable = null
-    }
-
-    private fun scheduleStreamConnectTimeout(sessionId: Long) {
-        cancelStreamConnectTimeout()
-        val timeoutRunnable = Runnable {
-            pendingStreamConnectTimeoutRunnable = null
-            if (sessionId != activeSessionId) return@Runnable
-            if (!isStreamingConnecting || isStreamingReady || streamSessionId != sessionId) return@Runnable
-            val message = "Gemini stream connection timed out"
-            Log.e(
-                TAG,
-                "VOICE_RESPONSE timeout after ${STREAM_CONNECT_TIMEOUT_MS}ms (stream_connect): $message"
-            )
-            // Ensure the stale socket lifecycle is torn down before reconnection handling.
-            transcriptionClient.cancelAll()
-            handleStreamDisconnected(sessionId, message)
-        }
-        pendingStreamConnectTimeoutRunnable = timeoutRunnable
-        mainHandler.postDelayed(timeoutRunnable, STREAM_CONNECT_TIMEOUT_MS)
-    }
-
-    private fun cancelStreamConnectTimeout() {
-        val runnable = pendingStreamConnectTimeoutRunnable ?: return
-        mainHandler.removeCallbacks(runnable)
-        pendingStreamConnectTimeoutRunnable = null
-    }
-
-    /**
-     * Move the dictation onto a fresh connection before the current one is
-     * terminated. Live transcription sessions are capped at 10 minutes, and the
-     * server announces the impending disconnect with `goAway`. Rotating is not an
-     * error, so it does not consume a reconnect attempt; buffered audio carries
-     * across the gap.
-     *
-     * If the user is still talking, wait for the next local silence so the
-     * current utterance can finalize on the outgoing socket. [forceAfterMs]
-     * (used for `goAway`) is the last moment we can wait.
-     */
-    private fun scheduleSessionRotate(sessionId: Long, delayMs: Long, forceAfterMs: Long? = null) {
-        if (sessionId != activeSessionId) return
-        cancelSessionRotateTimer()
-        val safeDelayMs = delayMs.coerceAtLeast(0L)
-        val rotateRunnable = Runnable {
-            pendingSessionRotateRunnable = null
-            if (sessionId != activeSessionId) return@Runnable
-            if (isSessionStopping || currentState == State.IDLE) return@Runnable
-            if (sessionApiKey.isBlank()) return@Runnable
-            if (voiceRecorder.isCurrentlySpeaking) {
-                // goAway with timeLeft under the force lead collapses both
-                // delays to 0, so no force timer is armed. Rotate now instead
-                // of waiting for silence while the server is already aborting.
-                val forceDelay = forceAfterMs?.coerceAtLeast(0L)
-                if (forceDelay != null && forceDelay <= safeDelayMs) {
-                    rotateStreamingSession(sessionId, "goAway imminent")
-                    return@Runnable
-                }
-                rotateAfterSpeechStops = true
-                Log.i(TAG, "Deferring Gemini session rotate until the current utterance ends")
-                return@Runnable
-            }
-            rotateStreamingSession(sessionId, "scheduled")
-        }
-        pendingSessionRotateRunnable = rotateRunnable
-        mainHandler.postDelayed(rotateRunnable, safeDelayMs)
-        if (forceAfterMs != null) {
-            val forceDelay = forceAfterMs.coerceAtLeast(safeDelayMs)
-            if (forceDelay > safeDelayMs) {
-                val forceRunnable = Runnable {
-                    pendingForceRotateRunnable = null
-                    if (sessionId != activeSessionId) return@Runnable
-                    if (!rotateAfterSpeechStops) return@Runnable
-                    rotateAfterSpeechStops = false
-                    cancelRotateAfterTurnSettle()
-                    rotateStreamingSession(sessionId, "goAway deadline")
-                }
-                pendingForceRotateRunnable = forceRunnable
-                mainHandler.postDelayed(forceRunnable, forceDelay)
-            }
-        }
-    }
-
-    private fun rotateStreamingSession(sessionId: Long, reason: String) {
-        if (sessionId != activeSessionId) return
-        if (isSessionStopping || currentState == State.IDLE) return
-        if (sessionApiKey.isBlank()) return
-        Log.i(TAG, "Rotating Gemini session onto a fresh connection ($reason)")
-        streamReconnectAttempts = 0
-        startStreamingSession(sessionId, sessionApiKey, isReconnect = true)
-    }
-
-    /**
-     * After a deferred rotate, [requestTurnFinalizeOnSilence] only sends
-     * `audioStreamEnd`. Wait for the leftover-flush window so a polished final
-     * can arrive before the outgoing socket is cancelled. A `goAway` force
-     * deadline still rotates immediately.
-     */
-    private fun scheduleRotateAfterTurnSettle(sessionId: Long) {
-        if (sessionId != activeSessionId) return
-        cancelRotateAfterTurnSettle()
-        val runnable = Runnable {
-            pendingRotateAfterFinalizeRunnable = null
-            if (sessionId != activeSessionId) return@Runnable
-            if (!rotateAfterSpeechStops) return@Runnable
-            rotateAfterSpeechStops = false
-            rotateStreamingSession(sessionId, "speech stopped")
-        }
-        pendingRotateAfterFinalizeRunnable = runnable
-        mainHandler.postDelayed(
-            runnable,
-            GeminiTranscriptionClient.INTERIM_FLUSH_AFTER_FINALIZE_MS
-        )
-        Log.i(TAG, "Waiting for leftover flush before Gemini session rotate")
-    }
-
-    private fun cancelRotateAfterTurnSettle() {
-        pendingRotateAfterFinalizeRunnable?.let { mainHandler.removeCallbacks(it) }
-        pendingRotateAfterFinalizeRunnable = null
-    }
-
-    private fun cancelSessionRotateTimer() {
-        pendingSessionRotateRunnable?.let { mainHandler.removeCallbacks(it) }
-        pendingSessionRotateRunnable = null
-        pendingForceRotateRunnable?.let { mainHandler.removeCallbacks(it) }
-        pendingForceRotateRunnable = null
-        cancelRotateAfterTurnSettle()
-    }
-
     private fun reloadRuntimeConfig() {
         val prefs = context.prefs()
 
@@ -1188,61 +552,6 @@ class VoiceInputManager(private val context: Context) {
 
     private fun cancelAutoStopTimer() {
         mainHandler.removeCallbacks(autoStopSilenceRunnable)
-    }
-
-    // ── Gemini response latency watchdog ───────────────────────────────
-
-    private fun scheduleGeminiResponseWatchdog(
-        sessionId: Long,
-        reason: String,
-        timeoutMs: Long = GEMINI_RESPONSE_TIMEOUT_MS
-    ) {
-        cancelGeminiResponseWatchdog()
-        val startedAtMs = SystemClock.elapsedRealtime()
-        awaitingGeminiResponse = AwaitingGeminiResponse(
-            sessionId = sessionId,
-            reason = reason,
-            startedAtMs = startedAtMs,
-            timeoutMs = timeoutMs
-        )
-        val runnable = Runnable {
-            geminiResponseTimeoutRunnable = null
-            val pending = awaitingGeminiResponse ?: return@Runnable
-            if (pending.sessionId != activeSessionId) return@Runnable
-            val elapsed = SystemClock.elapsedRealtime() - pending.startedAtMs
-            awaitingGeminiResponse = null
-            Log.e(
-                TAG,
-                "VOICE_RESPONSE timeout after ${elapsed}ms (${pending.reason}): " +
-                    "no Gemini response; streamReady=$isStreamingReady, " +
-                    "pendingAudio=${pendingAudioChunks.size}, " +
-                    "reconnectAttempt=$streamReconnectAttempts"
-            )
-        }
-        geminiResponseTimeoutRunnable = runnable
-        mainHandler.postDelayed(runnable, timeoutMs)
-    }
-
-    private fun acknowledgeStreamConnect(sessionId: Long) {
-        if (sessionId != activeSessionId || streamConnectStartedAtMs <= 0L) return
-        val elapsed = SystemClock.elapsedRealtime() - streamConnectStartedAtMs
-        streamConnectStartedAtMs = 0L
-        Log.i(TAG, "VOICE_RESPONSE ok in ${elapsed}ms (stream_connect): stream ready")
-    }
-
-    private fun acknowledgeGeminiResponse(sessionId: Long, hasTranscriptText: Boolean) {
-        val pending = awaitingGeminiResponse ?: return
-        if (pending.sessionId != sessionId) return
-        cancelGeminiResponseWatchdog()
-        val elapsed = SystemClock.elapsedRealtime() - pending.startedAtMs
-        val detail = if (hasTranscriptText) "transcript received" else "interim or turn boundary"
-        Log.i(TAG, "VOICE_RESPONSE ok in ${elapsed}ms (${pending.reason}): $detail")
-    }
-
-    private fun cancelGeminiResponseWatchdog() {
-        geminiResponseTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
-        geminiResponseTimeoutRunnable = null
-        awaitingGeminiResponse = null
     }
 
     // ── Settings ───────────────────────────────────────────────────────

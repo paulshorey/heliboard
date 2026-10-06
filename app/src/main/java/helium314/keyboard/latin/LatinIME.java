@@ -2092,7 +2092,7 @@ public class LatinIME extends InputMethodService implements
             }
 
             @Override
-            public void onTranscriptionResult(@NonNull String text, boolean attachesToPrevious) {
+            public boolean onTranscriptionResult(@NonNull String text, boolean attachesToPrevious) {
                 try {
                     Log.i(TAG, "VOICE raw transcript=[" + text + "]");
                     final String trimmed = text.trim();
@@ -2101,19 +2101,26 @@ public class LatinIME extends InputMethodService implements
                         if (mVoiceInputManager == null || !mVoiceInputManager.hasPendingProcessing()) {
                             mKeyboardSwitcher.hideProcessingIndicator();
                         }
-                        return;
+                        return true;
                     }
                     Log.i(
                             TAG,
                             "VOICE_STEP_4 transcription arrived in IME (" +
                                     trimmed.length() + " chars)"
                     );
-                    commitVoiceTranscriptionText(
+                    return commitVoiceTranscriptionText(
                             prepareVoiceTranscriptionText(trimmed, attachesToPrevious)
                     );
                 } catch (Exception e) {
                     Log.e(TAG, "Error processing transcription result: " + e.getMessage(), e);
+                    return false;
                 }
+            }
+
+            @Override
+            public boolean onTranscriptionInterrupted(@NonNull String marker) {
+                // Keep the marker literal and never rewrite the confirmed paragraph.
+                return commitVoiceText(marker, false);
             }
 
             @Override
@@ -2151,45 +2158,42 @@ public class LatinIME extends InputMethodService implements
      *
      * @param text The prepared transcription text to insert
      */
-    private void commitVoiceTranscriptionText(@NonNull final String text) {
-        if (text.isEmpty()) {
-            return;
-        }
+    private boolean commitVoiceTranscriptionText(@NonNull final String text) {
+        return commitVoiceText(text, true);
+    }
+
+    private boolean commitVoiceText(@NonNull final String text, final boolean processTranscript) {
+        if (text.isEmpty()) return true;
+        boolean batchStarted = false;
         try {
-            // Everything — finishInput, commitText, and optional post-processing
-            // replacement — is wrapped in a SINGLE batch edit.  This ensures the
-            // framework delivers only ONE onUpdateSelection whose newSelStart
-            // matches our final mExpectedSelStart.  Without this, the intermediate
-            // onUpdateSelection from the commit would arrive while mExpectedSelStart
-            // has already been shifted by the post-processing delete+re-commit,
-            // causing isBelatedExpectedUpdate to return false and the voice-cancel
-            // guard in onUpdateSelection to kill the recording session.
+            // beginBatchEdit increments the wrapper's nesting before calling the
+            // host, so finally must balance it even if the host throws there.
+            batchStarted = true;
             mInputLogic.mConnection.beginBatchEdit();
+            if (!mInputLogic.mConnection.isConnected()) return false;
             mInputLogic.finishInput();
 
-            // A pause can make Gemini finalize a sentence with "." before it
-            // hears a separately dictated punctuation mark. Replace that period
-            // only for a standalone voice punctuation segment. Do this at
-            // insertion time so earlier text is untouched and a selection still
-            // follows normal commitText replacement behavior.
-            if (text.length() == 1 && "!?,:;".indexOf(text.charAt(0)) >= 0
+            if (processTranscript && text.length() == 1 && "!?,:;".indexOf(text.charAt(0)) >= 0
                     && !mInputLogic.mConnection.hasSelection()) {
                 final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
                 if (before != null && before.length() == 1 && before.charAt(0) == '.') {
-                    mInputLogic.mConnection.deleteTextBeforeCursor(1);
+                    if (!mInputLogic.mConnection.deleteTextBeforeCursor(1)) return false;
                 }
             }
-            mInputLogic.mConnection.commitText(text, 1);
-
-            runTranscriptPostProcessing();
-
-            mInputLogic.mConnection.endBatchEdit();
-
-            // Text has been inserted — hide the processing spinner.
-            mKeyboardSwitcher.hideProcessingIndicator();
+            String insertion = text;
+            if (!processTranscript && !mInputLogic.mConnection.hasSelection()) {
+                final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
+                if (before != null && before.length() > 0 && !Character.isWhitespace(before.charAt(0))) {
+                    insertion = " " + text;
+                }
+            }
+            if (!mInputLogic.mConnection.commitText(insertion, 1)) return false;
+            return !processTranscript || runTranscriptPostProcessing();
         } catch (Exception e) {
-            Log.e(TAG, "Error inserting transcription text: " + e.getMessage(), e);
-            mKeyboardSwitcher.hideProcessingIndicator();
+            Log.e(TAG, "Error inserting voice text: " + e.getMessage(), e);
+            return false;
+        } finally {
+            if (batchStarted) mInputLogic.mConnection.endBatchEdit();
         }
     }
 
@@ -2201,32 +2205,32 @@ public class LatinIME extends InputMethodService implements
      * does not produce a separate onUpdateSelection that confuses the voice-input
      * cursor guard.
      */
-    private void runTranscriptPostProcessing() {
+    private boolean runTranscriptPostProcessing() {
         final int maxParagraphLen = Constants.EDITOR_CONTENTS_CACHE_SIZE;
         final CharSequence beforeCursor =
                 mInputLogic.mConnection.getTextBeforeCursor(maxParagraphLen, 0);
         if (beforeCursor == null || beforeCursor.length() == 0) {
-            return;
+            return true;
         }
 
         final String before = beforeCursor.toString();
         final int newlinePos = before.lastIndexOf('\n');
         final String paragraph = (newlinePos >= 0) ? before.substring(newlinePos + 1) : before;
         if (paragraph.isEmpty()) {
-            return;
+            return true;
         }
 
         final String corrected =
                 TranscriptPostProcessor.INSTANCE.processCurrentParagraph(paragraph);
         if (corrected == null) {
-            return;
+            return true;
         }
 
         Log.i(TAG, "VOICE post-processing: replacing paragraph ("
                 + paragraph.length() + " → " + corrected.length() + " chars)");
 
-        mInputLogic.mConnection.deleteTextBeforeCursor(paragraph.length());
-        mInputLogic.mConnection.commitText(corrected, 1);
+        if (!mInputLogic.mConnection.deleteTextBeforeCursor(paragraph.length())) return false;
+        return mInputLogic.mConnection.commitText(corrected, 1);
     }
 
     /**
