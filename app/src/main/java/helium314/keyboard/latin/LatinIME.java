@@ -2110,7 +2110,9 @@ public class LatinIME extends InputMethodService implements
                             prepareVoiceTranscriptionText(trimmed, attachesToPrevious)
                     );
                 } catch (Exception e) {
-                    Log.e(TAG, "Error processing transcription result: " + e.getMessage(), e);
+                    Log.e(TAG, "Editor could not prepare voice text; stopping dictation");
+                    if (mVoiceInputManager != null) mVoiceInputManager.cancelRecording();
+                    showVoiceErrorToast("The editor could not accept voice text. Dictation stopped.");
                 }
             }
 
@@ -2122,8 +2124,13 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onError(@NonNull String error) {
                 Log.e(TAG, "Voice input error: " + error);
-                mKeyboardSwitcher.hideProcessingIndicator();
+                refreshVoiceProcessingIndicator();
                 showVoiceErrorToast(error);
+            }
+
+            @Override
+            public void onTranscriptionInterrupted() {
+                commitVoiceTranscriptionText(" [Dictation interrupted] ");
             }
 
             @Override
@@ -2132,6 +2139,14 @@ public class LatinIME extends InputMethodService implements
                 launchSetupAppSettings();
             }
         });
+    }
+
+    private void refreshVoiceProcessingIndicator() {
+        if (mVoiceInputManager != null && mVoiceInputManager.hasPendingProcessing()) {
+            mKeyboardSwitcher.showProcessingIndicator();
+        } else {
+            mKeyboardSwitcher.hideProcessingIndicator();
+        }
     }
 
     /**
@@ -2163,31 +2178,39 @@ public class LatinIME extends InputMethodService implements
             // causing isBelatedExpectedUpdate to return false and the voice-cancel
             // guard in onUpdateSelection to kill the recording session.
             mInputLogic.mConnection.beginBatchEdit();
-            mInputLogic.finishInput();
+            try {
+                mInputLogic.finishInput();
 
-            // A pause can make MAI finalize a sentence with "." before it
-            // hears a separately dictated punctuation mark. Replace that period
-            // only for a standalone voice punctuation segment. Do this at
-            // insertion time so earlier text is untouched and a selection still
-            // follows normal commitText replacement behavior.
-            if (text.length() == 1 && "!?,:;".indexOf(text.charAt(0)) >= 0
-                    && !mInputLogic.mConnection.hasSelection()) {
-                final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
-                if (before != null && before.length() == 1 && before.charAt(0) == '.') {
-                    mInputLogic.mConnection.deleteTextBeforeCursor(1);
+                // A pause can make MAI finalize a sentence with "." before it
+                // hears a separately dictated punctuation mark. Replace that period
+                // only for a standalone voice punctuation segment. Do this at
+                // insertion time so earlier text is untouched and a selection still
+                // follows normal commitText replacement behavior.
+                if (text.length() == 1 && "!?,:;".indexOf(text.charAt(0)) >= 0
+                        && !mInputLogic.mConnection.hasSelection()) {
+                    final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
+                    if (before != null && before.length() == 1 && before.charAt(0) == '.') {
+                        mInputLogic.mConnection.deleteTextBeforeCursor(1);
+                    }
                 }
+                if (!mInputLogic.mConnection.commitText(text, 1)) {
+                    throw new IllegalStateException("Editor rejected voice insertion");
+                }
+
+                runTranscriptPostProcessing();
+
+            } finally {
+                mInputLogic.mConnection.endBatchEdit();
             }
-            mInputLogic.mConnection.commitText(text, 1);
 
-            runTranscriptPostProcessing();
-
-            mInputLogic.mConnection.endBatchEdit();
-
-            // Text has been inserted — hide the processing spinner.
-            mKeyboardSwitcher.hideProcessingIndicator();
+            refreshVoiceProcessingIndicator();
         } catch (Exception e) {
-            Log.e(TAG, "Error inserting transcription text: " + e.getMessage(), e);
+            // Do not continue dictating after an unwritten final. Exception messages
+            // from a host editor may contain text, so keep diagnostics generic.
+            Log.e(TAG, "Editor could not accept voice text; stopping dictation");
+            if (mVoiceInputManager != null) mVoiceInputManager.cancelRecording();
             mKeyboardSwitcher.hideProcessingIndicator();
+            showVoiceErrorToast("The editor could not accept voice text. Dictation stopped.");
         }
     }
 
@@ -2224,7 +2247,9 @@ public class LatinIME extends InputMethodService implements
                 + paragraph.length() + " → " + corrected.length() + " chars)");
 
         mInputLogic.mConnection.deleteTextBeforeCursor(paragraph.length());
-        mInputLogic.mConnection.commitText(corrected, 1);
+        if (!mInputLogic.mConnection.commitText(corrected, 1)) {
+            throw new IllegalStateException("Editor rejected voice cleanup");
+        }
     }
 
     /**

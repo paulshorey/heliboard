@@ -3,7 +3,7 @@
 Longer-form architecture notes that complement the shorter folder-local AGENTS files.
 
 ## Direct files
-- `mai-transcription.md` - MAI Speech SDK integration, Azure account/key/region setup, session lifecycle, final insertion, and validation.
+- `mai-transcription.md` - MAI Speech SDK integration, Azure account/key/region setup, session lifecycle, bounded FIFO, connection failure/deadline policy, interruption markers, final insertion, and validation.
 - `input-simplified.md` - explains the mirror-based current-word architecture and why the host editor is treated as a committed-text sink.
 - `recent-number-row-changes.md` - number-row bake migration notes and layout/parser troubleshooting.
 - `general-edit-history-plan.md` - implementation plan for generalizing the fullapp edit history into a bounded, general-purpose edit history that also captures regular-keyboard typing, without breaking fullapp draft sync.

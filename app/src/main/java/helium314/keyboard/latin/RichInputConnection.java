@@ -316,8 +316,9 @@ public final class RichInputConnection implements PrivateCommandPerformer {
      *
      * @param text The text to commit. This may include styles.
      * @param newCursorPosition The new cursor position around the text.
+     * @return whether the host InputConnection accepted the operation.
      */
-    public void commitText(final CharSequence text, final int newCursorPosition) {
+    public boolean commitText(final CharSequence text, final int newCursorPosition) {
         if (DEBUG_BATCH_NESTING) checkBatchEdit();
         if (DEBUG_PREVIOUS_TEXT) checkConsistencyForDebug();
         if (DebugFlags.DEBUG_ENABLED)
@@ -351,8 +352,16 @@ public final class RichInputConnection implements PrivateCommandPerformer {
                     }
                 }
             }
-            mIC.commitText(mTempObjectForCommitText, newCursorPosition);
+            boolean accepted = false;
+            try {
+                accepted = mIC.commitText(mTempObjectForCommitText, newCursorPosition);
+                return accepted;
+            } finally {
+                if (!accepted) reloadTextCache();
+            }
         }
+        reloadTextCache();
+        return false;
     }
 
     @Nullable
