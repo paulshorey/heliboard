@@ -1,22 +1,22 @@
-# app/src/test/java/helium314/keyboard/latin/voice
+# latin/voice tests
 
-Tests for the Gemini Live voice pipeline.
+MAI-Transcribe-2-Streaming SDK lifecycle and local transcript regression tests.
 
 ## Direct files
-- `GeminiTranscriptionClientTest.kt` - `setup` wire format, audio framing, language resolution, server-message parsing, and transcript assembly.
-- `GeminiTranscriptionClientStreamTest.kt` - end-to-end WebSocket lifecycle against a local `MockWebServer`, including the close-code-1007 setup-tier fallback and leftover-interim flush after `audioStreamEnd`.
-- `TranscriptPostProcessorTest.kt` - finalized-text cleanup tests.
-- `TranscriptionPreferencesTest.kt` - Gemini preference defaults, sanitization, and cleanup of previous providers' keys.
-- `VoiceContextVocabularyTest.kt` - editor-derived speech-biasing vocabulary.
+- `BoundedAudioWriterTest.kt` - real byte-capacity accounting, capacity notifications, ordered resumption, write failure containment, and cancellation/rejected executor.
+- `FakeVoiceNetworkMonitor.kt` - deterministic network preflight/loss seam.
+- `VoiceNetworkMonitorTest.kt` - validation, default-network handoff, registration cleanup, and stale observer suppression.
+- `FakeMaiSpeechSession.kt` - device-independent SDK seam for deterministic callbacks and recorded audio/commit/EOF operations; deferred writes exercise the same bounded writer as the SDK adapter.
+- `MaiTranscriptionClientTest.kt` - Speech endpoint construction, locale hints, and Android/ABI gating.
+- `MaiTranscriptionClientStreamTest.kt` - startup readiness, advisory commit tokens/offsets, missing acknowledgments and bounded EOF fallback, NoMatch, EOF draining, deduplication/repetitions, cancellation, terminal failures, backpressure, inconsistent timing, and oldest-audio deadlines.
+- `VoiceInputManagerTest.kt` - microphone callbacks, startup/pause/stop, deferred commits before post-pause audio, restart failures and overflow while retaining draining transcripts/buffered audio, offline/network/service failure stops and markers, full-size PCM backpressure and upload deadlines, quiet audio delivery after local silence, cancellation, buffering limits, session replacement/rotation, and subsecond recorder configuration.
+- `TranscriptionPreferencesTest.kt` - Speech key/region defaults, storage, validation, and bounded/idempotent conversion of saved silence seconds to milliseconds.
+- `TranscriptPostProcessorTest.kt` - spoken punctuation, em-dash preservation across cleanup passes, paragraph commands, and filler cleanup.
 
-## Non-obvious notes
-- Voice bugs split cleanly between transport/session setup and local post-processing; keep that distinction clear in new tests.
-- `GeminiTranscriptionClientTest.kt` needs Robolectric even though it tests pure functions: the client builds payloads with `org.json`, which is an unimplemented stub on the plain JVM test classpath.
-- `GeminiTranscriptionClientTest.kt` should keep asserting the two `setup` placement rules that fail catastrophically at runtime — `inputAudioTranscription` beside `generationConfig`, and `responseModalities: ["TEXT"]` inside it — plus that each `SetupTier` drops exactly one feature.
-- `GeminiTranscriptionClientStreamTest.kt` points `GeminiTranscriptionClient.streamingEndpoint` at `MockWebServer` and restores it in `@After`. It also resets `negotiatedSetupTier`, which is process-wide state that would otherwise leak between tests.
-- Robolectric's main looper is paused, and the client posts callbacks there from OkHttp's reader thread, so the stream tests pump with `awaitUntil { }` (idle the looper, check, sleep) instead of a bare latch.
-- `VoiceContextVocabularyTest.kt` covers what must *not* be biased as much as what must: common words, sentence-initial capitals, digits, and URL/path/email/identifier fragments.
-- Neither suite can confirm what Google's server does with a given `setup` field. Use `tools/gemini-live-smoke-test.py` with a real `GEMINI_API_KEY` for that.
+## Notes
+- Lifecycle tests use Robolectric with a paused main looper. No device-native SDK objects are created in these JVM tests.
+- Compile/package against the pinned Android AAR to verify API compatibility. Service acceptance requires a configured Speech resource; use `tools/mai-streaming-smoke-test.py` with the Python SDK.
+- Android native execution, microphone behavior, and latency require a supported device. Local tests cannot establish recognition quality.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

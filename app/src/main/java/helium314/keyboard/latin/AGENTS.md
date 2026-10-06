@@ -52,13 +52,14 @@ This is the main IME engine. It owns the InputMethodService lifecycle, the curre
 - `suggestions/` - suggestion strip and more-suggestions UI.
 - `touchinputconsumer/` - gesture typing consumer hook.
 - `utils/` - cross-cutting helpers used across the IME.
-- `voice/` - Gemini Live recording, streaming, and transcript post-processing.
+- `voice/` - MAI streaming recording, streaming, and transcript post-processing.
 
 ## Non-obvious notes
 - The simplified input model keeps the current word in `WordComposer`, not in the host editor.
 - `EditorWordMirror` in `inputlogic/` mirrors that current word into the host app using committed-text operations; bypassing it tends to break deletion, suggestions, and revert logic.
 - Suggestion lookup is driven by `WordComposer` plus `needsToLookupSuggestions()`. Host `TYPE_TEXT_FLAG_NO_SUGGESTIONS` no longer hides the strip or skips current-word tracking; password and non-text fields still do. Autocorrect and user-history learning still honor that host flag unless the field also set `TYPE_TEXT_FLAG_AUTO_CORRECT`. An empty 3-slot strip almost always means lookup was skipped, not that the host hid the current word.
-- Voice insertion is a deliberate bypass: `LatinIME.commitVoiceTranscriptionText()` calls `finishInput()` and then direct `commitText()` in one batch edit before paragraph post-processing.
+- Voice insertion is a deliberate bypass: `LatinIME.commitVoiceTranscriptionText()` calls `finishInput()` and then direct `commitText()` in one batch edit before paragraph post-processing. `RichInputConnection.commitText()` returns host acceptance and refreshes text and cursor caches after rejection. Voice cleanup and standalone punctuation replacement use `replaceTextBeforeCursor()` to select and replace a range in one commit, retaining original text on rejection and restoring the cursor where possible; never delete the paragraph before committing its replacement. Voice cancels immediately on insertion failure; its processing indicator stays visible through errors/finals while any pending work remains. Interruption markers separate uncertain audio from deliberate new recordings.
+- Voice diagnostics log lifecycle and transcript lengths only. Never put transcript contents into the app log or Android logcat; export redaction is defense in depth.
 - Fullapp is a standalone draft view. It seeds from `InputConnection`, persists live sync-eligible drafts through `FullappEditorResult`, archives finished drafts into `latin/edithistory/EditHistoryStore`, and replays with raw `InputConnection` replacement on IME reconnect; the system extract view is not the fullapp source of truth.
 - Regular-keyboard typing is captured into the same read-only `EditHistoryStore` (debounced in `LatinIME`, gated by `PREF_EDIT_HISTORY_ENABLED` and the same privacy exclusions as email capture).
 - Toolbar button definitions and defaults live in `utils/ToolbarUtils.kt`, while strip rendering/voice overlay state lives in `suggestions/SuggestionStripView.kt`.

@@ -194,7 +194,7 @@ public class LatinIME extends InputMethodService implements
 
     private final ClipboardHistoryManager mClipboardHistoryManager = new ClipboardHistoryManager(this);
 
-    // Voice input manager (local recording + Gemini Live transcription)
+    // Voice input manager (local recording + MAI streaming transcription)
     private VoiceInputManager mVoiceInputManager;
     // Wake lock to prevent CPU sleep during voice recording
     private PowerManager.WakeLock mVoiceWakeLock;
@@ -586,7 +586,6 @@ public class LatinIME extends InputMethodService implements
         // Initialize voice input manager
         mVoiceInputManager = new VoiceInputManager(this);
         setupVoiceInputListener();
-        mVoiceInputManager.setPriorTextProvider(this::buildVoiceContextText);
 
         // Register to receive ringer mode change.
         final IntentFilter filter = new IntentFilter();
@@ -2094,7 +2093,6 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onTranscriptionResult(@NonNull String text, boolean attachesToPrevious) {
                 try {
-                    Log.i(TAG, "VOICE raw transcript=[" + text + "]");
                     final String trimmed = text.trim();
                     if (trimmed.isEmpty()) {
                         Log.i(TAG, "VOICE_STEP_4 empty transcription result — nothing to insert");
@@ -2112,7 +2110,9 @@ public class LatinIME extends InputMethodService implements
                             prepareVoiceTranscriptionText(trimmed, attachesToPrevious)
                     );
                 } catch (Exception e) {
-                    Log.e(TAG, "Error processing transcription result: " + e.getMessage(), e);
+                    Log.e(TAG, "Editor could not prepare voice text; stopping dictation");
+                    if (mVoiceInputManager != null) mVoiceInputManager.cancelRecording();
+                    showVoiceErrorToast("The editor could not accept voice text. Dictation stopped.");
                 }
             }
 
@@ -2124,8 +2124,13 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onError(@NonNull String error) {
                 Log.e(TAG, "Voice input error: " + error);
-                mKeyboardSwitcher.hideProcessingIndicator();
+                refreshVoiceProcessingIndicator();
                 showVoiceErrorToast(error);
+            }
+
+            @Override
+            public void onTranscriptionInterrupted() {
+                commitVoiceTranscriptionText(" [Dictation interrupted] ");
             }
 
             @Override
@@ -2134,6 +2139,14 @@ public class LatinIME extends InputMethodService implements
                 launchSetupAppSettings();
             }
         });
+    }
+
+    private void refreshVoiceProcessingIndicator() {
+        if (mVoiceInputManager != null && mVoiceInputManager.hasPendingProcessing()) {
+            mKeyboardSwitcher.showProcessingIndicator();
+        } else {
+            mKeyboardSwitcher.hideProcessingIndicator();
+        }
     }
 
     /**
@@ -2165,31 +2178,43 @@ public class LatinIME extends InputMethodService implements
             // causing isBelatedExpectedUpdate to return false and the voice-cancel
             // guard in onUpdateSelection to kill the recording session.
             mInputLogic.mConnection.beginBatchEdit();
-            mInputLogic.finishInput();
+            try {
+                mInputLogic.finishInput();
 
-            // A pause can make Gemini finalize a sentence with "." before it
-            // hears a separately dictated punctuation mark. Replace that period
-            // only for a standalone voice punctuation segment. Do this at
-            // insertion time so earlier text is untouched and a selection still
-            // follows normal commitText replacement behavior.
-            if (text.length() == 1 && "!?,:;".indexOf(text.charAt(0)) >= 0
-                    && !mInputLogic.mConnection.hasSelection()) {
-                final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
-                if (before != null && before.length() == 1 && before.charAt(0) == '.') {
-                    mInputLogic.mConnection.deleteTextBeforeCursor(1);
+                // A pause can make MAI finalize a sentence with "." before it
+                // hears a separately dictated punctuation mark. Replace that period
+                // only for a standalone voice punctuation segment. Do this at
+                // insertion time so earlier text is untouched and a selection still
+                // follows normal commitText replacement behavior.
+                boolean replacedPeriod = false;
+                if (text.length() == 1 && "!?,:;".indexOf(text.charAt(0)) >= 0
+                        && !mInputLogic.mConnection.hasSelection()) {
+                    final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
+                    if (before != null && before.length() == 1 && before.charAt(0) == '.') {
+                        if (!mInputLogic.mConnection.replaceTextBeforeCursor(1, text)) {
+                            throw new IllegalStateException("Editor rejected voice punctuation");
+                        }
+                        replacedPeriod = true;
+                    }
                 }
+                if (!replacedPeriod && !mInputLogic.mConnection.commitText(text, 1)) {
+                    throw new IllegalStateException("Editor rejected voice insertion");
+                }
+
+                runTranscriptPostProcessing();
+
+            } finally {
+                mInputLogic.mConnection.endBatchEdit();
             }
-            mInputLogic.mConnection.commitText(text, 1);
 
-            runTranscriptPostProcessing();
-
-            mInputLogic.mConnection.endBatchEdit();
-
-            // Text has been inserted — hide the processing spinner.
-            mKeyboardSwitcher.hideProcessingIndicator();
+            refreshVoiceProcessingIndicator();
         } catch (Exception e) {
-            Log.e(TAG, "Error inserting transcription text: " + e.getMessage(), e);
+            // Do not continue dictating after an unwritten final. Exception messages
+            // from a host editor may contain text, so keep diagnostics generic.
+            Log.e(TAG, "Editor could not accept voice text; stopping dictation");
+            if (mVoiceInputManager != null) mVoiceInputManager.cancelRecording();
             mKeyboardSwitcher.hideProcessingIndicator();
+            showVoiceErrorToast("The editor could not accept voice text. Dictation stopped.");
         }
     }
 
@@ -2225,8 +2250,9 @@ public class LatinIME extends InputMethodService implements
         Log.i(TAG, "VOICE post-processing: replacing paragraph ("
                 + paragraph.length() + " → " + corrected.length() + " chars)");
 
-        mInputLogic.mConnection.deleteTextBeforeCursor(paragraph.length());
-        mInputLogic.mConnection.commitText(corrected, 1);
+        if (!mInputLogic.mConnection.replaceTextBeforeCursor(paragraph.length(), corrected)) {
+            throw new IllegalStateException("Editor rejected voice cleanup");
+        }
     }
 
     /**
@@ -2294,34 +2320,6 @@ public class LatinIME extends InputMethodService implements
                 || c == '\t'
                 || c == '/'
                 || c == '\\';
-    }
-
-    /**
-     * Maximum chars of editor text scanned to seed Gemini's speech-biasing
-     * vocabulary. Only harvested terms are sent, never this text itself, so the
-     * window can be generous.
-     */
-    private static final int VOICE_CONTEXT_TEXT_LOOKBACK = 4000;
-
-    /**
-     * Provider hook for {@link VoiceInputManager#setPriorTextProvider}. Reads
-     * up to {@link #VOICE_CONTEXT_TEXT_LOOKBACK} characters of editor text
-     * before the cursor. {@code VoiceContextVocabulary} harvests proper nouns
-     * and acronyms from it so dictated names come back spelled and capitalized
-     * the way the user already typed them.
-     */
-    @Nullable
-    private String buildVoiceContextText() {
-        try {
-            if (mInputLogic == null || mInputLogic.mConnection == null) return null;
-            final CharSequence before =
-                    mInputLogic.mConnection.getTextBeforeCursor(VOICE_CONTEXT_TEXT_LOOKBACK, 0);
-            if (before == null || before.length() == 0) return null;
-            return before.toString();
-        } catch (Exception e) {
-            Log.e(TAG, "Error reading editor context for voice vocabulary: " + e.getMessage());
-            return null;
-        }
     }
 
     /**

@@ -23,7 +23,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -42,7 +41,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.core.content.edit
 import helium314.keyboard.latin.R
 import helium314.keyboard.latin.permissions.PermissionsUtil
 import helium314.keyboard.latin.settings.TranscriptionPreferences
@@ -52,6 +50,7 @@ import helium314.keyboard.latin.utils.prefs
 import helium314.keyboard.settings.SearchSettingsScreen
 import helium314.keyboard.settings.SettingsActivity
 import helium314.keyboard.settings.SettingsContainer
+import helium314.keyboard.settings.SettingsDestination
 import helium314.keyboard.settings.Theme
 import helium314.keyboard.settings.previewDark
 import kotlinx.coroutines.delay
@@ -72,13 +71,13 @@ fun SetupAppScreen(
     var isImeEnabled by remember { mutableStateOf(false) }
     var isImeCurrent by remember { mutableStateOf(false) }
     var microphoneGranted by remember { mutableStateOf(false) }
-    var geminiApiKey by remember { mutableStateOf("") }
+    var transcriptionConfigured by remember { mutableStateOf(false) }
 
     fun refreshStatus() {
         isImeEnabled = UncachedInputMethodManagerUtils.isThisImeEnabled(context, imm)
         isImeCurrent = UncachedInputMethodManagerUtils.isThisImeCurrent(context, imm)
         microphoneGranted = PermissionsUtil.checkAllPermissionsGranted(context, Manifest.permission.RECORD_AUDIO)
-        geminiApiKey = TranscriptionPreferences.readGeminiApiKey(prefs)
+        transcriptionConfigured = TranscriptionPreferences.readMaiConfig(prefs).validationError() == null
     }
 
     LaunchedEffect(prefChanged?.value) {
@@ -157,17 +156,13 @@ fun SetupAppScreen(
                     }
                 )
                 SetupRequirementItem(
-                    title = stringResource(R.string.gemini_api_key_title),
-                    summary = stringResource(R.string.gemini_api_key_summary),
-                    isComplete = geminiApiKey.isNotBlank(),
+                    title = stringResource(R.string.mai_setup_title),
+                    summary = stringResource(R.string.mai_setup_summary),
+                    isComplete = transcriptionConfigured,
                 ) {
-                    SetupKeyField(
-                        value = geminiApiKey,
-                        onValueChange = { newValue ->
-                            geminiApiKey = newValue.trim()
-                            TranscriptionPreferences.writeGeminiApiKey(prefs, newValue)
-                        }
-                    )
+                    Button(onClick = { SettingsDestination.navigateTo(SettingsDestination.Transcription) }) {
+                        Text(stringResource(R.string.settings_screen_transcription))
+                    }
                 }
                 Text(
                     text = stringResource(R.string.setup_app_return_later),
@@ -247,21 +242,6 @@ private fun SetupRequirementItem(
     }
 }
 
-@Composable
-private fun SetupKeyField(
-    value: String,
-    onValueChange: (String) -> Unit,
-) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        modifier = Modifier.fillMaxWidth(),
-        minLines = 1,
-        maxLines = 2,
-        textStyle = MaterialTheme.typography.bodySmall,
-        shape = MaterialTheme.shapes.small,
-    )
-}
 
 @Preview
 @Composable

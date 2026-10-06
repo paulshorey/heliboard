@@ -20,7 +20,7 @@ Use `--verify` to run the InputLogic + voice smoke tests after setup, `--full-te
 ./gradlew assembleDebug && ./gradlew installDebug
 
 # With debugging:
-./gradlew assembleDebug && ./gradlew installDebug && adb logcat | grep -E "(voice|Gemini|transcri)"
+./gradlew assembleDebug && ./gradlew installDebug && adb logcat | grep -E "(voice|MAI|transcri)"
 ```
 
 ## Debug Gradle

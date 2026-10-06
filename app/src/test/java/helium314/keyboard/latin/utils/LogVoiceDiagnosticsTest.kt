@@ -11,7 +11,7 @@ class LogVoiceDiagnosticsTest {
     fun `voice package tags are included`() {
         assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "VoiceInputManager", "VOICE_STEP_1 start")))
         assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "VoiceRecorder", "Recording started")))
-        assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "GeminiTranscription", "stream ready")))
+        assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "MaiTranscription", "stream ready")))
     }
 
     @Test
@@ -36,7 +36,7 @@ class LogVoiceDiagnosticsTest {
     @Test
     fun `voice response lines are included`() {
         assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "VoiceInputManager", "VOICE_RESPONSE ok in 120ms (turn_finalize): transcript received")))
-        assertTrue(Log.isVoiceDiagnosticLine(LogLine('E', "VoiceInputManager", "VOICE_RESPONSE timeout after 15000ms (audio_pending): no Gemini response")))
+        assertTrue(Log.isVoiceDiagnosticLine(LogLine('E', "VoiceInputManager", "VOICE_RESPONSE timeout after 15000ms (audio_pending): no MAI response")))
     }
 
     @Test
@@ -52,12 +52,17 @@ class LogVoiceDiagnosticsTest {
     }
 
     @Test
+    fun `redact azure api key header`() {
+        assertEquals("api_key=[redacted]", Log.redactVoiceDiagnosticMessage("api-key=secret"))
+    }
+
+    @Test
     fun `redact api key in url query string`() {
         val redacted = Log.redactVoiceDiagnosticMessage(
-            "opening wss://generativelanguage.googleapis.com/ws/x?key=AIzaSecret123&alt=json"
+            "opening wss://resource.services.ai.azure.com/mai/v1/realtime?key=Secret123&intent=transcription"
         )
         assertEquals(
-            "opening wss://generativelanguage.googleapis.com/ws/x?key=[redacted]&alt=json",
+            "opening wss://resource.services.ai.azure.com/mai/v1/realtime?key=[redacted]&intent=transcription",
             redacted
         )
     }
