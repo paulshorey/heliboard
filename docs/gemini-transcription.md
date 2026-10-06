@@ -27,9 +27,11 @@ costs the user more than a second of waiting.
    with one commit, so a rejected replacement does not first delete confirmed text.
 6. On terminal failure, invalidate the recording and connection generations before
    stopping capture, clearing pending work, and notifying the editor. Already
-   inserted text remains. If audio was captured, insert one literal
+   inserted text remains. If the stream reached readiness and audio was captured, insert one literal
    `[Dictation interrupted]` marker without transcript cleanup. An editor failure
    suppresses the marker because the editor is no longer trustworthy.
+   Rejection before `setupComplete` leaves the editor untouched and reports why
+   dictation could not start; no PCM was submitted to that connection.
 7. Restoring internet never resumes the failed recording. The user must tap the
    mic explicitly. A normal stop blocks restart until the outgoing stream closes.
 
@@ -336,6 +338,27 @@ The WAV must be 16-bit PCM, 16 kHz, mono:
 `ffmpeg -i input.m4a -ar 16000 -ac 1 -c:a pcm_s16le speech.wav`
 
 ## Integrity regression and device checks
+
+Startup rejection is distinct from interruption of a usable stream. The service
+can reject setup with a 1011 close whose detail says prepayment credits are depleted,
+without a gRPC status name. Match that detail before generic close/quota wording;
+HTTP-429 handshake bodies and in-band `RESOURCE_EXHAUSTED` errors can carry the
+same billing problem. Check the API key's project in AI Studio, as described in
+[Google's billing guidance](https://ai.google.dev/gemini-api/docs/billing#prepay).
+The app cannot restore a rejected project's billing access.
+
+Both About → Save log and Transcription → Voice diagnostics include recent voice
+history, application/build and Android/device information. A separate 500-line
+voice ring prevents keyboard geometry/key traces from evicting the failure. General
+export puts voice history first, then up to 500 other app warnings/errors with
+consecutive repeats collapsed and 200 recent native Android logcat lines excluding
+duplicated app tags. Transcript payloads are not logged by insertion; exported
+legacy transcript lines and API-key patterns are redacted.
+
+Session diagnostics record phase, elapsed time, captured and accepted PCM counts,
+raw/socket queue sizes, accepted finals and last-response age. Transport close
+records retain the code, readiness, requested-finish state and sanitized service
+detail, so an early billing rejection cannot be confused with a stalled upload.
 
 The voice manager tests cover loss/reconnect callbacks, explicit restart, ordered
 PCM/control delivery, queue overflow, oldest-audio and progress deadlines, editor

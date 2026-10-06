@@ -1,6 +1,7 @@
 package helium314.keyboard.latin.utils
 
 import android.os.Build
+import helium314.keyboard.latin.BuildConfig
 import java.time.LocalDateTime
 import java.util.Date
 
@@ -75,18 +76,25 @@ object Log {
             if (logLines.size > 12000) // clear oldest entries if list gets too long
                 logLines.subList(0, 2000).clear()
             logLines.add(line)
+            if (isVoiceDiagnosticLine(line)) {
+                if (voiceLogLines.size == DEFAULT_VOICE_DIAGNOSTICS_MAX_LINES) voiceLogLines.removeFirst()
+                voiceLogLines.addLast(line)
+            }
         }
     }
 
     private val logLines: MutableList<LogLine> = ArrayList(2000)
+    // Keyboard geometry/key traces must not evict an entire dictation failure.
+    private val voiceLogLines = ArrayDeque<LogLine>()
 
     /** returns a copy of [logLines] */
-    fun getLog(maxLines: Int = logLines.size) = synchronized(logLines) { logLines.takeLast(maxLines) }
+    fun getLog(maxLines: Int = Int.MAX_VALUE) = synchronized(logLines) { logLines.takeLast(maxLines.coerceAtLeast(0)) }
 
     private val VOICE_DIAGNOSTIC_TAGS = setOf(
         "VoiceInputManager",
         "VoiceRecorder",
         "GeminiTranscription",
+        "VoiceNetwork",
     )
 
     private const val LATIN_IME_TAG = "LatinIME"
@@ -134,9 +142,10 @@ object Log {
     }
 
     fun getVoiceDiagnosticsLog(maxLines: Int = DEFAULT_VOICE_DIAGNOSTICS_MAX_LINES): List<LogLine> =
-        synchronized(logLines) { filterVoiceDiagnosticsLines(logLines, maxLines) }
+        synchronized(logLines) { voiceLogLines.takeLast(maxLines.coerceAtLeast(0)) }
 
     internal fun filterVoiceDiagnosticsLines(lines: List<LogLine>, maxLines: Int): List<LogLine> {
+        if (maxLines <= 0) return emptyList()
         val result = ArrayList<LogLine>(minOf(maxLines, 64))
         for (i in lines.indices.reversed()) {
             val line = lines[i]
@@ -154,10 +163,48 @@ object Log {
         val header = buildString {
             appendLine("HeliBoard voice diagnostics")
             appendLine("App version: $appVersion")
+            appendLine("Build: ${BuildConfig.BUILD_TYPE}; Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
+            appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
             appendLine("Lines: ${lines.size} (oldest first)")
             appendLine()
         }
         return header + lines.joinToString("\n") { it.formatLine(redact = true) }
+    }
+
+    /** Focused voice history first, then bounded warnings without duplicated app logcat. */
+    fun formatDebugLogExport(
+        lines: List<LogLine>,
+        voiceLines: List<LogLine>,
+        appVersion: String,
+        systemWarnings: String,
+    ): String = buildString {
+        appendLine(formatVoiceDiagnosticsExport(voiceLines, appVersion))
+        appendLine()
+        appendLine("Other app warnings/errors (newest 500; consecutive repeats collapsed)")
+        val warnings = lines.filter { it.level in "WEF" && !isVoiceDiagnosticLine(it) }.takeLast(500)
+        appendLine(compactWarnings(warnings))
+        appendLine()
+        appendLine("Recent Android warnings/errors (app duplicates excluded)")
+        val appTags = (lines + voiceLines).mapNotNull { it.tag }.toSet()
+        val tagPattern = Regex("""\s[VDIWEF]\s+([^:]+):""")
+        append(systemWarnings.lineSequence().filter { line ->
+            tagPattern.find(line)?.groupValues?.get(1)?.trim() !in appTags
+        }.joinToString("\n") { redactVoiceDiagnosticMessage(it) })
+    }
+
+    internal fun compactWarnings(lines: List<LogLine>): String = buildString {
+        var index = 0
+        while (index < lines.size) {
+            val first = lines[index]
+            var end = index + 1
+            while (end < lines.size && lines[end].level == first.level &&
+                lines[end].tag == first.tag && lines[end].message == first.message) end++
+            // Use the last occurrence's timestamp, retaining the repeat count.
+            append(lines[end - 1].formatLine(redact = true))
+            if (end - index > 1) append(" [repeated ${end - index} times]")
+            appendLine()
+            index = end
+        }
     }
 }
 

@@ -2094,7 +2094,6 @@ public class LatinIME extends InputMethodService implements
             @Override
             public boolean onTranscriptionResult(@NonNull String text, boolean attachesToPrevious) {
                 try {
-                    Log.i(TAG, "VOICE raw transcript=[" + text + "]");
                     final String trimmed = text.trim();
                     if (trimmed.isEmpty()) {
                         Log.i(TAG, "VOICE_STEP_4 empty transcription result — nothing to insert");
@@ -2103,11 +2102,6 @@ public class LatinIME extends InputMethodService implements
                         }
                         return true;
                     }
-                    Log.i(
-                            TAG,
-                            "VOICE_STEP_4 transcription arrived in IME (" +
-                                    trimmed.length() + " chars)"
-                    );
                     return commitVoiceTranscriptionText(
                             prepareVoiceTranscriptionText(trimmed, attachesToPrevious)
                     );
@@ -2130,7 +2124,7 @@ public class LatinIME extends InputMethodService implements
 
             @Override
             public void onError(@NonNull String error) {
-                Log.e(TAG, "Voice input error: " + error);
+                // The manager logs the cause and session snapshot once.
                 mKeyboardSwitcher.hideProcessingIndicator();
                 showVoiceErrorToast(error);
             }

@@ -11,6 +11,7 @@ import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import helium314.keyboard.latin.utils.Log
 
 internal interface VoiceNetworkMonitor {
     /** Preflight and terminal-loss observation. Callback runs on the main looper. */
@@ -31,7 +32,9 @@ internal class AndroidVoiceNetworkMonitor(private val context: Context) : VoiceN
         val connectivity = manager ?: return false
         val token = generation
         try {
-            if (!hasInternet()) return false
+            val available = hasInternet()
+            Log.i("VoiceNetwork", "preflight usable=$available sdk=${Build.VERSION.SDK_INT}")
+            if (!available) return false
             if (Build.VERSION.SDK_INT >= 24) {
                 var currentNetwork = connectivity.activeNetwork
                 val observer = object : ConnectivityManager.NetworkCallback() {
@@ -41,13 +44,19 @@ internal class AndroidVoiceNetworkMonitor(private val context: Context) : VoiceN
                     override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
                         handler.post {
                             if (generation == token && currentNetwork == network && !usable(capabilities)) {
+                                Log.w("VoiceNetwork", "default route lost usable capabilities " +
+                                    "internet=${capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)} " +
+                                    "validated=${capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)}")
                                 onUnavailable()
                             }
                         }
                     }
                     override fun onLost(network: Network) {
                         handler.post {
-                            if (generation == token && currentNetwork == network) onUnavailable()
+                            if (generation == token && currentNetwork == network) {
+                                Log.w("VoiceNetwork", "default route lost")
+                                onUnavailable()
+                            }
                         }
                     }
                 }
@@ -58,7 +67,10 @@ internal class AndroidVoiceNetworkMonitor(private val context: Context) : VoiceN
                 // A dynamically registered legacy broadcast covers older devices.
                 val observer = object : BroadcastReceiver() {
                     override fun onReceive(context: Context?, intent: Intent?) {
-                        if (generation == token && !hasInternet()) onUnavailable()
+                        if (generation == token && !hasInternet()) {
+                            Log.w("VoiceNetwork", "legacy connectivity broadcast: no usable route")
+                            onUnavailable()
+                        }
                     }
                 }
                 receiver = observer
@@ -67,7 +79,8 @@ internal class AndroidVoiceNetworkMonitor(private val context: Context) : VoiceN
             }
             if (!hasInternet()) { stop(); return false }
             return true
-        } catch (_: RuntimeException) {
+        } catch (e: RuntimeException) {
+            Log.w("VoiceNetwork", "network observation failed: ${e.javaClass.simpleName}")
             stop()
             return false
         }

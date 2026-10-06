@@ -25,6 +25,7 @@ Tests for the Gemini Live voice pipeline.
 
 - Manager fakes capture the actual callbacks and drive the paused main looper. Client `internal` methods have mangled JVM names; Mockito answers normalize them with `substringBefore('$')`.
 - API-21 network tests use `android.app.Application` to isolate the monitor from unrelated app subtype initialization.
+- Startup-rejection tests use the truncated depleted-credit detail from a device log (1011), an HTTP-429 handshake body, and queued pre-readiness PCM. No live billable request is needed; startup rejection must leave existing editor text untouched.
 - InputLogic tests cover host commit/selection rejection, exceptions, preservation of confirmed text and caret after rejected replacements, cache refresh, balanced batches, and literal interruption markers. Acceptance means the editor call succeeded, not proof of semantic completeness upstream.
 
 ## Keep this file current

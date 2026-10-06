@@ -381,7 +381,7 @@ class GeminiTranscriptionClient {
             val error = json.optJSONObject("error") ?: return null
             val message = error.optString("message", "")
             val status = error.optString("status", "")
-            val friendly = friendlyErrorForStatus(status)
+            val friendly = friendlyErrorForDetail(message) ?: friendlyErrorForStatus(status)
             return when {
                 friendly != null -> friendly
                 message.isNotBlank() && status.isNotBlank() -> "$status: $message"
@@ -395,7 +395,7 @@ class GeminiTranscriptionClient {
             "UNAUTHENTICATED" -> "Invalid Gemini API key. Please check Settings."
             "PERMISSION_DENIED" ->
                 "This Gemini API key is not allowed to use $MODEL."
-            "RESOURCE_EXHAUSTED" -> "Gemini rate limited — too many requests"
+            "RESOURCE_EXHAUSTED" -> "Gemini quota or rate limit reached. Check your project's usage and limits."
             "FAILED_PRECONDITION" ->
                 "Gemini requires billing to be enabled for this API key."
             "UNAVAILABLE" -> "Gemini is temporarily unavailable. Please try again."
@@ -431,6 +431,7 @@ class GeminiTranscriptionClient {
          */
         internal fun statusFromReason(reason: String): String? {
             if (reason.isBlank()) return null
+            friendlyErrorForDetail(reason)?.let { return it }
             val upper = reason.uppercase(Locale.US)
             for (status in FRIENDLY_STATUSES) {
                 if (upper.contains(status)) return friendlyErrorForStatus(status)
@@ -439,6 +440,17 @@ class GeminiTranscriptionClient {
                 return "Invalid Gemini API key. Please check Settings."
             }
             return null
+        }
+
+        internal const val CREDITS_DEPLETED_ERROR =
+            "Gemini API credits are depleted. Add credits to this API key's project in Google AI Studio."
+
+        private fun friendlyErrorForDetail(message: String): String? {
+            val lower = message.lowercase(Locale.US)
+            // Live closes can truncate the detail to 123 bytes and omit the gRPC
+            // status. Match the actionable detail before generic quota/status text.
+            return if ((lower.contains("prepayment credits") || lower.contains("prepaid credits")) &&
+                (lower.contains("depleted") || lower.contains("exhausted"))) CREDITS_DEPLETED_ERROR else null
         }
 
         private val FRIENDLY_STATUSES = listOf(
@@ -750,22 +762,25 @@ class GeminiTranscriptionClient {
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 if (newToken != activeConnectionToken) return
-                Log.i(TAG, "Gemini stream closing: code=$code, reason=$reason")
                 webSocket.close(code, reason)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 postIfCurrent(newToken) {
+                    val detail = safeServiceDetail(reason, apiKey)
+                    val closeSummary = "connection=$newToken close code=$code ready=$isSessionReady " +
+                        "clientFinish=$isClosing queuedBytes=${webSocket.queueSize()} reason=$detail"
+                    if (isClosing && code == 1000) Log.i(TAG, closeSummary) else Log.w(TAG, closeSummary)
                     clearFinalizeCloseTimer()
                     val rejectedTier = awaitingSetupTier
                     awaitingSetupTier = null
                     isSessionReady = false
                     this@GeminiTranscriptionClient.webSocket = null
                     if (!isClosing && rejectedTier != null &&
-                        retrySetupWithLowerTier(rejectedTier, code, reason, apiKey, sessionConfig, callback)
+                        retrySetupWithLowerTier(rejectedTier, code, detail, apiKey, sessionConfig, callback)
                     ) return@postIfCurrent
                     if (!isClosing || code != 1000) {
-                        reportStreamError(describeCloseFailure(code, reason))
+                        reportStreamError(describeCloseFailure(code, detail))
                     } else {
                         val target = this@GeminiTranscriptionClient.callback
                         cancelAll()
@@ -775,13 +790,19 @@ class GeminiTranscriptionClient {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                if (newToken != activeConnectionToken) return
+                // Read a bounded handshake body on OkHttp's thread, never the UI
+                // thread. HTTP 429 can mean depleted credits rather than request rate.
+                val error = safeServiceDetail(mapConnectionError(t, response), apiKey)
                 postIfCurrent(newToken) {
+                    Log.w(TAG, "connection=$newToken transportFailure http=${response?.code} " +
+                        "ready=$isSessionReady clientFinish=$isClosing type=${t.javaClass.simpleName} error=$error")
                     clearFinalizeCloseTimer()
                     awaitingSetupTier = null
                     isSessionReady = false
                     this@GeminiTranscriptionClient.webSocket = null
                     // A failure during graceful drain is still loss, not EOF.
-                    reportStreamError(mapConnectionError(t, response))
+                    reportStreamError(error)
                 }
             }
 
@@ -843,7 +864,9 @@ class GeminiTranscriptionClient {
         offerAudioChunk(pcmData) == AudioSendResult.ACCEPTED
 
     /** A final cannot acknowledge audio that is still waiting in the local sender. */
-    internal fun hasQueuedFrames(): Boolean = (webSocket?.queueSize() ?: 0L) > 0L
+    internal fun hasQueuedFrames(): Boolean = queuedFrameBytes() > 0L
+
+    internal fun queuedFrameBytes(): Long = webSocket?.queueSize() ?: 0L
 
     /**
      * Ask Gemini to finalize the current turn immediately instead of waiting out
@@ -920,13 +943,13 @@ class GeminiTranscriptionClient {
         val json = try {
             JSONObject(message)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse Gemini message: ${e.message}")
+            Log.w(TAG, "connection=$connectionToken invalid JSON chars=${message.length} type=${e.javaClass.simpleName}")
             postIfCurrent(connectionToken) { reportStreamError("Invalid transcription response") }
             return
         }
 
         extractErrorMessage(json)?.let { description ->
-            Log.e(TAG, "Gemini stream error event: $description")
+            Log.w(TAG, "connection=$connectionToken server error: ${Log.redactVoiceDiagnosticMessage(description)}")
             postIfCurrent(connectionToken) {
                 reportStreamError(description)
             }
@@ -937,7 +960,7 @@ class GeminiTranscriptionClient {
             postIfCurrent(connectionToken) {
                 awaitingSetupTier = null
                 isSessionReady = true
-                Log.i(TAG, "Gemini setupComplete received; stream ready")
+                Log.i(TAG, "connection=$connectionToken setupComplete received; stream ready")
                 callback?.onStreamReady()
             }
             return
@@ -982,13 +1005,17 @@ class GeminiTranscriptionClient {
     }
 
     private fun mapConnectionError(error: Throwable, response: Response?): String {
+        val body = try { response?.peekBody(4096)?.string() } catch (_: Exception) { null }
+        if (!body.isNullOrBlank()) {
+            statusFromReason(body)?.let { return it }
+        }
         val code = response?.code
         if (code != null) {
             return when (code) {
                 400 -> "Gemini rejected the request. Check the API key in Settings."
                 401, 403 -> "Invalid Gemini API key. Please check Settings."
                 404 -> "The Gemini model $MODEL is not available for this key."
-                429 -> "Gemini rate limited — too many requests"
+                429 -> friendlyErrorForStatus("RESOURCE_EXHAUSTED")!!
                 in 500..599 -> "Gemini service error ($code)"
                 else -> "Gemini connection rejected ($code)"
             }
@@ -999,6 +1026,11 @@ class GeminiTranscriptionClient {
             is ConnectException -> "Could not connect to Gemini streaming"
             else -> "Streaming error: ${error.message ?: "unknown"}"
         }
+    }
+
+    private fun safeServiceDetail(detail: String, apiKey: String): String {
+        val withoutKey = if (apiKey.isNotEmpty()) detail.replace(apiKey, "[redacted]") else detail
+        return Log.redactVoiceDiagnosticMessage(withoutKey).replace('\n', ' ').replace('\r', ' ').take(512)
     }
 
     private fun postIfCurrent(connectionToken: Long, action: () -> Unit) {

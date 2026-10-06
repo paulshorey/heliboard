@@ -352,7 +352,20 @@ class VoiceInputManagerTest {
         stream.onHandshakeRestarted(); advance(1100)
         assertTrue(manager.isIdle)
         assertTrue(errors.single().contains("connection timed out"))
-        assertEquals(1, markers.size)
+        assertTrue(markers.isEmpty())
+    }
+
+    @Test fun startupRejectionStopsCaptureAndLeavesTheExistingEditorTextUntouched() {
+        inserted.add("existing editor text")
+        start(ready = false); audio()
+        stream.onStreamError(GeminiTranscriptionClient.CREDITS_DEPLETED_ERROR)
+        stream.onStreamReady(); audio(2); final("late words")
+        assertTrue(manager.isIdle)
+        assertTrue(stopped > 0)
+        assertEquals(listOf("existing editor text"), inserted)
+        assertTrue(markers.isEmpty())
+        assertTrue(sent.isEmpty())
+        assertEquals(listOf("Could not start dictation. ${GeminiTranscriptionClient.CREDITS_DEPLETED_ERROR}"), errors)
     }
 
     @Test fun quietPcmIsNotDiscardedWhileWaitingForSpeech() {

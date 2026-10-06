@@ -177,7 +177,7 @@ class GeminiTranscriptionClientStreamTest {
     }
 
     @Test
-    fun surfacesGoAwaySoTheSessionCanRotate() {
+    fun surfacesGoAwaySoTheSessionCanDrain() {
         enqueueServer(object : WebSocketListener() {
             override fun onMessage(webSocket: WebSocket, text: String) {
                 serverReceived.add(text)
@@ -298,6 +298,34 @@ class GeminiTranscriptionClientStreamTest {
         currentServerSocket!!.send("not JSON")
         awaitUntil { events.contains("error:Invalid transcription response") }
         assertTrue(transcripts.isEmpty())
+    }
+
+    @Test
+    fun startupCloseReportsDepletedCreditsWithoutRetryingOrSendingAudio() {
+        enqueueServer(object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                serverReceived.add(text)
+                webSocket.close(1011,
+                    "Your prepayment credits are depleted. Please go to AI Studio at https://ai.studio/projects to manage your project and billi")
+            }
+        })
+        startClient()
+        awaitUntil { events.any { it.startsWith("error:") } }
+        assertEquals(1, serverReceived.size)
+        assertTrue(events.contains("error:${GeminiTranscriptionClient.CREDITS_DEPLETED_ERROR}"))
+        assertTrue(!events.contains("ready"))
+        assertTrue(transcripts.isEmpty())
+    }
+
+    @Test
+    fun httpQuotaRejectionWithDepletedCreditBodyReportsBillingInsteadOfRequestRate() {
+        server.enqueue(MockResponse().setResponseCode(429).setBody(
+            """{"error":{"status":"RESOURCE_EXHAUSTED","message":"Your prepayment credits are depleted."}}"""
+        ))
+        startClient()
+        awaitUntil { events.any { it.startsWith("error:") } }
+        assertTrue(events.contains("error:${GeminiTranscriptionClient.CREDITS_DEPLETED_ERROR}"))
+        assertEquals(1, events.count { it.startsWith("error:") })
     }
 
     private fun readyServer() {

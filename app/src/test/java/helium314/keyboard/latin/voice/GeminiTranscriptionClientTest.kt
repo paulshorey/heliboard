@@ -259,7 +259,7 @@ class GeminiTranscriptionClientTest {
             )
         )
         assertEquals(
-            "Gemini rate limited — too many requests",
+            "Gemini quota or rate limit reached. Check your project's usage and limits.",
             GeminiTranscriptionClient.extractErrorMessage(
                 JSONObject("""{"error":{"status":"RESOURCE_EXHAUSTED"}}""")
             )
@@ -294,6 +294,27 @@ class GeminiTranscriptionClientTest {
     }
 
     // ── transcript assembly ────────────────────────────────────────────
+
+    @Test
+    fun depletedCreditsAreRecognizedInATruncatedLiveCloseWithoutAStatusName() {
+        assertEquals(
+            GeminiTranscriptionClient.CREDITS_DEPLETED_ERROR,
+            GeminiTranscriptionClient.describeCloseFailure(1011,
+                "Your prepayment credits are depleted. Please go to AI Studio at https://ai.studio/projects to manage your project and billi")
+        )
+    }
+
+    @Test
+    fun depletedCreditDetailTakesPriorityOverTheGenericQuotaStatus() {
+        assertEquals(
+            GeminiTranscriptionClient.CREDITS_DEPLETED_ERROR,
+            GeminiTranscriptionClient.extractErrorMessage(JSONObject(
+                """{"error":{"status":"RESOURCE_EXHAUSTED","message":"Your prepayment credits are depleted."}}"""
+            ))
+        )
+        assertEquals(GeminiTranscriptionClient.CREDITS_DEPLETED_ERROR,
+            GeminiTranscriptionClient.statusFromReason("RESOURCE_EXHAUSTED: prepaid credits exhausted"))
+    }
 
     @Test
     fun accumulator_appendsIndependentUtterancesAsSeparateSegments() {

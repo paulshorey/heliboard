@@ -143,10 +143,6 @@ class VoiceRecorder(private val context: Context) {
             silenceDurationMs = sanitizedDuration,
             silenceThreshold = sanitizedThreshold
         )
-        Log.i(
-            TAG,
-            "Silence config updated: duration=${sanitizedDuration}ms, threshold=${sanitizedThreshold}"
-        )
     }
 
     fun hasRecordPermission(): Boolean {

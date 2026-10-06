@@ -90,6 +90,15 @@ class VoiceInputManager internal constructor(
     private var finalTimeout: Runnable? = null
     private var sessionLimit: Runnable? = null
     private var drainTimeout: Runnable? = null
+    private var sessionStartedAtMs = 0L
+    private var capturedChunks = 0
+    private var capturedBytes = 0L
+    private var acceptedAudioChunks = 0
+    private var acceptedAudioBytes = 0L
+    private var acceptedFinals = 0
+    private var backpressureSeen = false
+    private var interimSeen = false
+    private var lastResponseAtMs: Long? = null
 
     private var chunkSilenceDurationMs = Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS * 1000L
     private var chunkSilenceThreshold = Defaults.PREF_VOICE_SILENCE_THRESHOLD.toDouble()
@@ -123,11 +132,13 @@ class VoiceInputManager internal constructor(
         // IDLE also means the mic has stopped while the previous connection drains.
         if (!isIdle) return false
         if (!voiceRecorder.hasRecordPermission()) {
+            Log.w(TAG, "start rejected: microphone permission required")
             listener?.onPermissionRequired()
             return false
         }
         val apiKey = getApiKey()
         if (apiKey.isBlank()) {
+            Log.w(TAG, "start rejected: Gemini API key is not configured")
             listener?.onError("Gemini API key not configured. Please set it in Settings.")
             return false
         }
@@ -138,10 +149,24 @@ class VoiceInputManager internal constructor(
                 if (isCurrent(sessionId)) failSession("Internet connection lost. Tap the mic to start again.")
             }) {
             networkMonitor.stop()
+            Log.w(TAG, "start rejected: no usable internet route")
             listener?.onError("Internet access is required for dictation.")
             return false
         }
         sessionOpen = true
+        sessionStartedAtMs = SystemClock.elapsedRealtime()
+        capturedChunks = 0
+        capturedBytes = 0L
+        acceptedAudioChunks = 0
+        acceptedAudioBytes = 0L
+        acceptedFinals = 0
+        backpressureSeen = false
+        interimSeen = false
+        lastResponseAtMs = null
+        Log.i(TAG, "session=$sessionId start mode=${geminiConfig.transcriptionMode} " +
+            "localSilenceMs=$chunkSilenceDurationMs threshold=$chunkSilenceThreshold " +
+            "autoStopMs=$autoStopSilenceMs serverSilenceMs=${geminiConfig.endOfSpeechSilenceMs} " +
+            "autoLanguage=${geminiConfig.autoDetectLanguage} editorVocabulary=${geminiConfig.useEditorContext}")
         acceptingAudio = true
         hasCapturedAudio = false
         unconfirmedSpeech = false
@@ -155,6 +180,8 @@ class VoiceInputManager internal constructor(
                     return
                 }
                 hasCapturedAudio = true
+                capturedChunks++
+                capturedBytes += pcmData.size
                 if (voiceRecorder.isCurrentlySpeaking) noteUnconfirmedSpeech(sessionId)
                 if (pcmData.size > MAX_PENDING_AUDIO_BYTES - pendingAudioBytes) {
                     failSession("Voice audio queue is full. Dictation stopped before skipping audio.")
@@ -202,6 +229,7 @@ class VoiceInputManager internal constructor(
         if (!sessionOpen || isSessionStopping) return
         val sessionId = activeSessionId
         isSessionStopping = true
+        Log.i(TAG, "stop requested ${sessionDiagnostics()}")
         cancelAutoStopTimer()
         sessionLimit?.let(mainHandler::removeCallbacks)
         sessionLimit = null
@@ -221,6 +249,7 @@ class VoiceInputManager internal constructor(
     fun pauseRecording() {
         if (!isRecording || !sessionOpen) return
         val sessionId = activeSessionId
+        Log.i(TAG, "session=$sessionId pause")
         cancelAutoStopTimer()
         voiceRecorder.pauseRecording()
         updateState(State.PAUSED)
@@ -231,6 +260,7 @@ class VoiceInputManager internal constructor(
     fun resumeRecording() {
         if (!isPaused || !sessionOpen || isSessionStopping) return
         val sessionId = activeSessionId
+        Log.i(TAG, "session=$sessionId resume")
         voiceRecorder.resumeRecording()
         if (!isCurrent(sessionId)) return
         hasFinalizedCurrentSilence = false
@@ -269,6 +299,7 @@ class VoiceInputManager internal constructor(
                 connectTimeout = null
                 isStreamingConnecting = false
                 isStreamingReady = true
+                Log.i(TAG, "ready ${sessionDiagnostics()}")
                 // Stop capture at the session limit; never replace a socket that
                 // could still be carrying an unconfirmed prefix.
                 sessionLimit = Runnable {
@@ -302,10 +333,16 @@ class VoiceInputManager internal constructor(
                 notifyProcessingIdleIfDrained()
             }
             override fun onInterimTranscription() {
-                if (isCurrent(sessionId)) noteUnconfirmedSpeech(sessionId)
+                if (!isCurrent(sessionId)) return
+                if (!interimSeen) {
+                    interimSeen = true
+                    Log.i(TAG, "session=$sessionId first interim elapsedMs=${SystemClock.elapsedRealtime() - sessionStartedAtMs}")
+                }
+                noteUnconfirmedSpeech(sessionId)
             }
             override fun onServerResponse(hasTranscriptText: Boolean) {
                 if (!isCurrent(sessionId)) return
+                lastResponseAtMs = SystemClock.elapsedRealtime()
                 responseTimeout?.let(mainHandler::removeCallbacks)
                 responseTimeout = null
                 // Interim and turnComplete prove responsiveness, not audio coverage.
@@ -349,11 +386,18 @@ class VoiceInputManager internal constructor(
                     }
                     when (transcriptionClient.offerAudioChunk(next.pcm)) {
                         GeminiTranscriptionClient.AudioSendResult.ACCEPTED -> {
+                            acceptedAudioChunks++
+                            acceptedAudioBytes += next.pcm.size
                             outbound.removeFirst()
                             pendingAudioBytes -= next.pcm.size
+                            if (acceptedAudioChunks == 1) Log.i(TAG, "first PCM accepted ${sessionDiagnostics()}")
                             armResponseTimeout(sessionId)
                         }
                         GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE -> {
+                            if (!backpressureSeen) {
+                                backpressureSeen = true
+                                Log.i(TAG, "backpressure; retaining audio FIFO head ${sessionDiagnostics()}")
+                            }
                             // Keep the exact head until the bounded socket queue has
                             // capacity. Controls and later audio cannot overtake it.
                             audioRetry = Runnable { flushOutbound(sessionId) }.also {
@@ -412,6 +456,9 @@ class VoiceInputManager internal constructor(
                     return
                 }
                 pendingTranscripts.removeFirst()
+                acceptedFinals++
+                Log.i(TAG, "session=$sessionId final accepted index=$acceptedFinals chars=${head.text.length} " +
+                    "attaches=${head.attachesToPrevious} pendingText=${pendingTranscripts.size}")
             }
         } finally {
             isDispatchingTranscripts = false
@@ -448,19 +495,45 @@ class VoiceInputManager internal constructor(
 
     private fun failSession(error: String, mark: Boolean = true) {
         if (!sessionOpen) return
-        val insertMarker = mark && hasCapturedAudio
-        Log.e(TAG, "Dictation integrity failure: $error")
+        // No audio crosses the socket before setupComplete. Startup rejection
+        // leaves the editor untouched and reports why dictation could not start.
+        val startupFailure = !isStreamingReady
+        val insertMarker = mark && hasCapturedAudio && !startupFailure
+        Log.e(TAG, "failure error=$error marker=$insertMarker ${sessionDiagnostics()}")
         // Invalidate before stopping the mic or calling the editor: callbacks
         // already queued by either transport or recorder become harmless.
-        endSession(cancelled = true)
+        endSession(cancelled = true, failed = true)
         if (insertMarker) {
-            try { listener?.onTranscriptionInterrupted(INTERRUPTION_MARKER) }
+            try {
+                if (listener?.onTranscriptionInterrupted(INTERRUPTION_MARKER) != true) {
+                    Log.w(TAG, "Editor did not accept the interruption marker")
+                }
+            }
             catch (e: Exception) { Log.e(TAG, "Could not insert interruption marker: ${e.message}") }
         }
-        listener?.onError(error)
+        listener?.onError(if (startupFailure) "Could not start dictation. $error" else error)
     }
 
-    private fun endSession(cancelled: Boolean) {
+    private fun sessionDiagnostics(): String {
+        val now = SystemClock.elapsedRealtime()
+        val phase = when {
+            waitingForClose -> "draining"
+            isSessionStopping -> "stopping"
+            isStreamingReady -> "streaming"
+            else -> "connecting"
+        }
+        return "session=$activeSessionId phase=$phase state=$currentState elapsedMs=${now - sessionStartedAtMs} " +
+            "capturedChunks=$capturedChunks capturedBytes=$capturedBytes acceptedAudioChunks=$acceptedAudioChunks " +
+            "acceptedAudioBytes=$acceptedAudioBytes pendingPcmBytes=$pendingAudioBytes " +
+            "socketQueuedBytes=${transcriptionClient.queuedFrameBytes()} finals=$acceptedFinals " +
+            "pendingText=${pendingTranscripts.size} pendingSpeech=$unconfirmedSpeech " +
+            "lastResponseAgoMs=${lastResponseAtMs?.let { now - it } ?: "none"}"
+    }
+
+    private fun endSession(cancelled: Boolean, failed: Boolean = false) {
+        if (sessionOpen && !failed) {
+            Log.i(TAG, "end outcome=${if (cancelled) "cancelled" else "completed"} ${sessionDiagnostics()}")
+        }
         val hadPendingWork = hasPendingProcessing()
         sessionOpen = false
         acceptingAudio = false
@@ -524,17 +597,6 @@ class VoiceInputManager internal constructor(
             silenceThreshold = chunkSilenceThreshold
         )
 
-        Log.i(
-            TAG,
-            "Voice config loaded: localSpeechSilence=${chunkSilenceDurationMs}ms, " +
-                "silenceThreshold=${chunkSilenceThreshold}, " +
-                "autoStopSilence=${autoStopSilenceMs}ms, " +
-                "geminiMode=${geminiConfig.transcriptionMode}, " +
-                "geminiEndOfSpeechSilenceMs=${geminiConfig.endOfSpeechSilenceMs}, " +
-                "geminiAutoDetectLanguage=${geminiConfig.autoDetectLanguage}, " +
-                "geminiUseEditorContext=${geminiConfig.useEditorContext}, " +
-                "geminiCustomVocabulary=${geminiConfig.customVocabulary.size}"
-        )
     }
 
     private fun updateState(newState: State) {
@@ -549,7 +611,6 @@ class VoiceInputManager internal constructor(
     private fun startAutoStopTimer() {
         mainHandler.removeCallbacks(autoStopSilenceRunnable)
         if (currentState == State.RECORDING) {
-            Log.i(TAG, "Starting auto-stop timer: ${autoStopSilenceMs}ms")
             mainHandler.postDelayed(autoStopSilenceRunnable, autoStopSilenceMs)
         }
     }

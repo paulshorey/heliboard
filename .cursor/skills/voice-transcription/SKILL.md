@@ -66,7 +66,8 @@ except `LatinIME.java` (parent package) and the settings UI/preferences helpers 
    potentially partial editor edit.
 8. On failure, invalidate callback generations first, stop capture, clear uncertain
    work, preserve inserted text, and insert `[Dictation interrupted]` literally
-   once if audio was captured. Do not attempt a marker after editor failure.
+   once if audio was captured and the stream reached readiness. Startup rejection leaves the editor
+   untouched and reports the service reason. Do not attempt a marker after editor failure.
 9. Stop joins the recorder and queues EOF after its posted tail. Block restart
    until the existing connection closes. No automatic reconnect or rotation.
 
@@ -201,7 +202,9 @@ Before commit, `LatinIME.prepareVoiceTranscriptionText()` uses
 After each chunk is committed, `LatinIME.runTranscriptPostProcessing()` reads the
 current paragraph (from the last newline to the cursor, up to 1024 chars) and runs
 `TranscriptPostProcessor.processCurrentParagraph()`. If any rule matches, the
-paragraph is replaced in place via `deleteTextBeforeCursor` + `commitText`.
+paragraph is selected and replaced in one commit through `replaceTextBeforeCursor`,
+without first deleting confirmed text. A rejection stops dictation and restores
+the caret best-effort; never retry a possibly partial replacement.
 
 Current processing removes comma-attached filler fragments ("um,", "uh,") and
 handles **spelled-out punctuation** ("exclamation point.", "comma", "question
