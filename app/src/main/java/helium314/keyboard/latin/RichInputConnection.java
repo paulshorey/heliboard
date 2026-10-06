@@ -323,6 +323,8 @@ public final class RichInputConnection implements PrivateCommandPerformer {
         if (DEBUG_PREVIOUS_TEXT) checkConsistencyForDebug();
         if (DebugFlags.DEBUG_ENABLED)
             Log.d(TAG, "committing "+text.length()+" characters");
+        final int previousSelStart = mExpectedSelStart;
+        final int previousSelEnd = mExpectedSelEnd;
         mCommittedTextBeforeComposingText.append(text);
         // TODO: the following is exceedingly error-prone. Right now when the cursor is in the
         //  middle of the composing word mComposingText only holds the part of the composing text
@@ -357,11 +359,45 @@ public final class RichInputConnection implements PrivateCommandPerformer {
                 accepted = mIC.commitText(mTempObjectForCommitText, newCursorPosition);
                 return accepted;
             } finally {
-                if (!accepted) reloadTextCache();
+                if (!accepted) {
+                    mExpectedSelStart = previousSelStart;
+                    mExpectedSelEnd = previousSelEnd;
+                    reloadCursorPosition();
+                    reloadTextCache();
+                }
             }
         }
+        mExpectedSelStart = previousSelStart;
+        mExpectedSelEnd = previousSelEnd;
         reloadTextCache();
         return false;
+    }
+
+    /**
+     * Replace a range ending at a known, collapsed cursor in one commit operation.
+     * Call after finishing composition and inside a batch edit. Selecting the range
+     * avoids deleting accepted text before discovering that its replacement failed.
+     * On failure, restore the original cursor where the editor still permits it.
+     */
+    public boolean replaceTextBeforeCursor(final int beforeLength, final CharSequence replacement) {
+        final int originalStart = mExpectedSelStart;
+        final int originalEnd = mExpectedSelEnd;
+        if (beforeLength < 0 || originalStart < beforeLength || originalStart != originalEnd
+                || mComposingText.length() != 0) return false;
+        boolean accepted = false;
+        try {
+            if (!setSelection(originalStart - beforeLength, originalStart)) return false;
+            accepted = commitText(replacement, 1);
+            return accepted;
+        } finally {
+            if (!accepted) {
+                try { setSelection(originalStart, originalEnd); }
+                finally {
+                    reloadCursorPosition();
+                    reloadTextCache();
+                }
+            }
+        }
     }
 
     @Nullable

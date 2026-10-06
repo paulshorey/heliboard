@@ -76,6 +76,11 @@ class InputLogicTest {
     @BeforeTest
     fun setUp() {
         rejectVoiceCommits = false
+        rejectVoiceCommitNumber = 0
+        throwVoiceCommitNumber = 0
+        voiceCommitAttempts = 0
+        rejectVoiceDeletions = false
+        rejectVoiceSelection = false
         voiceProcessingVisible = false
         latinIME = Robolectric.setupService(LatinIME::class.java)
         // start logging only after latinIME is created, avoids showing the stack traces if library is not found
@@ -136,6 +141,80 @@ class InputLogicTest {
         commitVoiceTranscriptionTextMethod.invoke(latinIME, "Unwritten words.")
         Mockito.verify(manager).cancelRecording()
         assertEquals("", getText())
+    }
+
+    @Test fun rejectedVoiceCleanupRetainsTheInsertedParagraphAndRestoresTheCursor() {
+        reset()
+        val manager = Mockito.mock(VoiceInputManager::class.java)
+        ReflectionHelpers.setField(latinIME, "mVoiceInputManager", manager)
+        rejectVoiceCommitNumber = 2 // Accept the transcript, reject its cleanup replacement.
+        commitVoiceTranscriptionTextMethod.invoke(latinIME, "Hello. Comma.")
+        assertEquals("Hello. Comma.", getText())
+        assertEquals(text.length, cursor)
+        Mockito.verify(manager).cancelRecording()
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun rejectedCommitRestoresExpectedCursorAsWellAsCachedText() {
+        reset(); setText("Original")
+        rejectVoiceCommits = true
+        assertEquals(false, connection.commitText("Rejected", 1))
+        assertEquals(text.length, connection.expectedSelectionStart)
+        assertEquals(text.length, connection.expectedSelectionEnd)
+        checkConnectionConsistency()
+    }
+
+    @Test fun rejectedVoicePunctuationReplacementPreservesThePreviousPeriod() {
+        reset(); setText("Original sentence.")
+        val manager = Mockito.mock(VoiceInputManager::class.java)
+        ReflectionHelpers.setField(latinIME, "mVoiceInputManager", manager)
+        rejectVoiceCommits = true
+        commitVoiceTranscriptionTextMethod.invoke(latinIME, "!")
+        assertEquals("Original sentence.", getText())
+        assertEquals(text.length, cursor)
+        Mockito.verify(manager).cancelRecording()
+        checkConnectionConsistency()
+    }
+
+    @Test fun exceptionDuringVoiceCleanupRetainsConfirmedTextAndBalancesBatchEdit() {
+        reset()
+        val manager = Mockito.mock(VoiceInputManager::class.java)
+        ReflectionHelpers.setField(latinIME, "mVoiceInputManager", manager)
+        throwVoiceCommitNumber = 2
+        commitVoiceTranscriptionTextMethod.invoke(latinIME, "Hello. Comma.")
+        assertEquals("Hello. Comma.", getText())
+        assertEquals(text.length, cursor)
+        assertEquals(0, batchEdit)
+        Mockito.verify(manager).cancelRecording()
+        checkConnectionConsistency()
+    }
+
+    @Test fun voiceCleanupReplacesOnlyCurrentParagraphAndPreservesFollowingText() {
+        reset(); setText("First paragraph.\n suffix")
+        setCursorPosition("First paragraph.\n".length)
+        commitVoiceTranscriptionTextMethod.invoke(latinIME, "Hello. Comma.")
+        assertEquals("First paragraph.\nHello, suffix", getText())
+        assertEquals("First paragraph.\nHello,".length, cursor)
+        checkConnectionConsistency()
+    }
+
+    @Test fun voiceCleanupDoesNotDuplicateTextWhenTheEditorRejectsDeletion() {
+        reset(); rejectVoiceDeletions = true
+        commitVoiceTranscriptionTextMethod.invoke(latinIME, "Hello. Comma.")
+        assertEquals("Hello,", getText())
+        checkConnectionConsistency()
+    }
+
+    @Test fun rejectedVoiceCleanupSelectionPreservesTextAndStopsDictation() {
+        reset()
+        val manager = Mockito.mock(VoiceInputManager::class.java)
+        ReflectionHelpers.setField(latinIME, "mVoiceInputManager", manager)
+        rejectVoiceSelection = true
+        commitVoiceTranscriptionTextMethod.invoke(latinIME, "Hello. Comma.")
+        assertEquals("Hello. Comma.", getText())
+        Mockito.verify(manager).cancelRecording()
+        checkConnectionConsistency()
     }
 
     @Test fun voiceTranscriptionReplacesSelectedText() {
@@ -1207,6 +1286,11 @@ private val composingText get() = if (composingStart == -1 || composingEnd == -1
 
 // essentially this is the text field we're editing in
 private var rejectVoiceCommits = false
+private var rejectVoiceCommitNumber = 0
+private var throwVoiceCommitNumber = 0
+private var voiceCommitAttempts = 0
+private var rejectVoiceDeletions = false
+private var rejectVoiceSelection = false
 private var voiceProcessingVisible = false
 private val ic = object : InputConnection {
     // pretty clear (though this may be slow depending on the editor)
@@ -1243,7 +1327,9 @@ private val ic = object : InputConnection {
         return true // always true
     }
     override fun commitText(p0: CharSequence, p1: Int): Boolean {
-        if (rejectVoiceCommits) return false
+        voiceCommitAttempts++
+        if (voiceCommitAttempts == throwVoiceCommitNumber) throw IllegalStateException("Host commit failed")
+        if (rejectVoiceCommits || voiceCommitAttempts == rejectVoiceCommitNumber) return false
         if (selectionStart != selectionEnd) {
             text = textBeforeCursor + textAfterCursor
             selectionEnd = selectionStart
@@ -1276,6 +1362,7 @@ private val ic = object : InputConnection {
         return false
     }
     override fun setSelection(p0: Int, p1: Int): Boolean {
+        if (rejectVoiceSelection) return false
         selectionStart = p0
         selectionEnd = p1
         // todo: call InputMethodService.onUpdateSelection(int, int, int, int, int, int), but only after batch edit is done!
@@ -1285,6 +1372,7 @@ private val ic = object : InputConnection {
     // chars, not codepoints or glyphs
     // todo: may delete only one half of a surrogate pair, but this should be avoided by RichInputConnection (maybe throw error)
     override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
+        if (rejectVoiceDeletions) return false
         // delete only before or after selection
         text = textBeforeCursor.substring(0, textBeforeCursor.length - beforeLength) +
                 text.substring(selectionStart, selectionEnd) +

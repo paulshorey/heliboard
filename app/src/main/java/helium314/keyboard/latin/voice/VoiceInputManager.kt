@@ -52,11 +52,13 @@ class VoiceInputManager internal constructor(
     private var stopRequested = false
     private var captureInterrupted = false
     private var awaitingIntegrityDrain = false
-    private var commitWhenFlushed = false
+    private var capturedSequence = 0L
+    private var uploadedSequence = 0L
+    private var commitAtSequence: Long? = null
     private var connectionReadyAt = 0L
     private var rotation: Runnable? = null
     private var autoStopSilenceMs = Defaults.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS * 1000L
-    private data class BufferedAudio(val pcm: ByteArray, val capturedAt: Long)
+    private data class BufferedAudio(val pcm: ByteArray, val capturedAt: Long, val sequence: Long)
     private val pendingAudio = ArrayDeque<BufferedAudio>()
     private var audioQueueTimeout: Runnable? = null
     private val autoStop = Runnable { if (isRecording) stopRecording() }
@@ -129,7 +131,7 @@ class VoiceInputManager internal constructor(
                     failCapture("Voice audio buffer filled before the connection became ready. Try again.")
                     return
                 }
-                pendingAudio.addLast(BufferedAudio(pcmData, SystemClock.elapsedRealtime()))
+                pendingAudio.addLast(BufferedAudio(pcmData, SystemClock.elapsedRealtime(), ++capturedSequence))
                 armAudioQueueTimeout()
                 flushAudio()
             }
@@ -141,8 +143,8 @@ class VoiceInputManager internal constructor(
             override fun onSpeechStopped() {
                 if (activeSession != sessionId || !isRecording) return
                 startAutoStop()
-                // Defer the advisory commit until every preceding local chunk is accepted.
-                commitWhenFlushed = true
+                // Remember the actual pause boundary, even if new speech queues behind it.
+                commitAtSequence = capturedSequence
                 flushAudio()
             }
             override fun onRecordingStopped() {
@@ -189,7 +191,7 @@ class VoiceInputManager internal constructor(
         val activeSession = sessionId
         handler.post {
             if (activeSession != sessionId || !isPaused) return@post
-            commitWhenFlushed = true
+            commitAtSequence = capturedSequence
             flushAudio()
         }
     }
@@ -233,7 +235,7 @@ class VoiceInputManager internal constructor(
                 if (!isCurrent() || !ready) return
                 if (stopRequested) finishConnection()
                 else {
-                    if (isPaused) { commitWhenFlushed = true; flushAudio() }
+                    if (isPaused) { commitAtSequence = capturedSequence; flushAudio() }
                     scheduleRotation()
                 }
             }
@@ -287,17 +289,25 @@ class VoiceInputManager internal constructor(
 
     private fun flushAudio() {
         val activeSession = sessionId
+        commitUploadedBoundary()
         while (ready && pendingAudio.isNotEmpty()) {
             val next = pendingAudio.first()
             if (!client.sendAudioChunk(next.pcm)) return
             if (activeSession != sessionId) return
             pendingAudio.removeFirst()
+            uploadedSequence = next.sequence
             armAudioQueueTimeout()
+            commitUploadedBoundary()
         }
-        if (ready && pendingAudio.isEmpty() && commitWhenFlushed && !stopRequested) {
-            commitWhenFlushed = false
-            client.finalizeTurn()
-        }
+    }
+
+    private fun commitUploadedBoundary() {
+        val boundary = commitAtSequence ?: return
+        if (!ready || uploadedSequence < boundary) return
+        commitAtSequence = null
+        // The worker queues this control operation before any post-pause audio.
+        // A stopped stream uses EOF instead of an extra advisory commit.
+        if (!stopRequested) client.finalizeTurn()
     }
 
     private fun finishConnection() {
@@ -364,7 +374,9 @@ class VoiceInputManager internal constructor(
         stopRequested = false
         captureInterrupted = false
         awaitingIntegrityDrain = false
-        commitWhenFlushed = false
+        capturedSequence = 0
+        uploadedSequence = 0
+        commitAtSequence = null
         connectionReadyAt = 0
         pendingAudio.clear()
         clearAudioQueueTimeout()

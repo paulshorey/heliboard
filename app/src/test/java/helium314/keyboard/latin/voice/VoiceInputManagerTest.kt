@@ -319,6 +319,24 @@ class VoiceInputManagerTest {
         active.backpressure = false; active.listener.onWriteAvailable(); pump()
         assertTrue(active.inputFinished); assertEquals(4, active.audio.size)
     }
+    @Test fun deferredSilenceCommitDoesNotIncludeSpeechCapturedAfterThePause() {
+        start(); active.backpressure = true
+        repeat(3) { recording.onAudioChunk(ByteArray(3200)) }
+        recording.onSpeechStopped()
+        recording.onAudioChunk(ByteArray(3200)); recording.onSpeechStarted()
+        recording.onAudioChunk(ByteArray(3200))
+        active.backpressure = false; active.listener.onWriteAvailable(); pump()
+        assertEquals(9600L, active.commits.single().second)
+        assertEquals(5, active.audio.size)
+    }
+    @Test fun deferredManualPauseCommitPrecedesResumedAudio() {
+        start(); active.backpressure = true
+        recording.onAudioChunk(ByteArray(3200)); manager.pauseRecording(); pump()
+        manager.resumeRecording(); recording.onAudioChunk(ByteArray(3200))
+        active.backpressure = false; active.listener.onWriteAvailable(); pump()
+        assertEquals(3200L, active.commits.single().second)
+        assertEquals(2, active.audio.size)
+    }
     @Test fun networkLossDuringReplacementDrainDiscardsNewAudioAndPreventsReplacement() {
         start(); recording.onAudioChunk(byteArrayOf(1, 0)); manager.stopRecording(); pump()
         val outgoing = active

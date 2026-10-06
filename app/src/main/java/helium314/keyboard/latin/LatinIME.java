@@ -2186,14 +2186,18 @@ public class LatinIME extends InputMethodService implements
                 // only for a standalone voice punctuation segment. Do this at
                 // insertion time so earlier text is untouched and a selection still
                 // follows normal commitText replacement behavior.
+                boolean replacedPeriod = false;
                 if (text.length() == 1 && "!?,:;".indexOf(text.charAt(0)) >= 0
                         && !mInputLogic.mConnection.hasSelection()) {
                     final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
                     if (before != null && before.length() == 1 && before.charAt(0) == '.') {
-                        mInputLogic.mConnection.deleteTextBeforeCursor(1);
+                        if (!mInputLogic.mConnection.replaceTextBeforeCursor(1, text)) {
+                            throw new IllegalStateException("Editor rejected voice punctuation");
+                        }
+                        replacedPeriod = true;
                     }
                 }
-                if (!mInputLogic.mConnection.commitText(text, 1)) {
+                if (!replacedPeriod && !mInputLogic.mConnection.commitText(text, 1)) {
                     throw new IllegalStateException("Editor rejected voice insertion");
                 }
 
@@ -2246,8 +2250,7 @@ public class LatinIME extends InputMethodService implements
         Log.i(TAG, "VOICE post-processing: replacing paragraph ("
                 + paragraph.length() + " → " + corrected.length() + " chars)");
 
-        mInputLogic.mConnection.deleteTextBeforeCursor(paragraph.length());
-        if (!mInputLogic.mConnection.commitText(corrected, 1)) {
+        if (!mInputLogic.mConnection.replaceTextBeforeCursor(paragraph.length(), corrected)) {
             throw new IllegalStateException("Editor rejected voice cleanup");
         }
     }

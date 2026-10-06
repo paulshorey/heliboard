@@ -13,7 +13,7 @@ Preserve these contracts:
 - Configure the resource key, matching region, and fixed MAI-Transcribe-2-Streaming model.
 - Keep JNI operations off the main thread and lifecycle callbacks on the main looper.
 - Gate native recognition to supported Android versions/ABIs without raising the keyboard's minimum.
-- Bound local audio and SDK worker bytes. Retain the FIFO head on backpressure and resume on capacity; queue commit/EOF only after all local audio is accepted. Local writes do not acknowledge service receipt.
+- Bound local audio and SDK worker bytes. Retain the FIFO head on backpressure and resume on capacity. EOF waits for the local FIFO; commit records the captured boundary and is queued after its preceding audio but before resumed speech. Local writes do not acknowledge service receipt.
 - Request advisory nonempty push-stream commits at silence/pause. Settle by final offsets and echoed tokens; NoMatch can settle without text. Missing confirmation triggers EOF drain/replacement after 60 seconds or 64 pending boundaries; never assume an advisory token must be echoed.
 - Only final recognized segments reach InputConnection. Never promote a hypothesis on failure.
 - Deduplicate result IDs, preserving repeated phrases with separate IDs.
@@ -24,7 +24,7 @@ Preserve these contracts:
 - Let the SDK own acknowledgements and recovery. Do not replay audio from the application.
 - Require validated internet before capture and observe network loss through drain. Keep the SDK Connection alive; disconnect while input is open and SDK errors end dictation without automatic retries. Mark uncertain audio with `[Dictation interrupted]` and require a deliberate new start.
 - Bound the oldest local upload wait and oldest unfinalized submitted audio to 30 seconds; only confirmed progress settles their age. EOF has its separate 60-second deadline. An upload timeout is terminal; a final-progress timeout stops capture and blocks restart while preserving accepted speech through EOF. These policy limits may stop capture in healthy slow sessions. NoMatch or timing gaps alone are not proof of missing speech.
-- Capture failures retain accepted speech to EOF, ignore later recorder callbacks, block restart while draining, and keep processing visible. Cancel dictation on editor rejection; no later final may follow an unwritten result.
+- Capture failures retain accepted speech to EOF, ignore later recorder callbacks, block restart while draining, and keep processing visible. Cancel dictation on editor rejection; no later final may follow an unwritten result. Cleanup and punctuation replacement select the range and use one commit operation; never delete accepted text before attempting its replacement. Restore text/cursor caches on rejected commits.
 - Keep key/region settings and diagnostics free of raw credentials or service error details.
 
 Validate with the client, manager, preference, transcript-formatting, and diagnostics tests, and the canonical APK build. `tools/mai-streaming-smoke-test.py` uses the Python Speech SDK for a credentialed check; a supported Android device is required to validate native execution and latency.

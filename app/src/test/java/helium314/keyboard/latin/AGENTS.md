@@ -3,7 +3,7 @@
 Core IME pipeline tests.
 
 ## Direct files
-- `InputLogicTest.kt` - broad regression suite for typing, deletion, correction, mirror-based input behavior, pending voice error indicators, and editor rejection cancelling dictation.
+- `InputLogicTest.kt` - broad regression suite for typing, deletion, correction, mirror-based input behavior, pending voice error indicators, editor rejection cancelling dictation, cursor-cache recovery, and non-destructive voice cleanup/punctuation replacement under rejection or exceptions.
 - `LatinIMETextSnapshotTest.java` - tests for fullapp text snapshot helpers.
 - `LocaleUtilsTest.kt` - locale utility tests.
 - `ScriptUtilsTest.kt` - script utility tests.
