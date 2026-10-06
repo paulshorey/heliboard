@@ -364,6 +364,36 @@ public final class RichInputConnection implements PrivateCommandPerformer {
         return false;
     }
 
+    /**
+     * Select and replace committed text in one commit, without deleting it first.
+     * There is no preliminary deletion if the commit is rejected. Restore the
+     * caret best-effort on failure; never retry a possibly partial edit.
+     * Caller must hold a batch edit and have finished composing text.
+     */
+    public boolean replaceTextBeforeCursor(final int beforeLength, final CharSequence replacement) {
+        final int originalStart = mExpectedSelStart;
+        final int originalEnd = mExpectedSelEnd;
+        if (beforeLength < 0 || originalStart < beforeLength || originalStart != originalEnd
+                || mComposingText.length() != 0 || !isConnected()) {
+            return false;
+        }
+        boolean accepted = false;
+        try {
+            if (!setSelection(originalStart - beforeLength, originalStart)) return false;
+            accepted = commitText(replacement, 1);
+            return accepted;
+        } finally {
+            if (!accepted) {
+                try {
+                    setSelection(originalStart, originalEnd);
+                } catch (RuntimeException ignored) {
+                    // The original failure is terminal; restoring the caret is optional.
+                }
+                refreshAfterFailedEdit();
+            }
+        }
+    }
+
     private void refreshAfterFailedEdit() {
         // A rejected/throwing host call may have partially changed the editor.
         // Recover both cached text and cursor from it, never from our prediction.
@@ -581,8 +611,7 @@ public final class RichInputConnection implements PrivateCommandPerformer {
         }
     }
 
-    public boolean deleteTextBeforeCursor(final int beforeLength) {
-        if (!isConnected()) return false;
+    public void deleteTextBeforeCursor(final int beforeLength) {
         if (DEBUG_BATCH_NESTING) checkBatchEdit();
         // TODO: the following is incorrect if the cursor is not immediately after the composition.
         //  Right now we never come here in this case because we reset the composing state before we
@@ -608,15 +637,10 @@ public final class RichInputConnection implements PrivateCommandPerformer {
             mExpectedSelEnd -= mExpectedSelStart;
             mExpectedSelStart = 0;
         }
-        try {
-            final boolean accepted = mIC.deleteSurroundingText(beforeLength, 0);
-            if (!accepted) refreshAfterFailedEdit();
-            if (DEBUG_PREVIOUS_TEXT) checkConsistencyForDebug();
-            return accepted;
-        } catch (RuntimeException e) {
-            refreshAfterFailedEdit();
-            throw e;
+        if (isConnected()) {
+            mIC.deleteSurroundingText(beforeLength, 0);
         }
+        if (DEBUG_PREVIOUS_TEXT) checkConsistencyForDebug();
     }
 
     /**

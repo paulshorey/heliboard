@@ -2173,11 +2173,12 @@ public class LatinIME extends InputMethodService implements
             if (!mInputLogic.mConnection.isConnected()) return false;
             mInputLogic.finishInput();
 
+            boolean replacePreviousPeriod = false;
             if (processTranscript && text.length() == 1 && "!?,:;".indexOf(text.charAt(0)) >= 0
                     && !mInputLogic.mConnection.hasSelection()) {
                 final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
                 if (before != null && before.length() == 1 && before.charAt(0) == '.') {
-                    if (!mInputLogic.mConnection.deleteTextBeforeCursor(1)) return false;
+                    replacePreviousPeriod = true;
                 }
             }
             String insertion = text;
@@ -2187,7 +2188,10 @@ public class LatinIME extends InputMethodService implements
                     insertion = " " + text;
                 }
             }
-            if (!mInputLogic.mConnection.commitText(insertion, 1)) return false;
+            final boolean accepted = replacePreviousPeriod
+                    ? mInputLogic.mConnection.replaceTextBeforeCursor(1, insertion)
+                    : mInputLogic.mConnection.commitText(insertion, 1);
+            if (!accepted) return false;
             return !processTranscript || runTranscriptPostProcessing();
         } catch (Exception e) {
             Log.e(TAG, "Error inserting voice text: " + e.getMessage(), e);
@@ -2229,8 +2233,7 @@ public class LatinIME extends InputMethodService implements
         Log.i(TAG, "VOICE post-processing: replacing paragraph ("
                 + paragraph.length() + " → " + corrected.length() + " chars)");
 
-        if (!mInputLogic.mConnection.deleteTextBeforeCursor(paragraph.length())) return false;
-        return mInputLogic.mConnection.commitText(corrected, 1);
+        return mInputLogic.mConnection.replaceTextBeforeCursor(paragraph.length(), corrected);
     }
 
     /**

@@ -185,10 +185,10 @@ class InputLogicTest {
         assertEquals(0, batchEdit)
     }
 
-    @Test fun rejectedVoicePunctuationDeletionDoesNotWriteAReplacement() {
+    @Test fun rejectedVoicePunctuationSelectionDoesNotWriteAReplacement() {
         reset()
         setText("Confirmed.")
-        rejectDelete = true
+        rejectSelection = true
         assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "!"))
         assertEquals("Confirmed.", getText())
         assertEquals(0, batchEdit)
@@ -198,19 +198,53 @@ class InputLogicTest {
     @Test fun rejectedParagraphCleanupStopsAfterTheAcceptedOriginalInsertion() {
         reset()
         setText("hello ")
-        rejectDelete = true
+        rejectSelection = true
         assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "Comma."))
         assertEquals("hello Comma.", getText())
         assertEquals(0, batchEdit)
         checkConnectionConsistency()
     }
 
-    @Test fun rejectedParagraphReplacementReportsFailureAfterDeletion() {
+    @Test fun rejectedParagraphReplacementPreservesTheOriginalTextAndCaret() {
         reset()
         setText("hello ")
         rejectSecondCommit = true
         assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "Comma."))
-        assertEquals("", text)
+        assertEquals("hello Comma.", text)
+        assertEquals(text.length, cursor)
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun rejectedPunctuationReplacementPreservesThePeriodAndCaret() {
+        reset()
+        setText("Confirmed.")
+        rejectCommit = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "!"))
+        assertEquals("Confirmed.", text)
+        assertEquals(text.length, cursor)
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun throwingParagraphReplacementPreservesTheOriginalTextAndCaret() {
+        reset()
+        setText("hello ")
+        throwOnSecondCommit = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "Comma."))
+        assertEquals("hello Comma.", text)
+        assertEquals(text.length, cursor)
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun throwingReplacementSelectionRefreshesTheCacheWithoutWritingText() {
+        reset()
+        setText("Confirmed.")
+        throwOnSelection = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "!"))
+        assertEquals("Confirmed.", text)
+        assertEquals(text.length, cursor)
         assertEquals(0, batchEdit)
         checkConnectionConsistency()
     }
@@ -1026,8 +1060,10 @@ class InputLogicTest {
         lastAddedWord = ""
         rejectCommit = false
         throwOnCommit = false
-        rejectDelete = false
         rejectSecondCommit = false
+        throwOnSecondCommit = false
+        rejectSelection = false
+        throwOnSelection = false
         commitCalls = 0
         throwOnBatchStart = false
 
@@ -1254,8 +1290,10 @@ private val composingText get() = if (composingStart == -1 || composingEnd == -1
 // essentially this is the text field we're editing in
 private var rejectCommit = false
 private var throwOnCommit = false
-private var rejectDelete = false
 private var rejectSecondCommit = false
+private var throwOnSecondCommit = false
+private var rejectSelection = false
+private var throwOnSelection = false
 private var commitCalls = 0
 private var throwOnBatchStart = false
 
@@ -1296,6 +1334,7 @@ private val ic = object : InputConnection {
     override fun commitText(p0: CharSequence, p1: Int): Boolean {
         if (throwOnCommit) error("editor disconnected")
         commitCalls++
+        if (throwOnSecondCommit && commitCalls == 2) error("editor disconnected")
         if (rejectCommit || (rejectSecondCommit && commitCalls == 2)) return false
         if (selectionStart != selectionEnd) {
             text = textBeforeCursor + textAfterCursor
@@ -1330,6 +1369,8 @@ private val ic = object : InputConnection {
         return false
     }
     override fun setSelection(p0: Int, p1: Int): Boolean {
+        if (throwOnSelection) error("editor disconnected")
+        if (rejectSelection) return false
         selectionStart = p0
         selectionEnd = p1
         // todo: call InputMethodService.onUpdateSelection(int, int, int, int, int, int), but only after batch edit is done!
@@ -1339,7 +1380,6 @@ private val ic = object : InputConnection {
     // chars, not codepoints or glyphs
     // todo: may delete only one half of a surrogate pair, but this should be avoided by RichInputConnection (maybe throw error)
     override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
-        if (rejectDelete) return false
         // delete only before or after selection
         text = textBeforeCursor.substring(0, textBeforeCursor.length - beforeLength) +
                 text.substring(selectionStart, selectionEnd) +

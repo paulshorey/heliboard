@@ -607,8 +607,7 @@ class GeminiTranscriptionClient {
 
         /**
          * A speculative interim hypothesis arrived. Never committed on its own;
-         * the manager uses this to notice that Gemini is holding an unfinished
-         * tail and to finalize the turn if local silence does not fire.
+         * the manager uses this to track pending speech and bound final progress.
          */
         fun onInterimTranscription()
 
@@ -633,8 +632,8 @@ class GeminiTranscriptionClient {
 
         /**
          * The client opened a replacement handshake on this same manager
-         * session (setup-tier fallback). Reset any connect timeout that was
-         * started for the previous attempt.
+         * session (setup-tier fallback). Preserve the original connect deadline
+         * across every attempt.
          */
         fun onHandshakeRestarted() {}
     }
@@ -842,6 +841,9 @@ class GeminiTranscriptionClient {
 
     fun sendAudioChunk(pcmData: ByteArray): Boolean =
         offerAudioChunk(pcmData) == AudioSendResult.ACCEPTED
+
+    /** A final cannot acknowledge audio that is still waiting in the local sender. */
+    internal fun hasQueuedFrames(): Boolean = (webSocket?.queueSize() ?: 0L) > 0L
 
     /**
      * Ask Gemini to finalize the current turn immediately instead of waiting out

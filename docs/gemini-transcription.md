@@ -23,6 +23,8 @@ costs the user more than a second of waiting.
 5. Deliver finalized segments in FIFO order. Retain the head until `LatinIME`
    synchronously returns editor acceptance, including paragraph cleanup. A false
    result or exception stops the session; never retry a potentially partial edit.
+   Cleanup and punctuation correction select the original range and replace it
+   with one commit, so a rejected replacement does not first delete confirmed text.
 6. On terminal failure, invalidate the recording and connection generations before
    stopping capture, clearing pending work, and notifying the editor. Already
    inserted text remains. If audio was captured, insert one literal
@@ -178,7 +180,9 @@ There is no stale-interim insertion timer. An interim is never evidence that all
 speech was received. On explicit stop, stop/join the recorder, process its already
 posted tail callbacks, enqueue EOF, and read for eight seconds before initiating
 WebSocket close. A nonempty transport queue at that deadline is failure. The
-manager also bounds the complete finish/close wait to 15 seconds. Missing finals
+manager also bounds the complete finish/close wait to 15 seconds. A capture thread still alive after
+two seconds reports terminal failure before the EOF barrier, blocks native capture
+reuse, and keeps its original recording callback for all late reads. Missing finals
 for locally detected speech or interim hypotheses produce an interruption marker.
 
 These are application deadlines, not Google latency guarantees. A healthy slow
@@ -227,6 +231,9 @@ Deadlines are anchored rather than reset by each PCM chunk:
   interims and `turnComplete` do not confirm the speech.
 - Pending locally detected speech/interim with no accepted final: 30 seconds.
   Interim updates cannot postpone this deadline. Pure silence does not arm it.
+  A final cannot clear pending speech while PCM or socket frames are still queued
+  locally: it may describe an earlier utterance. The deadline remains until a
+  later final arrives after those queues drain; draining alone is not confirmation.
 - EOF: eight seconds before initiating close, 15 seconds for the full close wait.
 
 Network loss, send/finalize failure, protocol error, unexpected close (including

@@ -58,7 +58,9 @@ Orchestrates recording, Gemini streaming, and ordered transcript delivery.
 - **Explicit restart**: no reconnect, resumption, or rotation. `goAway` or nine minutes stops capture and drains; the next recording requires a mic tap.
 - **Session config**: maps the subtype locale to a documented BCP-47 code, clamps `silenceDurationMs` to 400–5000 ms, and harvests vocabulary once per recording.
 - **Deadlines**: 12 seconds across all setup tiers, 30 seconds for oldest queued PCM and pending-speech response/final progress, 15 seconds for EOF/close. PCM/interim updates cannot postpone missing final progress. Pure silence does not arm a speech deadline.
+- **Final progress**: an earlier final cannot acknowledge a suffix still in the PCM or socket queue. Keep pending speech until a later final arrives after the local queues drain.
 - **Auto-stop**: prolonged local silence stops recording. Local speech-stop, pause, and stop enqueue `audioStreamEnd`.
+- **Capture shutdown**: a missed two-second join is terminal before EOF; an old live thread blocks reuse and keeps its original recording callback.
 
 ### LatinIME.java
 Main orchestrator that coordinates all components and inserts text into the editor.
@@ -66,6 +68,7 @@ Main orchestrator that coordinates all components and inserts text into the edit
 - Calls `mInputLogic.finishInput()` first to keep composing state in sync
 - Applies pre-commit spacing/casing/trailing-punctuation shaping, then runs paragraph-level post-processing
 - Wraps commit and post-processing in one batch edit, always closed in `finally`; reports false for rejected/throwing editor operations
+- Selects and commits cleanup/punctuation replacements without deleting the original first; on failure, restores the caret best-effort and refreshes caches without retrying text
 - Literal interruption markers bypass casing and paragraph cleanup
 - Supplies editor text for vocabulary harvesting through `buildVoiceContextText`
 

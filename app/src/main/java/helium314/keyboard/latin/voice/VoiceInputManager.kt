@@ -292,9 +292,13 @@ class VoiceInputManager internal constructor(
                 pendingTranscripts.addLast(segment)
                 processTranscripts(sessionId)
                 if (!isCurrent(sessionId)) return
-                unconfirmedSpeech = false
-                finalTimeout?.let(mainHandler::removeCallbacks)
-                finalTimeout = null
+                // This final may describe an earlier utterance. Never let it
+                // acknowledge a suffix that has not even left our local queues.
+                if (outbound.none { it is Outbound.Audio } && !transcriptionClient.hasQueuedFrames()) {
+                    unconfirmedSpeech = false
+                    finalTimeout?.let(mainHandler::removeCallbacks)
+                    finalTimeout = null
+                }
                 notifyProcessingIdleIfDrained()
             }
             override fun onInterimTranscription() {

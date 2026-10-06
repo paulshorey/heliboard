@@ -30,6 +30,7 @@ class VoiceInputManagerTest {
     private val errors = mutableListOf<String>()
     private var speaking = false
     private var sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
+    private var transportQueued = false
     private var editorAccepts = true
     private var editorThrows = false
     private var finalizeAccepts = true
@@ -63,6 +64,7 @@ class VoiceInputManagerTest {
                 }
                 "finalizeTurn" -> { sent.add("end"); finalizeAccepts }
                 "finishStreaming" -> { sent.add("finish"); finalizeAccepts }
+                "hasQueuedFrames" -> transportQueued
                 else -> Mockito.RETURNS_DEFAULTS.answer(call)
             }
         }
@@ -212,6 +214,51 @@ class VoiceInputManagerTest {
         stream.onServerResponse(false); stream.onStreamClosed()
         assertTrue(manager.isIdle)
         assertEquals(1, markers.size)
+    }
+
+    @Test fun earlierFinalCannotAcknowledgeAudioStillWaitingInTheManager() {
+        start(); speaking = true; audio(1)
+        sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE
+        audio(2); final("confirmed prefix")
+        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
+        sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
+        advance(30); stream.onStreamClosed()
+        assertTrue(manager.isIdle)
+        assertEquals(listOf("confirmed prefix"), inserted)
+        assertEquals(listOf("audio:1", "audio:2", "finish"), sent)
+        assertEquals(1, markers.size)
+    }
+
+    @Test fun earlierFinalCannotAcknowledgeAudioStillWaitingInTheSocket() {
+        start(); speaking = true; audio()
+        transportQueued = true; final("confirmed prefix")
+        transportQueued = false
+        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
+        stream.onStreamClosed()
+        assertTrue(manager.isIdle)
+        assertEquals(listOf("confirmed prefix"), inserted)
+        assertEquals(1, markers.size)
+    }
+
+    @Test fun queuedAudioKeepsTheOriginalFinalProgressDeadlineAfterAnEarlierFinal() {
+        start(); speaking = true; audio(); advance(29_000)
+        transportQueued = true; final("confirmed prefix")
+        advance(1100)
+        assertTrue(manager.isIdle)
+        assertTrue(errors.single().contains("No final transcript"))
+        assertEquals(listOf("confirmed prefix"), inserted)
+        assertEquals(1, markers.size)
+    }
+
+    @Test fun laterFinalAfterLocalQueuesDrainCanCompleteTheSession() {
+        start(); speaking = true; audio()
+        transportQueued = true; final("confirmed prefix")
+        transportQueued = false
+        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
+        final("confirmed suffix"); stream.onStreamClosed()
+        assertTrue(manager.isIdle)
+        assertEquals(listOf("confirmed prefix", "confirmed suffix"), inserted)
+        assertTrue(markers.isEmpty())
     }
 
     @Test fun stopWaitsForTheFinalAndBlocksRestartUntilTheSocketCloses() {

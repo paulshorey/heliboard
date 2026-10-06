@@ -164,6 +164,10 @@ class VoiceRecorder(private val context: Context) {
             Log.w(TAG, "Already recording")
             return false
         }
+        if (recordingThread?.isAlive == true) {
+            callback?.onRecordingError("Previous microphone capture has not stopped")
+            return false
+        }
         if (!hasRecordPermission()) {
             Log.e(TAG, "No RECORD_AUDIO permission")
             callback?.onRecordingError("Microphone permission not granted")
@@ -192,11 +196,10 @@ class VoiceRecorder(private val context: Context) {
             audioRecord?.startRecording()
             isRecording = true
 
-            recordingThread = thread(start = true, name = "VoiceRecorder") {
-                recordingLoop()
-            }
-
             val callbackSnapshot = callback
+            recordingThread = thread(start = true, name = "VoiceRecorder") {
+                recordingLoop(callbackSnapshot)
+            }
             mainHandler.post { callbackSnapshot?.onRecordingStarted() }
             val configSnapshot = silenceConfig
             Log.i(
@@ -229,9 +232,18 @@ class VoiceRecorder(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping AudioRecord: ${e.message}")
         }
+        val captureThread = recordingThread
         try {
-            recordingThread?.join(2000)
-        } catch (_: InterruptedException) {}
+            captureThread?.join(2000)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+        if (captureThread?.isAlive == true) {
+            // The manager posts EOF only after this call returns. Queue this
+            // error first: a missed join cannot masquerade as a complete tail.
+            val callbackSnapshot = callback
+            mainHandler.post { callbackSnapshot?.onRecordingError("Microphone capture did not stop") }
+        }
         releaseRecorder()
         Log.i(TAG, "Recording stopped")
         val callbackSnapshot = callback
@@ -274,12 +286,13 @@ class VoiceRecorder(private val context: Context) {
     private fun releaseRecorder() {
         try { audioRecord?.release() } catch (_: Exception) {}
         audioRecord = null
-        recordingThread = null
+        // Retain a stuck thread so a new session cannot reuse capture state.
+        if (recordingThread?.isAlive != true) recordingThread = null
     }
 
     // ── Recording loop with silence detection ──────────────────────────
 
-    private fun recordingLoop() {
+    private fun recordingLoop(recordingCallback: RecordingCallback?) {
         val readBuffer = ByteArray(BYTES_PER_READ)
         var silenceDurationMs = 0L
         isSpeaking = false
@@ -326,7 +339,7 @@ class VoiceRecorder(private val context: Context) {
                                 val error =
                                     "Microphone produced no audio data for ${emptyReadWindowMs}ms"
                                 Log.e(TAG, error)
-                                val callbackSnapshot = callback
+                                val callbackSnapshot = recordingCallback
                                 mainHandler.post { callbackSnapshot?.onRecordingError(error) }
                                 break
                             }
@@ -340,7 +353,7 @@ class VoiceRecorder(private val context: Context) {
                         }
                         val error = mapAudioReadError(bytesRead)
                         Log.e(TAG, "AudioRecord read failed: $error")
-                        val callbackSnapshot = callback
+                        val callbackSnapshot = recordingCallback
                         mainHandler.post { callbackSnapshot?.onRecordingError(error) }
                         break
                     }
@@ -351,7 +364,7 @@ class VoiceRecorder(private val context: Context) {
 
                 // Always forward the live PCM stream; streaming transcription consumes
                 // this path instead of relying on locally cut WAV segments.
-                val callbackSnapshot = callback
+                val callbackSnapshot = recordingCallback
                 mainHandler.post { callbackSnapshot?.onAudioChunk(chunk) }
 
                 val energy = rmsEnergy(chunk)
@@ -391,7 +404,7 @@ class VoiceRecorder(private val context: Context) {
                 if (hasSpeech) {
                     if (!isSpeaking) {
                         isSpeaking = true
-                        val callbackSnapshot = callback
+                        val callbackSnapshot = recordingCallback
                         mainHandler.post { callbackSnapshot?.onSpeechStarted() }
                     }
                     silenceDurationMs = 0L
@@ -406,7 +419,7 @@ class VoiceRecorder(private val context: Context) {
                                 "VOICE_STEP_2 silence detected (${configSnapshot.silenceDurationMs}ms window), " +
                                     "energy=${smoothedEnergy.toInt()}, threshold=${silenceThreshold.toInt()} — speech stopped"
                             )
-                            val callbackSnapshot = callback
+                            val callbackSnapshot = recordingCallback
                             mainHandler.post { callbackSnapshot?.onSpeechStopped() }
                         }
                     }
@@ -418,7 +431,7 @@ class VoiceRecorder(private val context: Context) {
                 return
             }
             Log.e(TAG, "Error in recording loop: ${e.message}")
-            val callbackSnapshot = callback
+            val callbackSnapshot = recordingCallback
             mainHandler.post { callbackSnapshot?.onRecordingError("Recording error: ${e.message}") }
         }
     }

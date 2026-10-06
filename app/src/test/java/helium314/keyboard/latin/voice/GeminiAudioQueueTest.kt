@@ -62,6 +62,16 @@ class GeminiAudioQueueTest {
         assertFalse(client.finishStreaming())
     }
 
+    @Test fun queueObservationTracksLocalFramesRatherThanAcceptedSends() {
+        assertFalse(client.hasQueuedFrames())
+        assertTrue(client.sendAudioChunk(ByteArray(3200)))
+        assertTrue(client.hasQueuedFrames())
+        socket.bytes = 0
+        assertFalse(client.hasQueuedFrames())
+        client.cancelAll()
+        assertFalse(client.hasQueuedFrames())
+    }
+
     @Test fun invalidPcmIsRejectedWithoutEnqueuingAFrame() {
         for (pcm in listOf(ByteArray(0), ByteArray(3), ByteArray(300_000))) {
             assertEquals(GeminiTranscriptionClient.AudioSendResult.FAILED, client.offerAudioChunk(pcm))
