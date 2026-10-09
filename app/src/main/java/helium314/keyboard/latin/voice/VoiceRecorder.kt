@@ -92,8 +92,10 @@ class VoiceRecorder(private val context: Context) {
         /**
          * Raw PCM16 microphone chunk from the live stream.
          * Chunk cadence is roughly every [READ_INTERVAL_MS] while recording.
+         * [containsSpeech] snapshots raw energy evidence at capture time; it
+         * excludes the speech-stop silence window and never gates PCM delivery.
          */
-        fun onAudioChunk(pcmData: ByteArray)
+        fun onAudioChunk(pcmData: ByteArray, containsSpeech: Boolean)
 
         /** Called when speech is detected (silence ended). */
         fun onSpeechStarted()
@@ -358,11 +360,6 @@ class VoiceRecorder(private val context: Context) {
                 val chunk = if (bytesRead == BYTES_PER_READ) readBuffer.copyOf()
                             else readBuffer.copyOf(bytesRead)
 
-                // Always forward the live PCM stream; streaming transcription consumes
-                // this path instead of relying on locally cut WAV segments.
-                val callbackSnapshot = recordingCallback
-                mainHandler.post { callbackSnapshot?.onAudioChunk(chunk) }
-
                 val energy = rmsEnergy(chunk)
                 smoothedEnergy = (ENERGY_SMOOTHING_ALPHA * energy) +
                     ((1.0 - ENERGY_SMOOTHING_ALPHA) * smoothedEnergy)
@@ -375,6 +372,15 @@ class VoiceRecorder(private val context: Context) {
                 } else {
                     smoothedEnergy >= speechThreshold
                 }
+
+                // Snapshot evidence for this chunk, not the mutable speaking flag:
+                // that flag includes the silence window and can change before the
+                // main looper consumes the callback. Raw energy also avoids treating
+                // the smoothing tail of a loud word as new speech after a final.
+                // This annotation never gates PCM delivery to Gemini.
+                val containsSpeech = energy >= silenceThreshold
+                val callbackSnapshot = recordingCallback
+                mainHandler.post { callbackSnapshot?.onAudioChunk(chunk, containsSpeech) }
 
                 // Percentile-based noise floor: track raw RMS energy (not EMA-smoothed)
                 // to avoid speech->silence lag contaminating the low-percentile baseline.

@@ -53,12 +53,12 @@ Builds `inputAudioTranscription.customVocabulary`.
 Orchestrates recording, Gemini streaming, and ordered transcript delivery.
 - **State machine**: IDLE → RECORDING ↔ PAUSED → IDLE
 - **Buffered audio/control FIFO**: retains up to 960,000 PCM bytes until transport acceptance. Pause, silence, and stop cannot overtake earlier audio. The socket queue holds at most 256 KiB of encoded audio JSON; local backpressure retries the same head every 25 ms.
-- **Transcript FIFO**: retains each head until the listener returns editor acceptance. Overflow at 64 entries is terminal, with no coalescing or skipping.
+- **Transcript FIFO**: retains each head until the listener returns local dispatch/cleanup success. Android IPC does not return the host editor's commit result. Overflow at 64 entries is terminal, with no coalescing or skipping.
 - **Terminal failure**: invalidate callback generations, stop capture, clear uncertain work, preserve inserted text, and mark possible loss with `[Dictation interrupted]` once. Editor rejection/exception suppresses a marker and stops later writes.
 - **Explicit restart**: no reconnect, resumption, or rotation. `goAway` or nine minutes stops capture and drains; the next recording requires a mic tap.
 - **Session config**: maps the subtype locale to a documented BCP-47 code, clamps `silenceDurationMs` to 400–5000 ms, and harvests vocabulary once per recording.
 - **Deadlines**: 12 seconds across all setup tiers, 30 seconds for oldest queued PCM and pending-speech response/final progress, 15 seconds for EOF/close. PCM/interim updates cannot postpone missing final progress. Pure silence does not arm a speech deadline.
-- **Final progress**: an earlier final cannot acknowledge a suffix still in the PCM or socket queue. Keep pending speech until a later final arrives after the local queues drain.
+- **Final progress**: an earlier final cannot acknowledge annotated speech still in the PCM or socket queue. PCM carries capture-time raw-energy evidence, separate from the speaking silence window. Track the encoded quiet/control suffix in the socket FIFO so silence alone does not block a final. Keep pending speech until a later final arrives after queued speech drains.
 - **Auto-stop**: prolonged local silence stops recording. Local speech-stop, pause, and stop enqueue `audioStreamEnd`.
 - **Capture shutdown**: a missed two-second join is terminal before EOF; an old live thread blocks reuse and keeps its original recording callback.
 
@@ -67,9 +67,10 @@ Main orchestrator that coordinates all components and inserts text into the edit
 - Uses `InputConnection.commitText(...)` at the caret, or replaces an active selection when text is highlighted
 - Calls `mInputLogic.finishInput()` first to keep composing state in sync
 - Applies pre-commit spacing/casing/trailing-punctuation shaping, then runs paragraph-level post-processing
-- Wraps commit and post-processing in one batch edit, always closed in `finally`; reports false for rejected/throwing editor operations
-- Selects and commits cleanup/punctuation replacements without deleting the original first; on failure, restores the caret best-effort and refreshes caches without retrying text
-- Literal interruption markers bypass casing and paragraph cleanup
+- Wraps commit and post-processing in a wrapper batch edit, always closed in `finally`; temporarily closes/reopens the host batch before selection readback so deferred editors apply edits; reports false for rejected/throwing editor operations
+- Verifies actual host selection positions and selected text before committing cleanup/punctuation replacements without deleting the original first; on failure, restores the caret best-effort and refreshes caches without retrying text
+- Prepares paragraph correction from the current cache, then verifies matching original host text after flushing; ignores delayed intermediate selection callbacks only when the host's current caret matches the expected voice caret
+- Literal interruption markers bypass casing and paragraph cleanup; always verify the current caret, even when the cached selection is collapsed, and preserve highlighted text by moving to a verified caret at its end, or skip insertion if the move cannot be verified
 - Supplies editor text for vocabulary harvesting through `buildVoiceContextText`
 
 ## Data Flow Steps
@@ -141,7 +142,7 @@ PAUSED     → User taps pause  → RECORDING (resume)
 
 ### Ordering Guarantees
 - Transcript segments are queued and delivered in FIFO order by `VoiceInputManager`.
-- `LatinIME` returns editor acceptance synchronously; a rejected insertion blocks every later segment.
+- `LatinIME` returns local dispatch/cleanup success synchronously; a rejected operation or unverifiable replacement selection blocks every later segment. This is not confirmation of complete insertion by a remote host editor.
 - The same outgoing FIFO orders PCM and control frames. No buffered audio is evicted to admit later audio.
 - IDLE during graceful drain does not allow a new recording until the old connection closes.
 - Silence-driven automatic paragraph breaks are disabled to avoid unintended host-app side effects.

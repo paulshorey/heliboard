@@ -17,7 +17,8 @@ Core IME pipeline tests.
 ## Non-obvious notes
 - `InputLogicTest.kt` is the most important behavior-regression suite for ordinary typing.
 - Suggestion-strip regressions for host `TYPE_TEXT_FLAG_NO_SUGGESTIONS` live in `InputLogicTest` (`noSuggestionsFlagStillLooksUpSuggestionsForCurrentWord`, `noSuggestionsFlagDoesNotAutocorrectOrLearn`). Password and non-text fields should still skip lookup. Those fields also skip user-history learning; autocorrect stays off unless the host also set `TYPE_TEXT_FLAG_AUTO_CORRECT`.
-- Voice insertion tests also verify editor rejection/exception, cache refresh, preservation of text/caret after rejected paragraph or punctuation replacement, and literal interruption markers.
+- Voice insertion tests also verify editor rejection/exception, cache refresh, preservation of text/caret after rejected paragraph or punctuation replacement, and literal interruption markers that preserve selected content. Remote selection tests model successful dispatch with no host change, mismatched selected text, unavailable selection queries, and partial extracted-text offsets.
+- Deferred-editor tests queue commits/selections until the host batch closes, and cover paragraph cleanup, punctuation replacement, and marker preservation. Delayed intermediate selection callbacks must preserve the final caches and recording; an actual user cursor move or cleared field still cancels voice work. Marker tests also cover a newly highlighted host selection whose callback has not arrived.
 - The mix of Java and Kotlin tests here is intentional; keep whichever language is clearest for the target code.
 
 ## Keep this file current

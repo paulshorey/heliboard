@@ -79,6 +79,49 @@ class GeminiAudioQueueTest {
         assertTrue(socket.messages.isEmpty())
     }
 
+    @Test fun speechQueueTrackingDistinguishesTrailingQuietPcmAndControls() {
+        assertEquals(GeminiTranscriptionClient.AudioSendResult.ACCEPTED,
+            client.offerAudioChunk(ByteArray(3200), containsSpeech = true))
+        assertTrue(client.hasQueuedSpeechFrames())
+        val speechBytes = socket.bytes
+        assertEquals(GeminiTranscriptionClient.AudioSendResult.ACCEPTED,
+            client.offerAudioChunk(ByteArray(3200), containsSpeech = false))
+        assertTrue(client.finalizeTurn())
+        val quietAndControlBytes = socket.bytes - speechBytes
+        socket.bytes = quietAndControlBytes + 1 // Even a partial speech frame remains a barrier.
+        assertTrue(client.hasQueuedSpeechFrames())
+        socket.bytes = quietAndControlBytes
+        assertTrue(client.hasQueuedFrames())
+        assertFalse(client.hasQueuedSpeechFrames())
+        assertEquals(GeminiTranscriptionClient.AudioSendResult.ACCEPTED,
+            client.offerAudioChunk(ByteArray(3200), containsSpeech = true))
+        assertTrue(client.hasQueuedSpeechFrames()) // A newer speech frame resets the quiet suffix.
+        client.cancelAll()
+        assertFalse(client.hasQueuedSpeechFrames())
+    }
+
+    @Test fun quietOnlySocketQueueNeverClaimsToContainSpeech() {
+        assertEquals(GeminiTranscriptionClient.AudioSendResult.ACCEPTED,
+            client.offerAudioChunk(ByteArray(3200), containsSpeech = false))
+        assertTrue(client.finalizeTurn())
+        assertTrue(client.hasQueuedFrames())
+        assertFalse(client.hasQueuedSpeechFrames())
+    }
+
+    @Test fun rejectedOrBackpressuredQuietFramesCannotHideQueuedSpeech() {
+        client.offerAudioChunk(ByteArray(3200), containsSpeech = true)
+        val speechBytes = socket.bytes
+        socket.bytes = GeminiTranscriptionClient.MAX_SOCKET_AUDIO_BYTES
+        assertEquals(GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE,
+            client.offerAudioChunk(ByteArray(3200), containsSpeech = false))
+        socket.bytes = speechBytes
+        socket.accepts = false
+        assertEquals(GeminiTranscriptionClient.AudioSendResult.FAILED,
+            client.offerAudioChunk(ByteArray(3200), containsSpeech = false))
+        assertFalse(client.finalizeTurn())
+        assertTrue(client.hasQueuedSpeechFrames())
+    }
+
     @Test fun failureDuringDrainInvalidatesQueuedAndLaterFrames() {
         assertTrue(client.finishStreaming())
         transport.onFailure(socket, IOException("connection lost"), null)

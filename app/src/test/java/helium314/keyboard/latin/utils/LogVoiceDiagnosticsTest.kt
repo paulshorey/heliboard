@@ -31,6 +31,11 @@ class LogVoiceDiagnosticsTest {
         assertFalse(Log.isVoiceDiagnosticLine(LogLine('I', "LatinIME", "onConfigurationChanged")))
     }
 
+    @Test fun `voice selection checks are retained without unrelated connection traces`() {
+        assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "RichInputConnection", "VOICE selection verification verified=false")))
+        assertFalse(Log.isVoiceDiagnosticLine(LogLine('W', "RichInputConnection", "cached text out of sync, reloading")))
+    }
+
     @Test
     fun `other tags are excluded`() {
         assertFalse(Log.isVoiceDiagnosticLine(LogLine('I', "Suggest", "request")))

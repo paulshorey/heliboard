@@ -1155,6 +1155,7 @@ public class LatinIME extends InputMethodService implements
         // keyboard's own text operations (e.g., transcription insertion).
         // Wrapped in try-catch because the InputConnection may be in an invalid state
         // (e.g., text field removed while recording is active).
+        boolean verifiedBelatedVoiceUpdate = false;
         try {
             final boolean voiceSessionActive = mVoiceInputManager != null
                     && (!mVoiceInputManager.isIdle() || mVoiceInputManager.hasPendingProcessing());
@@ -1163,22 +1164,32 @@ public class LatinIME extends InputMethodService implements
                     && !mInputLogic.mConnection.isBelatedExpectedUpdate(
                             oldSelStart, newSelStart, oldSelEnd, newSelEnd,
                             composingSpanStart, composingSpanEnd)) {
-                // Check if the cursor ended up at the end of existing text.
-                // If so, don't cancel — the user may have tapped the text field but the
-                // cursor is still where transcription inserts text, so dictation continues.
-                // Exception: if the text field is empty (was cleared, e.g. message sent),
-                // still cancel because the user is done with that field.
-                final CharSequence afterCursor = mInputLogic.mConnection.getTextAfterCursor(1, 0);
-                final boolean cursorAtEnd = (afterCursor == null || afterCursor.length() == 0);
-                if (cursorAtEnd) {
-                    final CharSequence beforeCursor = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
-                    final boolean fieldEmpty = (beforeCursor == null || beforeCursor.length() == 0);
-                    if (fieldEmpty) {
-                        discardPendingVoiceWork("Text field cleared while recording — discarding voice input");
+                // Cleanup selection verification must flush host batches. Intermediate
+                // callbacks can therefore arrive after the final commit, including for
+                // insertion in the middle of a field. Check the current host caret before
+                // treating an old callback as a user move or resetting typing caches.
+                verifiedBelatedVoiceUpdate = mInputLogic.mConnection.hasExpectedVoiceCursor();
+                if (!verifiedBelatedVoiceUpdate) {
+                    // Check if the cursor ended up at the end of existing text.
+                    // If so, don't cancel — the user may have tapped the text field but the
+                    // cursor is still where transcription inserts text, so dictation continues.
+                    // Exception: if the text field is empty (was cleared, e.g. message sent),
+                    // still cancel because the user is done with that field.
+                    final CharSequence afterCursor = mInputLogic.mConnection.getTextAfterCursor(1, 0);
+                    final boolean cursorAtEnd = (afterCursor == null || afterCursor.length() == 0);
+                    if (cursorAtEnd) {
+                        // The cached text still describes the previous selection until
+                        // InputLogic handles this callback. Read the host to detect clears.
+                        final android.view.inputmethod.InputConnection host = getCurrentInputConnection();
+                        final CharSequence beforeCursor = host == null ? null : host.getTextBeforeCursor(1, 0);
+                        final boolean fieldEmpty = (beforeCursor == null || beforeCursor.length() == 0);
+                        if (fieldEmpty) {
+                            discardPendingVoiceWork("Text field cleared while recording — discarding voice input");
+                        }
+                        // else: cursor at end of existing text — continue recording
+                    } else {
+                        discardPendingVoiceWork("Cursor moved away from end while recording — discarding voice input");
                     }
-                    // else: cursor at end of existing text — continue recording
-                } else {
-                    discardPendingVoiceWork("Cursor moved away from end while recording — discarding voice input");
                 }
             }
         } catch (Exception e) {
@@ -1205,7 +1216,7 @@ public class LatinIME extends InputMethodService implements
             }
             scheduleEditHistoryCapture();
         }
-        if (isInputViewShown()
+        if (!verifiedBelatedVoiceUpdate && isInputViewShown()
                 && mInputLogic.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd,
                 composingSpanStart, composingSpanEnd, settingsValues)) {
             // we don't want to update a manually set shift state if selection changed towards one side
@@ -2167,6 +2178,11 @@ public class LatinIME extends InputMethodService implements
             if (!mInputLogic.mConnection.isConnected()) return false;
             mInputLogic.finishInput();
 
+            if (!processTranscript && !mInputLogic.mConnection.collapseSelectionToEndAndVerify()) {
+                Log.w(TAG, "VOICE interruption marker skipped: could not verify selection collapse");
+                return false;
+            }
+
             boolean replacePreviousPeriod = false;
             if (processTranscript && text.length() == 1 && "!?,:;".indexOf(text.charAt(0)) >= 0
                     && !mInputLogic.mConnection.hasSelection()) {
@@ -2199,15 +2215,19 @@ public class LatinIME extends InputMethodService implements
      * Read the current paragraph (text from the last line break to the cursor),
      * run post-processing rules, and replace the paragraph if anything changed.
      *
-     * MUST be called inside an already-open batch edit so that the replacement
-     * does not produce a separate onUpdateSelection that confuses the voice-input
-     * cursor guard.
+     * Called inside a wrapper batch edit. Replacement temporarily flushes the
+     * host batch to verify its selection; delayed callbacks are checked against
+     * the host's current caret by the voice-input cursor guard.
      */
     private boolean runTranscriptPostProcessing() {
         final int maxParagraphLen = Constants.EDITOR_CONTENTS_CACHE_SIZE;
-        final CharSequence beforeCursor =
-                mInputLogic.mConnection.getTextBeforeCursor(maxParagraphLen, 0);
-        if (beforeCursor == null || beforeCursor.length() == 0) {
+        // The host may defer the just-committed segment until its batch closes.
+        // Use our current cache to prepare the correction, then the replacement
+        // helper flushes the batch and verifies that the original text matches.
+        final CharSequence cached = mInputLogic.mConnection.getCachedTextBeforeCursor();
+        final CharSequence beforeCursor = cached.subSequence(
+                Math.max(0, cached.length() - maxParagraphLen), cached.length());
+        if (beforeCursor.length() == 0) {
             return true;
         }
 

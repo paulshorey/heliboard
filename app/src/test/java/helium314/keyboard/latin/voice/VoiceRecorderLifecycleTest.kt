@@ -86,11 +86,51 @@ class VoiceRecorderLifecycleTest {
         VoiceRecorder::class.java.getDeclaredField(name).apply { isAccessible = true }.set(recorder, value)
     }
 
+    @Test fun quietChunkDuringTheSpeakingWindowCarriesNoSpeechEvidence() {
+        val recorder = VoiceRecorder(ApplicationProvider.getApplicationContext<Context>())
+        val events = Events()
+        var reads = 0
+        val audio = Mockito.mock(AudioRecord::class.java) { call ->
+            if (call.method.name == "read") {
+                val buffer = call.arguments[0] as ByteArray
+                when (reads++) {
+                    0 -> { // Loud PCM starts speech; the next quiet frame is still in the silence window.
+                        buffer.indices.forEach { buffer[it] = if (it % 2 == 0) 0xd0.toByte() else 7 }
+                        buffer.size
+                    }
+                    1 -> { buffer.fill(0); buffer.size }
+                    else -> AudioRecord.ERROR_INVALID_OPERATION
+                }
+            } else Mockito.RETURNS_DEFAULTS.answer(call)
+        }
+        setField(recorder, "isRecording", true)
+        setField(recorder, "audioRecord", audio)
+        val loop = VoiceRecorder::class.java.getDeclaredMethod("recordingLoop", VoiceRecorder.RecordingCallback::class.java)
+            .apply { isAccessible = true }
+        val worker = Thread { loop.invoke(recorder, events) }
+        setField(recorder, "recordingThread", worker)
+        worker.start()
+        try {
+            worker.join(2000)
+            assertFalse(worker.isAlive)
+            assertTrue(recorder.isCurrentlySpeaking)
+            // Main-looper delivery must keep its capture-time annotation even if state changed.
+            setField(recorder, "isSpeaking", false)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(listOf(true, false), events.speechEvidence)
+            assertEquals(2, events.audioChunks)
+        } finally { recorder.stopRecording(); worker.join(1000) }
+    }
+
     private class Events : VoiceRecorder.RecordingCallback {
         var audioChunks = 0
+        val speechEvidence = mutableListOf<Boolean>()
         val errors = mutableListOf<String>()
         override fun onRecordingStarted() { }
-        override fun onAudioChunk(pcmData: ByteArray) { audioChunks++ }
+        override fun onAudioChunk(pcmData: ByteArray, containsSpeech: Boolean) {
+            audioChunks++
+            speechEvidence.add(containsSpeech)
+        }
         override fun onSpeechStarted() { }
         override fun onSpeechStopped() { }
         override fun onRecordingStopped() { }

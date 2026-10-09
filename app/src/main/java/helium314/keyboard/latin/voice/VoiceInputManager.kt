@@ -14,7 +14,7 @@ import helium314.keyboard.latin.utils.prefs
 
 /**
  * One recording owns one Live connection. All capture, control, transcript and
- * editor acknowledgment events are serialized on the main looper. A failed
+ * local insertion results are serialized on the main looper. A failed
  * connection is never resumed: Live has no per-audio delivery acknowledgment.
  */
 class VoiceInputManager internal constructor(
@@ -48,7 +48,7 @@ class VoiceInputManager internal constructor(
 
     interface VoiceInputListener {
         fun onStateChanged(state: State)
-        /** Return only after the editor accepts the complete insertion. */
+        /** Return local dispatch/cleanup success; Android IPC is not an editor receipt. */
         fun onTranscriptionResult(text: String, attachesToPrevious: Boolean): Boolean
         /** Insert literally, without transcript cleanup or paragraph replacement. */
         fun onTranscriptionInterrupted(marker: String): Boolean
@@ -62,7 +62,7 @@ class VoiceInputManager internal constructor(
     fun interface PriorTextProvider { fun getPriorText(): String? }
 
     private sealed interface Outbound {
-        data class Audio(val pcm: ByteArray, val capturedAtMs: Long) : Outbound
+        data class Audio(val pcm: ByteArray, val capturedAtMs: Long, val containsSpeech: Boolean) : Outbound
         data class End(val finish: Boolean) : Outbound
     }
 
@@ -92,6 +92,7 @@ class VoiceInputManager internal constructor(
     private var drainTimeout: Runnable? = null
     private var sessionStartedAtMs = 0L
     private var capturedChunks = 0
+    private var capturedSpeechChunks = 0
     private var capturedBytes = 0L
     private var acceptedAudioChunks = 0
     private var acceptedAudioBytes = 0L
@@ -156,6 +157,7 @@ class VoiceInputManager internal constructor(
         sessionOpen = true
         sessionStartedAtMs = SystemClock.elapsedRealtime()
         capturedChunks = 0
+        capturedSpeechChunks = 0
         capturedBytes = 0L
         acceptedAudioChunks = 0
         acceptedAudioBytes = 0L
@@ -173,7 +175,7 @@ class VoiceInputManager internal constructor(
         hasFinalizedCurrentSilence = false
         voiceRecorder.setCallback(object : VoiceRecorder.RecordingCallback {
             override fun onRecordingStarted() { }
-            override fun onAudioChunk(pcmData: ByteArray) {
+            override fun onAudioChunk(pcmData: ByteArray, containsSpeech: Boolean) {
                 if (!isCurrent(sessionId) || !acceptingAudio) return
                 if (pcmData.isEmpty() || pcmData.size % 2 != 0) {
                     failSession("Invalid microphone audio")
@@ -182,12 +184,15 @@ class VoiceInputManager internal constructor(
                 hasCapturedAudio = true
                 capturedChunks++
                 capturedBytes += pcmData.size
-                if (voiceRecorder.isCurrentlySpeaking) noteUnconfirmedSpeech(sessionId)
+                if (containsSpeech) {
+                    capturedSpeechChunks++
+                    noteUnconfirmedSpeech(sessionId, "pcm")
+                }
                 if (pcmData.size > MAX_PENDING_AUDIO_BYTES - pendingAudioBytes) {
                     failSession("Voice audio queue is full. Dictation stopped before skipping audio.")
                     return
                 }
-                outbound.addLast(Outbound.Audio(pcmData, SystemClock.elapsedRealtime()))
+                outbound.addLast(Outbound.Audio(pcmData, SystemClock.elapsedRealtime(), containsSpeech))
                 pendingAudioBytes += pcmData.size
                 flushOutbound(sessionId)
             }
@@ -197,7 +202,8 @@ class VoiceInputManager internal constructor(
                 if (!isCurrent(sessionId) || !acceptingAudio) return
                 cancelAutoStopTimer()
                 hasFinalizedCurrentSilence = false
-                noteUnconfirmedSpeech(sessionId)
+                // Pending speech is recorded by the preceding annotated PCM
+                // callback. The boundary flag includes silence/smoothing tails.
             }
             override fun onSpeechStopped() {
                 if (!isCurrent(sessionId) || currentState != State.RECORDING) return
@@ -325,11 +331,16 @@ class VoiceInputManager internal constructor(
                 if (!isCurrent(sessionId)) return
                 // This final may describe an earlier utterance. Never let it
                 // acknowledge a suffix that has not even left our local queues.
-                if (outbound.none { it is Outbound.Audio } && !transcriptionClient.hasQueuedFrames()) {
+                val queuedPcmSpeech = outbound.any { it is Outbound.Audio && it.containsSpeech }
+                val queuedSocketSpeech = transcriptionClient.hasQueuedSpeechFrames()
+                if (!queuedPcmSpeech && !queuedSocketSpeech) {
                     unconfirmedSpeech = false
                     finalTimeout?.let(mainHandler::removeCallbacks)
                     finalTimeout = null
                 }
+                Log.i(TAG, "session=$sessionId final progress pendingSpeech=$unconfirmedSpeech " +
+                    "queuedPcmSpeech=$queuedPcmSpeech queuedSocketSpeech=$queuedSocketSpeech " +
+                    "capturedSpeechChunks=$capturedSpeechChunks")
                 notifyProcessingIdleIfDrained()
             }
             override fun onInterimTranscription() {
@@ -338,7 +349,7 @@ class VoiceInputManager internal constructor(
                     interimSeen = true
                     Log.i(TAG, "session=$sessionId first interim elapsedMs=${SystemClock.elapsedRealtime() - sessionStartedAtMs}")
                 }
-                noteUnconfirmedSpeech(sessionId)
+                noteUnconfirmedSpeech(sessionId, "interim")
             }
             override fun onServerResponse(hasTranscriptText: Boolean) {
                 if (!isCurrent(sessionId)) return
@@ -384,7 +395,7 @@ class VoiceInputManager internal constructor(
                         failSession("Voice audio upload stalled")
                         return
                     }
-                    when (transcriptionClient.offerAudioChunk(next.pcm)) {
+                    when (transcriptionClient.offerAudioChunk(next.pcm, next.containsSpeech)) {
                         GeminiTranscriptionClient.AudioSendResult.ACCEPTED -> {
                             acceptedAudioChunks++
                             acceptedAudioBytes += next.pcm.size
@@ -465,7 +476,9 @@ class VoiceInputManager internal constructor(
         }
     }
 
-    private fun noteUnconfirmedSpeech(sessionId: Long) {
+    private fun noteUnconfirmedSpeech(sessionId: Long, source: String) {
+        if (!unconfirmedSpeech) Log.i(TAG, "session=$sessionId speech pending source=$source " +
+            "capturedSpeechChunks=$capturedSpeechChunks")
         unconfirmedSpeech = true
         armResponseTimeout(sessionId)
         listener?.onProcessingStarted()
@@ -523,7 +536,8 @@ class VoiceInputManager internal constructor(
             else -> "connecting"
         }
         return "session=$activeSessionId phase=$phase state=$currentState elapsedMs=${now - sessionStartedAtMs} " +
-            "capturedChunks=$capturedChunks capturedBytes=$capturedBytes acceptedAudioChunks=$acceptedAudioChunks " +
+            "capturedChunks=$capturedChunks capturedSpeechChunks=$capturedSpeechChunks " +
+            "capturedBytes=$capturedBytes acceptedAudioChunks=$acceptedAudioChunks " +
             "acceptedAudioBytes=$acceptedAudioBytes pendingPcmBytes=$pendingAudioBytes " +
             "socketQueuedBytes=${transcriptionClient.queuedFrameBytes()} finals=$acceptedFinals " +
             "pendingText=${pendingTranscripts.size} pendingSpeech=$unconfirmedSpeech " +

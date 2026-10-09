@@ -125,6 +125,7 @@ object Log {
     fun isVoiceDiagnosticLine(line: LogLine): Boolean {
         val tag = line.tag ?: return false
         if (tag in VOICE_DIAGNOSTIC_TAGS) return true
+        if (tag == "RichInputConnection") return line.message.startsWith("VOICE ")
         if (tag != LATIN_IME_TAG) return false
         val message = line.message
         return LATIN_IME_VOICE_MESSAGE_MARKERS.any { marker -> message.contains(marker, ignoreCase = false) }

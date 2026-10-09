@@ -33,8 +33,8 @@ import java.util.concurrent.TimeUnit
  *    (`realtimeInput.audio`), ~100 ms per chunk.
  * 4. Read `serverContent.interimInputTranscription` (speculative, discarded here)
  *    and `serverContent.inputTranscription` (authoritative, committed to the
- *    editor). Leftover interims are committed after `audioStreamEnd` when no
- *    final arrives, so a trailing unfinished phrase still lands. `serverContent.turnComplete` closes an utterance.
+ *    editor). Interims are never committed, including after `audioStreamEnd`.
+ *    `serverContent.turnComplete` closes an utterance without acknowledging audio.
  * 5. `realtimeInput.audioStreamEnd` finalizes the current turn without ending
  *    the session ("Hybrid VAD"); audio may resume afterwards.
  *
@@ -681,6 +681,13 @@ class GeminiTranscriptionClient {
 
     private val accumulator = TranscriptAccumulator()
 
+    // Audio/control sends are serialized on the main looper. OkHttp drains in
+    // FIFO order, so a queue no larger than this suffix contains only quiet PCM
+    // and controls after the most recently accepted speech frame. This is local
+    // queue bookkeeping, never evidence of server receipt.
+    private var hasAcceptedSpeech = false
+    private var nonSpeechSuffixBytes = 0L
+
     /**
      * Set while the socket is open but `setupComplete` has not arrived. A 1007
      * close in this window means the `setup` payload was rejected, which is what
@@ -841,7 +848,7 @@ class GeminiTranscriptionClient {
     internal enum class AudioSendResult { ACCEPTED, BACKPRESSURE, FAILED }
 
     /** Bounded local queue acceptance, never a server delivery acknowledgment. */
-    internal fun offerAudioChunk(pcmData: ByteArray): AudioSendResult {
+    internal fun offerAudioChunk(pcmData: ByteArray, containsSpeech: Boolean = true): AudioSendResult {
         if (pcmData.isEmpty() || pcmData.size % 2 != 0 || isClosing || !isSessionReady) {
             return AudioSendResult.FAILED
         }
@@ -853,7 +860,14 @@ class GeminiTranscriptionClient {
             return AudioSendResult.BACKPRESSURE
         }
         return try {
-            if (socket.send(message)) AudioSendResult.ACCEPTED else AudioSendResult.FAILED
+            if (!socket.send(message)) return AudioSendResult.FAILED
+            if (containsSpeech) {
+                hasAcceptedSpeech = true
+                nonSpeechSuffixBytes = 0L
+            } else {
+                nonSpeechSuffixBytes += message.length
+            }
+            AudioSendResult.ACCEPTED
         } catch (e: Exception) {
             Log.e(TAG, "Failed to send audio chunk: ${e.message}")
             AudioSendResult.FAILED
@@ -863,8 +877,12 @@ class GeminiTranscriptionClient {
     fun sendAudioChunk(pcmData: ByteArray): Boolean =
         offerAudioChunk(pcmData) == AudioSendResult.ACCEPTED
 
-    /** A final cannot acknowledge audio that is still waiting in the local sender. */
+    /** Includes quiet PCM and controls; used for transport drainage, not speech progress. */
     internal fun hasQueuedFrames(): Boolean = queuedFrameBytes() > 0L
+
+    /** A final cannot acknowledge speech still waiting in the local sender. */
+    internal fun hasQueuedSpeechFrames(): Boolean =
+        hasAcceptedSpeech && queuedFrameBytes() > nonSpeechSuffixBytes
 
     internal fun queuedFrameBytes(): Long = webSocket?.queueSize() ?: 0L
 
@@ -880,7 +898,9 @@ class GeminiTranscriptionClient {
         val socket = webSocket ?: return false
         if (!isSessionReady) return false
         return try {
-            socket.send(AUDIO_STREAM_END_MESSAGE)
+            val sent = socket.send(AUDIO_STREAM_END_MESSAGE)
+            if (sent) nonSpeechSuffixBytes += AUDIO_STREAM_END_MESSAGE.length
+            sent
         } catch (e: Exception) {
             Log.e(TAG, "Failed to send Gemini audioStreamEnd: ${e.message}")
             false
@@ -925,6 +945,8 @@ class GeminiTranscriptionClient {
         isSessionReady = false
         awaitingSetupTier = null
         accumulator.reset()
+        hasAcceptedSpeech = false
+        nonSpeechSuffixBytes = 0L
         val socket = webSocket
         webSocket = null
         if (socket != null) {

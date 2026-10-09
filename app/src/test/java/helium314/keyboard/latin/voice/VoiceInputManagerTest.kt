@@ -31,6 +31,7 @@ class VoiceInputManagerTest {
     private var speaking = false
     private var sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
     private var transportQueued = false
+    private var transportQueuedSilence = false
     private var editorAccepts = true
     private var editorThrows = false
     private var finalizeAccepts = true
@@ -64,7 +65,8 @@ class VoiceInputManagerTest {
                 }
                 "finalizeTurn" -> { sent.add("end"); finalizeAccepts }
                 "finishStreaming" -> { sent.add("finish"); finalizeAccepts }
-                "hasQueuedFrames" -> transportQueued
+                "hasQueuedFrames" -> transportQueued || transportQueuedSilence
+                "hasQueuedSpeechFrames" -> transportQueued
                 else -> Mockito.RETURNS_DEFAULTS.answer(call)
             }
         }
@@ -91,7 +93,8 @@ class VoiceInputManagerTest {
         assertTrue(manager.startRecording())
         if (ready) stream.onStreamReady()
     }
-    private fun audio(value: Int = 1, size: Int = 3200) = capture.onAudioChunk(ByteArray(size) { value.toByte() })
+    private fun audio(value: Int = 1, size: Int = 3200, containsSpeech: Boolean = speaking) =
+        capture.onAudioChunk(ByteArray(size) { value.toByte() }, containsSpeech)
     private fun final(text: String) {
         stream.onTranscriptionResult(TranscriptSegment(text, false))
         stream.onServerResponse(true)
@@ -119,7 +122,7 @@ class VoiceInputManagerTest {
         assertTrue(stopped > 0)
         oldStream.onStreamReady()
         oldStream.onTranscriptionResult(TranscriptSegment("automatic suffix", false))
-        oldCapture.onAudioChunk(ByteArray(3200))
+        oldCapture.onAudioChunk(ByteArray(3200), true)
         oldNetwork()
         advance(40_000)
         assertEquals(1, starts)
@@ -416,10 +419,60 @@ class VoiceInputManagerTest {
 
     @Test fun speechOnsetPostedBeforeStopIsRetainedThroughTheTailBarrier() {
         start(); manager.stopRecording()
-        audio(); capture.onSpeechStarted()
+        audio(containsSpeech = true); capture.onSpeechStarted()
         shadowOf(Looper.getMainLooper()).idle()
         stream.onStreamClosed()
         assertTrue(manager.isIdle)
+        assertEquals(1, markers.size)
+    }
+
+    @Test fun silentHangoverAfterAFinalDoesNotInventMissingSpeech() {
+        start(); speaking = true; audio(); final("All spoken words.")
+        // The recorder still reports speaking until its longer silence window ends.
+        audio(0, containsSpeech = false)
+        speaking = false; capture.onSpeechStopped()
+        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle(); stream.onStreamClosed()
+        assertEquals(listOf("All spoken words."), inserted)
+        assertTrue(markers.isEmpty())
+        assertTrue(errors.isEmpty())
+    }
+
+    @Test fun onlyQueuedSocketSilenceDoesNotPreventAcceptingACompleteFinal() {
+        start(); speaking = true; audio()
+        speaking = false; capture.onSpeechStopped()
+        transportQueuedSilence = true; audio(0)
+        final("All spoken words.")
+        transportQueuedSilence = false
+        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle(); stream.onStreamClosed()
+        assertTrue(markers.isEmpty())
+        assertTrue(errors.isEmpty())
+    }
+
+    @Test fun onlyQueuedManagerSilenceDoesNotPreventAcceptingACompleteFinal() {
+        start(); speaking = true; audio()
+        speaking = false; capture.onSpeechStopped()
+        sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE; audio(0)
+        final("All spoken words.")
+        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
+        sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
+        advance(30); stream.onStreamClosed()
+        assertEquals(listOf("audio:1", "end", "audio:0", "finish"), sent)
+        assertTrue(markers.isEmpty())
+        assertTrue(errors.isEmpty())
+    }
+
+    @Test fun capturedSpeechEvidenceSurvivesALaterRecorderStateChange() {
+        start(); speaking = false; audio(containsSpeech = true)
+        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle(); stream.onStreamClosed()
+        assertEquals(1, markers.size)
+    }
+
+    @Test fun speechAfterAFinalStillRequiresItsOwnFinal() {
+        start(); speaking = true; audio(); final("First sentence.")
+        audio(0, containsSpeech = false)
+        audio(2, containsSpeech = true)
+        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle(); stream.onStreamClosed()
+        assertEquals(listOf("First sentence."), inserted)
         assertEquals(1, markers.size)
     }
 

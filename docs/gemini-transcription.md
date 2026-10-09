@@ -21,14 +21,23 @@ costs the user more than a second of waiting.
    `interimInputTranscription` is provisional and never inserted, including after
    silence, EOF, a timeout, socket replacement, or failure. `modelTurn` is ignored.
 5. Deliver finalized segments in FIFO order. Retain the head until `LatinIME`
-   synchronously returns editor acceptance, including paragraph cleanup. A false
-   result or exception stops the session; never retry a potentially partial edit.
-   Cleanup and punctuation correction select the original range and replace it
-   with one commit, so a rejected replacement does not first delete confirmed text.
+   returns local dispatch/cleanup success, including paragraph cleanup. Android
+   remote `InputConnection` booleans do not return the actual host editor's result.
+   A false result or exception stops the session; never retry a potentially partial edit.
+   Cleanup and punctuation correction select the original range, verify actual
+   host selection positions and selected text, and replace it with one commit, so
+   a rejected replacement does not first delete confirmed text.
+   Temporarily close/reopen the host batch before readback so deferred editors
+   apply edits. Prepare paragraph correction from the cache and verify matching
+   original host text after flushing. Ignore delayed intermediate selection
+   callbacks only when the host's current caret matches the expected voice caret.
 6. On terminal failure, invalidate the recording and connection generations before
    stopping capture, clearing pending work, and notifying the editor. Already
-   inserted text remains. If the stream reached readiness and audio was captured, insert one literal
-   `[Dictation interrupted]` marker without transcript cleanup. An editor failure
+   inserted text remains. If the stream reached readiness and audio was captured,
+   insert one literal
+   `[Dictation interrupted]` marker without transcript cleanup. If text is
+   highlighted, collapse to the end of that range and verify the host caret first;
+   skip marker insertion if that move cannot be verified. An editor failure
    suppresses the marker because the editor is no longer trustworthy.
    Rejection before `setupComplete` leaves the editor untouched and reports why
    dictation could not start; no PCM was submitted to that connection.
@@ -176,7 +185,11 @@ mic pause, and explicit stop enqueue `audioStreamEnd` behind preceding audio.
 Forward quiet PCM too: withholding it based on local RMS detection can drop soft
 speech or the beginning of a new utterance. Audio following `audioStreamEnd`
 reopens the stream, as documented. Local VAD controls finalization and auto-stop,
-not which recorded samples the service receives.
+not which recorded samples the service receives. Each chunk carries raw-energy
+speech evidence snapshotted before posting to the main looper. The speaking flag
+includes the silence window and its smoothing tail, so it is not used to rearm
+pending speech. Quiet PCM after a final does not create another missing-final
+deadline.
 
 There is no stale-interim insertion timer. An interim is never evidence that all
 speech was received. On explicit stop, stop/join the recorder, process its already
@@ -233,9 +246,12 @@ Deadlines are anchored rather than reset by each PCM chunk:
   interims and `turnComplete` do not confirm the speech.
 - Pending locally detected speech/interim with no accepted final: 30 seconds.
   Interim updates cannot postpone this deadline. Pure silence does not arm it.
-  A final cannot clear pending speech while PCM or socket frames are still queued
-  locally: it may describe an earlier utterance. The deadline remains until a
-  later final arrives after those queues drain; draining alone is not confirmation.
+  A final cannot clear pending speech while annotated speech frames are still
+  queued locally: it may describe an earlier utterance. The deadline remains until a
+  later final arrives after speech frames drain; draining alone is not confirmation.
+  Queued quiet PCM and controls do not block that final. The sender counts encoded
+  bytes after the last speech frame; FIFO queue size distinguishes queued speech
+  from its quiet/control suffix.
 - EOF: eight seconds before initiating close, 15 seconds for the full close wait.
 
 Network loss, send/finalize failure, protocol error, unexpected close (including
@@ -251,7 +267,25 @@ and `queueSize()` excludes OS/intermediary buffers. Neither proves server receip
 independently of other server messages, with no guaranteed ordering relative to
 those messages. `turnComplete` is not a watermark for submitted PCM.
 
-This implementation enforces local FIFO/editor acceptance and stops on detected
+Android's [remote InputConnection invoker](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/inputmethodservice/IRemoteInputConnectionInvoker.java)
+returns success when an operation is dispatched without a `RemoteException`; the
+[editor-side implementation](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/view/inputmethod/RemoteInputConnectionImpl.java)
+discards the host's commit/selection return values. Before cleanup/punctuation
+replacement, query actual extracted selection positions (including `startOffset`)
+and selected text. If these are unavailable or differ from the intended range,
+stop without committing the replacement and restore the original caret best-effort.
+Compose's [buffered input connection](https://android.googlesource.com/platform/frameworks/support/+/08274d3734d2e635eba3944c8def835b366ee65d/compose/foundation/foundation/src/androidMain/kotlin/androidx/compose/foundation/text/input/internal/StatelessInputConnection.android.kt)
+applies queued edits only when its batch depth returns to zero. Verification
+therefore runs with the host batch temporarily closed. The wrapper batch remains
+balanced, and the voice selection guard checks the actual current caret before
+treating an intermediate callback as a user move.
+The marker always verifies the host caret, including when the cached selection
+was collapsed, because a new highlight callback may still be pending. If needed,
+collapse the known selection before verification. These
+checks protect placement; they cannot prove semantic completeness or detect every
+filtered/truncated insertion by a host editor.
+
+This implementation enforces local FIFO/dispatch checks and stops on detected
 uncertainty. It cannot certify every spoken word or detect an omission the service
 silently makes while continuing to emit plausible finals. Local VAD and finals
 are progress signals, not per-sample acknowledgments. The interruption marker
@@ -356,8 +390,11 @@ duplicated app tags. Transcript payloads are not logged by insertion; exported
 legacy transcript lines and API-key patterns are redacted.
 
 Session diagnostics record phase, elapsed time, captured and accepted PCM counts,
-raw/socket queue sizes, accepted finals and last-response age. Transport close
-records retain the code, readiness, requested-finish state and sanitized service
+raw/socket queue sizes, capture-time speech counts, final progress with queued
+speech flags, accepted finals and last-response age. Voice selection diagnostics
+record expected/actual positions, selected lengths, and verification outcome; no
+editor/transcript contents are logged. Transport close records retain the code,
+readiness, requested-finish state and sanitized service
 detail, so an early billing rejection cannot be confused with a stalled upload.
 
 The voice manager tests cover loss/reconnect callbacks, explicit restart, ordered
@@ -368,7 +405,13 @@ a controllable socket. Network tests cover default-route validation, handoff,
 stale callbacks, and API-21 receiver cleanup. Local WebSocket tests verify actual
 frames, schema fallback, authoritative-only insertion, and terminal close/error
 handling. InputLogic tests verify editor return values, failed cleanup, balanced
-batch edits, and literal marker insertion.
+batch edits, and literal marker insertion that preserves selected text. They also
+model a remotely dispatched selection the host ignores, unavailable selection
+queries, mismatched selected content, and partial extracted-text offsets. Deferred
+editor tests apply commits/selections only after batch closure, and check that
+delayed cleanup callbacks preserve dictation while real user cursor moves and
+cleared fields cancel it. Marker tests also cover a newly highlighted host range
+whose callback has not yet reached the IME.
 
 After checking out the branch in the device workspace: dictate a confirmed prefix,
 disable both Wi-Fi and mobile data while continuing to speak, and restore them.
@@ -376,3 +419,28 @@ The mic must stop, the prefix must remain, a single interruption marker must sho
 and no automatic suffix may appear. Deliberately tap the mic for a new recording.
 Also test offline start, radio loss while paused and while stopping, quiet speech
 after pauses, a slow final, host-editor rejection, and the nine-minute limit.
+
+For selection and silence regressions, use the fullapp editor and ordinary notes
+and messaging fields:
+
+1. Enter `hello cruel world`, highlight `cruel`, start dictation, and disable both
+   Wi-Fi and mobile data before a final appears. All original words must remain.
+   A failure after readiness inserts a marker after `cruel` only if caret collapse
+   can be verified; startup failure or unverifiable selection leaves text intact.
+2. Dictate a short sentence, wait for the final, remain silent for five seconds,
+   then stop. Repeat with pause/resume and with the silence auto-stop. Successful
+   completion must not add a marker merely because quiet PCM followed the final.
+3. Dictate a sentence, then a separate punctuation command such as `exclamation
+   point`. Cleanup must replace the intended range once, without duplicating the
+   paragraph. An unverifiable range stops dictation and preserves the accepted
+   original text instead of appending a replacement.
+4. In the fullapp editor, insert dictation in the middle of existing text, then
+   use a spoken punctuation command that triggers cleanup. Dictation should keep
+   running, preserve the text after the caret, and insert later segments at the
+   final corrected caret. Moving the caret yourself into another word must still
+   cancel dictation.
+
+Save About → Save log immediately after a failure. Report the test number, app,
+whether the words remained, whether a marker appeared, and the approximate time.
+The export retains `VOICE selection verification`, `speech pending`, and
+`final progress` lines to identify the host-selection and speech-queue decisions.

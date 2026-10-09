@@ -16,7 +16,7 @@ HeliBoard uses that API.
 ```
 Microphone → VoiceRecorder (PCM16 16kHz) → Gemini Live WebSocket → inputTranscription
                                                                         ↓
-Text Field ← LatinIME (commitText) ← VoiceInputManager (acknowledged FIFO + terminal failure + graceful stop)
+Text Field ← LatinIME (commitText) ← VoiceInputManager (local insertion FIFO + terminal failure + graceful stop)
 ```
 
 A local network preflight precedes mic capture. The service handshake runs in parallel
@@ -37,7 +37,7 @@ not "optimize" latency at the expense of transcript quality.
 | `GeminiTranscriptionClient.kt` | WebSocket client for `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=…`. Builds the `setup` payload at a negotiated [setup tier](#setup-tier-degradation), streams base64 PCM as JSON text frames, parses `inputTranscription` / `interimInputTranscription` / `turnComplete` / `goAway`, sends `audioStreamEnd` for Hybrid VAD, and reassembles editor segments |
 | `VoiceContextVocabulary.kt` | Harvests proper nouns and acronyms from editor text and merges them with user + built-in terms into `customVocabulary` |
 | `TranscriptSegment.kt` | Finalized chunk passed from the client to the IME pipeline |
-| `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), acknowledged FIFO, terminal failure, capture stop on `goAway`, auto-stop timers, session config assembly |
+| `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO retained until local insertion succeeds, terminal failure, capture stop on `goAway`, auto-stop timers, session config assembly |
 | `TranscriptionPreferences.kt` | Reads/writes Gemini preferences and erases the preference keys of previously used providers |
 | `TranscriptPostProcessor.kt` | Local transcript shaping: pre-commit casing/trailing-punctuation adjustment plus paragraph-level spoken-command replacement after commit |
 | `LatinIME.java` | Orchestrator — finalizes composing state, commits transcript text at the caret, supplies editor text for vocabulary harvesting via `buildVoiceContextText`, triggers post-processing |
@@ -62,12 +62,15 @@ except `LatinIME.java` (parent package) and the settings UI/preferences helpers 
    provisional and never committed; `turnComplete` is a boundary, not an audio ACK.
 6. `TranscriptAccumulator` converts finals into segments with `attachesToPrevious`.
 7. Deliver FIFO segments on the main looper. Retain the head until the listener
-   returns editor acceptance. Rejection/exception is terminal; never retry a
-   potentially partial editor edit.
+   returns local dispatch/cleanup success. Rejection/exception is terminal; never
+   retry a potentially partial editor edit.
 8. On failure, invalidate callback generations first, stop capture, clear uncertain
    work, preserve inserted text, and insert `[Dictation interrupted]` literally
-   once if audio was captured and the stream reached readiness. Startup rejection leaves the editor
-   untouched and reports the service reason. Do not attempt a marker after editor failure.
+   once if audio was captured and the stream reached readiness. Preserve selected
+   content by collapsing to a verified caret at its end; skip the marker if the
+   host cannot confirm the caret (even when the cached selection is collapsed).
+   Startup rejection leaves the editor untouched
+   and reports the service reason. Do not attempt a marker after editor failure.
 9. Stop joins the recorder and queues EOF after its posted tail. Block restart
    until the existing connection closes. No automatic reconnect or rotation.
 
@@ -158,7 +161,10 @@ text is handled locally instead (see below).
 
 Server VAD stays enabled with patient end detection. Local silence, pause, and stop
 enqueue `audioStreamEnd` behind all preceding PCM. Forward all captured audio,
-including silence; local RMS VAD must not decide which samples are discarded.
+including silence; local RMS VAD must not decide which samples are discarded. PCM
+callbacks carry raw-energy speech evidence captured with that chunk, not the
+mutable speaking flag or its silence/smoothing tail. Only queued speech blocks
+final progress; a queued quiet/control suffix does not require another final.
 Audio after `audioStreamEnd` reopens the turn. Only authoritative finals reach the
 editor; an unfinished tail that fails to finalize is visibly interrupted.
 
@@ -187,6 +193,10 @@ The user starts the next recording deliberately. Schema-tier fallback is allowed
 only before readiness, when no audio has been submitted, within the original
 connection deadline.
 
+Android remote `InputConnection` booleans confirm dispatch, not the host editor's
+commit result. Local selection checks protect replacement placement but cannot
+certify complete insertion in every editor.
+
 `send(true)` only means local queue acceptance. Input transcription has no
 per-chunk acknowledgment, and `turnComplete` is not a delivery watermark. See
 `docs/gemini-transcription.md` for sourced rationale, conservative deadline
@@ -203,8 +213,14 @@ After each chunk is committed, `LatinIME.runTranscriptPostProcessing()` reads th
 current paragraph (from the last newline to the cursor, up to 1024 chars) and runs
 `TranscriptPostProcessor.processCurrentParagraph()`. If any rule matches, the
 paragraph is selected and replaced in one commit through `replaceTextBeforeCursor`,
-without first deleting confirmed text. A rejection stops dictation and restores
-the caret best-effort; never retry a possibly partial replacement.
+without first deleting confirmed text. Verify actual host selection positions and
+selected text before the replacement commit. Temporarily close/reopen the host
+batch before readback so deferred editors apply pending edits. Prepare the
+correction from our cache and verify matching original host text after flushing.
+Delayed intermediate selection callbacks are ignored only when the host's current
+caret matches the expected voice caret. Unavailable/mismatched selection or
+a rejected operation stops dictation and restores the caret best-effort; never
+retry a possibly partial replacement.
 
 Current processing removes comma-attached filler fragments ("um,", "uh,") and
 handles **spelled-out punctuation** ("exclamation point.", "comma", "question
