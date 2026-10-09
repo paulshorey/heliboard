@@ -38,6 +38,7 @@ class GeminiTranscriptionClientStreamTest {
     private val serverReceived = CopyOnWriteArrayList<String>()
     private val events = CopyOnWriteArrayList<String>()
     private val transcripts = CopyOnWriteArrayList<TranscriptSegment>()
+    private val responseHasFinal = CopyOnWriteArrayList<Boolean>()
 
     @Before
     fun setUp() {
@@ -115,6 +116,23 @@ class GeminiTranscriptionClientStreamTest {
         // than raced ahead of the session configuration.
         assertEquals(false, client.sendAudioChunk(ByteArray(320)))
         assertEquals(false, events.contains("ready"))
+    }
+
+    @Test
+    fun repeatedAuthoritativeFinalStillReportsProgressWithoutAnotherEditorSegment() {
+        enqueueServer(object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                if (text.contains("\"setup\"")) webSocket.send("""{"setupComplete":{}}""")
+            }
+        })
+        startClient()
+        awaitUntil { events.contains("ready") }
+        val frame = """{"serverContent":{"inputTranscription":{"text":"Confirmed sentence."}}}"""
+        currentServerSocket!!.send(frame)
+        currentServerSocket!!.send(frame)
+        awaitUntil { responseHasFinal.size == 2 }
+        assertEquals(listOf(true, true), responseHasFinal.toList())
+        assertEquals(listOf("Confirmed sentence."), transcripts.map { it.text })
     }
 
     @Test
@@ -378,6 +396,7 @@ class GeminiTranscriptionClientStreamTest {
                 }
 
                 override fun onServerResponse(hasTranscriptText: Boolean) {
+                    responseHasFinal.add(hasTranscriptText)
                     events.add("response")
                 }
 

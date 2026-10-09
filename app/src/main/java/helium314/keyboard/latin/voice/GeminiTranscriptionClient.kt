@@ -1003,9 +1003,9 @@ class GeminiTranscriptionClient {
         if (connectionToken != activeConnectionToken) return
         extractFinalTranscript(json)?.let { finalText ->
             sawResponse = true
+            sawTranscript = true
             val segment = accumulator.accept(finalText)
             if (segment != null) {
-                sawTranscript = true
                 callback?.onTranscriptionResult(segment)
             }
         }

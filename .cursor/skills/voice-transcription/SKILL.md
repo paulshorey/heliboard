@@ -76,11 +76,26 @@ except `LatinIME.java` (parent package) and the settings UI/preferences helpers 
 
 The PCM FIFO is bounded to 960,000 bytes; the socket audio queue to 256 KiB of
 encoded JSON. Backpressure retains the head and retries locally every 25 ms;
-controls never overtake audio. Overflow stops instead of dropping/coalescing data.
-Oldest queued PCM has 30 seconds to enter the socket queue. Pending speech has
-30-second response/final-progress deadlines that new audio/interims cannot extend.
+controls never overtake audio; at most 64 controls may wait locally. Overflow stops
+instead of dropping/coalescing data. Oldest queued PCM has 30 seconds to enter the
+socket queue. Active local speech or pending recognized words has 30 seconds
+without a server response. The missing-final wait applies to recognized words,
+not raw volume spikes, and starts when a speech
+boundary's `audioStreamEnd` enters the socket queue, not when speech first becomes
+pending. Repeated controls/interims cannot extend that wait; a new speech onset
+clears it until the next boundary. Long utterances with live interims continue.
+Controls retain their captured speech epoch so backpressure cannot apply an older
+boundary's final deadline to a newer utterance.
 The setup deadline is 12 seconds across every schema tier. Stop reads finals for
 eight seconds before initiating close, with a 15-second total close deadline.
+Clear older response/final watchdogs as soon as graceful stop begins. Silence
+auto-stop is intentional: accept late finals, never promote interims, and close
+normally without a marker for unconfirmed noise/hypotheses. Actual transport,
+microphone, queue, and drain failures still report interruptions. Equal-deadline
+silence and speech timers favor the normal silence stop. Repeated authoritative
+finals acknowledge progress without another editor write; queued speech still
+prevents acknowledgment. Pause/resume capture phases discard results/errors from
+a native read interrupted by the earlier phase.
 
 ## Setup payload
 
@@ -196,6 +211,24 @@ connection deadline.
 Android remote `InputConnection` booleans confirm dispatch, not the host editor's
 commit result. Local selection checks protect replacement placement but cannot
 certify complete insertion in every editor.
+
+Interactive keyboard hiding, finished input/view callbacks, and target changes
+cancel all voice work immediately, including an IDLE microphone whose connection
+is still draining. Remove the spinner and invalidate old callbacks so a new mic
+tap starts immediately. Screen-off hiding alone preserves recording. Explicit mic
+stop still drains the current socket.
+
+Monitor host text through a dedicated `getExtractedText(...,
+GET_EXTRACTED_TEXT_MONITOR)` token unless the framework's fullscreen extract view
+is visible; retain its existing monitor in that case. Check actual host text on
+notifications, selection updates (even unchanged), restarts, and before insertion.
+A verified nonempty-to-empty
+transition cancels dictation without a marker. Null queries are unavailable, not
+empty, and an all-text highlight is not a clear. Editors that omit monitoring
+callbacks are checked again before a late final can refill their cleared field.
+Remember successful insertions as nonempty-field evidence even when a host never
+sends change notifications. A clear alone does not prove submission, so it does
+not automatically hide the keyboard.
 
 `send(true)` only means local queue acceptance. Input transcription has no
 per-chunk acknowledgment, and `turnComplete` is not a delivery watermark. See

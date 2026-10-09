@@ -16,7 +16,8 @@ costs the user more than a second of waiting.
    `audioStreamEnd` in one FIFO. Wait for `setupComplete` before sending any audio.
 3. Bound the local PCM queue to 960,000 bytes (30 seconds), and the OkHttp audio
    queue to 256 KiB of encoded JSON. Local backpressure retains the exact head;
-   later audio and control frames cannot overtake it. Overflow stops the session.
+   later audio and control frames cannot overtake it. Limit locally queued
+   speech-boundary controls to 64 too. Overflow stops the session.
 4. Only `serverContent.inputTranscription` creates editor segments.
    `interimInputTranscription` is provisional and never inserted, including after
    silence, EOF, a timeout, socket replacement, or failure. `modelTurn` is ignored.
@@ -43,6 +44,9 @@ costs the user more than a second of waiting.
    dictation could not start; no PCM was submitted to that connection.
 7. Restoring internet never resumes the failed recording. The user must tap the
    mic explicitly. A normal stop blocks restart until the outgoing stream closes.
+   Interactive keyboard hiding, finished input/view callbacks, and host clears
+   instead cancel all work immediately and remove the spinner, allowing a fresh
+   mic tap without waiting for an old socket to drain.
 
 ## Important files
 
@@ -197,8 +201,10 @@ posted tail callbacks, enqueue EOF, and read for eight seconds before initiating
 WebSocket close. A nonempty transport queue at that deadline is failure. The
 manager also bounds the complete finish/close wait to 15 seconds. A capture thread still alive after
 two seconds reports terminal failure before the EOF barrier, blocks native capture
-reuse, and keeps its original recording callback for all late reads. Missing finals
-for locally detected speech or interim hypotheses produce an interruption marker.
+reuse, and keeps its original recording callback for all late reads. Pause/resume
+changes the capture phase so an interrupted native read cannot falsely abort
+resumed recording. Missing finals after an explicit mic stop can produce an
+interruption marker; a normal silence auto-stop does not.
 
 These are application deadlines, not Google latency guarantees. A healthy slow
 final can be interrupted; accuracy takes priority over inserting a provisional
@@ -242,21 +248,68 @@ minutes to avoid an unprovable transcript boundary at socket replacement.
 Deadlines are anchored rather than reset by each PCM chunk:
 
 - Oldest locally queued audio: 30 seconds to enter the bounded transport queue.
-- Pending speech with no server response: 30 seconds. A response signals liveness;
-  interims and `turnComplete` do not confirm the speech.
-- Pending locally detected speech/interim with no accepted final: 30 seconds.
-  Interim updates cannot postpone this deadline. Pure silence does not arm it.
+- Active local speech or pending recognized words with no server response:
+  30 seconds. A response signals liveness; interims and `turnComplete` do not
+  confirm the speech. Quiet audio with only raw RMS spikes does not require
+  transcription responses.
+- Pending recognized words with no accepted final: 30 seconds.
+  Start this wait at a submitted `audioStreamEnd`, not when speech first becomes
+  pending: [Google documents](https://ai.google.dev/gemini-api/docs/live-api/live-transcribe)
+  that finals arrive on speech completion while interims arrive during speech.
+  A fixed deadline from onset interrupts healthy long utterances. Repeated
+  controls/interims cannot postpone the boundary's wait. A new speech onset
+  clears that final wait until the next boundary. Controls retain their captured
+  speech epoch so a delayed older boundary cannot start a final deadline for a
+  newer utterance. The response watchdog and
+  oldest-audio deadlines still apply. Raw volume evidence alone does not arm a
+  missing-final wait: breathing or room noise may cross that threshold.
   A final cannot clear pending speech while annotated speech frames are still
-  queued locally: it may describe an earlier utterance. The deadline remains until a
+  queued locally: it may describe an earlier utterance. Pending speech remains until a
   later final arrives after speech frames drain; draining alone is not confirmation.
   Queued quiet PCM and controls do not block that final. The sender counts encoded
   bytes after the last speech frame; FIFO queue size distinguishes queued speech
-  from its quiet/control suffix.
-- EOF: eight seconds before initiating close, 15 seconds for the full close wait.
+  from its quiet/control suffix. A duplicate authoritative final also advances
+  progress, even when transcript assembly suppresses the duplicate editor write.
+- EOF: cancel the earlier response/final watchdogs, read finals for eight seconds
+  before initiating close, and allow 15 seconds for the full close wait.
+
+The configured local silence timeout is a normal stop reason. It drains the same
+connection and accepts late authoritative finals, then completes without a marker
+even if raw noise or a provisional hypothesis remains unconfirmed. Interims are
+never promoted into editor text. If silence and a speech watchdog expire together,
+the intentional silence stop takes precedence. Real microphone, network, upload,
+protocol, queue, and drain failures still report an interruption. The auto-stop
+timer continues to use adaptive local microphone activity rather than recognized
+words; that timing policy is separate from failure detection.
 
 Network loss, send/finalize failure, protocol error, unexpected close (including
 remote 1000), or failure during graceful drain is terminal. OkHttp protocol pings
 remain at 20 seconds as another transport failure signal.
+
+### Keyboard hiding and host clears
+
+Hiding the keyboard while the screen is interactive cancels capture, the socket,
+all queues, and pending timers immediately. `onFinishInputView` and `onFinishInput`
+invalidate voice work before deferred lifecycle housekeeping. Reopening the
+keyboard does not inherit the old spinner or wait for its eight-second finalization
+grace. Screen-off hiding alone preserves recording, as before. Explicit mic stop
+still drains.
+
+At recording start, subscribe to [host text changes](https://developer.android.com/reference/android/view/inputmethod/InputConnection#getExtractedText(android.view.inputmethod.ExtractedTextRequest,%20int))
+with a dedicated extracted-text monitor token unless the framework's fullscreen
+extract view is visible; that view retains its own monitor. Check actual text
+before/after the caret and the selection on notifications, selection updates (including unchanged selection),
+editor restart, and before voice insertion. A verified nonempty-to-empty
+transition cancels all voice work without a marker. Null queries mean unavailable,
+not empty; highlighted text is not a clear. Remember successful insertion as
+nonempty-field evidence too, including when the field started empty. Re-read the
+host rather than treating belated or partial extracted updates as current text. Editors that omit change
+notifications are checked before a late final can refill the field; such editors
+may not stop capture immediately if they send no notification or restart at all.
+
+Android does not expose a universal event identifying a form submission made
+through a host application's own button. A clear proves only that the field became
+empty, so it stops dictation without automatically hiding the keyboard.
 
 ### What this can and cannot prove
 
@@ -430,6 +483,9 @@ and messaging fields:
 2. Dictate a short sentence, wait for the final, remain silent for five seconds,
    then stop. Repeat with pause/resume and with the silence auto-stop. Successful
    completion must not add a marker merely because quiet PCM followed the final.
+   Also remain silent until auto-stop without speaking any words, and repeat
+   after a final with normal breathing/brief room noise. Normal auto-stop must
+   leave no marker and allow a new recording after the finalization grace.
 3. Dictate a sentence, then a separate punctuation command such as `exclamation
    point`. Cleanup must replace the intended range once, without duplicating the
    paragraph. An unverifiable range stops dictation and preserves the accepted
@@ -439,8 +495,20 @@ and messaging fields:
    running, preserve the text after the caret, and insert later segments at the
    final corrected caret. Moving the caret yourself into another word must still
    cancel dictation.
+5. Speak continuously for more than 30 seconds, then pause and wait for the final.
+   Repeat with a 20-second thinking pause before continuing. Live interims during
+   speech must not trigger the missing-final timeout. A paused turn with pending
+   recognized words but no final still times out; a completely unresponsive
+   stream during active speech still stops.
+6. Hide and immediately reopen the keyboard during recording and during drain.
+   The spinner must disappear, a new mic tap must start, and no old words/marker
+   may arrive. Repeat a host clear/send while recording or paused, including when
+   the caret was already at zero. A cleared field must not be refilled by a late
+   final. An unchanged field with selected text or unavailable queries must not
+   be mistaken for an empty field.
 
 Save About → Save log immediately after a failure. Report the test number, app,
 whether the words remained, whether a marker appeared, and the approximate time.
 The export retains `VOICE selection verification`, `speech pending`, and
-`final progress` lines to identify the host-selection and speech-queue decisions.
+`final progress` lines to identify the host-selection and speech-queue decisions,
+plus finalization controls and separate response/interim/final/boundary ages.

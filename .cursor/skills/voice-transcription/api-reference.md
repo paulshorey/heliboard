@@ -194,14 +194,32 @@ buffer, so HeliBoard does not use it.
 - Graceful shutdown: stop/join capture, queue EOF after the posted tail, read
   finals for 8 s, then initiate close 1000. A nonempty socket queue is failure.
   The manager bounds the total finish/close wait to 15 s and blocks restart.
+  Clear old response/final timers at stop. Silence auto-stop drains and completes
+  without an interruption marker for unconfirmed noise/hypotheses; real failures
+  still report interruptions. Interims never become editor text.
 - `goAway` or the nine-minute cap stops capture and drains the same connection.
   Network/send/protocol/timeout failures terminate it with no automatic reconnect.
   A remote 1000 is unexpected unless the client requested close.
 - Local backpressure retains the FIFO head. The PCM queue is 960,000 bytes, the
   socket audio queue is 256 KiB of encoded JSON, and finalized text is limited to
-  64 queued entries. Overflow stops rather than dropping or merging data.
-- The setup deadline is 12 s across all tiers. Oldest local audio and pending
-  speech have 30 s progress deadlines; new PCM/interims cannot extend them.
+  64 queued entries. Locally queued boundary controls also have a 64-entry limit.
+  Overflow stops rather than dropping or merging data.
+- The setup deadline is 12 s across all tiers. Oldest local audio, active local
+  speech and pending recognized words without a response have 30 s deadlines.
+  A missing-final wait applies to recognized words, not RMS spikes, and starts at
+  submitted `audioStreamEnd`; repeated controls/interims cannot extend it. A new
+  speech onset clears the final wait until the next boundary. Live interims allow
+  long utterances without a premature final timeout.
+  Boundaries retain their captured speech epoch; an older boundary delayed by
+  backpressure cannot start the newer utterance's final wait.
+  At equal deadlines the intentional silence stop takes precedence. Duplicate
+  authoritative finals still count as progress without duplicate insertion;
+  queued speech prevents acknowledgment. Interrupted native reads belong to
+  their original pause/resume capture phase, even after a rapid resume.
+- Interactive keyboard hiding, editor disconnection, and verified host clears
+  cancel capture and all queued work immediately; explicit mic stop still drains.
+  Host clears use extracted-text monitoring plus actual reads, with null meaning
+  unavailable rather than empty. An external clear does not prove submission.
 
 | Close code | Meaning |
 |------|---------|

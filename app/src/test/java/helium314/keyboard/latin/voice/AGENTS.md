@@ -10,9 +10,9 @@ Tests for the Gemini Live voice pipeline.
 - `VoiceContextVocabularyTest.kt` - editor-derived speech-biasing vocabulary.
 
 - `GeminiAudioQueueTest.kt` - production bounded sender, queue acceptance/backpressure/failure, speech versus trailing quiet/control frames, stale frames, and EOF queue deadline.
-- `VoiceInputManagerTest.kt` - acknowledged transcript FIFO, audio/control FIFO, terminal failures, restart/drain guards, and anchored deadlines using injected recorder/client/network dependencies. Final-progress cases distinguish queued speech from silence, including capture-time evidence during the local speaking window.
+- `VoiceInputManagerTest.kt` - acknowledged transcript FIFO, bounded audio/control FIFO, terminal failures, immediate cancellation/restart during drain, and anchored deadlines using injected recorder/client/network dependencies. Finals wait from the current speech epoch's submitted boundary; delayed older boundaries and live interims must allow long utterances. Covers intentional silence auto-stop, noisy PCM after a final, equal-deadline timer ordering, watchdog cancellation at stop, late drain finals, and duplicate final progress with queued-speech safeguards.
 - `VoiceNetworkMonitorTest.kt` - validated internet, route loss/handoff, stale observations, and API-21 receiver cleanup.
-- `VoiceRecorderLifecycleTest.kt` - missed capture join/restart guard callback ownership across an in-flight native read, and immutable raw-energy speech evidence on quiet PCM during the speaking window.
+- `VoiceRecorderLifecycleTest.kt` - missed capture join/restart guard, callback ownership across an in-flight native read, immutable raw-energy speech evidence on quiet PCM during the speaking window, and errors/exceptions from a read interrupted by rapid pause/resume while new-phase errors still surface.
 
 ## Non-obvious notes
 - Voice bugs split cleanly between transport/session setup and local post-processing; keep that distinction clear in new tests.

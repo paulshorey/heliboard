@@ -37,6 +37,7 @@ class VoiceInputManager internal constructor(
         private const val MAX_SILENCE_THRESHOLD = 5000
         internal const val MAX_PENDING_AUDIO_BYTES = 960_000 // 30 s of PCM16 at 16 kHz
         internal const val MAX_PENDING_TRANSCRIPTS = 64
+        internal const val MAX_PENDING_CONTROLS = 64
         internal const val STREAM_CONNECT_TIMEOUT_MS = 12_000L
         internal const val PROGRESS_TIMEOUT_MS = 30_000L
         internal const val DRAIN_TIMEOUT_MS = 15_000L
@@ -45,6 +46,7 @@ class VoiceInputManager internal constructor(
     }
 
     enum class State { IDLE, RECORDING, PAUSED }
+    private enum class StopReason { USER, SILENCE_TIMEOUT, SESSION_LIMIT, SERVER_END }
 
     interface VoiceInputListener {
         fun onStateChanged(state: State)
@@ -63,7 +65,7 @@ class VoiceInputManager internal constructor(
 
     private sealed interface Outbound {
         data class Audio(val pcm: ByteArray, val capturedAtMs: Long, val containsSpeech: Boolean) : Outbound
-        data class End(val finish: Boolean) : Outbound
+        data class End(val finish: Boolean, val speechEpoch: Long) : Outbound
     }
 
     private var listener: VoiceInputListener? = null
@@ -79,6 +81,11 @@ class VoiceInputManager internal constructor(
     private var waitingForClose = false
     private var hasCapturedAudio = false
     private var unconfirmedSpeech = false
+    private var unconfirmedTranscript = false
+    private var localSpeechActive = false
+    private var speechEpoch = 0L
+    private var stopReason: StopReason? = null
+    private var autoStopAtMs: Long? = null
     private var hasFinalizedCurrentSilence = false
     private var isDispatchingTranscripts = false
     private var pendingAudioBytes = 0
@@ -100,13 +107,16 @@ class VoiceInputManager internal constructor(
     private var backpressureSeen = false
     private var interimSeen = false
     private var lastResponseAtMs: Long? = null
+    private var lastInterimAtMs: Long? = null
+    private var lastFinalAtMs: Long? = null
+    private var finalizedAtMs: Long? = null
 
     private var chunkSilenceDurationMs = Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS * 1000L
     private var chunkSilenceThreshold = Defaults.PREF_VOICE_SILENCE_THRESHOLD.toDouble()
     private var autoStopSilenceMs = Defaults.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS * 1000L
     private var geminiConfig: GeminiConfig = TranscriptionPreferences.readGeminiConfig(context.prefs())
     private val autoStopSilenceRunnable = Runnable {
-        if (currentState == State.RECORDING) stopRecording()
+        if (currentState == State.RECORDING) stopRecording(StopReason.SILENCE_TIMEOUT)
     }
 
     val isRecording: Boolean get() = currentState == State.RECORDING
@@ -165,6 +175,9 @@ class VoiceInputManager internal constructor(
         backpressureSeen = false
         interimSeen = false
         lastResponseAtMs = null
+        lastInterimAtMs = null
+        lastFinalAtMs = null
+        finalizedAtMs = null
         Log.i(TAG, "session=$sessionId start mode=${geminiConfig.transcriptionMode} " +
             "localSilenceMs=$chunkSilenceDurationMs threshold=$chunkSilenceThreshold " +
             "autoStopMs=$autoStopSilenceMs serverSilenceMs=${geminiConfig.endOfSpeechSilenceMs} " +
@@ -172,6 +185,10 @@ class VoiceInputManager internal constructor(
         acceptingAudio = true
         hasCapturedAudio = false
         unconfirmedSpeech = false
+        unconfirmedTranscript = false
+        localSpeechActive = false
+        speechEpoch = 0L
+        stopReason = null
         hasFinalizedCurrentSilence = false
         voiceRecorder.setCallback(object : VoiceRecorder.RecordingCallback {
             override fun onRecordingStarted() { }
@@ -197,16 +214,26 @@ class VoiceInputManager internal constructor(
                 flushOutbound(sessionId)
             }
             override fun onSpeechStarted() {
-                // A queued onset can follow a stop/pause tap but precede the
-                // recorder-tail barrier. It still represents pending speech.
-                if (!isCurrent(sessionId) || !acceptingAudio) return
+                // Tail speech evidence lives in the annotated PCM. A boundary
+                // posted before a pause/stop must not restart capture watchdogs.
+                if (!isCurrent(sessionId) || !acceptingAudio || !isRecording || isSessionStopping) return
+                localSpeechActive = true
+                speechEpoch++
                 cancelAutoStopTimer()
                 hasFinalizedCurrentSilence = false
+                // A new utterance may follow a long thinking pause. Finals are
+                // emitted on speech completion, not on a fixed cadence while
+                // speaking. Keep the liveness watchdog, but stop waiting for an
+                // end-of-speech final until this utterance is finalized too.
+                clearFinalTimeout()
+                finalizedAtMs = null
+                armResponseTimeout(sessionId)
                 // Pending speech is recorded by the preceding annotated PCM
                 // callback. The boundary flag includes silence/smoothing tails.
             }
             override fun onSpeechStopped() {
                 if (!isCurrent(sessionId) || currentState != State.RECORDING) return
+                localSpeechActive = false
                 startAutoStopTimer()
                 if (!hasFinalizedCurrentSilence) {
                     hasFinalizedCurrentSilence = true
@@ -231,12 +258,21 @@ class VoiceInputManager internal constructor(
         return true
     }
 
-    fun stopRecording() {
+    fun stopRecording() = stopRecording(StopReason.USER)
+
+    private fun stopRecording(reason: StopReason) {
         if (!sessionOpen || isSessionStopping) return
         val sessionId = activeSessionId
         isSessionStopping = true
-        Log.i(TAG, "stop requested ${sessionDiagnostics()}")
+        stopReason = reason
+        localSpeechActive = false
+        Log.i(TAG, "stop requested reason=$reason ${sessionDiagnostics()}")
         cancelAutoStopTimer()
+        // The drain has its own bounded wait. A timer from an earlier speech
+        // boundary must not cancel the recorder-tail barrier or a late final.
+        clearFinalTimeout()
+        responseTimeout?.let(mainHandler::removeCallbacks)
+        responseTimeout = null
         sessionLimit?.let(mainHandler::removeCallbacks)
         sessionLimit = null
         voiceRecorder.stopRecording()
@@ -255,12 +291,16 @@ class VoiceInputManager internal constructor(
     fun pauseRecording() {
         if (!isRecording || !sessionOpen) return
         val sessionId = activeSessionId
+        val boundaryEpoch = speechEpoch
         Log.i(TAG, "session=$sessionId pause")
         cancelAutoStopTimer()
+        localSpeechActive = false
         voiceRecorder.pauseRecording()
         updateState(State.PAUSED)
         mainHandler.post {
-            if (isCurrent(sessionId) && !isSessionStopping) enqueueEnd(sessionId, finish = false)
+            if (isCurrent(sessionId) && !isSessionStopping) {
+                enqueueEnd(sessionId, finish = false, boundaryEpoch = boundaryEpoch)
+            }
         }
     }
     fun resumeRecording() {
@@ -311,7 +351,7 @@ class VoiceInputManager internal constructor(
                 sessionLimit = Runnable {
                     if (isCurrent(sessionId) && !isSessionStopping) {
                         listener?.onError("Dictation session limit reached. Tap the mic after processing finishes.")
-                        stopRecording()
+                        stopRecording(StopReason.SESSION_LIMIT)
                     }
                 }.also { mainHandler.postDelayed(it, GeminiTranscriptionClient.SESSION_CAPTURE_LIMIT_MS) }
                 flushOutbound(sessionId)
@@ -329,22 +369,12 @@ class VoiceInputManager internal constructor(
                 pendingTranscripts.addLast(segment)
                 processTranscripts(sessionId)
                 if (!isCurrent(sessionId)) return
-                // This final may describe an earlier utterance. Never let it
-                // acknowledge a suffix that has not even left our local queues.
-                val queuedPcmSpeech = outbound.any { it is Outbound.Audio && it.containsSpeech }
-                val queuedSocketSpeech = transcriptionClient.hasQueuedSpeechFrames()
-                if (!queuedPcmSpeech && !queuedSocketSpeech) {
-                    unconfirmedSpeech = false
-                    finalTimeout?.let(mainHandler::removeCallbacks)
-                    finalTimeout = null
-                }
-                Log.i(TAG, "session=$sessionId final progress pendingSpeech=$unconfirmedSpeech " +
-                    "queuedPcmSpeech=$queuedPcmSpeech queuedSocketSpeech=$queuedSocketSpeech " +
-                    "capturedSpeechChunks=$capturedSpeechChunks")
-                notifyProcessingIdleIfDrained()
+                acknowledgeFinal(sessionId)
             }
             override fun onInterimTranscription() {
                 if (!isCurrent(sessionId)) return
+                lastInterimAtMs = SystemClock.elapsedRealtime()
+                unconfirmedTranscript = true
                 if (!interimSeen) {
                     interimSeen = true
                     Log.i(TAG, "session=$sessionId first interim elapsedMs=${SystemClock.elapsedRealtime() - sessionStartedAtMs}")
@@ -356,30 +386,39 @@ class VoiceInputManager internal constructor(
                 lastResponseAtMs = SystemClock.elapsedRealtime()
                 responseTimeout?.let(mainHandler::removeCallbacks)
                 responseTimeout = null
+                // Repeated authoritative finals still prove transcript progress
+                // even when the client has suppressed a duplicate editor write.
+                if (hasTranscriptText) acknowledgeFinal(sessionId, logProgress = false)
                 // Interim and turnComplete prove responsiveness, not audio coverage.
             }
             override fun onSessionExpiring(timeLeftMs: Long) {
                 if (!isCurrent(sessionId) || isSessionStopping) return
                 listener?.onError("Dictation session is ending. Tap the mic after processing finishes.")
-                stopRecording()
+                stopRecording(StopReason.SERVER_END)
             }
             override fun onStreamError(error: String) {
                 if (isCurrent(sessionId)) failSession(error)
             }
             override fun onStreamClosed() {
                 if (!isCurrent(sessionId)) return
-                if (!waitingForClose || unconfirmedSpeech || outbound.isNotEmpty()) {
+                if (!waitingForClose || outbound.isNotEmpty() ||
+                    (unconfirmedSpeech && stopReason != StopReason.SILENCE_TIMEOUT)) {
                     failSession("Dictation ended before all pending speech was confirmed.")
                 } else {
+                    if (unconfirmedSpeech) Log.i(TAG, "Silence timeout completed without another final ${sessionDiagnostics()}")
                     endSession(cancelled = false)
                 }
             }
         })
     }
 
-    private fun enqueueEnd(sessionId: Long, finish: Boolean) {
+    private fun enqueueEnd(sessionId: Long, finish: Boolean, boundaryEpoch: Long = speechEpoch) {
         if (!isCurrent(sessionId)) return
-        outbound.addLast(Outbound.End(finish))
+        if (outbound.count { it is Outbound.End } >= MAX_PENDING_CONTROLS) {
+            failSession("Voice control queue is full. Dictation stopped before skipping a speech boundary.")
+            return
+        }
+        outbound.addLast(Outbound.End(finish, boundaryEpoch))
         flushOutbound(sessionId)
     }
 
@@ -430,7 +469,16 @@ class VoiceInputManager internal constructor(
                         return
                     }
                     outbound.removeFirst()
+                    // Backpressure may delay an older boundary until after a
+                    // newer utterance has started. It must not impose a final
+                    // deadline on speech currently being captured.
+                    if (next.speechEpoch == speechEpoch && finalizedAtMs == null) {
+                        finalizedAtMs = SystemClock.elapsedRealtime()
+                    }
                     armResponseTimeout(sessionId)
+                    armFinalTimeout(sessionId)
+                    Log.i(TAG, "session=$sessionId finalize finish=${next.finish} " +
+                        "pendingSpeech=$unconfirmedSpeech finalWait=${finalTimeout != null}")
                     if (next.finish) {
                         waitingForClose = true
                         drainTimeout = Runnable {
@@ -482,20 +530,66 @@ class VoiceInputManager internal constructor(
         unconfirmedSpeech = true
         armResponseTimeout(sessionId)
         listener?.onProcessingStarted()
-        if (finalTimeout != null) return
+        // An interim may arrive after EOF was sent without local speech
+        // evidence. It must use that boundary's deadline, not wait forever.
+        armFinalTimeout(sessionId)
+    }
+
+    private fun acknowledgeFinal(sessionId: Long, logProgress: Boolean = true) {
+        lastFinalAtMs = SystemClock.elapsedRealtime()
+        // This final may describe an earlier utterance. Never let it acknowledge
+        // a suffix that has not even left our local queues.
+        val queuedPcmSpeech = outbound.any { it is Outbound.Audio && it.containsSpeech }
+        val queuedSocketSpeech = transcriptionClient.hasQueuedSpeechFrames()
+        if (!queuedPcmSpeech && !queuedSocketSpeech) {
+            unconfirmedSpeech = false
+            unconfirmedTranscript = false
+            clearFinalTimeout()
+            finalizedAtMs = null
+            responseTimeout?.let(mainHandler::removeCallbacks)
+            responseTimeout = null
+        }
+        if (logProgress) Log.i(TAG, "session=$sessionId final progress pendingSpeech=$unconfirmedSpeech " +
+            "queuedPcmSpeech=$queuedPcmSpeech queuedSocketSpeech=$queuedSocketSpeech " +
+            "capturedSpeechChunks=$capturedSpeechChunks")
+        notifyProcessingIdleIfDrained()
+    }
+
+    private fun clearFinalTimeout() {
+        finalTimeout?.let(mainHandler::removeCallbacks)
+        finalTimeout = null
+    }
+
+    private fun armFinalTimeout(sessionId: Long) {
+        // Only a submitted speech boundary starts the final wait. Interims
+        // while speaking prove liveness and must not impose a maximum utterance
+        // duration. Repeated controls/interims cannot extend this boundary's wait.
+        val boundaryAtMs = finalizedAtMs ?: return
+        // A raw RMS spike may be breathing or room noise. Only recognized words
+        // justify waiting for a final transcript after a speech boundary.
+        if (isSessionStopping || localSpeechActive || !unconfirmedTranscript || finalTimeout != null) return
         finalTimeout = Runnable {
             finalTimeout = null
-            if (isCurrent(sessionId) && unconfirmedSpeech) {
+            if (isCurrent(sessionId) && !isSessionStopping && unconfirmedTranscript) {
+                if (stopForElapsedSilence()) return@Runnable
                 failSession("No final transcript arrived for pending speech")
             }
-        }.also { mainHandler.postDelayed(it, PROGRESS_TIMEOUT_MS) }
+        }.also {
+            val remainingMs = (boundaryAtMs + PROGRESS_TIMEOUT_MS - SystemClock.elapsedRealtime()).coerceAtLeast(0)
+            mainHandler.postDelayed(it, remainingMs)
+        }
     }
 
     private fun armResponseTimeout(sessionId: Long) {
-        if (!unconfirmedSpeech || responseTimeout != null) return // PCM cannot postpone a stalled stream.
+        if (isSessionStopping || (!unconfirmedTranscript && !localSpeechActive) || responseTimeout != null) return
         responseTimeout = Runnable {
             responseTimeout = null
-            if (isCurrent(sessionId)) failSession("Transcription stopped responding")
+            // Quiet audio with no recognized words does not require a server
+            // response. Leave that case to the intentional silence auto-stop.
+            if (isCurrent(sessionId) && !isSessionStopping && (unconfirmedTranscript || localSpeechActive)) {
+                if (stopForElapsedSilence()) return@Runnable
+                failSession("Transcription stopped responding")
+            }
         }.also { mainHandler.postDelayed(it, PROGRESS_TIMEOUT_MS) }
     }
 
@@ -541,7 +635,11 @@ class VoiceInputManager internal constructor(
             "acceptedAudioBytes=$acceptedAudioBytes pendingPcmBytes=$pendingAudioBytes " +
             "socketQueuedBytes=${transcriptionClient.queuedFrameBytes()} finals=$acceptedFinals " +
             "pendingText=${pendingTranscripts.size} pendingSpeech=$unconfirmedSpeech " +
-            "lastResponseAgoMs=${lastResponseAtMs?.let { now - it } ?: "none"}"
+            "pendingWords=$unconfirmedTranscript localSpeech=$localSpeechActive stopReason=${stopReason ?: "none"} " +
+            "lastResponseAgoMs=${lastResponseAtMs?.let { now - it } ?: "none"} " +
+            "lastInterimAgoMs=${lastInterimAtMs?.let { now - it } ?: "none"} " +
+            "lastFinalAgoMs=${lastFinalAtMs?.let { now - it } ?: "none"} " +
+            "finalizedAgoMs=${finalizedAtMs?.let { now - it } ?: "none"}"
     }
 
     private fun endSession(cancelled: Boolean, failed: Boolean = false) {
@@ -567,6 +665,10 @@ class VoiceInputManager internal constructor(
         isSessionStopping = false
         waitingForClose = false
         unconfirmedSpeech = false
+        unconfirmedTranscript = false
+        localSpeechActive = false
+        stopReason = null
+        finalizedAtMs = null
         outbound.clear()
         pendingTranscripts.clear()
         pendingAudioBytes = 0
@@ -623,14 +725,25 @@ class VoiceInputManager internal constructor(
     // ── Timers ─────────────────────────────────────────────────────────
 
     private fun startAutoStopTimer() {
-        mainHandler.removeCallbacks(autoStopSilenceRunnable)
+        cancelAutoStopTimer()
         if (currentState == State.RECORDING) {
+            autoStopAtMs = SystemClock.elapsedRealtime() + autoStopSilenceMs
             mainHandler.postDelayed(autoStopSilenceRunnable, autoStopSilenceMs)
         }
     }
 
     private fun cancelAutoStopTimer() {
         mainHandler.removeCallbacks(autoStopSilenceRunnable)
+        autoStopAtMs = null
+    }
+
+    private fun stopForElapsedSilence(): Boolean {
+        val deadline = autoStopAtMs ?: return false
+        if (currentState != State.RECORDING || SystemClock.elapsedRealtime() < deadline) return false
+        // Equal-deadline callbacks can be dequeued in either order. The normal
+        // silence stop takes precedence over a speech watchdog at that instant.
+        stopRecording(StopReason.SILENCE_TIMEOUT)
+        return true
     }
 
     // ── Settings ───────────────────────────────────────────────────────

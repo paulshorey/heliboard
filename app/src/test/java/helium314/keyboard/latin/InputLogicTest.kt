@@ -7,6 +7,7 @@ import android.inputmethodservice.InputMethodService
 import android.os.Bundle
 import android.os.Handler
 import android.os.Message
+import android.os.PowerManager
 import android.text.InputType
 import android.view.KeyEvent
 import android.view.inputmethod.*
@@ -35,6 +36,7 @@ import org.junit.runner.RunWith
 import org.mockito.Mockito
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.Implements
@@ -435,12 +437,175 @@ class InputLogicTest {
         checkConnectionConsistency()
     }
 
+    @Test fun clearingAtAnUnchangedCaretCancelsVoice() {
+        reset(); setText("confirmed"); setCursorPosition(0)
+        val manager = mockActiveVoiceManager()
+        text = ""
+        latinIME.onUpdateSelection(0, 0, 0, 0, -1, -1)
+        Mockito.verify(manager).cancelRecording()
+    }
+
+    @Test fun extractedTextMonitoringDetectsAClearWithoutASelectionCallback() {
+        reset(); setText("confirmed")
+        val manager = mockActiveVoiceManager()
+        assertEquals(InputConnection.GET_EXTRACTED_TEXT_MONITOR, lastExtractedTextFlags)
+        val token = lastExtractedTextToken
+        text = ""; selectionStart = 0; selectionEnd = 0
+        latinIME.onUpdateExtractedText(token, ExtractedText().apply { text = "" })
+        Mockito.verify(manager).cancelRecording()
+    }
+
+    @Test fun aBelatedOrPartialExtractedUpdateDoesNotClearTheActualHost() {
+        reset(); setText("confirmed")
+        val manager = mockActiveVoiceManager()
+        latinIME.onUpdateExtractedText(lastExtractedTextToken, ExtractedText().apply {
+            text = ""; partialStartOffset = 0; partialEndOffset = 3
+        })
+        Mockito.verify(manager, Mockito.never()).cancelRecording()
+        assertEquals("confirmed", text)
+    }
+
+    @Test fun aRejectedTextMonitorStillChecksTheActualHostBeforeALateFinal() {
+        reset(); setText("confirmed")
+        throwOnExtractedTextMonitor = true
+        val manager = mockActiveVoiceManager()
+        text = ""; selectionStart = 0; selectionEnd = 0
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "Late words."))
+        Mockito.verify(manager).cancelRecording()
+        assertEquals("", text)
+    }
+
+    @Test fun fullscreenExtractionKeepsItsOwnMonitorAndStillDetectsClears() {
+        reset(); setText("confirmed")
+        extractViewShown = true
+        try {
+            val manager = mockActiveVoiceManager()
+            assertEquals(0, lastExtractedTextFlags)
+            text = ""; selectionStart = 0; selectionEnd = 0
+            latinIME.onUpdateExtractedText(123, ExtractedText().apply { text = "" })
+            Mockito.verify(manager).cancelRecording()
+        } finally {
+            extractViewShown = false
+        }
+    }
+
+    @Test fun unavailableSurroundingTextDoesNotCountAsAClear() {
+        reset(); setText("confirmed")
+        val manager = mockActiveVoiceManager()
+        unavailableSurroundingText = true
+        latinIME.onUpdateSelection(9, 9, 0, 0, -1, -1)
+        Mockito.verify(manager, Mockito.never()).cancelRecording()
+    }
+
+    @Test fun selectingAllTextDoesNotCountAsAnEmptyVoiceEditor() {
+        reset(); setText("confirmed"); setCursorPosition(0, 9)
+        val manager = mockActiveVoiceManager()
+        latinIME.onUpdateExtractedText(lastExtractedTextToken, ExtractedText().apply { text = "" })
+        Mockito.verify(manager, Mockito.never()).cancelRecording()
+        assertEquals("confirmed", text)
+    }
+
+    @Test fun restartingAnEmptyHostCancelsVoiceBeforeResettingTypingCaches() {
+        reset(); setText("confirmed")
+        val manager = mockActiveVoiceManager()
+        text = ""; selectionStart = 0; selectionEnd = 0
+        latinIME.onStartInput(EditorInfo().apply { inputType = currentInputType }, true)
+        Mockito.verify(manager).cancelRecording()
+    }
+
+    @Test fun aLateVoiceFinalCannotRefillAHostClearedWithoutNotification() {
+        reset(); setText("confirmed")
+        val manager = mockActiveVoiceManager()
+        text = ""; selectionStart = 0; selectionEnd = 0
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "Late words."))
+        Mockito.verify(manager).cancelRecording()
+        assertEquals("", text)
+    }
+
+    @Test fun aFieldThatStartedEmptyCannotBeRefilledAfterASilentClear() {
+        reset()
+        val manager = mockActiveVoiceManager()
+        assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(latinIME, "First words."))
+        text = ""; selectionStart = 0; selectionEnd = 0
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "Late words."))
+        Mockito.verify(manager).cancelRecording()
+        assertEquals("", text)
+    }
+
+    @Test fun anInterruptionMarkerCannotRefillAClearedHostAfterTheSessionEnds() {
+        reset(); setText("confirmed")
+        mockActiveVoiceManager()
+        // Failure invalidates the session before asking the IME for a marker.
+        LatinIME::class.java.getDeclaredField("mVoiceEditorMonitorActive").apply {
+            isAccessible = true; setBoolean(latinIME, false)
+        }
+        text = ""; selectionStart = 0; selectionEnd = 0
+        val method = LatinIME::class.java.getDeclaredMethod("commitVoiceText", String::class.java, Boolean::class.javaPrimitiveType)
+            .apply { isAccessible = true }
+        assertEquals(false, method.invoke(latinIME, "[Dictation interrupted]", false))
+        assertEquals("", text)
+    }
+
+    @Test fun anOldMonitorTokenCannotCancelANewRecording() {
+        reset(); setText("confirmed")
+        mockActiveVoiceManager()
+        val oldToken = lastExtractedTextToken
+        val manager = mockActiveVoiceManager()
+        text = ""; selectionStart = 0; selectionEnd = 0
+        latinIME.onUpdateExtractedText(oldToken, ExtractedText().apply { text = "" })
+        Mockito.verify(manager, Mockito.never()).cancelRecording()
+        latinIME.onUpdateExtractedText(lastExtractedTextToken, ExtractedText().apply { text = "" })
+        Mockito.verify(manager).cancelRecording()
+    }
+
+    @Test fun hidingTheKeyboardCancelsVoiceInsteadOfDraining() {
+        reset()
+        val manager = mockActiveVoiceManager()
+        shadowOf(latinIME.getSystemService(PowerManager::class.java)).setIsInteractive(true)
+        latinIME.onWindowHidden()
+        Mockito.verify(manager).cancelRecording()
+        Mockito.verify(manager, Mockito.never()).stopRecording()
+    }
+
+    @Test fun finishingTheInputViewCancelsEvenWhileVoiceIsDraining() {
+        reset()
+        val manager = mockActiveVoiceManager()
+        Mockito.`when`(manager.state).thenReturn(VoiceInputManager.State.IDLE)
+        Mockito.`when`(manager.hasPendingProcessing()).thenReturn(true)
+        latinIME.onFinishInputView(true)
+        Mockito.verify(manager).cancelRecording()
+        Mockito.verify(manager, Mockito.never()).stopRecording()
+    }
+
+    @Test fun turningOffTheScreenStillAllowsTheActiveRecordingToContinue() {
+        reset()
+        val manager = mockActiveVoiceManager()
+        shadowOf(latinIME.getSystemService(PowerManager::class.java)).setIsInteractive(false)
+        latinIME.onFinishInputView(false)
+        latinIME.onWindowHidden()
+        Mockito.verify(manager, Mockito.never()).cancelRecording()
+        Mockito.verify(manager, Mockito.never()).stopRecording()
+    }
+
     private fun mockActiveVoiceManager(): VoiceInputManager {
         val manager = Mockito.mock(VoiceInputManager::class.java)
         Mockito.`when`(manager.isIdle).thenReturn(false)
+        Mockito.doAnswer {
+            Mockito.`when`(manager.isIdle).thenReturn(true)
+            Mockito.`when`(manager.hasPendingProcessing()).thenReturn(false)
+            null
+        }.`when`(manager).cancelRecording()
         LatinIME::class.java.getDeclaredField("mVoiceInputManager").apply {
             isAccessible = true
             set(latinIME, manager)
+        }
+        LatinIME::class.java.getDeclaredField("mVoiceEditorMonitorActive").apply {
+            isAccessible = true
+            setBoolean(latinIME, true)
+        }
+        LatinIME::class.java.getDeclaredMethod("monitorVoiceEditorChanges").apply {
+            isAccessible = true
+            invoke(latinIME)
         }
         return manager
     }
@@ -1242,6 +1407,11 @@ class InputLogicTest {
         throwOnBatchStart = false
         ignoreSelection = false
         noExtractedText = false
+        unavailableSurroundingText = false
+        throwOnExtractedTextMonitor = false
+        extractViewShown = false
+        lastExtractedTextToken = 0
+        lastExtractedTextFlags = 0
         wrongSelectedText = false
         extractedTextOffset = 0
         deferBatchEdits = false
@@ -1478,6 +1648,11 @@ private var commitCalls = 0
 private var throwOnBatchStart = false
 private var ignoreSelection = false
 private var noExtractedText = false
+private var unavailableSurroundingText = false
+private var throwOnExtractedTextMonitor = false
+private var extractViewShown = false
+private var lastExtractedTextToken = 0
+private var lastExtractedTextFlags = 0
 private var wrongSelectedText = false
 private var extractedTextOffset = 0
 private var deferBatchEdits = false
@@ -1490,9 +1665,11 @@ private fun applyOrDeferEdit(edit: () -> Unit) {
 private val ic = object : InputConnection {
     // pretty clear (though this may be slow depending on the editor)
     // bad return value here is likely the cause for that weird bug improved/fixed by fixIncorrectLength
-    override fun getTextBeforeCursor(p0: Int, p1: Int): CharSequence = textBeforeCursor.takeLast(p0)
+    override fun getTextBeforeCursor(p0: Int, p1: Int): CharSequence? =
+        if (unavailableSurroundingText) null else textBeforeCursor.takeLast(p0)
     // pretty clear (though this may be slow depending on the editor)
-    override fun getTextAfterCursor(p0: Int, p1: Int): CharSequence = textAfterCursor.take(p0)
+    override fun getTextAfterCursor(p0: Int, p1: Int): CharSequence? =
+        if (unavailableSurroundingText) null else textAfterCursor.take(p0)
     // pretty clear
     override fun getSelectedText(p0: Int): CharSequence? = when {
         selectionStart == selectionEnd -> null
@@ -1630,6 +1807,11 @@ private val ic = object : InputConnection {
     }
     // implementation is only to work with getTextBeforeCursorAndDetectLaggyConnection
     override fun getExtractedText(p0: ExtractedTextRequest?, p1: Int): ExtractedText? {
+        if (p1 == InputConnection.GET_EXTRACTED_TEXT_MONITOR) {
+            if (throwOnExtractedTextMonitor) error("monitor unsupported")
+            lastExtractedTextToken = p0?.token ?: 0
+            lastExtractedTextFlags = p1
+        }
         if (noExtractedText) return null
         return ExtractedText().also {
             it.startOffset = extractedTextOffset
@@ -1671,6 +1853,8 @@ class ShadowInputMethodService {
     fun getCurrentInputConnection() = ic
     @Implementation
     fun isInputViewShown() = true // otherwise selection updates will do nothing
+    @Implementation
+    fun isExtractViewShown() = extractViewShown
 }
 
 @Implements(Handler::class)

@@ -191,7 +191,7 @@ class VoiceInputManagerTest {
     }
 
     @Test fun continuousPcmCannotPostponeTheResponseDeadline() {
-        start(); speaking = true; audio()
+        start(); speaking = true; audio(); capture.onSpeechStarted()
         repeat(29) { advance(1000); audio() }
         advance(1100)
         assertTrue(manager.isIdle)
@@ -199,16 +199,74 @@ class VoiceInputManagerTest {
         assertEquals(1, markers.size)
     }
 
-    @Test fun interimUpdatesDoNotAcknowledgePendingSpeech() {
-        start(); speaking = true; audio()
-        repeat(29) {
+    @Test fun aLongUtteranceWithLiveInterimsWaitsUntilSpeechEndsForAFinal() {
+        start(); speaking = true; audio(); capture.onSpeechStarted()
+        repeat(65) {
             advance(1000); audio(); stream.onInterimTranscription(); stream.onServerResponse(false)
         }
-        advance(1100)
+        assertTrue(manager.isRecording)
+        assertTrue(inserted.isEmpty())
+        speaking = false; capture.onSpeechStopped()
+        advance(5000); final("All of the long utterance.")
+        assertTrue(manager.isRecording)
+        assertTrue(errors.isEmpty())
+        assertTrue(markers.isEmpty())
+        assertEquals(listOf("All of the long utterance."), inserted)
+    }
+
+    @Test fun interimsAfterSpeechEndsCannotPostponeTheFinalDeadline() {
+        start(); speaking = true; audio(); capture.onSpeechStarted()
+        manager.pauseRecording(); shadowOf(Looper.getMainLooper()).idle()
+        repeat(29) {
+            advance(1000); stream.onInterimTranscription(); stream.onServerResponse(false)
+        }
+        advance(1001)
         assertTrue(manager.isIdle)
         assertTrue(errors.single().contains("No final transcript"))
         assertTrue(inserted.isEmpty())
         assertEquals(1, markers.size)
+    }
+
+    @Test fun anInterimAfterAPauseWithoutLocalSpeechUsesTheSubmittedBoundaryDeadline() {
+        start(); audio(0)
+        manager.pauseRecording(); shadowOf(Looper.getMainLooper()).idle()
+        advance(20_000)
+        stream.onInterimTranscription(); stream.onServerResponse(false)
+        advance(10_001)
+        assertTrue(manager.isIdle)
+        assertTrue(errors.single().contains("No final transcript"))
+        assertEquals(1, markers.size)
+    }
+
+    @Test fun speechResumingAfterATwentySecondPauseStartsANewFinalWait() {
+        start(); speaking = true; audio(); capture.onSpeechStarted()
+        stream.onInterimTranscription(); stream.onServerResponse(false)
+        speaking = false; capture.onSpeechStopped()
+        advance(20_000)
+        speaking = true; audio(); capture.onSpeechStarted()
+        repeat(20) {
+            advance(1000); audio(); stream.onInterimTranscription(); stream.onServerResponse(false)
+        }
+        assertTrue(manager.isRecording)
+        speaking = false; capture.onSpeechStopped()
+        final("The resumed utterance.")
+        assertTrue(errors.isEmpty())
+        assertTrue(markers.isEmpty())
+    }
+
+    @Test fun aLongPauseAfterAConfirmedFinalDoesNotInventPendingSpeech() {
+        start(); speaking = true; audio(); capture.onSpeechStarted(); final("First sentence.")
+        speaking = false; audio(0); capture.onSpeechStopped()
+        advance(20_000)
+        speaking = true; audio(); capture.onSpeechStarted()
+        repeat(20) {
+            advance(1000); audio(); stream.onInterimTranscription(); stream.onServerResponse(false)
+        }
+        final("Second sentence.")
+        assertTrue(manager.isRecording)
+        assertTrue(errors.isEmpty())
+        assertTrue(markers.isEmpty())
+        assertEquals(listOf("First sentence.", "Second sentence."), inserted)
     }
 
     @Test fun turnCompleteCannotHideAnUnconfirmedTailOnStop() {
@@ -244,7 +302,9 @@ class VoiceInputManagerTest {
     }
 
     @Test fun queuedAudioKeepsTheOriginalFinalProgressDeadlineAfterAnEarlierFinal() {
-        start(); speaking = true; audio(); advance(29_000)
+        start(); speaking = true; audio()
+        stream.onInterimTranscription(); stream.onServerResponse(false)
+        manager.pauseRecording(); shadowOf(Looper.getMainLooper()).idle(); advance(29_000)
         transportQueued = true; final("confirmed prefix")
         advance(1100)
         assertTrue(manager.isIdle)
@@ -383,6 +443,28 @@ class VoiceInputManagerTest {
         assertTrue(inserted.isEmpty())
     }
 
+    @Test fun cancellationDuringDrainClearsProcessingAndAllowsImmediateRestart() {
+        start(); speaking = true; audio()
+        val oldStream = stream
+        val oldCapture = capture
+        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(manager.hasPendingProcessing())
+        assertTrue(processing)
+        manager.cancelRecording()
+        assertTrue(manager.isIdle)
+        assertFalse(processing)
+        start()
+        oldStream.onStreamClosed()
+        oldStream.onStreamError("old failure")
+        oldStream.onTranscriptionResult(TranscriptSegment("old pending words", false))
+        oldCapture.onAudioChunk(ByteArray(3200), true)
+        final("New session words.")
+        assertTrue(manager.isRecording)
+        assertEquals(listOf("New session words."), inserted)
+        assertTrue(markers.isEmpty())
+        assertTrue(errors.isEmpty())
+    }
+
     @Test fun stopBeforeSetupRetainsTheFinalCapturedAudioBeforeEof() {
         start(ready = false); audio(1); manager.stopRecording()
         // Simulate the recorder tail already posted ahead of the stop barrier.
@@ -474,6 +556,134 @@ class VoiceInputManagerTest {
         manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle(); stream.onStreamClosed()
         assertEquals(listOf("First sentence."), inserted)
         assertEquals(1, markers.size)
+    }
+
+    @Test fun silenceAutoStopWithoutWordsClosesNormallyAndAllowsANewSession() {
+        start(); audio(0)
+        advance(30_000)
+        assertEquals(VoiceInputManager.State.IDLE, manager.state)
+        assertEquals("finish", sent.last())
+        assertFalse(manager.isIdle) // Still receiving finals during the close grace.
+        stream.onStreamClosed()
+        assertTrue(manager.isIdle)
+        assertTrue(markers.isEmpty())
+        assertTrue(errors.isEmpty())
+        assertFalse(processing)
+        start()
+        assertTrue(manager.isRecording)
+    }
+
+    @Test fun aSingleNoisyChunkAfterAFinalDoesNotTurnSilenceAutoStopIntoFailure() {
+        start(); audio(containsSpeech = true); capture.onSpeechStarted(); final("Confirmed words.")
+        capture.onSpeechStopped()
+        advance(700); audio(containsSpeech = true)
+        advance(29_300)
+        assertEquals("finish", sent.last())
+        advance(40) // The missing-final timer fired here in the device log.
+        stream.onStreamClosed()
+        assertTrue(manager.isIdle)
+        assertEquals(listOf("Confirmed words."), inserted)
+        assertTrue(markers.isEmpty())
+        assertTrue(errors.isEmpty())
+    }
+
+    @Test fun quietNoiseWithoutRecognizedWordsDoesNotArmAFinalDeadlineWhilePaused() {
+        start(); audio(containsSpeech = true)
+        manager.pauseRecording(); shadowOf(Looper.getMainLooper()).idle()
+        advance(35_000)
+        assertTrue(manager.isPaused)
+        assertTrue(errors.isEmpty())
+        assertTrue(markers.isEmpty())
+    }
+
+    @Test fun silenceAutoStopWinsWhenAResponseWatchdogHasTheSameDeadline() {
+        start(); audio(); stream.onInterimTranscription(); stream.onServerResponse(false)
+        audio(); capture.onSpeechStopped()
+        advance(30_000)
+        assertEquals("finish", sent.last())
+        stream.onStreamClosed()
+        assertTrue(manager.isIdle)
+        assertTrue(inserted.isEmpty()) // Never promote a provisional transcript.
+        assertTrue(markers.isEmpty())
+        assertTrue(errors.isEmpty())
+    }
+
+    @Test fun silenceAutoStopStillAcceptsTheLastFinalDuringDrain() {
+        start(); audio(containsSpeech = true); capture.onSpeechStopped()
+        advance(30_000)
+        advance(1000); final("Last confirmed sentence."); stream.onStreamClosed()
+        assertEquals(listOf("Last confirmed sentence."), inserted)
+        assertTrue(markers.isEmpty())
+        assertTrue(errors.isEmpty())
+    }
+
+    @Test fun aRealNetworkFailureDuringSilenceDrainStillReportsAnInterruption() {
+        start(); audio(); advance(30_000)
+        network.loss!!()
+        assertTrue(manager.isIdle)
+        assertEquals(1, markers.size)
+        assertTrue(errors.single().contains("Internet connection lost"))
+    }
+
+    @Test fun manualStopClearsThePreviousSpeechDeadlineAndWaitsForTheDrainFinal() {
+        start(); audio(); stream.onInterimTranscription(); stream.onServerResponse(false)
+        manager.pauseRecording(); shadowOf(Looper.getMainLooper()).idle()
+        advance(29_000); manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
+        advance(1100)
+        assertFalse(manager.isIdle)
+        assertTrue(errors.isEmpty())
+        final("Confirmed during drain."); stream.onStreamClosed()
+        assertEquals(listOf("Confirmed during drain."), inserted)
+        assertTrue(markers.isEmpty())
+    }
+
+    @Test fun repeatedFinalProgressAfterSocketSpeechDrainsDoesNotInsertDuplicateText() {
+        start(); audio(containsSpeech = true)
+        transportQueued = true; final("Confirmed sentence.")
+        transportQueued = false
+        stream.onServerResponse(true) // Client deduplicated the repeated authoritative final.
+        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle(); stream.onStreamClosed()
+        assertEquals(listOf("Confirmed sentence."), inserted)
+        assertTrue(markers.isEmpty())
+        assertTrue(errors.isEmpty())
+    }
+
+    @Test fun repeatedFinalProgressCannotAcknowledgeSpeechStillQueuedInTheSocket() {
+        start(); audio(containsSpeech = true)
+        transportQueued = true; final("Confirmed sentence."); stream.onServerResponse(true)
+        transportQueued = false
+        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle(); stream.onStreamClosed()
+        assertEquals(listOf("Confirmed sentence."), inserted)
+        assertEquals(1, markers.size)
+    }
+
+    @Test fun controlQueueOverflowStopsWithoutLettingControlsOvertakeBlockedAudio() {
+        start(); sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE; audio()
+        repeat(VoiceInputManager.MAX_PENDING_CONTROLS + 1) {
+            manager.pauseRecording(); shadowOf(Looper.getMainLooper()).idle(); manager.resumeRecording()
+        }
+        assertTrue(manager.isIdle)
+        assertTrue(sent.isEmpty())
+        assertTrue(errors.single().contains("control queue is full"))
+        assertEquals(1, markers.size)
+    }
+
+    @Test fun aBackpressuredOlderBoundaryDoesNotStartAFinalWaitDuringTheNextUtterance() {
+        start(); audio(containsSpeech = true); capture.onSpeechStarted()
+        stream.onInterimTranscription(); stream.onServerResponse(false)
+        sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE
+        audio(); capture.onSpeechStopped()
+        advance(1000); audio(containsSpeech = true); capture.onSpeechStarted()
+        sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED; advance(30)
+        repeat(35) {
+            advance(1000); audio(containsSpeech = true)
+            stream.onInterimTranscription(); stream.onServerResponse(false)
+        }
+        assertTrue(manager.isRecording)
+        assertTrue(errors.isEmpty())
+        capture.onSpeechStopped(); advance(1000); final("Both utterances.")
+        assertEquals(listOf("Both utterances."), inserted)
+        assertTrue(markers.isEmpty())
     }
 
     private class FakeNetwork : VoiceNetworkMonitor {

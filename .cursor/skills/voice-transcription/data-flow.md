@@ -52,18 +52,20 @@ Builds `inputAudioTranscription.customVocabulary`.
 ### VoiceInputManager.kt
 Orchestrates recording, Gemini streaming, and ordered transcript delivery.
 - **State machine**: IDLE → RECORDING ↔ PAUSED → IDLE
-- **Buffered audio/control FIFO**: retains up to 960,000 PCM bytes until transport acceptance. Pause, silence, and stop cannot overtake earlier audio. The socket queue holds at most 256 KiB of encoded audio JSON; local backpressure retries the same head every 25 ms.
+- **Buffered audio/control FIFO**: retains up to 960,000 PCM bytes and 64 boundary controls until transport acceptance. Pause, silence, and stop cannot overtake earlier audio. The socket queue holds at most 256 KiB of encoded audio JSON; local backpressure retries the same head every 25 ms.
 - **Transcript FIFO**: retains each head until the listener returns local dispatch/cleanup success. Android IPC does not return the host editor's commit result. Overflow at 64 entries is terminal, with no coalescing or skipping.
 - **Terminal failure**: invalidate callback generations, stop capture, clear uncertain work, preserve inserted text, and mark possible loss with `[Dictation interrupted]` once. Editor rejection/exception suppresses a marker and stops later writes.
 - **Explicit restart**: no reconnect, resumption, or rotation. `goAway` or nine minutes stops capture and drains; the next recording requires a mic tap.
 - **Session config**: maps the subtype locale to a documented BCP-47 code, clamps `silenceDurationMs` to 400–5000 ms, and harvests vocabulary once per recording.
-- **Deadlines**: 12 seconds across all setup tiers, 30 seconds for oldest queued PCM and pending-speech response/final progress, 15 seconds for EOF/close. PCM/interim updates cannot postpone missing final progress. Pure silence does not arm a speech deadline.
-- **Final progress**: an earlier final cannot acknowledge annotated speech still in the PCM or socket queue. PCM carries capture-time raw-energy evidence, separate from the speaking silence window. Track the encoded quiet/control suffix in the socket FIFO so silence alone does not block a final. Keep pending speech until a later final arrives after queued speech drains.
-- **Auto-stop**: prolonged local silence stops recording. Local speech-stop, pause, and stop enqueue `audioStreamEnd`.
-- **Capture shutdown**: a missed two-second join is terminal before EOF; an old live thread blocks reuse and keeps its original recording callback.
+- **Deadlines**: 12 seconds across all setup tiers, 30 seconds for oldest queued PCM, active local speech or pending recognized words without a server response, 15 seconds for EOF/close. The missing-final wait applies to recognized words, not RMS spikes, and starts at the current speech epoch's submitted `audioStreamEnd`. Repeated controls/interims cannot extend it; new onset clears it until the next boundary. A delayed older boundary cannot start a wait for the newer utterance. Graceful stop clears previous speech watchdogs and continues reading finals.
+- **Final progress**: an earlier final cannot acknowledge annotated speech still in the PCM or socket queue. PCM carries capture-time raw-energy evidence, separate from the speaking silence window. Track the encoded quiet/control suffix in the socket FIFO so silence alone does not block a final. A repeated authoritative final also acknowledges progress after queued speech drains, without another editor write.
+- **Auto-stop**: prolonged adaptive local silence stops recording intentionally. Local speech-stop, pause, and stop enqueue `audioStreamEnd`. Silence auto-stop drains late finals and closes normally without a marker for unconfirmed noise/hypotheses. Interims never become text; actual failures still report interruptions. At equal deadlines, normal silence stop wins over a speech watchdog.
+- **Capture shutdown**: a missed two-second join is terminal before EOF; an old live thread blocks reuse and keeps its original recording callback. Pause/resume changes the capture phase, so a native read interrupted by an earlier phase cannot falsely abort resumed recording.
 
 ### LatinIME.java
 Main orchestrator that coordinates all components and inserts text into the editor.
+- Cancels active/draining voice work immediately when the keyboard is hidden while interactive or the input target finishes/changes; screen-off hiding alone preserves recording.
+- Monitors host edits with a dedicated extracted-text token unless the framework's fullscreen extract view is visible, retaining its monitor then. Actual host reads on updates, restarts, and before insertion detect nonempty-to-empty clears even without selection movement. Successful insertion supplies nonempty-field evidence too. Null queries do not imply emptiness, and clears alone do not prove submission or hide the keyboard.
 - Uses `InputConnection.commitText(...)` at the caret, or replaces an active selection when text is highlighted
 - Calls `mInputLogic.finishInput()` first to keep composing state in sync
 - Applies pre-commit spacing/casing/trailing-punctuation shaping, then runs paragraph-level post-processing

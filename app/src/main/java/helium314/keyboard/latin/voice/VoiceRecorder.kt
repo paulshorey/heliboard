@@ -120,6 +120,7 @@ class VoiceRecorder(private val context: Context) {
     @Volatile private var isRecording = false
     @Volatile private var isPaused = false
     @Volatile private var isSpeaking = false
+    @Volatile private var capturePhase = 0L
     @Volatile private var silenceConfig = SilenceConfig()
     private var callback: RecordingCallback? = null
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -252,6 +253,7 @@ class VoiceRecorder(private val context: Context) {
 
     fun pauseRecording() {
         if (isRecording && !isPaused) {
+            capturePhase++
             isPaused = true
             try {
                 // Stop the recorder to avoid keeping the microphone actively capturing
@@ -268,6 +270,7 @@ class VoiceRecorder(private val context: Context) {
         if (isRecording && isPaused) {
             try {
                 audioRecord?.startRecording()
+                capturePhase++
                 isPaused = false
             } catch (e: Exception) {
                 Log.e(TAG, "Error resuming AudioRecord: ${e.message}")
@@ -316,13 +319,23 @@ class VoiceRecorder(private val context: Context) {
                     continue
                 }
 
-                val bytesRead = audioRecord?.read(readBuffer, 0, BYTES_PER_READ) ?: break
+                val readPhase = capturePhase
+                val bytesRead = try {
+                    audioRecord?.read(readBuffer, 0, BYTES_PER_READ) ?: break
+                } catch (e: Exception) {
+                    // A rapid pause/resume can finish before the interrupted
+                    // native read returns. Its exception belongs to the old
+                    // capture phase, even though isPaused is already false.
+                    if (!isRecording || isPaused || readPhase != capturePhase) continue
+                    throw e
+                }
                 if (!isRecording) {
                     break
                 }
-                if (isPaused) {
+                if (isPaused || readPhase != capturePhase) {
                     silenceDurationMs = 0L
                     isSpeaking = false
+                    consecutiveEmptyReads = 0
                     continue
                 }
                 when {

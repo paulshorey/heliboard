@@ -86,6 +86,60 @@ class VoiceRecorderLifecycleTest {
         VoiceRecorder::class.java.getDeclaredField(name).apply { isAccessible = true }.set(recorder, value)
     }
 
+    @Test fun aNativeReadErrorFromBeforeRapidPauseResumeDoesNotAbortResumedCapture() {
+        verifyInterruptedReadAfterResume(throws = false)
+    }
+
+    @Test fun aNativeReadExceptionFromBeforeRapidPauseResumeDoesNotAbortResumedCapture() {
+        verifyInterruptedReadAfterResume(throws = true)
+    }
+
+    private fun verifyInterruptedReadAfterResume(throws: Boolean) {
+        val recorder = VoiceRecorder(ApplicationProvider.getApplicationContext<Context>())
+        val events = Events()
+        recorder.setCallback(events)
+        val reading = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        var reads = 0
+        val audio = Mockito.mock(AudioRecord::class.java) { call ->
+            if (call.method.name == "read") {
+                when (reads++) {
+                    0 -> {
+                        reading.countDown()
+                        check(release.await(5, TimeUnit.SECONDS))
+                        if (throws) throw IllegalStateException("interrupted by pause")
+                        AudioRecord.ERROR_INVALID_OPERATION
+                    }
+                    1 -> { (call.arguments[0] as ByteArray).fill(0); 3200 }
+                    else -> AudioRecord.ERROR_BAD_VALUE // A real new-phase error must still surface.
+                }
+            } else Mockito.RETURNS_DEFAULTS.answer(call)
+        }
+        setField(recorder, "isRecording", true)
+        setField(recorder, "audioRecord", audio)
+        val loop = VoiceRecorder::class.java.getDeclaredMethod("recordingLoop", VoiceRecorder.RecordingCallback::class.java)
+            .apply { isAccessible = true }
+        val worker = Thread { loop.invoke(recorder, events) }
+        setField(recorder, "recordingThread", worker)
+        worker.start()
+        try {
+            assertTrue(reading.await(2, TimeUnit.SECONDS))
+            recorder.pauseRecording()
+            recorder.resumeRecording()
+            release.countDown()
+            worker.join(2000)
+            assertFalse(worker.isAlive)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(3, reads)
+            assertEquals(1, events.audioChunks)
+            assertEquals(listOf("Microphone returned invalid audio buffer"), events.errors)
+        } finally {
+            release.countDown()
+            recorder.stopRecording()
+            worker.join(1000)
+        }
+    }
+
     @Test fun quietChunkDuringTheSpeakingWindowCarriesNoSpeechEvidence() {
         val recorder = VoiceRecorder(ApplicationProvider.getApplicationContext<Context>())
         val events = Events()
