@@ -9,6 +9,53 @@ class TranscriptPostProcessorTest {
     private fun process(input: String): String =
         TranscriptPostProcessor.processCurrentParagraph(input) ?: input
 
+    @Test
+    fun `removes every period immediately before correction punctuation`() {
+        assertEquals(
+            "Wow! Really? List: Pause; Also, End.",
+            process("Wow.! Really.? List.: Pause.; Also., End.")
+        )
+    }
+
+    @Test
+    fun `removes every comma immediately before correction punctuation`() {
+        assertEquals(
+            "Wow! Really? List: Pause; Also, End.",
+            process("Wow,! Really,? List,: Pause,; Also,, End,.")
+        )
+    }
+
+    @Test
+    fun `removes mixed period and comma runs in one pass`() {
+        val corrected = process("Wait.,! Really,.? List,.: Pause.,; Also.,, End,,.")
+        assertEquals("Wait! Really? List: Pause; Also, End.", corrected)
+        assertNull(TranscriptPostProcessor.processCurrentParagraph(corrected))
+    }
+
+    @Test
+    fun `preserves ordinary commas delimiters and separated punctuation`() {
+        val text = "3,000 Yes, please. Done,\" (Done,) [Done,] , ! ,\n?"
+        assertNull(TranscriptPostProcessor.processCurrentParagraph(text))
+    }
+
+    @Test
+    fun `cleans punctuation produced by spoken commands`() {
+        assertEquals("Wow!", process("Wow.Exclamation point."))
+    }
+
+    @Test
+    fun `removes period runs before punctuation in one pass`() {
+        val corrected = process("Wait...! Really..? List..: Pause..; Also..,")
+        assertEquals("Wait! Really? List: Pause; Also,", corrected)
+        assertNull(TranscriptPostProcessor.processCurrentParagraph(corrected))
+    }
+
+    @Test
+    fun `preserves ordinary periods ellipses delimiters and separated punctuation`() {
+        val text = "3.14 v1.2 example.com folder/.hidden Wait... Done.\" (Done.) [Done.] . ! .\n?"
+        assertNull(TranscriptPostProcessor.processCurrentParagraph(text))
+    }
+
     // --- Exclamation point (capitalized command form) ---
 
     @Test
