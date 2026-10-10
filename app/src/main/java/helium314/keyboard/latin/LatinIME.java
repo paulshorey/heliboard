@@ -2282,15 +2282,20 @@ public class LatinIME extends InputMethodService implements
                 return false;
             }
 
+            // Normalize the entire segment here, including earlier paragraphs
+            // when a final contains line breaks. The paragraph pass also cleans
+            // existing editor context and punctuation produced by spoken commands.
+            String insertion = processTranscript
+                    ? TranscriptPostProcessor.INSTANCE.removePeriodsBeforePunctuation(text) : text;
             boolean replacePreviousPeriod = false;
-            if (processTranscript && text.length() == 1 && "!?,:;".indexOf(text.charAt(0)) >= 0
+            if (processTranscript
+                    && TranscriptPostProcessor.INSTANCE.startsWithPunctuationCorrection(insertion)
                     && !mInputLogic.mConnection.hasSelection()) {
                 final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
                 if (before != null && before.length() == 1 && before.charAt(0) == '.') {
                     replacePreviousPeriod = true;
                 }
             }
-            String insertion = text;
             if (!processTranscript && !mInputLogic.mConnection.hasSelection()) {
                 final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
                 if (before != null && before.length() > 0 && !Character.isWhitespace(before.charAt(0))) {

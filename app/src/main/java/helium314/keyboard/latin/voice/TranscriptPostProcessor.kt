@@ -7,15 +7,32 @@ package helium314.keyboard.latin.voice
  * "um,", "uh,") and spelled-out punctuation names that the speaker dictates
  * as voice commands (e.g. "exclamation point", "comma").
  *
- * Rules are applied case-insensitively, longest match first, so that patterns
+ * Spoken-command rules match capitalized sentence-form commands, longest first, so patterns
  * with surrounding punctuation context (like ". Exclamation point.") are consumed
- * before shorter ambiguous ones (like "exclamation point.").
+ * before shorter ones (like "Exclamation point."). Redundant periods before
+ * correction punctuation are removed after command conversion.
  */
 object TranscriptPostProcessor {
 
     data class Rule(val find: String, val replace: String)
 
     val rules: List<Rule> = buildRules()
+
+    private const val PERIOD_CORRECTION_PUNCTUATION = "!?,:;"
+    private val periodsBeforePunctuation = Regex("""\.+(?=[$PERIOD_CORRECTION_PUNCTUATION])""")
+
+    /** Whether this segment can correct a period at the end of the preceding segment. */
+    fun startsWithPunctuationCorrection(text: String): Boolean =
+        text.isNotEmpty() && text[0] in PERIOD_CORRECTION_PUNCTUATION
+
+    /**
+     * Remove adjacent periods before `!`, `?`, `,`, `:`, or `;` throughout [text].
+     * A run of periods before one of these marks is removed in one pass so the
+     * result is stable across repeated cleanup. Other punctuation, ellipses on
+     * their own, and periods separated from the mark by whitespace are preserved.
+     */
+    fun removePeriodsBeforePunctuation(text: String): String =
+        periodsBeforePunctuation.replace(text, "")
 
     private val disfluencyReplacements = listOf(
         Rule("—", ""),
@@ -41,6 +58,7 @@ object TranscriptPostProcessor {
         for (rule in rules) {
             result = result.replace(rule.find, rule.replace)
         }
+        result = removePeriodsBeforePunctuation(result)
         return if (result != paragraph) result else null
     }
 

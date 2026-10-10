@@ -148,13 +148,47 @@ class InputLogicTest {
         }
     }
 
-    @Test fun multiCharacterVoiceSegmentDoesNotReplacePreviousPeriod() {
+    @Test fun multiCharacterVoiceSegmentReplacesPreviousPeriod() {
         reset()
         setText("Done.")
 
         commitVoiceTranscriptionTextMethod.invoke(latinIME, "?!")
 
-        assertEquals("Done.?!", getText())
+        assertEquals("Done?!", getText())
+        checkConnectionConsistency()
+    }
+
+    @Test fun voicePunctuationCleanupCoversEveryParagraphInTheIncomingSegment() {
+        reset()
+
+        assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(
+            latinIME, "First.! Next.?\nList.: Pause.;\nFinally.,"
+        ))
+
+        assertEquals("First! Next?\nList: Pause;\nFinally,", getText())
+        checkConnectionConsistency()
+    }
+
+    @Test fun voicePunctuationCleanupCoversExistingParagraphText() {
+        reset()
+        setText("Wow.! Really.? List.: Pause.; Also.,")
+
+        assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(latinIME, " End."))
+
+        assertEquals("Wow! Really? List: Pause; Also, End.", getText())
+        checkConnectionConsistency()
+    }
+
+    @Test fun longerVoicePunctuationCorrectionKeepsHostSelectionVerification() {
+        reset()
+        setText("Confirmed.")
+        rejectSelection = true
+
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "? Really.!"))
+
+        assertEquals("Confirmed.", getText())
+        assertEquals(0, commitCalls)
+        assertEquals(0, batchEdit)
         checkConnectionConsistency()
     }
 
