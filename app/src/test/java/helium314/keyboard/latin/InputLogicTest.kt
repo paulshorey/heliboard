@@ -7,6 +7,7 @@ import android.inputmethodservice.InputMethodService
 import android.os.Bundle
 import android.os.Handler
 import android.os.Message
+import android.os.PowerManager
 import android.text.InputType
 import android.view.KeyEvent
 import android.view.inputmethod.*
@@ -30,10 +31,12 @@ import helium314.keyboard.latin.utils.ScriptUtils
 import helium314.keyboard.latin.utils.SubtypeSettings
 import helium314.keyboard.latin.utils.getTimestampFormatter
 import helium314.keyboard.latin.utils.prefs
+import helium314.keyboard.latin.voice.VoiceInputManager
 import org.junit.runner.RunWith
 import org.mockito.Mockito
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.Implements
@@ -164,6 +167,447 @@ class InputLogicTest {
 
         assertEquals("Done. !", getText())
         checkConnectionConsistency()
+    }
+
+    @Test fun voiceCommitRejectionIsReportedAndDoesNotAdvanceTheCache() {
+        reset()
+        setText("confirmed")
+        rejectCommit = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, " rejected"))
+        assertEquals("confirmed", getText())
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun voiceCommitExceptionClosesTheBatchAndReportsFailure() {
+        reset()
+        setText("confirmed")
+        throwOnCommit = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, " rejected"))
+        assertEquals("confirmed", getText())
+        assertEquals(0, batchEdit)
+    }
+
+    @Test fun rejectedVoicePunctuationSelectionDoesNotWriteAReplacement() {
+        reset()
+        setText("Confirmed.")
+        rejectSelection = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "!"))
+        assertEquals("Confirmed.", getText())
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun rejectedParagraphCleanupStopsAfterTheAcceptedOriginalInsertion() {
+        reset()
+        setText("hello ")
+        rejectSelection = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "Comma."))
+        assertEquals("hello Comma.", getText())
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun rejectedParagraphReplacementPreservesTheOriginalTextAndCaret() {
+        reset()
+        setText("hello ")
+        rejectSecondCommit = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "Comma."))
+        assertEquals("hello Comma.", text)
+        assertEquals(text.length, cursor)
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun rejectedPunctuationReplacementPreservesThePeriodAndCaret() {
+        reset()
+        setText("Confirmed.")
+        rejectCommit = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "!"))
+        assertEquals("Confirmed.", text)
+        assertEquals(text.length, cursor)
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun throwingParagraphReplacementPreservesTheOriginalTextAndCaret() {
+        reset()
+        setText("hello ")
+        throwOnSecondCommit = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "Comma."))
+        assertEquals("hello Comma.", text)
+        assertEquals(text.length, cursor)
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun throwingReplacementSelectionRefreshesTheCacheWithoutWritingText() {
+        reset()
+        setText("Confirmed.")
+        throwOnSelection = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "!"))
+        assertEquals("Confirmed.", text)
+        assertEquals(text.length, cursor)
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun hostBatchStartExceptionIsBalancedInsideTheWrapper() {
+        reset()
+        setText("confirmed")
+        throwOnBatchStart = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, " rejected"))
+        assertEquals("confirmed", text)
+        val nesting = RichInputConnection::class.java.getDeclaredField("mNestLevel").apply { isAccessible = true }
+        assertEquals(0, nesting.getInt(connection))
+        assertEquals(0, batchEdit)
+    }
+
+    @Test fun interruptionMarkerNeverRunsParagraphCleanup() {
+        reset()
+        setText("um, confirmed prefix")
+        val method = LatinIME::class.java.getDeclaredMethod("commitVoiceText", String::class.java, Boolean::class.javaPrimitiveType)
+            .apply { isAccessible = true }
+        assertEquals(true, method.invoke(latinIME, "[Dictation interrupted]", false))
+        assertEquals("um, confirmed prefix [Dictation interrupted]", getText())
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun interruptionMarkerPreservesSelectedExistingText() {
+        reset(); setText("hello cruel world"); setCursorPosition(6, 11)
+        val method = LatinIME::class.java.getDeclaredMethod("commitVoiceText", String::class.java, Boolean::class.javaPrimitiveType)
+            .apply { isAccessible = true }
+        assertEquals(true, method.invoke(latinIME, "[Dictation interrupted]", false))
+        assertEquals("hello cruel [Dictation interrupted] world", text)
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun ignoredRemoteSelectionStopsCleanupWithoutAppendingTheParagraph() {
+        reset(); setText("hello ")
+        ignoreSelection = true // IPC dispatch succeeds even when the host does not apply the request.
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "Comma."))
+        assertEquals("hello Comma.", text)
+        assertEquals(text.length, cursor)
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun ignoredRemoteSelectionPreventsMarkerFromReplacingHighlightedText() {
+        reset(); setText("hello cruel world"); setCursorPosition(6, 11)
+        ignoreSelection = true
+        val method = LatinIME::class.java.getDeclaredMethod("commitVoiceText", String::class.java, Boolean::class.javaPrimitiveType)
+            .apply { isAccessible = true }
+        assertEquals(false, method.invoke(latinIME, "[Dictation interrupted]", false))
+        assertEquals("hello cruel world", text)
+        assertEquals(6, selectionStart)
+        assertEquals(11, selectionEnd)
+        assertEquals(0, commitCalls)
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun markerDoesNotOverwriteAHostSelectionWhoseCallbackHasNotArrived() {
+        reset(); setText("hello cruel world")
+        selectionStart = 6
+        selectionEnd = 11 // The wrapper still expects the previous collapsed caret.
+        val method = LatinIME::class.java.getDeclaredMethod("commitVoiceText", String::class.java, Boolean::class.javaPrimitiveType)
+            .apply { isAccessible = true }
+        assertEquals(false, method.invoke(latinIME, "[Dictation interrupted]", false))
+        assertEquals("hello cruel world", text)
+        assertEquals(6, selectionStart)
+        assertEquals(11, selectionEnd)
+        assertEquals(0, commitCalls)
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun markerIsSkippedWhenTheHostCaretCannotBeVerified() {
+        reset(); setText("confirmed")
+        noExtractedText = true
+        val method = LatinIME::class.java.getDeclaredMethod("commitVoiceText", String::class.java, Boolean::class.javaPrimitiveType)
+            .apply { isAccessible = true }
+        assertEquals(false, method.invoke(latinIME, "[Dictation interrupted]", false))
+        assertEquals("confirmed", text)
+        assertEquals(0, commitCalls)
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun unavailableHostSelectionStopsCleanupBeforeReplacingText() {
+        reset(); setText("hello ")
+        noExtractedText = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "Comma."))
+        assertEquals("hello Comma.", text)
+        assertEquals(text.length, cursor)
+        assertEquals(1, commitCalls)
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun wrongSelectedTextStopsCleanupEvenWhenReportedPositionsMatch() {
+        reset(); setText("Confirmed.")
+        wrongSelectedText = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "!"))
+        assertEquals("Confirmed.", text)
+        assertEquals(text.length, cursor)
+        assertEquals(0, commitCalls)
+        assertEquals(0, batchEdit)
+        checkConnectionConsistency()
+    }
+
+    @Test fun selectionVerificationAccountsForExtractedTextStartOffset() {
+        reset(); setText("header Confirmed.")
+        extractedTextOffset = 7
+        assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(latinIME, "!"))
+        assertEquals("header Confirmed!", text)
+        checkConnectionConsistency()
+    }
+
+    @Test fun deferredEditorAppliesParagraphInsertionBeforeCleanupVerification() {
+        reset(); setText("hello ")
+        deferBatchEdits = true
+        assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(latinIME, "Comma."))
+        assertEquals("hello ,", text)
+        assertEquals(0, batchEdit)
+        assertEquals(0, deferredEdits.size)
+        checkConnectionConsistency()
+    }
+
+    @Test fun deferredEditorAppliesPunctuationSelectionBeforeVerification() {
+        reset(); setText("Confirmed.")
+        deferBatchEdits = true
+        assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(latinIME, "!"))
+        assertEquals("Confirmed!", text)
+        assertEquals(0, batchEdit)
+        assertEquals(0, deferredEdits.size)
+        checkConnectionConsistency()
+    }
+
+    @Test fun deferredEditorPreservesHighlightedTextWhenInsertingMarker() {
+        reset(); setText("hello cruel world"); setCursorPosition(6, 11)
+        deferBatchEdits = true
+        val method = LatinIME::class.java.getDeclaredMethod("commitVoiceText", String::class.java, Boolean::class.javaPrimitiveType)
+            .apply { isAccessible = true }
+        assertEquals(true, method.invoke(latinIME, "[Dictation interrupted]", false))
+        assertEquals("hello cruel [Dictation interrupted] world", text)
+        assertEquals(0, batchEdit)
+        assertEquals(0, deferredEdits.size)
+        checkConnectionConsistency()
+    }
+
+    @Test fun delayedCleanupSelectionCallbacksDoNotCancelVoiceInsertionInTheMiddle() {
+        reset(); setText("hello  world"); setCursorPosition(6)
+        val manager = mockActiveVoiceManager()
+        deferBatchEdits = true
+        assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(latinIME, "Comma."))
+        assertEquals("hello , world", text)
+
+        // The host is already at the final caret when earlier batch/selection
+        // notifications reach the IME. These must not reset its current cache.
+        latinIME.onUpdateSelection(6, 6, 12, 12, -1, -1)
+        latinIME.onUpdateSelection(12, 12, 0, 12, -1, -1)
+        latinIME.onUpdateSelection(0, 12, 7, 7, -1, -1)
+        Mockito.verify(manager, Mockito.never()).cancelRecording()
+        checkConnectionConsistency()
+    }
+
+    @Test fun actualUserCursorMoveStillCancelsVoiceAfterCleanup() {
+        reset(); setText("hello  world"); setCursorPosition(6)
+        val manager = mockActiveVoiceManager()
+        deferBatchEdits = true
+        assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(latinIME, "Comma."))
+
+        setCursorPosition(2)
+        Mockito.verify(manager).cancelRecording()
+        assertEquals("hello , world", text)
+        checkConnectionConsistency()
+    }
+
+    @Test fun clearingTheHostFieldCancelsVoiceDespiteThePreviousTextCache() {
+        reset(); setText("confirmed")
+        val manager = mockActiveVoiceManager()
+        text = ""
+        selectionStart = 0
+        selectionEnd = 0
+
+        latinIME.onUpdateSelection(9, 9, 0, 0, -1, -1)
+        Mockito.verify(manager).cancelRecording()
+        checkConnectionConsistency()
+    }
+
+    @Test fun clearingAtAnUnchangedCaretCancelsVoice() {
+        reset(); setText("confirmed"); setCursorPosition(0)
+        val manager = mockActiveVoiceManager()
+        text = ""
+        latinIME.onUpdateSelection(0, 0, 0, 0, -1, -1)
+        Mockito.verify(manager).cancelRecording()
+    }
+
+    @Test fun extractedTextMonitoringDetectsAClearWithoutASelectionCallback() {
+        reset(); setText("confirmed")
+        val manager = mockActiveVoiceManager()
+        assertEquals(InputConnection.GET_EXTRACTED_TEXT_MONITOR, lastExtractedTextFlags)
+        val token = lastExtractedTextToken
+        text = ""; selectionStart = 0; selectionEnd = 0
+        latinIME.onUpdateExtractedText(token, ExtractedText().apply { text = "" })
+        Mockito.verify(manager).cancelRecording()
+    }
+
+    @Test fun aBelatedOrPartialExtractedUpdateDoesNotClearTheActualHost() {
+        reset(); setText("confirmed")
+        val manager = mockActiveVoiceManager()
+        latinIME.onUpdateExtractedText(lastExtractedTextToken, ExtractedText().apply {
+            text = ""; partialStartOffset = 0; partialEndOffset = 3
+        })
+        Mockito.verify(manager, Mockito.never()).cancelRecording()
+        assertEquals("confirmed", text)
+    }
+
+    @Test fun aRejectedTextMonitorStillChecksTheActualHostBeforeALateFinal() {
+        reset(); setText("confirmed")
+        throwOnExtractedTextMonitor = true
+        val manager = mockActiveVoiceManager()
+        text = ""; selectionStart = 0; selectionEnd = 0
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "Late words."))
+        Mockito.verify(manager).cancelRecording()
+        assertEquals("", text)
+    }
+
+    @Test fun fullscreenExtractionKeepsItsOwnMonitorAndStillDetectsClears() {
+        reset(); setText("confirmed")
+        extractViewShown = true
+        try {
+            val manager = mockActiveVoiceManager()
+            assertEquals(0, lastExtractedTextFlags)
+            text = ""; selectionStart = 0; selectionEnd = 0
+            latinIME.onUpdateExtractedText(123, ExtractedText().apply { text = "" })
+            Mockito.verify(manager).cancelRecording()
+        } finally {
+            extractViewShown = false
+        }
+    }
+
+    @Test fun unavailableSurroundingTextDoesNotCountAsAClear() {
+        reset(); setText("confirmed")
+        val manager = mockActiveVoiceManager()
+        unavailableSurroundingText = true
+        latinIME.onUpdateSelection(9, 9, 0, 0, -1, -1)
+        Mockito.verify(manager, Mockito.never()).cancelRecording()
+    }
+
+    @Test fun selectingAllTextDoesNotCountAsAnEmptyVoiceEditor() {
+        reset(); setText("confirmed"); setCursorPosition(0, 9)
+        val manager = mockActiveVoiceManager()
+        latinIME.onUpdateExtractedText(lastExtractedTextToken, ExtractedText().apply { text = "" })
+        Mockito.verify(manager, Mockito.never()).cancelRecording()
+        assertEquals("confirmed", text)
+    }
+
+    @Test fun restartingAnEmptyHostCancelsVoiceBeforeResettingTypingCaches() {
+        reset(); setText("confirmed")
+        val manager = mockActiveVoiceManager()
+        text = ""; selectionStart = 0; selectionEnd = 0
+        latinIME.onStartInput(EditorInfo().apply { inputType = currentInputType }, true)
+        Mockito.verify(manager).cancelRecording()
+    }
+
+    @Test fun aLateVoiceFinalCannotRefillAHostClearedWithoutNotification() {
+        reset(); setText("confirmed")
+        val manager = mockActiveVoiceManager()
+        text = ""; selectionStart = 0; selectionEnd = 0
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "Late words."))
+        Mockito.verify(manager).cancelRecording()
+        assertEquals("", text)
+    }
+
+    @Test fun aFieldThatStartedEmptyCannotBeRefilledAfterASilentClear() {
+        reset()
+        val manager = mockActiveVoiceManager()
+        assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(latinIME, "First words."))
+        text = ""; selectionStart = 0; selectionEnd = 0
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "Late words."))
+        Mockito.verify(manager).cancelRecording()
+        assertEquals("", text)
+    }
+
+    @Test fun anInterruptionMarkerCannotRefillAClearedHostAfterTheSessionEnds() {
+        reset(); setText("confirmed")
+        mockActiveVoiceManager()
+        // Failure invalidates the session before asking the IME for a marker.
+        LatinIME::class.java.getDeclaredField("mVoiceEditorMonitorActive").apply {
+            isAccessible = true; setBoolean(latinIME, false)
+        }
+        text = ""; selectionStart = 0; selectionEnd = 0
+        val method = LatinIME::class.java.getDeclaredMethod("commitVoiceText", String::class.java, Boolean::class.javaPrimitiveType)
+            .apply { isAccessible = true }
+        assertEquals(false, method.invoke(latinIME, "[Dictation interrupted]", false))
+        assertEquals("", text)
+    }
+
+    @Test fun anOldMonitorTokenCannotCancelANewRecording() {
+        reset(); setText("confirmed")
+        mockActiveVoiceManager()
+        val oldToken = lastExtractedTextToken
+        val manager = mockActiveVoiceManager()
+        text = ""; selectionStart = 0; selectionEnd = 0
+        latinIME.onUpdateExtractedText(oldToken, ExtractedText().apply { text = "" })
+        Mockito.verify(manager, Mockito.never()).cancelRecording()
+        latinIME.onUpdateExtractedText(lastExtractedTextToken, ExtractedText().apply { text = "" })
+        Mockito.verify(manager).cancelRecording()
+    }
+
+    @Test fun hidingTheKeyboardCancelsVoiceInsteadOfDraining() {
+        reset()
+        val manager = mockActiveVoiceManager()
+        shadowOf(latinIME.getSystemService(PowerManager::class.java)).setIsInteractive(true)
+        latinIME.onWindowHidden()
+        Mockito.verify(manager).cancelRecording()
+        Mockito.verify(manager, Mockito.never()).stopRecording()
+    }
+
+    @Test fun finishingTheInputViewCancelsEvenWhileVoiceIsDraining() {
+        reset()
+        val manager = mockActiveVoiceManager()
+        Mockito.`when`(manager.state).thenReturn(VoiceInputManager.State.IDLE)
+        Mockito.`when`(manager.hasPendingProcessing()).thenReturn(true)
+        latinIME.onFinishInputView(true)
+        Mockito.verify(manager).cancelRecording()
+        Mockito.verify(manager, Mockito.never()).stopRecording()
+    }
+
+    @Test fun turningOffTheScreenStillAllowsTheActiveRecordingToContinue() {
+        reset()
+        val manager = mockActiveVoiceManager()
+        shadowOf(latinIME.getSystemService(PowerManager::class.java)).setIsInteractive(false)
+        latinIME.onFinishInputView(false)
+        latinIME.onWindowHidden()
+        Mockito.verify(manager, Mockito.never()).cancelRecording()
+        Mockito.verify(manager, Mockito.never()).stopRecording()
+    }
+
+    private fun mockActiveVoiceManager(): VoiceInputManager {
+        val manager = Mockito.mock(VoiceInputManager::class.java)
+        Mockito.`when`(manager.isIdle).thenReturn(false)
+        Mockito.doAnswer {
+            Mockito.`when`(manager.isIdle).thenReturn(true)
+            Mockito.`when`(manager.hasPendingProcessing()).thenReturn(false)
+            null
+        }.`when`(manager).cancelRecording()
+        LatinIME::class.java.getDeclaredField("mVoiceInputManager").apply {
+            isAccessible = true
+            set(latinIME, manager)
+        }
+        LatinIME::class.java.getDeclaredField("mVoiceEditorMonitorActive").apply {
+            isAccessible = true
+            setBoolean(latinIME, true)
+        }
+        LatinIME::class.java.getDeclaredMethod("monitorVoiceEditorChanges").apply {
+            isAccessible = true
+            invoke(latinIME)
+        }
+        return manager
     }
 
     @Test fun clipboardPasteTrimsWhitespaceAndDoesNotAppendSpace() {
@@ -953,6 +1397,25 @@ class InputLogicTest {
         batchEdit = 0
         currentInputType = InputType.TYPE_CLASS_TEXT
         lastAddedWord = ""
+        rejectCommit = false
+        throwOnCommit = false
+        rejectSecondCommit = false
+        throwOnSecondCommit = false
+        rejectSelection = false
+        throwOnSelection = false
+        commitCalls = 0
+        throwOnBatchStart = false
+        ignoreSelection = false
+        noExtractedText = false
+        unavailableSurroundingText = false
+        throwOnExtractedTextMonitor = false
+        extractViewShown = false
+        lastExtractedTextToken = 0
+        lastExtractedTextFlags = 0
+        wrongSelectedText = false
+        extractedTextOffset = 0
+        deferBatchEdits = false
+        deferredEdits.clear()
 
         // reset settings
         latinIME.prefs().edit { clear() }
@@ -1175,15 +1638,44 @@ private val composingText get() = if (composingStart == -1 || composingEnd == -1
     else text.substring(composingStart, composingEnd)
 
 // essentially this is the text field we're editing in
+private var rejectCommit = false
+private var throwOnCommit = false
+private var rejectSecondCommit = false
+private var throwOnSecondCommit = false
+private var rejectSelection = false
+private var throwOnSelection = false
+private var commitCalls = 0
+private var throwOnBatchStart = false
+private var ignoreSelection = false
+private var noExtractedText = false
+private var unavailableSurroundingText = false
+private var throwOnExtractedTextMonitor = false
+private var extractViewShown = false
+private var lastExtractedTextToken = 0
+private var lastExtractedTextFlags = 0
+private var wrongSelectedText = false
+private var extractedTextOffset = 0
+private var deferBatchEdits = false
+private val deferredEdits = mutableListOf<() -> Unit>()
+
+private fun applyOrDeferEdit(edit: () -> Unit) {
+    if (deferBatchEdits && batchEdit > 0) deferredEdits.add(edit) else edit()
+}
+
 private val ic = object : InputConnection {
     // pretty clear (though this may be slow depending on the editor)
     // bad return value here is likely the cause for that weird bug improved/fixed by fixIncorrectLength
-    override fun getTextBeforeCursor(p0: Int, p1: Int): CharSequence = textBeforeCursor.take(p0)
+    override fun getTextBeforeCursor(p0: Int, p1: Int): CharSequence? =
+        if (unavailableSurroundingText) null else textBeforeCursor.takeLast(p0)
     // pretty clear (though this may be slow depending on the editor)
-    override fun getTextAfterCursor(p0: Int, p1: Int): CharSequence = textAfterCursor.take(p0)
+    override fun getTextAfterCursor(p0: Int, p1: Int): CharSequence? =
+        if (unavailableSurroundingText) null else textAfterCursor.take(p0)
     // pretty clear
-    override fun getSelectedText(p0: Int): CharSequence? = if (selectionStart == selectionEnd) null
-        else text.substring(selectionStart, selectionEnd)
+    override fun getSelectedText(p0: Int): CharSequence? = when {
+        selectionStart == selectionEnd -> null
+        wrongSelectedText -> "wrong selection"
+        else -> text.substring(selectionStart, selectionEnd)
+    }
     // In the simplified architecture the host editor is treated like a committed-text sink.
     // setComposingText therefore behaves as a replace-in-place edit without leaving a live
     // composing span in the host field.
@@ -1210,29 +1702,35 @@ private val ic = object : InputConnection {
         return true // always true
     }
     override fun commitText(p0: CharSequence, p1: Int): Boolean {
-        if (selectionStart != selectionEnd) {
-            text = textBeforeCursor + textAfterCursor
-            selectionEnd = selectionStart
-        }
+        if (throwOnCommit) error("editor disconnected")
+        commitCalls++
+        if (throwOnSecondCommit && commitCalls == 2) error("editor disconnected")
+        if (rejectCommit || (rejectSecondCommit && commitCalls == 2)) return false
         val insertText = p0.toString()
-        text = text.substring(0, selectionStart) + insertText + text.substring(selectionEnd)
-        selectionStart += insertText.length
-        selectionEnd = selectionStart
-        composingStart = -1
-        composingEnd = -1
+        applyOrDeferEdit {
+            text = text.substring(0, selectionStart) + insertText + text.substring(selectionEnd)
+            selectionStart += insertText.length
+            selectionEnd = selectionStart
+            composingStart = -1
+            composingEnd = -1
+        }
         return true
     }
-    // just tells the text field that we add many updated, and that the editor should not
-    // send status updates until batch edit ended (not actually used for this simulation)
+    // Compose-style editors can queue edits until the outer batch closes.
     override fun beginBatchEdit(): Boolean {
+        if (throwOnBatchStart) error("editor disconnected")
         ++batchEdit
         return true // always true
     }
     // end a batch edit, but maybe there are multiple batch edits happening
     override fun endBatchEdit(): Boolean {
-        if (batchEdit > 0)
-            return --batchEdit == 0
-        return false // returns true if there is still a batch edit ongoing
+        if (batchEdit <= 0) return false
+        if (--batchEdit == 0) {
+            val pending = deferredEdits.toList()
+            deferredEdits.clear()
+            pending.forEach { it() }
+        }
+        return batchEdit > 0
     }
     // should notify about cursor info containing composing text, selection, ...
     // todo: maybe that could be interesting, implement it?
@@ -1242,8 +1740,13 @@ private val ic = object : InputConnection {
         return false
     }
     override fun setSelection(p0: Int, p1: Int): Boolean {
-        selectionStart = p0
-        selectionEnd = p1
+        if (throwOnSelection) error("editor disconnected")
+        if (rejectSelection) return false
+        if (ignoreSelection) return true
+        applyOrDeferEdit {
+            selectionStart = p0
+            selectionEnd = p1
+        }
         // todo: call InputMethodService.onUpdateSelection(int, int, int, int, int, int), but only after batch edit is done!
         return true
     }
@@ -1303,11 +1806,17 @@ private val ic = object : InputConnection {
         return true
     }
     // implementation is only to work with getTextBeforeCursorAndDetectLaggyConnection
-    override fun getExtractedText(p0: ExtractedTextRequest?, p1: Int): ExtractedText {
+    override fun getExtractedText(p0: ExtractedTextRequest?, p1: Int): ExtractedText? {
+        if (p1 == InputConnection.GET_EXTRACTED_TEXT_MONITOR) {
+            if (throwOnExtractedTextMonitor) error("monitor unsupported")
+            lastExtractedTextToken = p0?.token ?: 0
+            lastExtractedTextFlags = p1
+        }
+        if (noExtractedText) return null
         return ExtractedText().also {
-            it.startOffset = 0
-            it.selectionStart = selectionStart
-            it.selectionEnd = selectionEnd
+            it.startOffset = extractedTextOffset
+            it.selectionStart = selectionStart - extractedTextOffset
+            it.selectionEnd = selectionEnd - extractedTextOffset
         }
     }
     // only effect is flashing, so whatever...
@@ -1344,6 +1853,8 @@ class ShadowInputMethodService {
     fun getCurrentInputConnection() = ic
     @Implementation
     fun isInputViewShown() = true // otherwise selection updates will do nothing
+    @Implementation
+    fun isExtractViewShown() = extractViewShown
 }
 
 @Implements(Handler::class)

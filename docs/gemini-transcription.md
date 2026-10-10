@@ -9,31 +9,44 @@ costs the user more than a second of waiting.
 
 ## Runtime flow
 
-1. `VoiceRecorder` captures 16 kHz mono PCM16 audio immediately when the mic
-   button is tapped, in ~100 ms chunks.
-2. `VoiceInputManager` starts `GeminiTranscriptionClient` in parallel and buffers
-   audio until the session is ready.
-3. `GeminiTranscriptionClient` opens
-   `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=API_KEY`
-   and sends exactly one `setup` JSON text frame.
-4. Audio is held until the server answers `{"setupComplete":{}}`. Chunks are then
-   sent as JSON text frames containing base64 PCM
-   (`realtimeInput.audio`, `mimeType: audio/pcm;rate=16000`).
-5. The server emits two transcript streams inside `serverContent`:
-   - `interimInputTranscription` — speculative partials. Not committed while the
-     speaker is talking. After `audioStreamEnd`, a leftover interim is flushed if
-     no final arrives, so an unfinished trailing phrase still lands.
-   - `inputTranscription` — the authoritative transcript for a speech segment.
-     This is what reaches the editor.
-   `turnComplete` closes an utterance.
-6. `GeminiTranscriptionClient.TranscriptAccumulator` turns those transcripts into
-   editor segments (see *Transcript assembly*), and emits a `TranscriptSegment`.
-7. `VoiceInputManager` queues segments in FIFO order; if the queue reaches 64
-   entries it coalesces the oldest rather than reordering newer text.
-8. `LatinIME` prepares the chunk, calls `finishInput()`, then `commitText(...)` to
-   insert it at the caret. A leading space is injected only when the segment is
-   **not** attaching to previous text and the preceding editor character needs a
-   separator.
+1. Require a usable default network before starting the mic. Android 23+ requires
+   validated internet; API 21–22 can only report connectedness. Observe losses
+   through capture, pause, and graceful drain.
+2. Capture every PCM16 chunk, including quiet audio. Queue audio and
+   `audioStreamEnd` in one FIFO. Wait for `setupComplete` before sending any audio.
+3. Bound the local PCM queue to 960,000 bytes (30 seconds), and the OkHttp audio
+   queue to 256 KiB of encoded JSON. Local backpressure retains the exact head;
+   later audio and control frames cannot overtake it. Limit locally queued
+   speech-boundary controls to 64 too. Overflow stops the session.
+4. Only `serverContent.inputTranscription` creates editor segments.
+   `interimInputTranscription` is provisional and never inserted, including after
+   silence, EOF, a timeout, socket replacement, or failure. `modelTurn` is ignored.
+5. Deliver finalized segments in FIFO order. Retain the head until `LatinIME`
+   returns local dispatch/cleanup success, including paragraph cleanup. Android
+   remote `InputConnection` booleans do not return the actual host editor's result.
+   A false result or exception stops the session; never retry a potentially partial edit.
+   Cleanup and punctuation correction select the original range, verify actual
+   host selection positions and selected text, and replace it with one commit, so
+   a rejected replacement does not first delete confirmed text.
+   Temporarily close/reopen the host batch before readback so deferred editors
+   apply edits. Prepare paragraph correction from the cache and verify matching
+   original host text after flushing. Ignore delayed intermediate selection
+   callbacks only when the host's current caret matches the expected voice caret.
+6. On terminal failure, invalidate the recording and connection generations before
+   stopping capture, clearing pending work, and notifying the editor. Already
+   inserted text remains. If the stream reached readiness and audio was captured,
+   insert one literal
+   `[Dictation interrupted]` marker without transcript cleanup. If text is
+   highlighted, collapse to the end of that range and verify the host caret first;
+   skip marker insertion if that move cannot be verified. An editor failure
+   suppresses the marker because the editor is no longer trustworthy.
+   Rejection before `setupComplete` leaves the editor untouched and reports why
+   dictation could not start; no PCM was submitted to that connection.
+7. Restoring internet never resumes the failed recording. The user must tap the
+   mic explicitly. A normal stop blocks restart until the outgoing stream closes.
+   Interactive keyboard hiding, finished input/view callbacks, and host clears
+   instead cancel all work immediately and remove the spinner, allowing a fresh
+   mic tap without waiting for an old socket to drain.
 
 ## Important files
 
@@ -42,6 +55,7 @@ costs the user more than a second of waiting.
 - `app/src/main/java/helium314/keyboard/latin/voice/TranscriptSegment.kt`
 - `app/src/main/java/helium314/keyboard/latin/voice/VoiceInputManager.kt`
 - `app/src/main/java/helium314/keyboard/latin/voice/VoiceRecorder.kt`
+- `app/src/main/java/helium314/keyboard/latin/voice/VoiceNetworkMonitor.kt`
 - `app/src/main/java/helium314/keyboard/latin/settings/TranscriptionPreferences.kt`
 - `app/src/main/java/helium314/keyboard/settings/screens/TranscriptionScreen.kt`
 - `app/src/main/java/helium314/keyboard/settings/screens/VoiceVocabularyScreen.kt`
@@ -170,30 +184,31 @@ punctuation continuity that vocabulary cannot.
 
 ## Turn finalization (Hybrid VAD)
 
-Server-side VAD stays enabled so speech onset keeps its prefix padding, but it is
-configured to be patient about *ending* speech (`END_SENSITIVITY_LOW`, 1500 ms).
-SMART mode also prefers a complete sentence. Mid-dictation that is fine: complete
-sentences finalize and land. At the end of a dictation the last unfinished phrase
-often stays as an interim hypothesis, and sending more silent PCM after
-`audioStreamEnd` immediately reopens the turn so Gemini waits for the next word
-again. The client therefore:
+Keep server VAD enabled with patient end detection. Local speech-stop silence,
+mic pause, and explicit stop enqueue `audioStreamEnd` behind preceding audio.
+Forward quiet PCM too: withholding it based on local RMS detection can drop soft
+speech or the beginning of a new utterance. Audio following `audioStreamEnd`
+reopens the stream, as documented. Local VAD controls finalization and auto-stop,
+not which recorded samples the service receives. Each chunk carries raw-energy
+speech evidence snapshotted before posting to the main looper. The speaking flag
+includes the silence window and its smoothing tail, so it is not used to rearm
+pending speech. Quiet PCM after a final does not create another missing-final
+deadline.
 
-- Sends `{"realtimeInput":{"audioStreamEnd":true}}` on local silence
-  (`PREF_VOICE_CHUNK_SILENCE_SECONDS`, default **2 s**). A stale-interim backup
-  (2 s with no final) runs only while local VAD reports the user is not speaking.
-- **Holds outbound audio** until speech resumes, keeping a 300 ms prefix so the
-  next utterance is not clipped. Silence must not reopen the turn.
-- Commits the last interim if no authoritative final arrives within **800 ms** of
-  `audioStreamEnd`. A late polished rewrite of those same words is dropped,
-  including SMART rewrites that drop a leading filler or change the first word.
-  A session rotate flushes an armed leftover before the connection token
-  changes so the outgoing close handler cannot drop it.
-- Sends the same `audioStreamEnd` on **mic pause** (a turn left open with no
-  audio is the dominant cause of close 1011) and on **stop**, then keeps reading
-  for up to 8 s.
+There is no stale-interim insertion timer. An interim is never evidence that all
+speech was received. On explicit stop, stop/join the recorder, process its already
+posted tail callbacks, enqueue EOF, and read for eight seconds before initiating
+WebSocket close. A nonempty transport queue at that deadline is failure. The
+manager also bounds the complete finish/close wait to 15 seconds. A capture thread still alive after
+two seconds reports terminal failure before the EOF barrier, blocks native capture
+reuse, and keeps its original recording callback for all late reads. Pause/resume
+changes the capture phase so an interrupted native read cannot falsely abort
+resumed recording. Missing finals after an explicit mic stop can produce an
+interruption marker; a normal silence auto-stop does not.
 
-It fires at most once per speech-stop transition, re-armed on the next speech
-onset.
+These are application deadlines, not Google latency guarantees. A healthy slow
+final can be interrupted; accuracy takes priority over inserting a provisional
+hypothesis.
 
 ## Transcript assembly
 
@@ -204,7 +219,7 @@ previous one, which covers both:
 
 - text that extends the previous message contributes only its suffix
 - unrelated text contributes all of itself
-- an identical repeat (which happens on reconnect) contributes nothing
+- an identical repeat within the same turn contributes nothing
 - `turnComplete` resets the comparison, so a phrase genuinely repeated in a new
   turn is still inserted
 
@@ -215,24 +230,132 @@ mid-word (`head` then `heading` yields `ing`, not `head ing`).
 `serverContent.modelTurn` is ignored, so a generated response can never leak into
 the editor.
 
-## Session lifecycle
+## Session lifecycle and progress deadlines
 
-- Live transcription sessions are capped at **10 minutes**.
-- The server warns with `{"goAway":{"timeLeft":"30s"}}`. `timeLeft` is a protobuf
-  Duration, so it arrives as a **string**, not a number.
-- `VoiceInputManager` rotates onto a fresh connection 1.5 s before the announced
-  deadline, and unconditionally after 9 minutes as a backstop. If the user is
-  still talking, rotation waits for local silence and the leftover-flush window
-  unless `goAway` is already imminent. A deferred rotate is cancelled if the
-  stream dies or a replacement session starts first. Rotation is not an error,
-  so it does not consume a reconnect attempt; buffered audio carries across
-  the gap.
-- There is **no application-level keepalive** in this protocol. OkHttp protocol
-  pings run every 20 s; the real fix for dropped connections is the audio
-  lifecycle above.
-- Close codes: **1007** = setup schema or auth (the reason string names the
-  offending field path and is surfaced), **1008** = policy/billing, **1011** =
-  stalled turn, **1006** = network.
+A recording owns one connection. There are no transport reconnects, automatic
+resumption, or automatic socket rotations. An explicit new recording builds fresh
+vocabulary and does not replay audio or send previous paragraphs as history.
+
+The sole retry is setup-schema negotiation (`FULL` → `MINIMAL`) before
+`setupComplete`; no audio has been sent yet. All tiers share the original
+12-second connection deadline, so repeated schema rejection cannot keep recording
+an ever-growing startup buffer.
+
+On `goAway`, or after nine minutes, stop capture and drain the existing connection,
+then require a new mic tap. This gives up seamless sessions longer than nine
+minutes to avoid an unprovable transcript boundary at socket replacement.
+
+Deadlines are anchored rather than reset by each PCM chunk:
+
+- Oldest locally queued audio: 30 seconds to enter the bounded transport queue.
+- Active local speech or pending recognized words with no server response:
+  30 seconds. A response signals liveness; interims and `turnComplete` do not
+  confirm the speech. Quiet audio with only raw RMS spikes does not require
+  transcription responses.
+- Pending recognized words with no accepted final: 30 seconds.
+  Start this wait at a submitted `audioStreamEnd`, not when speech first becomes
+  pending: [Google documents](https://ai.google.dev/gemini-api/docs/live-api/live-transcribe)
+  that finals arrive on speech completion while interims arrive during speech.
+  A fixed deadline from onset interrupts healthy long utterances. Repeated
+  controls/interims cannot postpone the boundary's wait. A new speech onset
+  clears that final wait until the next boundary. Controls retain their captured
+  speech epoch so a delayed older boundary cannot start a final deadline for a
+  newer utterance. The response watchdog and
+  oldest-audio deadlines still apply. Raw volume evidence alone does not arm a
+  missing-final wait: breathing or room noise may cross that threshold.
+  A final cannot clear pending speech while annotated speech frames are still
+  queued locally: it may describe an earlier utterance. Pending speech remains until a
+  later final arrives after speech frames drain; draining alone is not confirmation.
+  Queued quiet PCM and controls do not block that final. The sender counts encoded
+  bytes after the last speech frame; FIFO queue size distinguishes queued speech
+  from its quiet/control suffix. A duplicate authoritative final also advances
+  progress, even when transcript assembly suppresses the duplicate editor write.
+- EOF: cancel the earlier response/final watchdogs, read finals for eight seconds
+  before initiating close, and allow 15 seconds for the full close wait.
+
+The configured local silence timeout is a normal stop reason. It drains the same
+connection and accepts late authoritative finals, then completes without a marker
+even if raw noise or a provisional hypothesis remains unconfirmed. Interims are
+never promoted into editor text. If silence and a speech watchdog expire together,
+the intentional silence stop takes precedence. Real microphone, network, upload,
+protocol, queue, and drain failures still report an interruption. The auto-stop
+timer continues to use adaptive local microphone activity rather than recognized
+words; that timing policy is separate from failure detection.
+
+Network loss, send/finalize failure, protocol error, unexpected close (including
+remote 1000), or failure during graceful drain is terminal. OkHttp protocol pings
+remain at 20 seconds as another transport failure signal.
+
+### Keyboard hiding and host clears
+
+Hiding the keyboard while the screen is interactive cancels capture, the socket,
+all queues, and pending timers immediately. `onFinishInputView` and `onFinishInput`
+invalidate voice work before deferred lifecycle housekeeping. Reopening the
+keyboard does not inherit the old spinner or wait for its eight-second finalization
+grace. Screen-off hiding alone preserves recording, as before. Explicit mic stop
+still drains.
+
+At recording start, subscribe to [host text changes](https://developer.android.com/reference/android/view/inputmethod/InputConnection#getExtractedText(android.view.inputmethod.ExtractedTextRequest,%20int))
+with a dedicated extracted-text monitor token unless the framework's fullscreen
+extract view is visible; that view retains its own monitor. Check actual text
+before/after the caret and the selection on notifications, selection updates (including unchanged selection),
+editor restart, and before voice insertion. A verified nonempty-to-empty
+transition cancels all voice work without a marker. Null queries mean unavailable,
+not empty; highlighted text is not a clear. Remember successful insertion as
+nonempty-field evidence too, including when the field started empty. Re-read the
+host rather than treating belated or partial extracted updates as current text. Editors that omit change
+notifications are checked before a late final can refill the field; such editors
+may not stop capture immediately if they send no notification or restart at all.
+
+Android does not expose a universal event identifying a form submission made
+through a host application's own button. A clear proves only that the field became
+empty, so it stops dictation without automatically hiding the keyboard.
+
+### What this can and cannot prove
+
+[OkHttp 4.12's WebSocket contract](https://github.com/square/okhttp/blob/parent-4.12.0/okhttp/src/main/kotlin/okhttp3/WebSocket.kt)
+says `send(true)` is queue acceptance; queued messages may be lost on cancellation,
+and `queueSize()` excludes OS/intermediary buffers. Neither proves server receipt.
+[Google's Live API reference](https://ai.google.dev/api/live) sends input transcripts
+independently of other server messages, with no guaranteed ordering relative to
+those messages. `turnComplete` is not a watermark for submitted PCM.
+
+Android's [remote InputConnection invoker](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/inputmethodservice/IRemoteInputConnectionInvoker.java)
+returns success when an operation is dispatched without a `RemoteException`; the
+[editor-side implementation](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/view/inputmethod/RemoteInputConnectionImpl.java)
+discards the host's commit/selection return values. Before cleanup/punctuation
+replacement, query actual extracted selection positions (including `startOffset`)
+and selected text. If these are unavailable or differ from the intended range,
+stop without committing the replacement and restore the original caret best-effort.
+Compose's [buffered input connection](https://android.googlesource.com/platform/frameworks/support/+/08274d3734d2e635eba3944c8def835b366ee65d/compose/foundation/foundation/src/androidMain/kotlin/androidx/compose/foundation/text/input/internal/StatelessInputConnection.android.kt)
+applies queued edits only when its batch depth returns to zero. Verification
+therefore runs with the host batch temporarily closed. The wrapper batch remains
+balanced, and the voice selection guard checks the actual current caret before
+treating an intermediate callback as a user move.
+The marker always verifies the host caret, including when the cached selection
+was collapsed, because a new highlight callback may still be pending. If needed,
+collapse the known selection before verification. These
+checks protect placement; they cannot prove semantic completeness or detect every
+filtered/truncated insertion by a host editor.
+
+This implementation enforces local FIFO/dispatch checks and stops on detected
+uncertainty. It cannot certify every spoken word or detect an omission the service
+silently makes while continuing to emit plausible finals. Local VAD and finals
+are progress signals, not per-sample acknowledgments. The interruption marker
+means speech may be missing; it does not reconstruct lost words or estimate gap
+length. Failures after any captured audio are marked conservatively, even if that
+audio might have been silence or already transcribed.
+
+[Google's transcription guide](https://ai.google.dev/gemini-api/docs/live-api/live-transcribe)
+distinguishes speculative interim hypotheses from finalized input transcription.
+That is why a timeout never promotes an interim into editor text.
+
+[Android's connectivity guidance](https://developer.android.com/develop/connectivity/network-ops/reading-network-state)
+informs the default-route observer. API 24+ uses default-network callbacks marshaled
+to the main looper; API 21–23 uses a dynamic connectivity receiver. Generations
+invalidate queued observations when the monitor stops. A validated replacement
+route is allowed when its availability precedes loss of the old route; the socket
+can still fail independently, which remains terminal.
 
 ## Configuration
 
@@ -300,3 +423,92 @@ tools/gemini-live-smoke-test.py --audio speech.wav       # real transcripts
 
 The WAV must be 16-bit PCM, 16 kHz, mono:
 `ffmpeg -i input.m4a -ar 16000 -ac 1 -c:a pcm_s16le speech.wav`
+
+## Integrity regression and device checks
+
+Startup rejection is distinct from interruption of a usable stream. The service
+can reject setup with a 1011 close whose detail says prepayment credits are depleted,
+without a gRPC status name. Match that detail before generic close/quota wording;
+HTTP-429 handshake bodies and in-band `RESOURCE_EXHAUSTED` errors can carry the
+same billing problem. Check the API key's project in AI Studio, as described in
+[Google's billing guidance](https://ai.google.dev/gemini-api/docs/billing#prepay).
+The app cannot restore a rejected project's billing access.
+
+Both About → Save log and Transcription → Voice diagnostics include recent voice
+history, application/build and Android/device information. A separate 500-line
+voice ring prevents keyboard geometry/key traces from evicting the failure. General
+export puts voice history first, then up to 500 other app warnings/errors with
+consecutive repeats collapsed and 200 recent native Android logcat lines excluding
+duplicated app tags. Transcript payloads are not logged by insertion; exported
+legacy transcript lines and API-key patterns are redacted.
+
+Session diagnostics record phase, elapsed time, captured and accepted PCM counts,
+raw/socket queue sizes, capture-time speech counts, final progress with queued
+speech flags, accepted finals and last-response age. Voice selection diagnostics
+record expected/actual positions, selected lengths, and verification outcome; no
+editor/transcript contents are logged. Transport close records retain the code,
+readiness, requested-finish state and sanitized service
+detail, so an early billing rejection cannot be confused with a stalled upload.
+
+The voice manager tests cover loss/reconnect callbacks, explicit restart, ordered
+PCM/control delivery, queue overflow, oldest-audio and progress deadlines, editor
+rejection/exception, setup fallback timeout, paused failures, and EOF/restart guards.
+The bounded sender tests exercise the production queue limit and false sends with
+a controllable socket. Network tests cover default-route validation, handoff,
+stale callbacks, and API-21 receiver cleanup. Local WebSocket tests verify actual
+frames, schema fallback, authoritative-only insertion, and terminal close/error
+handling. InputLogic tests verify editor return values, failed cleanup, balanced
+batch edits, and literal marker insertion that preserves selected text. They also
+model a remotely dispatched selection the host ignores, unavailable selection
+queries, mismatched selected content, and partial extracted-text offsets. Deferred
+editor tests apply commits/selections only after batch closure, and check that
+delayed cleanup callbacks preserve dictation while real user cursor moves and
+cleared fields cancel it. Marker tests also cover a newly highlighted host range
+whose callback has not yet reached the IME.
+
+After checking out the branch in the device workspace: dictate a confirmed prefix,
+disable both Wi-Fi and mobile data while continuing to speak, and restore them.
+The mic must stop, the prefix must remain, a single interruption marker must show,
+and no automatic suffix may appear. Deliberately tap the mic for a new recording.
+Also test offline start, radio loss while paused and while stopping, quiet speech
+after pauses, a slow final, host-editor rejection, and the nine-minute limit.
+
+For selection and silence regressions, use the fullapp editor and ordinary notes
+and messaging fields:
+
+1. Enter `hello cruel world`, highlight `cruel`, start dictation, and disable both
+   Wi-Fi and mobile data before a final appears. All original words must remain.
+   A failure after readiness inserts a marker after `cruel` only if caret collapse
+   can be verified; startup failure or unverifiable selection leaves text intact.
+2. Dictate a short sentence, wait for the final, remain silent for five seconds,
+   then stop. Repeat with pause/resume and with the silence auto-stop. Successful
+   completion must not add a marker merely because quiet PCM followed the final.
+   Also remain silent until auto-stop without speaking any words, and repeat
+   after a final with normal breathing/brief room noise. Normal auto-stop must
+   leave no marker and allow a new recording after the finalization grace.
+3. Dictate a sentence, then a separate punctuation command such as `exclamation
+   point`. Cleanup must replace the intended range once, without duplicating the
+   paragraph. An unverifiable range stops dictation and preserves the accepted
+   original text instead of appending a replacement.
+4. In the fullapp editor, insert dictation in the middle of existing text, then
+   use a spoken punctuation command that triggers cleanup. Dictation should keep
+   running, preserve the text after the caret, and insert later segments at the
+   final corrected caret. Moving the caret yourself into another word must still
+   cancel dictation.
+5. Speak continuously for more than 30 seconds, then pause and wait for the final.
+   Repeat with a 20-second thinking pause before continuing. Live interims during
+   speech must not trigger the missing-final timeout. A paused turn with pending
+   recognized words but no final still times out; a completely unresponsive
+   stream during active speech still stops.
+6. Hide and immediately reopen the keyboard during recording and during drain.
+   The spinner must disappear, a new mic tap must start, and no old words/marker
+   may arrive. Repeat a host clear/send while recording or paused, including when
+   the caret was already at zero. A cleared field must not be refilled by a late
+   final. An unchanged field with selected text or unavailable queries must not
+   be mistaken for an empty field.
+
+Save About → Save log immediately after a failure. Report the test number, app,
+whether the words remained, whether a marker appeared, and the approximate time.
+The export retains `VOICE selection verification`, `speech pending`, and
+`final progress` lines to identify the host-selection and speech-queue decisions,
+plus finalization controls and separate response/interim/final/boundary ages.

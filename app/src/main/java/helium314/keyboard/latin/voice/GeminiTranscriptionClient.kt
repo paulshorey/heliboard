@@ -33,8 +33,8 @@ import java.util.concurrent.TimeUnit
  *    (`realtimeInput.audio`), ~100 ms per chunk.
  * 4. Read `serverContent.interimInputTranscription` (speculative, discarded here)
  *    and `serverContent.inputTranscription` (authoritative, committed to the
- *    editor). Leftover interims are committed after `audioStreamEnd` when no
- *    final arrives, so a trailing unfinished phrase still lands. `serverContent.turnComplete` closes an utterance.
+ *    editor). Interims are never committed, including after `audioStreamEnd`.
+ *    `serverContent.turnComplete` closes an utterance without acknowledging audio.
  * 5. `realtimeInput.audioStreamEnd` finalizes the current turn without ending
  *    the session ("Hybrid VAD"); audio may resume afterwards.
  *
@@ -121,22 +121,14 @@ class GeminiTranscriptionClient {
         internal const val END_OF_SPEECH_SENSITIVITY = "END_SENSITIVITY_LOW"
 
         /**
-         * Live transcription sessions are capped at 10 minutes. Rotate a little
-         * early so a long dictation never hits the hard abort mid-utterance.
+         * Stop capture before the 10-minute session cap, then drain this socket.
+         * A fresh connection requires an explicit new recording.
          */
-        internal const val SESSION_ROTATE_AFTER_MS = 9L * 60L * 1000L
+        internal const val SESSION_CAPTURE_LIMIT_MS = 9L * 60L * 1000L
 
         /** How long to keep reading after `audioStreamEnd` before closing. */
-        private const val FINALIZE_CLOSE_GRACE_MS = 8_000L
-
-        /**
-         * How long to wait for a finalized `inputTranscription` after Hybrid
-         * VAD `audioStreamEnd` before committing the last interim hypothesis.
-         * SMART mode often withholds a final until it sees the next word or a
-         * complete sentence; the trailing utterance then never lands unless
-         * the leftover interim is flushed.
-         */
-        internal const val INTERIM_FLUSH_AFTER_FINALIZE_MS = 800L
+        internal const val FINALIZE_CLOSE_GRACE_MS = 8_000L
+        internal const val MAX_SOCKET_AUDIO_BYTES = 256 * 1024L
 
         /** OkHttp protocol ping cadence; the Live API has no app-level keepalive. */
         private const val PING_INTERVAL_SECONDS = 20L
@@ -360,9 +352,8 @@ class GeminiTranscriptionClient {
                 ?.takeIf { it.isNotEmpty() }
 
         /**
-         * Speculative partial hypothesis. Not committed while the speaker is
-         * still talking. After `audioStreamEnd`, a leftover interim is flushed
-         * if no authoritative final arrives.
+         * Speculative partial hypothesis. Never committed, including after
+         * audioStreamEnd, a timeout, transport failure, or replacement.
          */
         internal fun extractInterimTranscript(json: JSONObject): String? =
             json.optJSONObject("serverContent")
@@ -390,7 +381,7 @@ class GeminiTranscriptionClient {
             val error = json.optJSONObject("error") ?: return null
             val message = error.optString("message", "")
             val status = error.optString("status", "")
-            val friendly = friendlyErrorForStatus(status)
+            val friendly = friendlyErrorForDetail(message) ?: friendlyErrorForStatus(status)
             return when {
                 friendly != null -> friendly
                 message.isNotBlank() && status.isNotBlank() -> "$status: $message"
@@ -404,7 +395,7 @@ class GeminiTranscriptionClient {
             "UNAUTHENTICATED" -> "Invalid Gemini API key. Please check Settings."
             "PERMISSION_DENIED" ->
                 "This Gemini API key is not allowed to use $MODEL."
-            "RESOURCE_EXHAUSTED" -> "Gemini rate limited — too many requests"
+            "RESOURCE_EXHAUSTED" -> "Gemini quota or rate limit reached. Check your project's usage and limits."
             "FAILED_PRECONDITION" ->
                 "Gemini requires billing to be enabled for this API key."
             "UNAVAILABLE" -> "Gemini is temporarily unavailable. Please try again."
@@ -440,6 +431,7 @@ class GeminiTranscriptionClient {
          */
         internal fun statusFromReason(reason: String): String? {
             if (reason.isBlank()) return null
+            friendlyErrorForDetail(reason)?.let { return it }
             val upper = reason.uppercase(Locale.US)
             for (status in FRIENDLY_STATUSES) {
                 if (upper.contains(status)) return friendlyErrorForStatus(status)
@@ -448,6 +440,17 @@ class GeminiTranscriptionClient {
                 return "Invalid Gemini API key. Please check Settings."
             }
             return null
+        }
+
+        internal const val CREDITS_DEPLETED_ERROR =
+            "Gemini API credits are depleted. Add credits to this API key's project in Google AI Studio."
+
+        private fun friendlyErrorForDetail(message: String): String? {
+            val lower = message.lowercase(Locale.US)
+            // Live closes can truncate the detail to 123 bytes and omit the gRPC
+            // status. Match the actionable detail before generic quota/status text.
+            return if ((lower.contains("prepayment credits") || lower.contains("prepaid credits")) &&
+                (lower.contains("depleted") || lower.contains("exhausted"))) CREDITS_DEPLETED_ERROR else null
         }
 
         private val FRIENDLY_STATUSES = listOf(
@@ -545,8 +548,8 @@ class GeminiTranscriptionClient {
          * semantics have changed between model generations. Comparing each
          * message against the previous one covers both: a message that extends
          * the previous one contributes only its suffix, an unrelated message
-         * contributes all of its text, and an identical repeat (which happens on
-         * reconnect) contributes nothing.
+         * contributes all of its text, and an identical repeat within that turn
+         * contributes nothing.
          */
         internal class TranscriptAccumulator {
             private var lastRawText: String = ""
@@ -558,14 +561,7 @@ class GeminiTranscriptionClient {
                 emittedTailIsWordy = false
             }
 
-            /** Keep [rawText] as the comparison baseline without emitting a segment. */
-            fun remember(rawText: String) {
-                lastRawText = rawText
-                val trimmed = rawText.trim()
-                emittedTailIsWordy = trimmed.isNotEmpty() && isWordyContinuationChar(trimmed.last())
-            }
-
-            fun accept(rawText: String, recordAs: String = rawText): TranscriptSegment? {
+            fun accept(rawText: String): TranscriptSegment? {
                 if (rawText.isEmpty()) return null
 
                 val previousRaw = lastRawText
@@ -575,13 +571,13 @@ class GeminiTranscriptionClient {
                 val newPart = when {
                     previousRaw.isEmpty() -> rawText
                     rawText == previousRaw -> {
-                        lastRawText = recordAs
+                        lastRawText = rawText
                         return null
                     }
                     isPrefixExtension -> rawText.substring(previousRaw.length)
                     else -> rawText
                 }
-                lastRawText = recordAs
+                lastRawText = rawText
 
                 val trimmed = newPart.trim()
                 if (trimmed.isEmpty()) return null
@@ -612,110 +608,6 @@ class GeminiTranscriptionClient {
             return c == '\'' || c == '\u2019' || c == '-' || c == '\u2010'
         }
 
-        /**
-         * After an interim hypothesis was committed because the speaker stopped
-         * and no final arrived, a late SMART-mode final may repeat those words
-         * with polish. Returns the extra text that still needs committing, or
-         * null when the final is only a rewrite of what was already inserted.
-         *
-         * SMART often drops a leading filler or rewrites the first word, so a
-         * prefix-only compare would treat the whole final as new and duplicate
-         * it. Leading tokens on either side may be skipped when the remaining
-         * overlap is strong; tokens that sit before that overlap cannot be
-         * inserted (the interim is already in the editor).
-         */
-        internal fun leftoverAfterFlushedInterim(finalText: String, flushedInterim: String): String? {
-            val finalTokens = tokenizeTranscript(finalText)
-            val interimTokens = tokenizeTranscript(flushedInterim)
-            if (finalTokens.isEmpty()) return null
-            if (interimTokens.isEmpty()) return finalText.trim()
-
-            val prefixMatched = countMatchingPrefix(interimTokens, finalTokens)
-            if (prefixMatched > 0) {
-                if (prefixMatched >= finalTokens.size) return null
-                return takeLastTranscriptWords(finalText, finalTokens.size - prefixMatched)
-            }
-
-            var bestMatched = 0
-            var bestFinalSkip = 0
-            for (interimSkip in 0 until interimTokens.size) {
-                for (finalSkip in 0 until finalTokens.size) {
-                    if (interimSkip == 0 && finalSkip == 0) continue
-                    val remainingInterim = interimTokens.subList(interimSkip, interimTokens.size)
-                    val remainingFinal = finalTokens.subList(finalSkip, finalTokens.size)
-                    val matched = countMatchingPrefix(remainingInterim, remainingFinal)
-                    if (!isStrongSkippedAlignment(matched, interimTokens.size, finalTokens.size)) {
-                        continue
-                    }
-                    if (matched > bestMatched) {
-                        bestMatched = matched
-                        bestFinalSkip = finalSkip
-                    }
-                }
-            }
-            if (bestMatched == 0) return finalText.trim()
-            val leftoverCount = finalTokens.size - bestFinalSkip - bestMatched
-            if (leftoverCount <= 0) return null
-            return takeLastTranscriptWords(finalText, leftoverCount)
-        }
-
-        internal fun countMatchingPrefix(left: List<String>, right: List<String>): Int {
-            var matched = 0
-            while (matched < left.size && matched < right.size) {
-                val a = comparableTranscriptToken(left[matched])
-                val b = comparableTranscriptToken(right[matched])
-                if (a.isEmpty() || b.isEmpty()) break
-                if (a == b || b.startsWith(a) || a.startsWith(b)) {
-                    matched++
-                } else {
-                    break
-                }
-            }
-            return matched
-        }
-
-        /**
-         * Skip-search alignments must not treat a shared tail word as polish.
-         * `hello today` vs `Something else today` would otherwise match `today`
-         * after skipping everything else and drop the authoritative final.
-         *
-         * Two or more matches are trusted only when they cover at least half
-         * of the flushed interim. A single-token match is only a filler-plus-
-         * word rewrite (`um hello` → `hello`).
-         */
-        internal fun isStrongSkippedAlignment(matched: Int, interimSize: Int, finalSize: Int): Boolean {
-            if (matched <= 0) return false
-            if (matched >= 2) return matched * 2 >= interimSize
-            return interimSize <= 2 && finalSize <= 2
-        }
-
-        internal fun comparableTranscriptToken(token: String): String =
-            buildString {
-                for (c in token) {
-                    if (c.isLetterOrDigit()) append(c)
-                }
-            }
-
-        internal fun tokenizeTranscript(text: String): List<String> {
-            val normalized = buildString {
-                for (c in text.lowercase(Locale.US)) {
-                    when {
-                        isWordyContinuationChar(c) -> append(c)
-                        lastOrNull()?.isWhitespace() != true && isNotEmpty() -> append(' ')
-                    }
-                }
-            }.trim()
-            if (normalized.isEmpty()) return emptyList()
-            return normalized.split(' ')
-        }
-
-        internal fun takeLastTranscriptWords(original: String, wordCount: Int): String {
-            if (wordCount <= 0) return ""
-            val matches = Regex("""\S+""").findAll(original).toList()
-            if (matches.isEmpty()) return ""
-            if (matches.size <= wordCount) return original.trim()
-            return original.substring(matches[matches.size - wordCount].range.first).trim()
-        }
     }
 
     interface StreamingCallback {
@@ -727,8 +619,7 @@ class GeminiTranscriptionClient {
 
         /**
          * A speculative interim hypothesis arrived. Never committed on its own;
-         * the manager uses this to notice that Gemini is holding an unfinished
-         * tail and to finalize the turn if local silence does not fire.
+         * the manager uses this to track pending speech and bound final progress.
          */
         fun onInterimTranscription()
 
@@ -740,8 +631,8 @@ class GeminiTranscriptionClient {
         fun onServerResponse(hasTranscriptText: Boolean)
 
         /**
-         * The server announced it will disconnect in [timeLeftMs]. The session
-         * should be rotated onto a fresh connection before that happens.
+         * The server announced it will disconnect in [timeLeftMs]. Stop capture
+         * and drain this connection; a new recording requires an explicit tap.
          */
         fun onSessionExpiring(timeLeftMs: Long)
 
@@ -753,8 +644,8 @@ class GeminiTranscriptionClient {
 
         /**
          * The client opened a replacement handshake on this same manager
-         * session (setup-tier fallback). Reset any connect timeout that was
-         * started for the previous attempt.
+         * session (setup-tier fallback). Preserve the original connect deadline
+         * across every attempt.
          */
         fun onHandshakeRestarted() {}
     }
@@ -767,6 +658,8 @@ class GeminiTranscriptionClient {
         .writeTimeout(15, TimeUnit.SECONDS)
         .pingInterval(PING_INTERVAL_SECONDS, TimeUnit.SECONDS)
         .build()
+
+    internal var socketFactory: WebSocket.Factory = client
 
     @Volatile
     private var webSocket: WebSocket? = null
@@ -786,36 +679,14 @@ class GeminiTranscriptionClient {
     @Volatile
     private var pendingFinalizeCloseRunnable: Runnable? = null
 
-    @Volatile
-    private var pendingInterimFlushRunnable: Runnable? = null
-
     private val accumulator = TranscriptAccumulator()
 
-    /**
-     * Last speculative hypothesis for the open turn. Committed only after
-     * `audioStreamEnd` if no authoritative `inputTranscription` arrives.
-     */
-    private var lastInterimText: String? = null
-
-    /** Interim already inserted so a late polished final does not duplicate it. */
-    private var flushedInterimText: String? = null
-
-    /**
-     * True after Hybrid VAD `audioStreamEnd` until that turn's leftover interim
-     * is flushed, a final arrives, or speech resumes. The flush timer must not
-     * commit an interim from the next utterance.
-     */
-    private var turnFlushArmed = false
-
-    /** The 800 ms wait already elapsed with no interim; flush the first one that arrives. */
-    private var turnFlushDeadlineElapsed = false
-
-    /**
-     * True after this turn already produced an authoritative
-     * `inputTranscription`. A later Hybrid VAD `audioStreamEnd` (local silence
-     * after the server already finalized) must not re-arm leftover flush.
-     */
-    private var turnHadAuthoritativeFinal = false
+    // Audio/control sends are serialized on the main looper. OkHttp drains in
+    // FIFO order, so a queue no larger than this suffix contains only quiet PCM
+    // and controls after the most recently accepted speech frame. This is local
+    // queue bookkeeping, never evidence of server receipt.
+    private var hasAcceptedSpeech = false
+    private var nonSpeechSuffixBytes = 0L
 
     /**
      * Set while the socket is open but `setupComplete` has not arrived. A 1007
@@ -844,14 +715,6 @@ class GeminiTranscriptionClient {
         callback: StreamingCallback,
         tier: SetupTier
     ) {
-        // A goAway / 9-minute rotate opens a new socket by incrementing the
-        // connection token. The outgoing close handler then sees a stale token
-        // and skips its leftover flush. Commit any leftover here first, including
-        // a mid-speech hypothesis when rotation cannot wait for silence.
-        if (turnFlushArmed || lastInterimText != null) {
-            flushPendingInterim(activeConnectionToken)
-        }
-
         val newToken = activeConnectionToken + 1
         activeConnectionToken = newToken
         stopStreamingInternal(cancel = true, clearCallback = false)
@@ -861,9 +724,7 @@ class GeminiTranscriptionClient {
         isSessionReady = false
         awaitingSetupTier = tier
         accumulator.reset()
-        resetTurnFlushState()
         clearFinalizeCloseTimer()
-        clearInterimFlushTimer()
 
         val request = Request.Builder()
             .url(buildStreamingUrl(apiKey))
@@ -879,27 +740,19 @@ class GeminiTranscriptionClient {
                 "customVocabulary=${sessionConfig.customVocabulary.size})"
         )
 
-        webSocket = client.newWebSocket(request, object : WebSocketListener() {
+        webSocket = socketFactory.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                if (newToken != activeConnectionToken) return
-                this@GeminiTranscriptionClient.webSocket = webSocket
-
-                val setupMessage = buildSetupMessage(sessionConfig, tier)
-                val sent = try {
-                    webSocket.send(setupMessage)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to send Gemini setup message: ${e.message}")
-                    false
-                }
-                if (!sent) {
-                    postIfCurrent(newToken) {
-                        callback.onStreamError("Gemini session could not be started")
+                postIfCurrent(newToken) {
+                    this@GeminiTranscriptionClient.webSocket = webSocket
+                    val sent = try {
+                        webSocket.send(buildSetupMessage(sessionConfig, tier))
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to send Gemini setup message: ${e.message}")
+                        false
                     }
-                    return
+                    if (!sent) reportStreamError("Gemini session could not be started")
+                    else Log.i(TAG, "Gemini setup sent (tier=$tier); awaiting setupComplete")
                 }
-                // Audio must wait for setupComplete; onStreamReady is what
-                // releases the manager's buffered chunks.
-                Log.i(TAG, "Gemini setup sent (tier=$tier); awaiting setupComplete")
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -916,65 +769,50 @@ class GeminiTranscriptionClient {
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 if (newToken != activeConnectionToken) return
-                Log.i(TAG, "Gemini stream closing: code=$code, reason=$reason")
                 webSocket.close(code, reason)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                if (newToken != activeConnectionToken) return
-                clearFinalizeCloseTimer()
-                val rejectedTier = awaitingSetupTier
-                awaitingSetupTier = null
-                isSessionReady = false
-                this@GeminiTranscriptionClient.webSocket = null
-                Log.i(TAG, "Gemini stream closed: code=$code, reason=$reason")
-
-                if (!isClosing && rejectedTier != null &&
-                    retrySetupWithLowerTier(rejectedTier, code, reason, apiKey, sessionConfig, callback)
-                ) {
-                    clearInterimFlushTimer()
-                    return
-                }
-                if (!isClosing && code != 1000) {
-                    val message = describeCloseFailure(code, reason)
-                    Log.e(TAG, "Gemini stream closed unexpectedly: $message")
-                    postIfCurrent(newToken) {
-                        flushPendingInterim(newToken)
-                        clearInterimFlushTimer()
-                        this@GeminiTranscriptionClient.callback?.onStreamError(message)
-                    }
-                    return
-                }
                 postIfCurrent(newToken) {
-                    flushPendingInterim(newToken)
-                    clearInterimFlushTimer()
-                    this@GeminiTranscriptionClient.callback?.onStreamClosed()
+                    val detail = safeServiceDetail(reason, apiKey)
+                    val closeSummary = "connection=$newToken close code=$code ready=$isSessionReady " +
+                        "clientFinish=$isClosing queuedBytes=${webSocket.queueSize()} reason=$detail"
+                    if (isClosing && code == 1000) Log.i(TAG, closeSummary) else Log.w(TAG, closeSummary)
+                    clearFinalizeCloseTimer()
+                    val rejectedTier = awaitingSetupTier
+                    awaitingSetupTier = null
+                    isSessionReady = false
+                    this@GeminiTranscriptionClient.webSocket = null
+                    if (!isClosing && rejectedTier != null &&
+                        retrySetupWithLowerTier(rejectedTier, code, detail, apiKey, sessionConfig, callback)
+                    ) return@postIfCurrent
+                    if (!isClosing || code != 1000) {
+                        reportStreamError(describeCloseFailure(code, detail))
+                    } else {
+                        val target = this@GeminiTranscriptionClient.callback
+                        cancelAll()
+                        target?.onStreamClosed()
+                    }
                 }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (newToken != activeConnectionToken) return
-                clearFinalizeCloseTimer()
-                awaitingSetupTier = null
-                isSessionReady = false
-                this@GeminiTranscriptionClient.webSocket = null
-                if (isClosing) {
-                    Log.i(TAG, "Gemini stream failure after close request: ${t.message}")
-                    postIfCurrent(newToken) {
-                        flushPendingInterim(newToken)
-                        clearInterimFlushTimer()
-                        this@GeminiTranscriptionClient.callback?.onStreamClosed()
-                    }
-                    return
-                }
-                val errorMessage = mapConnectionError(t, response)
-                Log.e(TAG, "Gemini stream failure: $errorMessage (raw: ${t.message})")
+                // Read a bounded handshake body on OkHttp's thread, never the UI
+                // thread. HTTP 429 can mean depleted credits rather than request rate.
+                val error = safeServiceDetail(mapConnectionError(t, response), apiKey)
                 postIfCurrent(newToken) {
-                    flushPendingInterim(newToken)
-                    clearInterimFlushTimer()
-                    this@GeminiTranscriptionClient.callback?.onStreamError(errorMessage)
+                    Log.w(TAG, "connection=$newToken transportFailure http=${response?.code} " +
+                        "ready=$isSessionReady clientFinish=$isClosing type=${t.javaClass.simpleName} error=$error")
+                    clearFinalizeCloseTimer()
+                    awaitingSetupTier = null
+                    isSessionReady = false
+                    this@GeminiTranscriptionClient.webSocket = null
+                    // A failure during graceful drain is still loss, not EOF.
+                    reportStreamError(error)
                 }
             }
+
         })
     }
 
@@ -1007,29 +845,46 @@ class GeminiTranscriptionClient {
         return true
     }
 
-    fun sendAudioChunk(pcmData: ByteArray): Boolean {
-        if (pcmData.isEmpty()) return true
-        if (isClosing) return false
-        val socket = webSocket ?: return false
-        if (!isSessionReady) return false
+    internal enum class AudioSendResult { ACCEPTED, BACKPRESSURE, FAILED }
+
+    /** Bounded local queue acceptance, never a server delivery acknowledgment. */
+    internal fun offerAudioChunk(pcmData: ByteArray, containsSpeech: Boolean = true): AudioSendResult {
+        if (pcmData.isEmpty() || pcmData.size % 2 != 0 || isClosing || !isSessionReady) {
+            return AudioSendResult.FAILED
+        }
+        val socket = webSocket ?: return AudioSendResult.FAILED
+        val message = buildAudioMessage(pcmData)
+        // Audio frames are ASCII (base64 + JSON). Reserve space for control frames.
+        if (message.length > MAX_SOCKET_AUDIO_BYTES) return AudioSendResult.FAILED
+        if (socket.queueSize() + message.length > MAX_SOCKET_AUDIO_BYTES) {
+            return AudioSendResult.BACKPRESSURE
+        }
         return try {
-            socket.send(buildAudioMessage(pcmData))
+            if (!socket.send(message)) return AudioSendResult.FAILED
+            if (containsSpeech) {
+                hasAcceptedSpeech = true
+                nonSpeechSuffixBytes = 0L
+            } else {
+                nonSpeechSuffixBytes += message.length
+            }
+            AudioSendResult.ACCEPTED
         } catch (e: Exception) {
             Log.e(TAG, "Failed to send audio chunk: ${e.message}")
-            false
+            AudioSendResult.FAILED
         }
     }
 
-    /**
-     * Forget leftover-interim flush state because a new utterance has started.
-     * Cancels a pending flush so it cannot commit the next phrase mid-speech.
-     */
-    fun onNewSpeechTurn() {
-        postIfCurrent(activeConnectionToken) {
-            clearInterimFlushTimer()
-            resetTurnFlushState()
-        }
-    }
+    fun sendAudioChunk(pcmData: ByteArray): Boolean =
+        offerAudioChunk(pcmData) == AudioSendResult.ACCEPTED
+
+    /** Includes quiet PCM and controls; used for transport drainage, not speech progress. */
+    internal fun hasQueuedFrames(): Boolean = queuedFrameBytes() > 0L
+
+    /** A final cannot acknowledge speech still waiting in the local sender. */
+    internal fun hasQueuedSpeechFrames(): Boolean =
+        hasAcceptedSpeech && queuedFrameBytes() > nonSpeechSuffixBytes
+
+    internal fun queuedFrameBytes(): Long = webSocket?.queueSize() ?: 0L
 
     /**
      * Ask Gemini to finalize the current turn immediately instead of waiting out
@@ -1044,18 +899,7 @@ class GeminiTranscriptionClient {
         if (!isSessionReady) return false
         return try {
             val sent = socket.send(AUDIO_STREAM_END_MESSAGE)
-            if (sent) {
-                postIfCurrent(activeConnectionToken) {
-                    if (turnHadAuthoritativeFinal && lastInterimText == null) {
-                        // Server already closed this turn. Re-arming would
-                        // commit the next utterance's first interim after 800 ms.
-                        return@postIfCurrent
-                    }
-                    turnFlushArmed = true
-                    turnFlushDeadlineElapsed = false
-                    scheduleInterimFlush()
-                }
-            }
+            if (sent) nonSpeechSuffixBytes += AUDIO_STREAM_END_MESSAGE.length
             sent
         } catch (e: Exception) {
             Log.e(TAG, "Failed to send Gemini audioStreamEnd: ${e.message}")
@@ -1069,9 +913,8 @@ class GeminiTranscriptionClient {
      * Closing right after the last audio chunk is the usual way to lose the
      * final phrase.
      */
-    fun finishStreaming() {
-        val socket = webSocket ?: return
-        val finalized = finalizeTurn()
+    fun finishStreaming(): Boolean {
+        if (!finalizeTurn()) return false
         isClosing = true
 
         clearFinalizeCloseTimer()
@@ -1080,17 +923,15 @@ class GeminiTranscriptionClient {
             if (connectionToken != activeConnectionToken) return@Runnable
             val activeSocket = webSocket ?: return@Runnable
             Log.i(TAG, "Gemini finalize grace elapsed; closing socket")
-            activeSocket.close(1000, "client_stop")
+            if (activeSocket.queueSize() != 0L || !activeSocket.close(1000, "client_stop")) {
+                reportStreamError("Voice stream did not drain before the stop deadline")
+            }
         }
         pendingFinalizeCloseRunnable = closeRunnable
         mainHandler.postDelayed(closeRunnable, FINALIZE_CLOSE_GRACE_MS)
 
-        if (finalized) {
-            Log.i(TAG, "Gemini audioStreamEnd sent; awaiting final transcript")
-        } else {
-            clearFinalizeCloseTimer()
-            socket.close(1000, "client_stop")
-        }
+        Log.i(TAG, "Gemini audioStreamEnd sent; awaiting final transcript")
+        return true
     }
 
     fun cancelAll() {
@@ -1100,12 +941,12 @@ class GeminiTranscriptionClient {
 
     private fun stopStreamingInternal(cancel: Boolean, clearCallback: Boolean) {
         clearFinalizeCloseTimer()
-        clearInterimFlushTimer()
         isClosing = true
         isSessionReady = false
         awaitingSetupTier = null
         accumulator.reset()
-        resetTurnFlushState()
+        hasAcceptedSpeech = false
+        nonSpeechSuffixBytes = 0L
         val socket = webSocket
         webSocket = null
         if (socket != null) {
@@ -1124,120 +965,79 @@ class GeminiTranscriptionClient {
         val json = try {
             JSONObject(message)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse Gemini message: ${e.message}")
+            Log.w(TAG, "connection=$connectionToken invalid JSON chars=${message.length} type=${e.javaClass.simpleName}")
+            postIfCurrent(connectionToken) { reportStreamError("Invalid transcription response") }
             return
         }
 
         extractErrorMessage(json)?.let { description ->
-            Log.e(TAG, "Gemini stream error event: $description")
+            Log.w(TAG, "connection=$connectionToken server error: ${Log.redactVoiceDiagnosticMessage(description)}")
             postIfCurrent(connectionToken) {
-                callback?.onStreamError(description)
+                reportStreamError(description)
             }
             return
         }
 
         if (isSetupComplete(json)) {
-            awaitingSetupTier = null
-            isSessionReady = true
-            Log.i(TAG, "Gemini setupComplete received; stream ready")
             postIfCurrent(connectionToken) {
+                awaitingSetupTier = null
+                isSessionReady = true
+                Log.i(TAG, "connection=$connectionToken setupComplete received; stream ready")
                 callback?.onStreamReady()
             }
             return
         }
 
-        // Transcript state and leftover-interim flush share the main thread so
-        // a timer cannot race handleMessage and duplicate or drop text.
-        postIfCurrent(connectionToken) {
-            applyServerContent(connectionToken, json)
-        }
+        // Assemble and dispatch on the same looper as the manager/editor.
+        postIfCurrent(connectionToken) { applyServerContent(connectionToken, json) }
     }
 
     private fun applyServerContent(connectionToken: Long, json: JSONObject) {
         if (connectionToken != activeConnectionToken) return
-
         var sawResponse = false
         var sawTranscript = false
-        var sawInterim = false
-
-        extractInterimTranscript(json)?.let { interim ->
-            lastInterimText = interim
+        extractInterimTranscript(json)?.let {
             sawResponse = true
-            sawInterim = true
-            if (turnFlushArmed) {
-                if (turnFlushDeadlineElapsed) {
-                    flushPendingInterim(connectionToken)
-                } else {
-                    scheduleInterimFlush()
-                }
-            }
-        }
-
-        extractFinalTranscript(json)?.let { finalText ->
-            sawResponse = true
-            clearInterimFlushTimer()
-            turnFlushArmed = false
-            turnFlushDeadlineElapsed = false
-            turnHadAuthoritativeFinal = true
-            lastInterimText = null
-            val flushed = flushedInterimText
-            val textToAccept = if (flushed != null) {
-                leftoverAfterFlushedInterim(finalText, flushed)
-            } else {
-                finalText
-            }
-            flushedInterimText = null
-            if (textToAccept == null) {
-                accumulator.remember(finalText)
-                Log.i(TAG, "Gemini final transcript is a polish of already-flushed interim; ignoring")
-            } else {
-                val segment = accumulator.accept(textToAccept, recordAs = finalText)
-                if (segment != null) {
-                    sawTranscript = true
-                    Log.i(
-                        TAG,
-                        "VOICE_STEP_4 Gemini final transcript (${segment.text.length} chars)"
-                    )
-                    callback?.onTranscriptionResult(segment)
-                } else {
-                    Log.i(TAG, "Gemini final transcript added no new text; ignoring")
-                }
-            }
-        }
-
-        if (isTurnComplete(json)) {
-            sawResponse = true
-            clearInterimFlushTimer()
-            // Commit a leftover interim, but keep flushedInterimText so a late
-            // polished final can still be deduped. Speech resume clears it.
-            flushPendingInterim(connectionToken)
-            turnFlushArmed = false
-            turnFlushDeadlineElapsed = false
-            accumulator.reset()
-            lastInterimText = null
-        }
-
-        extractGoAwayMillis(json)?.let { timeLeftMs ->
-            Log.w(TAG, "Gemini goAway received; ${timeLeftMs}ms left on this connection")
-            callback?.onSessionExpiring(timeLeftMs)
-        }
-
-        if (sawInterim) {
             callback?.onInterimTranscription()
         }
-        if (sawResponse) {
-            callback?.onServerResponse(sawTranscript)
+        if (connectionToken != activeConnectionToken) return
+        extractFinalTranscript(json)?.let { finalText ->
+            sawResponse = true
+            sawTranscript = true
+            val segment = accumulator.accept(finalText)
+            if (segment != null) {
+                callback?.onTranscriptionResult(segment)
+            }
         }
+        if (connectionToken != activeConnectionToken) return
+        if (isTurnComplete(json)) {
+            sawResponse = true
+            // This is not an audio acknowledgment and must never flush an interim.
+            accumulator.reset()
+        }
+        extractGoAwayMillis(json)?.let { callback?.onSessionExpiring(it) }
+        if (connectionToken != activeConnectionToken) return
+        if (sawResponse) callback?.onServerResponse(sawTranscript)
+    }
+
+    private fun reportStreamError(error: String) {
+        val target = callback
+        cancelAll() // Invalidate queued frames before exposing a terminal failure.
+        target?.onStreamError(error)
     }
 
     private fun mapConnectionError(error: Throwable, response: Response?): String {
+        val body = try { response?.peekBody(4096)?.string() } catch (_: Exception) { null }
+        if (!body.isNullOrBlank()) {
+            statusFromReason(body)?.let { return it }
+        }
         val code = response?.code
         if (code != null) {
             return when (code) {
                 400 -> "Gemini rejected the request. Check the API key in Settings."
                 401, 403 -> "Invalid Gemini API key. Please check Settings."
                 404 -> "The Gemini model $MODEL is not available for this key."
-                429 -> "Gemini rate limited — too many requests"
+                429 -> friendlyErrorForStatus("RESOURCE_EXHAUSTED")!!
                 in 500..599 -> "Gemini service error ($code)"
                 else -> "Gemini connection rejected ($code)"
             }
@@ -1248,6 +1048,11 @@ class GeminiTranscriptionClient {
             is ConnectException -> "Could not connect to Gemini streaming"
             else -> "Streaming error: ${error.message ?: "unknown"}"
         }
+    }
+
+    private fun safeServiceDetail(detail: String, apiKey: String): String {
+        val withoutKey = if (apiKey.isNotEmpty()) detail.replace(apiKey, "[redacted]") else detail
+        return Log.redactVoiceDiagnosticMessage(withoutKey).replace('\n', ' ').replace('\r', ' ').take(512)
     }
 
     private fun postIfCurrent(connectionToken: Long, action: () -> Unit) {
@@ -1264,51 +1069,4 @@ class GeminiTranscriptionClient {
         pendingFinalizeCloseRunnable = null
     }
 
-    private fun scheduleInterimFlush() {
-        clearInterimFlushTimer()
-        val connectionToken = activeConnectionToken
-        val runnable = Runnable {
-            pendingInterimFlushRunnable = null
-            if (connectionToken != activeConnectionToken) return@Runnable
-            if (!turnFlushArmed) return@Runnable
-            if (lastInterimText == null) {
-                turnFlushDeadlineElapsed = true
-                return@Runnable
-            }
-            flushPendingInterim(connectionToken)
-        }
-        pendingInterimFlushRunnable = runnable
-        mainHandler.postDelayed(runnable, INTERIM_FLUSH_AFTER_FINALIZE_MS)
-    }
-
-    private fun flushPendingInterim(connectionToken: Long) {
-        if (connectionToken != activeConnectionToken) return
-        val interim = lastInterimText ?: return
-        if (flushedInterimText != null) return
-        val segment = accumulator.accept(interim) ?: return
-        flushedInterimText = interim
-        lastInterimText = null
-        turnFlushArmed = false
-        turnFlushDeadlineElapsed = false
-        Log.i(
-            TAG,
-            "VOICE_STEP_4 Gemini flushed leftover interim (${segment.text.length} chars)"
-        )
-        callback?.onTranscriptionResult(segment)
-        callback?.onServerResponse(true)
-    }
-
-    private fun resetTurnFlushState() {
-        lastInterimText = null
-        flushedInterimText = null
-        turnFlushArmed = false
-        turnFlushDeadlineElapsed = false
-        turnHadAuthoritativeFinal = false
-    }
-
-    private fun clearInterimFlushTimer() {
-        val runnable = pendingInterimFlushRunnable ?: return
-        mainHandler.removeCallbacks(runnable)
-        pendingInterimFlushRunnable = null
-    }
 }

@@ -259,7 +259,7 @@ class GeminiTranscriptionClientTest {
             )
         )
         assertEquals(
-            "Gemini rate limited — too many requests",
+            "Gemini quota or rate limit reached. Check your project's usage and limits.",
             GeminiTranscriptionClient.extractErrorMessage(
                 JSONObject("""{"error":{"status":"RESOURCE_EXHAUSTED"}}""")
             )
@@ -294,6 +294,27 @@ class GeminiTranscriptionClientTest {
     }
 
     // ── transcript assembly ────────────────────────────────────────────
+
+    @Test
+    fun depletedCreditsAreRecognizedInATruncatedLiveCloseWithoutAStatusName() {
+        assertEquals(
+            GeminiTranscriptionClient.CREDITS_DEPLETED_ERROR,
+            GeminiTranscriptionClient.describeCloseFailure(1011,
+                "Your prepayment credits are depleted. Please go to AI Studio at https://ai.studio/projects to manage your project and billi")
+        )
+    }
+
+    @Test
+    fun depletedCreditDetailTakesPriorityOverTheGenericQuotaStatus() {
+        assertEquals(
+            GeminiTranscriptionClient.CREDITS_DEPLETED_ERROR,
+            GeminiTranscriptionClient.extractErrorMessage(JSONObject(
+                """{"error":{"status":"RESOURCE_EXHAUSTED","message":"Your prepayment credits are depleted."}}"""
+            ))
+        )
+        assertEquals(GeminiTranscriptionClient.CREDITS_DEPLETED_ERROR,
+            GeminiTranscriptionClient.statusFromReason("RESOURCE_EXHAUSTED: prepaid credits exhausted"))
+    }
 
     @Test
     fun accumulator_appendsIndependentUtterancesAsSeparateSegments() {
@@ -363,113 +384,6 @@ class GeminiTranscriptionClientTest {
         accumulator.reset()
         // The same text in a new turn is a real repeat the user spoke again.
         assertEquals("Hello world.", accumulator.accept("Hello world.")?.text)
-    }
-
-    @Test
-    fun leftoverAfterFlushedInterim_dropsAPolishedRewriteOfTheSameWords() {
-        assertNull(
-            GeminiTranscriptionClient.leftoverAfterFlushedInterim("Hello world.", "hello wor")
-        )
-        assertNull(
-            GeminiTranscriptionClient.leftoverAfterFlushedInterim("And then I.", "and then I")
-        )
-    }
-
-    @Test
-    fun leftoverAfterFlushedInterim_keepsWordsTheFinalAdded() {
-        assertEquals(
-            "went home.",
-            GeminiTranscriptionClient.leftoverAfterFlushedInterim(
-                "And then I went home.",
-                "and then I"
-            )
-        )
-    }
-
-    @Test
-    fun leftoverAfterFlushedInterim_keepsAnUnrelatedFinal() {
-        assertEquals(
-            "Something else.",
-            GeminiTranscriptionClient.leftoverAfterFlushedInterim("Something else.", "hello")
-        )
-    }
-
-    @Test
-    fun leftoverAfterFlushedInterim_keepsAnUnrelatedFinalThatSharesATrailingWord() {
-        assertEquals(
-            "Something else today.",
-            GeminiTranscriptionClient.leftoverAfterFlushedInterim(
-                "Something else today.",
-                "hello today"
-            )
-        )
-    }
-
-    @Test
-    fun leftoverAfterFlushedInterim_dropsARewriteThatDroppedALeadingFiller() {
-        assertNull(
-            GeminiTranscriptionClient.leftoverAfterFlushedInterim(
-                "I think we should go.",
-                "um I think we should go"
-            )
-        )
-        assertNull(
-            GeminiTranscriptionClient.leftoverAfterFlushedInterim(
-                "The meeting is at noon.",
-                "yeah so the meeting is at noon"
-            )
-        )
-        assertNull(
-            GeminiTranscriptionClient.leftoverAfterFlushedInterim("hello.", "um hello")
-        )
-    }
-
-    @Test
-    fun leftoverAfterFlushedInterim_dropsARewriteThatChangedTheOpeningWord() {
-        assertNull(
-            GeminiTranscriptionClient.leftoverAfterFlushedInterim(
-                "Well hello there.",
-                "Hello there"
-            )
-        )
-    }
-
-    @Test
-    fun leftoverAfterFlushedInterim_keepsASuffixAfterSkippedFiller() {
-        assertEquals(
-            "to the store.",
-            GeminiTranscriptionClient.leftoverAfterFlushedInterim(
-                "I think we should go to the store.",
-                "um I think we should go"
-            )
-        )
-    }
-
-    @Test
-    fun leftoverAfterFlushedInterim_treatsContractionsAsOneWord() {
-        assertNull(
-            GeminiTranscriptionClient.leftoverAfterFlushedInterim("I don't.", "I dont")
-        )
-        assertNull(
-            GeminiTranscriptionClient.leftoverAfterFlushedInterim("co-op.", "coop")
-        )
-        assertEquals(
-            listOf("i", "don't"),
-            GeminiTranscriptionClient.tokenizeTranscript("I don't.")
-        )
-    }
-
-    @Test
-    fun accumulator_usesRecordAsAsTheNextComparisonBaseline() {
-        val accumulator = TranscriptAccumulator()
-
-        assertEquals("and then I", accumulator.accept("and then I")?.text)
-        assertEquals(
-            "went home.",
-            accumulator.accept("went home.", recordAs = "And then I went home")?.text
-        )
-        val extension = assertNotNull(accumulator.accept("And then I went home later."))
-        assertEquals("later.", extension.text)
     }
 
     @Test

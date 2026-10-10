@@ -16,10 +16,11 @@ HeliBoard uses that API.
 ```
 Microphone → VoiceRecorder (PCM16 16kHz) → Gemini Live WebSocket → inputTranscription
                                                                         ↓
-Text Field ← LatinIME (commitText) ← VoiceInputManager (FIFO queue + reconnect + graceful stop)
+Text Field ← LatinIME (commitText) ← VoiceInputManager (local insertion FIFO + terminal failure + graceful stop)
 ```
 
-Recording starts **instantly** on mic tap — no network round-trip delay.
+A local network preflight precedes mic capture. The service handshake runs in parallel
+with capture; audio waits in a bounded FIFO until `setupComplete`.
 
 ## Accuracy over latency
 
@@ -36,7 +37,7 @@ not "optimize" latency at the expense of transcript quality.
 | `GeminiTranscriptionClient.kt` | WebSocket client for `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=…`. Builds the `setup` payload at a negotiated [setup tier](#setup-tier-degradation), streams base64 PCM as JSON text frames, parses `inputTranscription` / `interimInputTranscription` / `turnComplete` / `goAway`, sends `audioStreamEnd` for Hybrid VAD, and reassembles editor segments |
 | `VoiceContextVocabulary.kt` | Harvests proper nouns and acronyms from editor text and merges them with user + built-in terms into `customVocabulary` |
 | `TranscriptSegment.kt` | Finalized chunk passed from the client to the IME pipeline |
-| `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO transcript queue, reconnects, session rotation on `goAway`, auto-stop timers, session config assembly |
+| `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO retained until local insertion succeeds, terminal failure, capture stop on `goAway`, auto-stop timers, session config assembly |
 | `TranscriptionPreferences.kt` | Reads/writes Gemini preferences and erases the preference keys of previously used providers |
 | `TranscriptPostProcessor.kt` | Local transcript shaping: pre-commit casing/trailing-punctuation adjustment plus paragraph-level spoken-command replacement after commit |
 | `LatinIME.java` | Orchestrator — finalizes composing state, commits transcript text at the caret, supplies editor text for vocabulary harvesting via `buildVoiceContextText`, triggers post-processing |
@@ -57,22 +58,44 @@ except `LatinIME.java` (parent package) and the settings UI/preferences helpers 
    flush on `onStreamReady`.
 4. Audio goes out as JSON text frames:
    `{"realtimeInput":{"audio":{"data":"<base64>","mimeType":"audio/pcm;rate=16000"}}}`.
-5. The server emits `serverContent.interimInputTranscription` (speculative)
-   and `serverContent.inputTranscription` (authoritative). Interims are not
-   committed while the speaker is talking. After Hybrid VAD `audioStreamEnd`, a
-   leftover interim is flushed if no final arrives — SMART mode otherwise holds
-   an unfinished trailing phrase waiting for the next word. `turnComplete`
-   closes an utterance. `modelTurn` is ignored so no generated response can leak
-   into the editor.
-6. `TranscriptAccumulator` converts finalized transcripts into segments and marks
-   `attachesToPrevious`.
-7. `VoiceInputManager` delivers segments in FIFO order to `LatinIME`.
-8. `LatinIME` inserts each segment with `commitText(...)`, replacing any active
-   selection and restoring a leading space only when the segment is **not**
-   `attachesToPrevious`.
+5. Only `serverContent.inputTranscription` creates editor segments. Interims are
+   provisional and never committed; `turnComplete` is a boundary, not an audio ACK.
+6. `TranscriptAccumulator` converts finals into segments with `attachesToPrevious`.
+7. Deliver FIFO segments on the main looper. Retain the head until the listener
+   returns local dispatch/cleanup success. Rejection/exception is terminal; never
+   retry a potentially partial editor edit.
+8. On failure, invalidate callback generations first, stop capture, clear uncertain
+   work, preserve inserted text, and insert `[Dictation interrupted]` literally
+   once if audio was captured and the stream reached readiness. Preserve selected
+   content by collapsing to a verified caret at its end; skip the marker if the
+   host cannot confirm the caret (even when the cached selection is collapsed).
+   Startup rejection leaves the editor untouched
+   and reports the service reason. Do not attempt a marker after editor failure.
+9. Stop joins the recorder and queues EOF after its posted tail. Block restart
+   until the existing connection closes. No automatic reconnect or rotation.
 
-On graceful stop the client sends `audioStreamEnd` and keeps reading for up to 8 s
-so the trailing phrase still arrives, then closes with 1000.
+The PCM FIFO is bounded to 960,000 bytes; the socket audio queue to 256 KiB of
+encoded JSON. Backpressure retains the head and retries locally every 25 ms;
+controls never overtake audio; at most 64 controls may wait locally. Overflow stops
+instead of dropping/coalescing data. Oldest queued PCM has 30 seconds to enter the
+socket queue. Active local speech or pending recognized words has 30 seconds
+without a server response. The missing-final wait applies to recognized words,
+not raw volume spikes, and starts when a speech
+boundary's `audioStreamEnd` enters the socket queue, not when speech first becomes
+pending. Repeated controls/interims cannot extend that wait; a new speech onset
+clears it until the next boundary. Long utterances with live interims continue.
+Controls retain their captured speech epoch so backpressure cannot apply an older
+boundary's final deadline to a newer utterance.
+The setup deadline is 12 seconds across every schema tier. Stop reads finals for
+eight seconds before initiating close, with a 15-second total close deadline.
+Clear older response/final watchdogs as soon as graceful stop begins. Silence
+auto-stop is intentional: accept late finals, never promote interims, and close
+normally without a marker for unconfirmed noise/hypotheses. Actual transport,
+microphone, queue, and drain failures still report interruptions. Equal-deadline
+silence and speech timers favor the normal silence stop. Repeated authoritative
+finals acknowledge progress without another editor write; queued speech still
+prevents acknowledgment. Pause/resume capture phases discard results/errors from
+a native read interrupted by the earlier phase.
 
 ## Setup payload
 
@@ -151,36 +174,17 @@ text is handled locally instead (see below).
 
 ## Turn finalization (Hybrid VAD)
 
-Server VAD stays enabled for accurate speech onset but is configured to be patient
-about ending speech (`END_SENSITIVITY_LOW`, 1500 ms). SMART mode also likes to
-wait for a complete sentence. Together that means a trailing unfinished phrase
-can sit as an interim hypothesis and never become `inputTranscription` — the
-user stops talking and nothing is written. The client backstops this:
+Server VAD stays enabled with patient end detection. Local silence, pause, and stop
+enqueue `audioStreamEnd` behind all preceding PCM. Forward all captured audio,
+including silence; local RMS VAD must not decide which samples are discarded. PCM
+callbacks carry raw-energy speech evidence captured with that chunk, not the
+mutable speaking flag or its silence/smoothing tail. Only queued speech blocks
+final progress; a queued quiet/control suffix does not require another final.
+Audio after `audioStreamEnd` reopens the turn. Only authoritative finals reach the
+editor; an unfinished tail that fails to finalize is visibly interrupted.
 
-- After local silence (`PREF_VOICE_CHUNK_SILENCE_SECONDS`, default **2 s**),
-  `VoiceInputManager` sends `{"realtimeInput":{"audioStreamEnd":true}}`. At most
-  once per speech-stop transition; re-armed on the next `onSpeechStarted`. A
-  stale-interim backup (2 s with no final) fires only while
-  `VoiceRecorder.isCurrentlySpeaking` is false, so it cannot hold audio during
-  live speech.
-- **Outbound audio is then held** until speech resumes. The next silent PCM
-  chunk would reopen the turn and Gemini would start waiting for the next word
-  again. A 300 ms prefix buffer is kept so the following utterance is not
-  clipped.
-- If no authoritative final arrives within **800 ms** of `audioStreamEnd`, the
-  last interim hypothesis is committed. A late polished final of the same words
-  is dropped so the editor does not see a duplicate, including SMART rewrites
-  that drop a leading filler or change the first word. `audioStreamEnd` after
-  a final already arrived does not re-arm that flush. A session rotate waits
-  for the current utterance when it can, then waits the leftover-flush window
-  so a polished final can arrive before the outgoing socket is cancelled. If
-  `goAway` is already imminent, rotate immediately even while speaking. A
-  deferred rotate is cancelled if the stream dies or a replacement session
-  starts first. `resumeRecording` clears a pending pause-during-connect
-  finalize so the new dictation is not closed on `setupComplete`.
-- On **mic pause** the same `audioStreamEnd` is sent. A turn left open with no
-  audio is the dominant cause of the Live API dropping the connection with 1011.
-- On **stop**, `finishStreaming()` sends it and then keeps reading for up to 8 s.
+The 800 ms interim fallback, held-silence prefix buffer, and stale-interim finalize
+timer were removed because they could insert provisional words or omit soft audio.
 
 ## Transcript assembly
 
@@ -188,7 +192,7 @@ The Live API has emitted finalized transcripts both as per-utterance deltas and 
 text that grows on each message, and the semantics changed between model
 generations. `TranscriptAccumulator` compares each transcript against the previous
 one, so text extending the previous message contributes only its suffix, unrelated
-text contributes all of itself, and an identical repeat (seen on reconnect)
+text contributes all of itself, and an identical repeat within the same turn
 contributes nothing. `turnComplete` resets the comparison.
 
 `attachesToPrevious` is set for segments starting with attaching punctuation
@@ -197,18 +201,40 @@ not `head ing`).
 
 ## Session lifecycle
 
-- Sessions are capped at **10 minutes**.
-- `{"goAway":{"timeLeft":"30s"}}` — `timeLeft` is a protobuf Duration and arrives
-  as a **string**.
-- `VoiceInputManager` rotates onto a fresh connection 1.5 s before the announced
-  deadline and unconditionally after 9 minutes. If the user is still talking,
-  rotation waits for local silence unless `goAway` is already imminent. A
-  deferred rotate is cancelled if the stream dies first. Rotation does not
-  consume a reconnect attempt; buffered audio carries across.
-- There is **no application-level keepalive** in this protocol. OkHttp pings run
-  every 20 s; the real fix for dropped connections is the audio lifecycle above.
-- Close codes: 1007 setup schema or auth, 1008 policy/billing, 1011 stalled turn,
-  1006 network.
+One recording owns one Live connection. Transport/network failure is terminal,
+including failure during pause or drain. Reconnect and rotation are disabled;
+`goAway` or the nine-minute limit stops capture and drains the existing session.
+The user starts the next recording deliberately. Schema-tier fallback is allowed
+only before readiness, when no audio has been submitted, within the original
+connection deadline.
+
+Android remote `InputConnection` booleans confirm dispatch, not the host editor's
+commit result. Local selection checks protect replacement placement but cannot
+certify complete insertion in every editor.
+
+Interactive keyboard hiding, finished input/view callbacks, and target changes
+cancel all voice work immediately, including an IDLE microphone whose connection
+is still draining. Remove the spinner and invalidate old callbacks so a new mic
+tap starts immediately. Screen-off hiding alone preserves recording. Explicit mic
+stop still drains the current socket.
+
+Monitor host text through a dedicated `getExtractedText(...,
+GET_EXTRACTED_TEXT_MONITOR)` token unless the framework's fullscreen extract view
+is visible; retain its existing monitor in that case. Check actual host text on
+notifications, selection updates (even unchanged), restarts, and before insertion.
+A verified nonempty-to-empty
+transition cancels dictation without a marker. Null queries are unavailable, not
+empty, and an all-text highlight is not a clear. Editors that omit monitoring
+callbacks are checked again before a late final can refill their cleared field.
+Remember successful insertions as nonempty-field evidence even when a host never
+sends change notifications. A clear alone does not prove submission, so it does
+not automatically hide the keyboard.
+
+`send(true)` only means local queue acceptance. Input transcription has no
+per-chunk acknowledgment, and `turnComplete` is not a delivery watermark. See
+`docs/gemini-transcription.md` for sourced rationale, conservative deadline
+tradeoffs, and device acceptance checks. These guards cannot detect a service that
+silently omits words while still returning plausible finals.
 
 ## Post-Processing (TranscriptPostProcessor)
 
@@ -219,7 +245,15 @@ Before commit, `LatinIME.prepareVoiceTranscriptionText()` uses
 After each chunk is committed, `LatinIME.runTranscriptPostProcessing()` reads the
 current paragraph (from the last newline to the cursor, up to 1024 chars) and runs
 `TranscriptPostProcessor.processCurrentParagraph()`. If any rule matches, the
-paragraph is replaced in place via `deleteTextBeforeCursor` + `commitText`.
+paragraph is selected and replaced in one commit through `replaceTextBeforeCursor`,
+without first deleting confirmed text. Verify actual host selection positions and
+selected text before the replacement commit. Temporarily close/reopen the host
+batch before readback so deferred editors apply pending edits. Prepare the
+correction from our cache and verify matching original host text after flushing.
+Delayed intermediate selection callbacks are ignored only when the host's current
+caret matches the expected voice caret. Unavailable/mismatched selection or
+a rejected operation stops dictation and restores the caret best-effort; never
+retry a possibly partial replacement.
 
 Current processing removes comma-attached filler fragments ("um,", "uh,") and
 handles **spelled-out punctuation** ("exclamation point.", "comma", "question

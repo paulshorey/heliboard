@@ -100,7 +100,7 @@ speech-to-text model `gemini-3.5-transcribe-live`. Documentation:
 Not used: `tools`, `speechConfig`, `outputAudioTranscription`, `translationConfig`,
 `proactivity`, `historyConfig`, `contextWindowCompression`, `sessionResumption`.
 Sessions are capped at 10 minutes and each dictation utterance is independent, so
-HeliBoard rotates connections rather than resuming them. `activityHandling` and
+HeliBoard stops and drains before requiring an explicit new recording. `activityHandling` and
 `turnCoverage` are conversational-agent concepts and are left at their defaults.
 
 ### Setup tiers
@@ -143,14 +143,11 @@ the server accepts today.
 {"realtimeInput":{"audioStreamEnd":true}}
 ```
 
-The server treats this as immediate turn finalization, bypassing its silence wait,
-with server VAD as fallback if the client's detector misses. **The session stays
-open** — "the client can reopen the stream by sending an audio message" — so
-HeliBoard uses it after local silence, when an interim goes stale, on mic pause,
-and on stop. After sending it, outbound audio is held until speech resumes;
-silent PCM would reopen the turn and SMART mode would wait for the next word
-again. If no `inputTranscription` arrives within 800 ms, the last interim is
-committed. It is only valid while automatic activity detection is enabled.
+HeliBoard queues this behind preceding PCM on local speech-stop silence, pause,
+and stop. It is valid while automatic activity detection is enabled. The session
+stays open and subsequent audio reopens the stream. Every captured chunk is
+forwarded, including quiet audio; local RMS detection does not discard samples.
+Only authoritative finals become text. There is no interim promotion deadline.
 
 Manual VAD (`activityStart` / `activityEnd`, both empty objects) requires
 `automaticActivityDetection.disabled: true` and gives up the server's pre-speech
@@ -184,9 +181,8 @@ buffer, so HeliBoard does not use it.
   against the previous one so either semantic yields correct text.
 - `goAway.timeLeft` is a protobuf Duration, so it serializes as a **string**
   (`"30s"`, `"10.5s"`), not a number.
-- The `/api/live` reference is stale on transcription: it omits
-  `interimInputTranscription` and claims `AudioTranscriptionConfig` has no fields.
-  The Live Transcription guide is authoritative for those.
+- Input transcription is independent of other server messages; `turnComplete`
+  is not a per-audio acknowledgment. An interim signals liveness, never final coverage.
 
 ### Session lifecycle and errors
 
@@ -195,9 +191,35 @@ buffer, so HeliBoard does not use it.
   sets OkHttp `pingInterval` to 20 s. The dominant cause of 1011 is not the network
   but a turn left open with no incoming audio, which `audioStreamEnd` on mic pause
   prevents.
-- Graceful shutdown: send `audioStreamEnd`, keep reading for the final
-  `inputTranscription` (HeliBoard allows 8 s), then close 1000. Closing right after
-  the last audio chunk loses the final segment.
+- Graceful shutdown: stop/join capture, queue EOF after the posted tail, read
+  finals for 8 s, then initiate close 1000. A nonempty socket queue is failure.
+  The manager bounds the total finish/close wait to 15 s and blocks restart.
+  Clear old response/final timers at stop. Silence auto-stop drains and completes
+  without an interruption marker for unconfirmed noise/hypotheses; real failures
+  still report interruptions. Interims never become editor text.
+- `goAway` or the nine-minute cap stops capture and drains the same connection.
+  Network/send/protocol/timeout failures terminate it with no automatic reconnect.
+  A remote 1000 is unexpected unless the client requested close.
+- Local backpressure retains the FIFO head. The PCM queue is 960,000 bytes, the
+  socket audio queue is 256 KiB of encoded JSON, and finalized text is limited to
+  64 queued entries. Locally queued boundary controls also have a 64-entry limit.
+  Overflow stops rather than dropping or merging data.
+- The setup deadline is 12 s across all tiers. Oldest local audio, active local
+  speech and pending recognized words without a response have 30 s deadlines.
+  A missing-final wait applies to recognized words, not RMS spikes, and starts at
+  submitted `audioStreamEnd`; repeated controls/interims cannot extend it. A new
+  speech onset clears the final wait until the next boundary. Live interims allow
+  long utterances without a premature final timeout.
+  Boundaries retain their captured speech epoch; an older boundary delayed by
+  backpressure cannot start the newer utterance's final wait.
+  At equal deadlines the intentional silence stop takes precedence. Duplicate
+  authoritative finals still count as progress without duplicate insertion;
+  queued speech prevents acknowledgment. Interrupted native reads belong to
+  their original pause/resume capture phase, even after a rapid resume.
+- Interactive keyboard hiding, editor disconnection, and verified host clears
+  cancel capture and all queued work immediately; explicit mic stop still drains.
+  Host clears use extracted-text monitoring plus actual reads, with null meaning
+  unavailable rather than empty. An external clear does not prove submission.
 
 | Close code | Meaning |
 |------|---------|

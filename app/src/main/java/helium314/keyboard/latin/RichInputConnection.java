@@ -312,12 +312,14 @@ public final class RichInputConnection implements PrivateCommandPerformer {
     }
 
     /**
-     * Calls {@link InputConnection#commitText(CharSequence, int)}.
+     * Calls {@link InputConnection#commitText(CharSequence, int)}. A remote
+     * connection's boolean reports IPC dispatch, not actual host text acceptance.
      *
      * @param text The text to commit. This may include styles.
      * @param newCursorPosition The new cursor position around the text.
      */
-    public void commitText(final CharSequence text, final int newCursorPosition) {
+    public boolean commitText(final CharSequence text, final int newCursorPosition) {
+        if (!isConnected()) return false;
         if (DEBUG_BATCH_NESTING) checkBatchEdit();
         if (DEBUG_PREVIOUS_TEXT) checkConsistencyForDebug();
         if (DebugFlags.DEBUG_ENABLED)
@@ -351,7 +353,150 @@ public final class RichInputConnection implements PrivateCommandPerformer {
                     }
                 }
             }
-            mIC.commitText(mTempObjectForCommitText, newCursorPosition);
+            try {
+                final boolean accepted = mIC.commitText(mTempObjectForCommitText, newCursorPosition);
+                if (!accepted) refreshAfterFailedEdit();
+                return accepted;
+            } catch (RuntimeException e) {
+                refreshAfterFailedEdit();
+                throw e;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Select and replace committed text in one commit, without deleting it first.
+     * Verify the actual host selection and selected text before committing.
+     * There is no preliminary deletion if the commit is rejected. Restore the
+     * caret best-effort on failure; never retry a possibly partial edit.
+     * Caller must hold a batch edit and have finished composing text.
+     * The host batch is temporarily closed so buffering editors apply the
+     * previous insertion and selection before we read them back.
+     */
+    public boolean replaceTextBeforeCursor(final int beforeLength, final CharSequence replacement) {
+        final int originalStart = mExpectedSelStart;
+        final int originalEnd = mExpectedSelEnd;
+        if (beforeLength < 0 || originalStart < beforeLength || originalStart != originalEnd
+                || mComposingText.length() != 0 || !isConnected()) {
+            return false;
+        }
+        final CharSequence cached = getCachedTextBeforeCursor();
+        if (cached.length() < beforeLength) return false;
+        final String expectedText = cached.subSequence(cached.length() - beforeLength,
+                cached.length()).toString();
+        final InputConnection host = suspendVoiceBatch();
+        if (host == null) return false;
+        boolean accepted = false;
+        boolean selectionAttempted = false;
+        try {
+            // Remote InputConnection booleans acknowledge IPC dispatch only.
+            // Read the original range and then verify actual host selection/text
+            // before committing, so a refused selection cannot append a paragraph.
+            final CharSequence originalText = mIC.getTextBeforeCursor(beforeLength, 0);
+            if (!TextUtils.equals(originalText, expectedText)) {
+                Log.w(TAG, "VOICE replacement original range unavailable or changed chars=" + beforeLength);
+                return false;
+            }
+            selectionAttempted = true;
+            if (!setSelection(originalStart - beforeLength, originalStart)) return false;
+            if (!verifyVoiceSelection(originalStart - beforeLength, originalStart, originalText)) {
+                return false;
+            }
+            accepted = commitText(replacement, 1);
+            return accepted;
+        } finally {
+            try {
+                if (!accepted) {
+                    if (selectionAttempted) {
+                        try {
+                            setSelection(originalStart, originalEnd);
+                        } catch (RuntimeException ignored) {
+                            // The original failure is terminal; restoring the caret is optional.
+                        }
+                    }
+                    refreshAfterFailedEdit();
+                }
+            } finally {
+                host.beginBatchEdit();
+            }
+        }
+    }
+
+    /** Preserve highlighted text when inserting a failure marker beside it. */
+    public boolean collapseSelectionToEndAndVerify() {
+        if (!isConnected() || !isCursorPositionKnown() || mComposingText.length() != 0) return false;
+        final int originalStart = mExpectedSelStart;
+        final int originalEnd = mExpectedSelEnd;
+        final int target = Math.max(originalStart, originalEnd);
+        final InputConnection host = suspendVoiceBatch();
+        if (host == null) return false;
+        boolean verified = false;
+        try {
+            // Even a cached collapsed caret can be stale: a newly highlighted
+            // host range may not have delivered its selection callback yet.
+            verified = (originalStart == originalEnd || setSelection(target, target))
+                    && verifyVoiceSelection(target, target, null);
+            return verified;
+        } finally {
+            try {
+                if (!verified) {
+                    if (originalStart != originalEnd) {
+                        try { setSelection(originalStart, originalEnd); } catch (RuntimeException ignored) { }
+                    }
+                    refreshAfterFailedEdit();
+                }
+            } finally {
+                host.beginBatchEdit();
+            }
+        }
+    }
+
+    @Nullable private InputConnection suspendVoiceBatch() {
+        if (!isConnected() || mNestLevel != 1) return null;
+        final InputConnection host = mIC;
+        host.endBatchEdit();
+        return host;
+    }
+
+    /** Read the current host caret when a delayed voice selection callback arrives. */
+    public boolean hasExpectedVoiceCursor() {
+        return isConnected() && isCursorPositionKnown() && !hasSelection()
+                && mComposingText.length() == 0
+                && verifyVoiceSelection(mExpectedSelStart, mExpectedSelEnd, null);
+    }
+
+    private boolean verifyVoiceSelection(final int start, final int end,
+            @Nullable final CharSequence expectedText) {
+        final ExtractedText actual = mIC.getExtractedText(new ExtractedTextRequest(), 0);
+        final CharSequence selected = mIC.getSelectedText(0);
+        final boolean positionsMatch = actual != null
+                && actual.selectionStart + actual.startOffset == start
+                && actual.selectionEnd + actual.startOffset == end;
+        final boolean textMatches = start == end
+                ? TextUtils.isEmpty(selected) : TextUtils.equals(expectedText, selected);
+        final boolean verified = positionsMatch && textMatches;
+        // Positions and lengths are useful for device troubleshooting; never log text.
+        Log.i(TAG, "VOICE selection verification verified=" + verified
+                + " expected=" + start + ":" + end
+                + " actual=" + (actual == null ? "unavailable"
+                    : (actual.selectionStart + actual.startOffset) + ":"
+                        + (actual.selectionEnd + actual.startOffset))
+                + " selectedChars=" + (selected == null ? -1 : selected.length()));
+        return verified;
+    }
+
+    private void refreshAfterFailedEdit() {
+        // A rejected/throwing host call may have partially changed the editor.
+        // Recover both cached text and cursor from it, never from our prediction.
+        try {
+            reloadTextCache();
+            reloadCursorPosition();
+        } catch (RuntimeException ignored) {
+            mCommittedTextBeforeComposingText.setLength(0);
+            mComposingText.setLength(0);
+            mExpectedSelStart = INVALID_CURSOR_POSITION;
+            mExpectedSelEnd = INVALID_CURSOR_POSITION;
         }
     }
 

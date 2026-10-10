@@ -33,6 +33,9 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.view.inputmethod.CompletionInfo;
 import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.ExtractedText;
+import android.view.inputmethod.ExtractedTextRequest;
+import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InlineSuggestion;
 import android.view.inputmethod.InlineSuggestionsRequest;
 import android.view.inputmethod.InlineSuggestionsResponse;
@@ -196,6 +199,10 @@ public class LatinIME extends InputMethodService implements
 
     // Voice input manager (local recording + Gemini Live transcription)
     private VoiceInputManager mVoiceInputManager;
+    // Use a separate token from InputMethodService's fullscreen extractor.
+    private int mVoiceEditorMonitorToken = 0x56000000;
+    private boolean mVoiceEditorMonitorActive;
+    private boolean mVoiceEditorHadText;
     // Wake lock to prevent CPU sleep during voice recording
     private PowerManager.WakeLock mVoiceWakeLock;
     private static final int FULLAPP_SYNC_MAX_CHARS = 100_000;
@@ -810,6 +817,11 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public void onStartInput(final EditorInfo editorInfo, final boolean restarting) {
+        if (!restarting) {
+            discardPendingVoiceWork("Input target changed — discarding voice work");
+        } else if (mVoiceEditorMonitorActive) {
+            cancelVoiceIfEditorCleared();
+        }
         mHandler.onStartInput(editorInfo, restarting);
     }
 
@@ -821,6 +833,11 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public void onFinishInputView(final boolean finishingInput) {
+        // Invalidate callbacks immediately, before deferred IME housekeeping.
+        final PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        if (finishingInput || (pm != null && pm.isInteractive())) {
+            discardPendingVoiceWork("Input view finished — discarding voice work");
+        }
         StatsUtils.onFinishInputView();
         mHandler.onFinishInputView(finishingInput);
         mStatsUtilsManager.onFinishInputView();
@@ -829,6 +846,7 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public void onFinishInput() {
+        discardPendingVoiceWork("Input connection finished — discarding voice work");
         mHandler.onFinishInput();
     }
 
@@ -880,6 +898,10 @@ public class LatinIME extends InputMethodService implements
 
     void onStartInputViewInternal(final EditorInfo editorInfo, final boolean restarting) {
         super.onStartInputView(editorInfo, restarting);
+        if (mVoiceEditorMonitorActive) {
+            cancelVoiceIfEditorCleared();
+            if (mVoiceEditorMonitorActive) monitorVoiceEditorChanges();
+        }
 
         mDictionaryFacilitator.onStartInput();
         // Switch to the null consumer to handle cases leading to early exit below, for which we
@@ -1047,15 +1069,14 @@ public class LatinIME extends InputMethodService implements
         Log.i(TAG, "onWindowHidden");
         // The keyboard window can be hidden for two very different reasons:
         //   1. Screen turned off (power button, timeout) — recording should CONTINUE.
-        //   2. User action (Back button, app dismissed keyboard) — gracefully stop.
+        //   2. User action (Back button, app dismissed keyboard) — cancel all work.
         // We distinguish them via PowerManager.isInteractive(): false means the screen
         // is off, true means a user/app action hid the keyboard while the screen is on.
         if (mVoiceInputManager != null && !mVoiceInputManager.isIdle()) {
             PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
             boolean screenOn = (pm != null && pm.isInteractive());
             if (screenOn) {
-                Log.i(TAG, "Keyboard hidden while screen on — gracefully stopping voice input");
-                stopVoiceRecordingGracefully();
+                discardPendingVoiceWork("Keyboard hidden while screen on — discarding voice work");
             } else {
                 Log.i(TAG, "Keyboard hidden because screen turned off — recording continues");
                 // Don't stop recording. The PARTIAL_WAKE_LOCK keeps the CPU alive,
@@ -1155,7 +1176,9 @@ public class LatinIME extends InputMethodService implements
         // keyboard's own text operations (e.g., transcription insertion).
         // Wrapped in try-catch because the InputConnection may be in an invalid state
         // (e.g., text field removed while recording is active).
+        boolean verifiedBelatedVoiceUpdate = false;
         try {
+            if (mVoiceEditorMonitorActive) cancelVoiceIfEditorCleared();
             final boolean voiceSessionActive = mVoiceInputManager != null
                     && (!mVoiceInputManager.isIdle() || mVoiceInputManager.hasPendingProcessing());
             if (voiceSessionActive
@@ -1163,22 +1186,33 @@ public class LatinIME extends InputMethodService implements
                     && !mInputLogic.mConnection.isBelatedExpectedUpdate(
                             oldSelStart, newSelStart, oldSelEnd, newSelEnd,
                             composingSpanStart, composingSpanEnd)) {
-                // Check if the cursor ended up at the end of existing text.
-                // If so, don't cancel — the user may have tapped the text field but the
-                // cursor is still where transcription inserts text, so dictation continues.
-                // Exception: if the text field is empty (was cleared, e.g. message sent),
-                // still cancel because the user is done with that field.
-                final CharSequence afterCursor = mInputLogic.mConnection.getTextAfterCursor(1, 0);
-                final boolean cursorAtEnd = (afterCursor == null || afterCursor.length() == 0);
-                if (cursorAtEnd) {
-                    final CharSequence beforeCursor = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
-                    final boolean fieldEmpty = (beforeCursor == null || beforeCursor.length() == 0);
-                    if (fieldEmpty) {
-                        discardPendingVoiceWork("Text field cleared while recording — discarding voice input");
+                // Cleanup selection verification must flush host batches. Intermediate
+                // callbacks can therefore arrive after the final commit, including for
+                // insertion in the middle of a field. Check the current host caret before
+                // treating an old callback as a user move or resetting typing caches.
+                verifiedBelatedVoiceUpdate = mInputLogic.mConnection.hasExpectedVoiceCursor();
+                if (!verifiedBelatedVoiceUpdate) {
+                    // Check if the cursor ended up at the end of existing text.
+                    // If so, don't cancel — the user may have tapped the text field but the
+                    // cursor is still where transcription inserts text, so dictation continues.
+                    // Exception: if the text field is empty (was cleared, e.g. message sent),
+                    // still cancel because the user is done with that field.
+                    final CharSequence afterCursor = mInputLogic.mConnection.getTextAfterCursor(1, 0);
+                    final boolean cursorAtEnd = afterCursor != null && afterCursor.length() == 0;
+                    if (cursorAtEnd) {
+                        // The cached text still describes the previous selection until
+                        // InputLogic handles this callback. Read the host to detect clears.
+                        final android.view.inputmethod.InputConnection host = getCurrentInputConnection();
+                        final CharSequence beforeCursor = host == null ? null : host.getTextBeforeCursor(1, 0);
+                        final boolean fieldEmpty = beforeCursor != null && beforeCursor.length() == 0
+                                && newSelStart == 0 && newSelEnd == 0;
+                        if (fieldEmpty) {
+                            discardPendingVoiceWork("Text field cleared while recording — discarding voice input");
+                        }
+                        // else: cursor at end of existing text — continue recording
+                    } else {
+                        discardPendingVoiceWork("Cursor moved away from end while recording — discarding voice input");
                     }
-                    // else: cursor at end of existing text — continue recording
-                } else {
-                    discardPendingVoiceWork("Cursor moved away from end while recording — discarding voice input");
                 }
             }
         } catch (Exception e) {
@@ -1205,7 +1239,7 @@ public class LatinIME extends InputMethodService implements
             }
             scheduleEditHistoryCapture();
         }
-        if (isInputViewShown()
+        if (!verifiedBelatedVoiceUpdate && isInputViewShown()
                 && mInputLogic.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd,
                 composingSpanStart, composingSpanEnd, settingsValues)) {
             // we don't want to update a manually set shift state if selection changed towards one side
@@ -1904,9 +1938,8 @@ public class LatinIME extends InputMethodService implements
     /**
      * Gracefully stop voice recording: stop the microphone but let pending transcription
      * work complete naturally. The final audio segment is flushed and sent
-     * for transcription. Use this when the user performs an action that should stop
-     * recording but not discard in-progress work (e.g., cursor move, text edit, back
-     * button, keyboard hidden).
+     * for transcription. Use this only while the editor remains a valid insertion
+     * target (e.g., an explicit mic stop or preparing a fullapp draft).
      */
     private void stopVoiceRecordingGracefully() {
         if (mVoiceInputManager == null || mVoiceInputManager.isIdle()) return;
@@ -1916,7 +1949,7 @@ public class LatinIME extends InputMethodService implements
     }
 
     /**
-     * Convenience wrapper: gracefully stop voice recording when the user performs an
+     * Convenience wrapper: cancel voice recording when the user performs an
      * action that indicates they want to interact with the text field manually (typing,
      * suggestion pick, glide/swipe, hardware keyboard). Any queued voice insertion is
      * discarded so late voice callbacks cannot overwrite the user's newer edits.
@@ -1932,11 +1965,80 @@ public class LatinIME extends InputMethodService implements
             return;
         }
         Log.i(TAG, reason);
+        mVoiceEditorMonitorActive = false;
+        mVoiceEditorHadText = false;
         resetVoiceInputState();
         if (mVoiceInputManager != null) {
             mVoiceInputManager.cancelRecording();
         }
         releaseVoiceWakeLock();
+    }
+
+    /** Subscribe to host edits even when clearing text does not move its caret. */
+    private void monitorVoiceEditorChanges() {
+        final InputConnection host = getCurrentInputConnection();
+        if (host == null) return;
+        try {
+            // A visible fullscreen extract view already owns a monitored extractor.
+            // Do not replace its token; its updates reach our override below.
+            if (!isExtractViewShown()) {
+                final ExtractedTextRequest request = new ExtractedTextRequest();
+                request.token = ++mVoiceEditorMonitorToken;
+                request.hintMaxChars = Constants.EDITOR_CONTENTS_CACHE_SIZE;
+                request.hintMaxLines = 10;
+                host.getExtractedText(request, InputConnection.GET_EXTRACTED_TEXT_MONITOR);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Could not monitor voice editor changes: " + e.getMessage());
+        }
+        // A failed/unsupported monitor must not disable the direct-read fallback.
+        cancelVoiceIfEditorCleared();
+    }
+
+    @Override
+    public void onUpdateExtractedText(final int token, final ExtractedText text) {
+        if (token == mVoiceEditorMonitorToken) {
+            if (mVoiceEditorMonitorActive) cancelVoiceIfEditorCleared();
+            return; // This token belongs to voice monitoring, not the extract UI.
+        }
+        super.onUpdateExtractedText(token, text);
+        if (mVoiceEditorMonitorActive && isExtractViewShown()) cancelVoiceIfEditorCleared();
+    }
+
+    private boolean cancelVoiceIfEditorCleared() {
+        if (!wasVoiceEditorCleared()) return false;
+        // Empty text proves a clear, not whether a message/form was submitted.
+        // Cancel dictation without inserting a marker or hiding the keyboard.
+        discardPendingVoiceWork("Host text field cleared — discarding voice work");
+        return true;
+    }
+
+    private boolean wasVoiceEditorCleared() {
+        final InputConnection host = getCurrentInputConnection();
+        if (host == null) return false;
+        try {
+            // Read the host, not typing caches or a potentially belated/partial
+            // extracted-text update. Null means unavailable, not an empty field.
+            final CharSequence before = host.getTextBeforeCursor(1, 0);
+            final CharSequence after = host.getTextAfterCursor(1, 0);
+            final CharSequence selected = host.getSelectedText(0);
+            if ((before != null && before.length() > 0)
+                    || (after != null && after.length() > 0)
+                    || (selected != null && selected.length() > 0)) {
+                mVoiceEditorHadText = true;
+                return false;
+            }
+            if (!mVoiceEditorHadText || before == null || after == null) return false;
+            if (selected != null) return selected.length() == 0;
+            // Many editors return null for a collapsed selection. Verify that
+            // case before deciding that before/after emptiness means a clear.
+            final ExtractedText actual = host.getExtractedText(new ExtractedTextRequest(), 0);
+            return actual != null && actual.selectionStart == 0 && actual.selectionEnd == 0
+                    && actual.startOffset == 0;
+        } catch (Exception e) {
+            Log.w(TAG, "Could not check voice editor text: " + e.getMessage());
+            return false;
+        }
     }
 
     /**
@@ -2017,13 +2119,13 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public void onVoicePauseClicked() {
-        if (mVoiceInputManager != null) {
+        if (mVoiceInputManager != null
+                && (mVoiceInputManager.isRecording() || mVoiceInputManager.isPaused())) {
             mVoiceInputManager.togglePause();
-            // Update UI immediately to show pause state
-            if (mSuggestionStripView != null) {
-                boolean isPaused = mVoiceInputManager.isPaused();
-                mSuggestionStripView.setVoiceInputState(isPaused ? VoiceState.PAUSED : VoiceState.RECORDING);
-                mKeyboardSwitcher.showToast(isPaused ? "Paused" : "Resumed", false);
+            // The state listener owns the controls, including failed resume and
+            // IDLE while draining. A no-op tap must not turn them red again.
+            if (mVoiceInputManager.isPaused()) {
+                mKeyboardSwitcher.showToast("Paused", false);
             }
         }
     }
@@ -2048,6 +2150,9 @@ public class LatinIME extends InputMethodService implements
                         } else {
                             mKeyboardSwitcher.showToast("Listening...", false);
                             resetVoiceInputState();
+                            mVoiceEditorHadText = false;
+                            mVoiceEditorMonitorActive = true;
+                            monitorVoiceEditorChanges();
                         }
                         // Keep screen on and CPU alive while recording
                         acquireVoiceWakeLock();
@@ -2085,6 +2190,9 @@ public class LatinIME extends InputMethodService implements
                 try {
                     if (mVoiceInputManager == null || !mVoiceInputManager.hasPendingProcessing()) {
                         mKeyboardSwitcher.hideProcessingIndicator();
+                        if (mVoiceInputManager == null || mVoiceInputManager.isIdle()) {
+                            mVoiceEditorMonitorActive = false;
+                        }
                     }
                 } catch (Exception e) {
                     Log.e(TAG, "Error hiding processing indicator on idle: " + e.getMessage());
@@ -2092,28 +2200,29 @@ public class LatinIME extends InputMethodService implements
             }
 
             @Override
-            public void onTranscriptionResult(@NonNull String text, boolean attachesToPrevious) {
+            public boolean onTranscriptionResult(@NonNull String text, boolean attachesToPrevious) {
                 try {
-                    Log.i(TAG, "VOICE raw transcript=[" + text + "]");
                     final String trimmed = text.trim();
                     if (trimmed.isEmpty()) {
                         Log.i(TAG, "VOICE_STEP_4 empty transcription result — nothing to insert");
                         if (mVoiceInputManager == null || !mVoiceInputManager.hasPendingProcessing()) {
                             mKeyboardSwitcher.hideProcessingIndicator();
                         }
-                        return;
+                        return true;
                     }
-                    Log.i(
-                            TAG,
-                            "VOICE_STEP_4 transcription arrived in IME (" +
-                                    trimmed.length() + " chars)"
-                    );
-                    commitVoiceTranscriptionText(
+                    return commitVoiceTranscriptionText(
                             prepareVoiceTranscriptionText(trimmed, attachesToPrevious)
                     );
                 } catch (Exception e) {
                     Log.e(TAG, "Error processing transcription result: " + e.getMessage(), e);
+                    return false;
                 }
+            }
+
+            @Override
+            public boolean onTranscriptionInterrupted(@NonNull String marker) {
+                // Keep the marker literal and never rewrite the confirmed paragraph.
+                return commitVoiceText(marker, false);
             }
 
             @Override
@@ -2123,7 +2232,7 @@ public class LatinIME extends InputMethodService implements
 
             @Override
             public void onError(@NonNull String error) {
-                Log.e(TAG, "Voice input error: " + error);
+                // The manager logs the cause and session snapshot once.
                 mKeyboardSwitcher.hideProcessingIndicator();
                 showVoiceErrorToast(error);
             }
@@ -2151,45 +2260,58 @@ public class LatinIME extends InputMethodService implements
      *
      * @param text The prepared transcription text to insert
      */
-    private void commitVoiceTranscriptionText(@NonNull final String text) {
-        if (text.isEmpty()) {
-            return;
-        }
+    private boolean commitVoiceTranscriptionText(@NonNull final String text) {
+        return commitVoiceText(text, true);
+    }
+
+    private boolean commitVoiceText(@NonNull final String text, final boolean processTranscript) {
+        if (text.isEmpty()) return true;
+        if (mVoiceEditorMonitorActive && cancelVoiceIfEditorCleared()) return false;
+        if (!processTranscript && wasVoiceEditorCleared()) return false;
+        boolean batchStarted = false;
         try {
-            // Everything — finishInput, commitText, and optional post-processing
-            // replacement — is wrapped in a SINGLE batch edit.  This ensures the
-            // framework delivers only ONE onUpdateSelection whose newSelStart
-            // matches our final mExpectedSelStart.  Without this, the intermediate
-            // onUpdateSelection from the commit would arrive while mExpectedSelStart
-            // has already been shifted by the post-processing delete+re-commit,
-            // causing isBelatedExpectedUpdate to return false and the voice-cancel
-            // guard in onUpdateSelection to kill the recording session.
+            // beginBatchEdit increments the wrapper's nesting before calling the
+            // host, so finally must balance it even if the host throws there.
+            batchStarted = true;
             mInputLogic.mConnection.beginBatchEdit();
+            if (!mInputLogic.mConnection.isConnected()) return false;
             mInputLogic.finishInput();
 
-            // A pause can make Gemini finalize a sentence with "." before it
-            // hears a separately dictated punctuation mark. Replace that period
-            // only for a standalone voice punctuation segment. Do this at
-            // insertion time so earlier text is untouched and a selection still
-            // follows normal commitText replacement behavior.
-            if (text.length() == 1 && "!?,:;".indexOf(text.charAt(0)) >= 0
+            if (!processTranscript && !mInputLogic.mConnection.collapseSelectionToEndAndVerify()) {
+                Log.w(TAG, "VOICE interruption marker skipped: could not verify selection collapse");
+                return false;
+            }
+
+            boolean replacePreviousPeriod = false;
+            if (processTranscript && text.length() == 1 && "!?,:;".indexOf(text.charAt(0)) >= 0
                     && !mInputLogic.mConnection.hasSelection()) {
                 final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
                 if (before != null && before.length() == 1 && before.charAt(0) == '.') {
-                    mInputLogic.mConnection.deleteTextBeforeCursor(1);
+                    replacePreviousPeriod = true;
                 }
             }
-            mInputLogic.mConnection.commitText(text, 1);
-
-            runTranscriptPostProcessing();
-
-            mInputLogic.mConnection.endBatchEdit();
-
-            // Text has been inserted — hide the processing spinner.
-            mKeyboardSwitcher.hideProcessingIndicator();
+            String insertion = text;
+            if (!processTranscript && !mInputLogic.mConnection.hasSelection()) {
+                final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
+                if (before != null && before.length() > 0 && !Character.isWhitespace(before.charAt(0))) {
+                    insertion = " " + text;
+                }
+            }
+            final boolean accepted = replacePreviousPeriod
+                    ? mInputLogic.mConnection.replaceTextBeforeCursor(1, insertion)
+                    : mInputLogic.mConnection.commitText(insertion, 1);
+            if (!accepted) return false;
+            final boolean completed = !processTranscript || runTranscriptPostProcessing();
+            // Some editors never send text-change notifications. Remember a
+            // successful insertion too, so the next final cannot refill a field
+            // that started empty, received dictation, then was cleared silently.
+            if (completed && processTranscript) mVoiceEditorHadText = true;
+            return completed;
         } catch (Exception e) {
-            Log.e(TAG, "Error inserting transcription text: " + e.getMessage(), e);
-            mKeyboardSwitcher.hideProcessingIndicator();
+            Log.e(TAG, "Error inserting voice text: " + e.getMessage(), e);
+            return false;
+        } finally {
+            if (batchStarted) mInputLogic.mConnection.endBatchEdit();
         }
     }
 
@@ -2197,36 +2319,39 @@ public class LatinIME extends InputMethodService implements
      * Read the current paragraph (text from the last line break to the cursor),
      * run post-processing rules, and replace the paragraph if anything changed.
      *
-     * MUST be called inside an already-open batch edit so that the replacement
-     * does not produce a separate onUpdateSelection that confuses the voice-input
-     * cursor guard.
+     * Called inside a wrapper batch edit. Replacement temporarily flushes the
+     * host batch to verify its selection; delayed callbacks are checked against
+     * the host's current caret by the voice-input cursor guard.
      */
-    private void runTranscriptPostProcessing() {
+    private boolean runTranscriptPostProcessing() {
         final int maxParagraphLen = Constants.EDITOR_CONTENTS_CACHE_SIZE;
-        final CharSequence beforeCursor =
-                mInputLogic.mConnection.getTextBeforeCursor(maxParagraphLen, 0);
-        if (beforeCursor == null || beforeCursor.length() == 0) {
-            return;
+        // The host may defer the just-committed segment until its batch closes.
+        // Use our current cache to prepare the correction, then the replacement
+        // helper flushes the batch and verifies that the original text matches.
+        final CharSequence cached = mInputLogic.mConnection.getCachedTextBeforeCursor();
+        final CharSequence beforeCursor = cached.subSequence(
+                Math.max(0, cached.length() - maxParagraphLen), cached.length());
+        if (beforeCursor.length() == 0) {
+            return true;
         }
 
         final String before = beforeCursor.toString();
         final int newlinePos = before.lastIndexOf('\n');
         final String paragraph = (newlinePos >= 0) ? before.substring(newlinePos + 1) : before;
         if (paragraph.isEmpty()) {
-            return;
+            return true;
         }
 
         final String corrected =
                 TranscriptPostProcessor.INSTANCE.processCurrentParagraph(paragraph);
         if (corrected == null) {
-            return;
+            return true;
         }
 
         Log.i(TAG, "VOICE post-processing: replacing paragraph ("
                 + paragraph.length() + " → " + corrected.length() + " chars)");
 
-        mInputLogic.mConnection.deleteTextBeforeCursor(paragraph.length());
-        mInputLogic.mConnection.commitText(corrected, 1);
+        return mInputLogic.mConnection.replaceTextBeforeCursor(paragraph.length(), corrected);
     }
 
     /**

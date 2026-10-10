@@ -6,7 +6,7 @@ End-to-end voice transcription pipeline: local capture, Gemini Live real-time st
 
 1. **VoiceRecorder** captures PCM16 audio locally; silence detection drives an early turn finalize at speech boundaries and auto-stop after a longer pause.
 2. **GeminiTranscriptionClient** opens the Live API WebSocket, sends one `setup` frame, waits for `setupComplete`, streams base64 PCM as JSON text frames, parses `serverContent` transcripts, and surfaces finalized transcript segments.
-3. **VoiceInputManager** buffers audio until the session is ready, retries broken sessions, rotates sessions before the 10-minute cap, derives a session config from preferences + subtype locale + editor text, queues finalized segments in FIFO order, and performs the graceful `audioStreamEnd` shutdown.
+3. **VoiceInputManager** requires a usable network, buffers audio and control messages until readiness, stops broken or expiring sessions, derives a session config from preferences + subtype locale + editor text, queues finalized segments in FIFO order, and performs the graceful `audioStreamEnd` shutdown.
 4. **LatinIME** inserts each finalized transcript immediately at the current caret position through `InputConnection`, adding a leading space only when the segment is not attaching to previous text and surrounding editor text needs a separator.
 
 ## Architecture
@@ -39,9 +39,9 @@ WebSocket client for the Gemini Live API.
 - **Authentication**: API key in the query string; no HTTP header
 - **Startup**: sends one `setup` text frame at the negotiated `SetupTier`, then **waits for `{"setupComplete":{}}`** before reporting the stream ready
 - **Transport**: JSON text frames only; audio is base64 inside `realtimeInput.audio`
-- **Output**: commits `serverContent.inputTranscription` through `TranscriptAccumulator`; flushes leftover `interimInputTranscription` after `audioStreamEnd` if no final arrives; ignores `modelTurn`
-- **Turn finalize**: `{"realtimeInput":{"audioStreamEnd":true}}` ends the turn without ending the session; outbound audio is then held until speech resumes so silence does not reopen the turn
-- **Graceful stop**: sends `audioStreamEnd`, keeps reading for 8 s, closes 1000
+- **Output**: only `serverContent.inputTranscription` creates editor segments; interims remain provisional forever; ignores `modelTurn`
+- **Turn finalize**: `{"realtimeInput":{"audioStreamEnd":true}}` is queued behind preceding PCM; every captured chunk is forwarded, including quiet audio
+- **Graceful stop**: sends EOF after the recorder tail, reads for 8 s before closing; a nonempty socket queue at that deadline is failure
 - **Schema resilience**: retries one `SetupTier` lower when the server closes with 1007, caching the working tier in `negotiatedSetupTier`
 
 ### VoiceContextVocabulary.kt
@@ -52,21 +52,27 @@ Builds `inputAudioTranscription.customVocabulary`.
 ### VoiceInputManager.kt
 Orchestrates recording, Gemini streaming, and ordered transcript delivery.
 - **State machine**: IDLE → RECORDING ↔ PAUSED → IDLE
-- **Buffered audio**: holds PCM chunks until `setupComplete` arrives
-- **Transcript queue**: preserves FIFO delivery, including `attachesToPrevious`; coalesces oldest entries if the queue reaches 64
-- **Reconnects**: retries transient WebSocket failures while the session is active (3 attempts, exponential backoff)
-- **Session rotation**: on `goAway` (1.5 s before the announced deadline) and unconditionally after 9 minutes; waits for the current utterance and leftover-flush window unless `goAway` is already imminent; a deferred rotate is cancelled if the stream dies first; does not consume a reconnect attempt
-- **Session config**: maps the subtype locale to a documented BCP-47 code, clamps `silenceDurationMs` to 400–5000 ms
-- **Auto-stop timer**: stops recording after prolonged silence
-- **Turn finalize**: sends `audioStreamEnd` after local speech-stop silence, when an interim goes stale, on mic pause, and before graceful stop; holds outbound audio until the next speech onset
-- **Response watchdog**: 15 s (generous, because the session is tuned to prefer a correct transcript over a fast one); logs `VOICE_RESPONSE` lines for diagnostics
+- **Buffered audio/control FIFO**: retains up to 960,000 PCM bytes and 64 boundary controls until transport acceptance. Pause, silence, and stop cannot overtake earlier audio. The socket queue holds at most 256 KiB of encoded audio JSON; local backpressure retries the same head every 25 ms.
+- **Transcript FIFO**: retains each head until the listener returns local dispatch/cleanup success. Android IPC does not return the host editor's commit result. Overflow at 64 entries is terminal, with no coalescing or skipping.
+- **Terminal failure**: invalidate callback generations, stop capture, clear uncertain work, preserve inserted text, and mark possible loss with `[Dictation interrupted]` once. Editor rejection/exception suppresses a marker and stops later writes.
+- **Explicit restart**: no reconnect, resumption, or rotation. `goAway` or nine minutes stops capture and drains; the next recording requires a mic tap.
+- **Session config**: maps the subtype locale to a documented BCP-47 code, clamps `silenceDurationMs` to 400–5000 ms, and harvests vocabulary once per recording.
+- **Deadlines**: 12 seconds across all setup tiers, 30 seconds for oldest queued PCM, active local speech or pending recognized words without a server response, 15 seconds for EOF/close. The missing-final wait applies to recognized words, not RMS spikes, and starts at the current speech epoch's submitted `audioStreamEnd`. Repeated controls/interims cannot extend it; new onset clears it until the next boundary. A delayed older boundary cannot start a wait for the newer utterance. Graceful stop clears previous speech watchdogs and continues reading finals.
+- **Final progress**: an earlier final cannot acknowledge annotated speech still in the PCM or socket queue. PCM carries capture-time raw-energy evidence, separate from the speaking silence window. Track the encoded quiet/control suffix in the socket FIFO so silence alone does not block a final. A repeated authoritative final also acknowledges progress after queued speech drains, without another editor write.
+- **Auto-stop**: prolonged adaptive local silence stops recording intentionally. Local speech-stop, pause, and stop enqueue `audioStreamEnd`. Silence auto-stop drains late finals and closes normally without a marker for unconfirmed noise/hypotheses. Interims never become text; actual failures still report interruptions. At equal deadlines, normal silence stop wins over a speech watchdog.
+- **Capture shutdown**: a missed two-second join is terminal before EOF; an old live thread blocks reuse and keeps its original recording callback. Pause/resume changes the capture phase, so a native read interrupted by an earlier phase cannot falsely abort resumed recording.
 
 ### LatinIME.java
 Main orchestrator that coordinates all components and inserts text into the editor.
+- Cancels active/draining voice work immediately when the keyboard is hidden while interactive or the input target finishes/changes; screen-off hiding alone preserves recording.
+- Monitors host edits with a dedicated extracted-text token unless the framework's fullscreen extract view is visible, retaining its monitor then. Actual host reads on updates, restarts, and before insertion detect nonempty-to-empty clears even without selection movement. Successful insertion supplies nonempty-field evidence too. Null queries do not imply emptiness, and clears alone do not prove submission or hide the keyboard.
 - Uses `InputConnection.commitText(...)` at the caret, or replaces an active selection when text is highlighted
 - Calls `mInputLogic.finishInput()` first to keep composing state in sync
 - Applies pre-commit spacing/casing/trailing-punctuation shaping, then runs paragraph-level post-processing
-- Wraps commit and post-processing in one batch edit so intermediate `onUpdateSelection` callbacks do not cancel voice input
+- Wraps commit and post-processing in a wrapper batch edit, always closed in `finally`; temporarily closes/reopens the host batch before selection readback so deferred editors apply edits; reports false for rejected/throwing editor operations
+- Verifies actual host selection positions and selected text before committing cleanup/punctuation replacements without deleting the original first; on failure, restores the caret best-effort and refreshes caches without retrying text
+- Prepares paragraph correction from the current cache, then verifies matching original host text after flushing; ignores delayed intermediate selection callbacks only when the host's current caret matches the expected voice caret
+- Literal interruption markers bypass casing and paragraph cleanup; always verify the current caret, even when the cached selection is collapsed, and preserve highlighted text by moving to a verified caret at its end, or skip insertion if the move cannot be verified
 - Supplies editor text for vocabulary harvesting through `buildVoiceContextText`
 
 ## Data Flow Steps
@@ -76,6 +82,7 @@ Main orchestrator that coordinates all components and inserts text into the edit
 User taps mic
     → LatinIME.onVoiceInputClicked()
     → VoiceInputManager.toggleRecording()
+    → VoiceNetworkMonitor.start() (preflight + loss observation)
     → VoiceRecorder.startRecording()
     → State = RECORDING
 ```
@@ -105,17 +112,16 @@ Active subtype locale + transcription preferences + editor text
 ### 3. Transcript → Immediate Insert
 ```
 serverContent arrives
-    → interimInputTranscription is held, not committed while the speaker is talking
-    → after audioStreamEnd, a leftover interim is flushed if no final arrives
-      (also on session rotate, before the connection token is incremented)
+    → interimInputTranscription signals pending speech, never editor text
     → inputTranscription goes through TranscriptAccumulator
         · extends the previous transcript → emit only the suffix
         · unrelated text                  → emit all of it
         · identical repeat                → emit nothing
     → attachesToPrevious = (starts with attaching punctuation OR resumes mid-word)
     → VoiceInputManager queues and delivers the segment to LatinIME in FIFO order
-    → LatinIME conditionally adds a leading space and commits via InputConnection.commitText(...)
-    → turnComplete resets the accumulator
+    → LatinIME conditionally adds a leading space and commits via InputConnection
+    → only an accepted commit/cleanup removes the FIFO head; failure ends the session
+    → turnComplete resets the accumulator, without acknowledging audio
 ```
 
 ### 4. Explicit New Paragraph Command
@@ -138,7 +144,9 @@ PAUSED     → User taps pause  → RECORDING (resume)
 
 ### Ordering Guarantees
 - Transcript segments are queued and delivered in FIFO order by `VoiceInputManager`.
-- `LatinIME` inserts each finalized transcript immediately when received.
+- `LatinIME` returns local dispatch/cleanup success synchronously; a rejected operation or unverifiable replacement selection blocks every later segment. This is not confirmation of complete insertion by a remote host editor.
+- The same outgoing FIFO orders PCM and control frames. No buffered audio is evicted to admit later audio.
+- IDLE during graceful drain does not allow a new recording until the old connection closes.
 - Silence-driven automatic paragraph breaks are disabled to avoid unintended host-app side effects.
 - Cancelling voice input invalidates the active manager session so stale Gemini callbacks are dropped before they reach the IME.
 
@@ -167,12 +175,20 @@ MAX_SILENCE_DURATION_MS = 30000L
 
 ## Error Handling
 
-- **Network/transcription failures**: surfaced to the user; recording may continue or stop depending on stream state
-- **Empty transcriptions**: ignored
-- **Session cancellation**: pending stream/transcript work is invalidated through the manager session ID
-- **Insertion failures**: logged and the processing indicator is cleared
-- **Close code 1007**: retried at a lower `SetupTier` when the reason is a schema problem; surfaced as an error when the reason names an auth status
-- **In-band `error` payloads**: routed to `onStreamError`, mapping gRPC statuses (`UNAUTHENTICATED`, `PERMISSION_DENIED`, `RESOURCE_EXHAUSTED`, `FAILED_PRECONDITION`, …) to actionable messages
+Network/transport failure, unexpected close, malformed JSON, invalid PCM, queue
+overflow, or progress timeout terminates the recording. Callbacks from that
+recording become stale before capture is stopped. Accepted editor text remains;
+uncertain audio produces one literal interruption marker. Connectivity restoration
+cannot append an automatic suffix. A user cancellation discards pending work
+without a marker. Editor rejection/exception is terminal with no retry or marker.
+
+The only retry is a 1007 setup-schema fallback before `setupComplete`; auth
+failures are surfaced, and every tier shares the original connection deadline.
+
+Neither `send(true)`, `queueSize()`, nor `turnComplete` proves all audio arrived.
+These guards enforce local order and detect uncertainty; they cannot certify every
+word recognized upstream. See `docs/gemini-transcription.md` for source links and
+device acceptance checks.
 
 ## Thread Safety
 
