@@ -2286,14 +2286,14 @@ public class LatinIME extends InputMethodService implements
             // when a final contains line breaks. The paragraph pass also cleans
             // existing editor context and punctuation produced by spoken commands.
             String insertion = processTranscript
-                    ? TranscriptPostProcessor.INSTANCE.removePeriodsBeforePunctuation(text) : text;
-            boolean replacePreviousPeriod = false;
-            if (processTranscript
-                    && TranscriptPostProcessor.INSTANCE.startsWithPunctuationCorrection(insertion)
-                    && !mInputLogic.mConnection.hasSelection()) {
-                final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
-                if (before != null && before.length() == 1 && before.charAt(0) == '.') {
-                    replacePreviousPeriod = true;
+                    ? TranscriptPostProcessor.INSTANCE.removeRedundantPunctuation(text) : text;
+            boolean replacePreviousPunctuation = false;
+            if (processTranscript && !mInputLogic.mConnection.hasSelection()) {
+                // Include a two-letter filler (um/uh), its comma, and the word boundary.
+                final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(4, 0);
+                if (before != null && before.length() > 0) {
+                    replacePreviousPunctuation = TranscriptPostProcessor.INSTANCE
+                            .shouldReplacePreviousPunctuation(before, insertion);
                 }
             }
             if (!processTranscript && !mInputLogic.mConnection.hasSelection()) {
@@ -2302,7 +2302,7 @@ public class LatinIME extends InputMethodService implements
                     insertion = " " + text;
                 }
             }
-            final boolean accepted = replacePreviousPeriod
+            final boolean accepted = replacePreviousPunctuation
                     ? mInputLogic.mConnection.replaceTextBeforeCursor(1, insertion)
                     : mInputLogic.mConnection.commitText(insertion, 1);
             if (!accepted) return false;

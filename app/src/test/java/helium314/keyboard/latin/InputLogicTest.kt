@@ -148,6 +148,19 @@ class InputLogicTest {
         }
     }
 
+    @Test fun separateVoicePunctuationReplacesPreviousComma() {
+        for (mark in listOf('!', '?', ',', ':', ';', '.')) {
+            reset()
+            setText("That was great")
+
+            assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(latinIME, ","))
+            assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(latinIME, mark.toString()))
+
+            assertEquals("That was great$mark", getText(), "mark=$mark")
+            checkConnectionConsistency()
+        }
+    }
+
     @Test fun multiCharacterVoiceSegmentReplacesPreviousPeriod() {
         reset()
         setText("Done.")
@@ -162,16 +175,16 @@ class InputLogicTest {
         reset()
 
         assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(
-            latinIME, "First.! Next.?\nList.: Pause.;\nFinally.,"
+            latinIME, "First.! Next,?\nList,: Pause.;\nFinally., End,."
         ))
 
-        assertEquals("First! Next?\nList: Pause;\nFinally,", getText())
+        assertEquals("First! Next?\nList: Pause;\nFinally, End.", getText())
         checkConnectionConsistency()
     }
 
     @Test fun voicePunctuationCleanupCoversExistingParagraphText() {
         reset()
-        setText("Wow.! Really.? List.: Pause.; Also.,")
+        setText("Wow,! Really.? List,: Pause.; Also,,")
 
         assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(latinIME, " End."))
 
@@ -180,16 +193,56 @@ class InputLogicTest {
     }
 
     @Test fun longerVoicePunctuationCorrectionKeepsHostSelectionVerification() {
+        for (previous in listOf('.', ',')) {
+            reset()
+            setText("Confirmed$previous")
+            rejectSelection = true
+
+            assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "? Really,!"))
+
+            assertEquals("Confirmed$previous", getText())
+            assertEquals(0, commitCalls)
+            assertEquals(0, batchEdit)
+            checkConnectionConsistency()
+        }
+    }
+
+    @Test fun deferredEditorAppliesCommaCorrectionBeforeVerification() {
         reset()
-        setText("Confirmed.")
-        rejectSelection = true
+        setText("Confirmed,")
+        deferBatchEdits = true
 
-        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "? Really.!"))
+        assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(latinIME, "? Really,!"))
 
-        assertEquals("Confirmed.", getText())
-        assertEquals(0, commitCalls)
+        assertEquals("Confirmed? Really!", getText())
         assertEquals(0, batchEdit)
+        assertEquals(0, deferredEdits.size)
         checkConnectionConsistency()
+    }
+
+    @Test fun voicePeriodsPreserveAnExistingEllipsis() {
+        reset()
+        setText("Wait.")
+
+        assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(latinIME, ".."))
+
+        assertEquals("Wait...", getText())
+        checkConnectionConsistency()
+    }
+
+    @Test fun voiceCommaCorrectionKeepsFillerCleanup() {
+        for (filler in listOf("Um", "Uh")) {
+            for (splitAtComma in listOf(false, true)) {
+                reset()
+                setText(if (splitAtComma) "Confirmed, $filler," else "Confirmed")
+
+                val segment = if (splitAtComma) "! Yes" else " $filler,! Yes"
+                assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(latinIME, segment))
+
+                assertEquals("Confirmed! Yes", getText())
+                checkConnectionConsistency()
+            }
+        }
     }
 
     @Test fun voiceExclamationKeepsSelectedTextReplacement() {
