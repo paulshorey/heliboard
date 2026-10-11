@@ -382,14 +382,26 @@ instruction and the 100-term vocabulary cap are hardcoded in
 
 ## Local pre/post-processing
 
-Unchanged by the provider swap:
-
 - `LatinIME.prepareVoiceTranscriptionText()` handles separator-space insertion,
   mid-sentence leading-casing correction, and stripping a trailing `.`/`!`/`?`
   when dictating before lowercase text.
 - `LatinIME.runTranscriptPostProcessing()` runs `TranscriptPostProcessor` over the
   current paragraph after commit, for spoken commands such as "Comma." or "New
-  paragraph." and for leftover filler fragments.
+  paragraph." and for leftover filler fragments. It also removes periods/commas
+  directly before `!`, `?`, `,`, `:`, or `;`, plus commas before `.`, throughout that
+  paragraph after command conversion.
+- `TranscriptPostProcessor` owns the shared punctuation-correction set and
+  normalization. Each incoming segment is normalized before insertion, covering
+  every occurrence even across line breaks. A segment beginning with a correction
+  mark replaces a redundant period or comma immediately before the editor caret
+  through the verified replacement path, including segments containing additional
+  text. A short editor suffix plus the segment's first character uses the same
+  normalizer as complete transcripts. Mixed
+  runs of periods/commas before these marks are removed in one pass; ordinary
+  periods/commas, standalone ellipses, closing quotes/brackets, and marks separated
+  by whitespace are preserved. Early normalization keeps the comma on `um,`/`uh,`
+  until paragraph-level filler removal can recognize and remove the whole fragment.
+  Interruption markers bypass this cleanup.
 - Silence-driven automatic paragraph insertion stays disabled, because inserting
   line breaks on host-app silence caused form submissions and other side effects.
 

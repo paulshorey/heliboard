@@ -2282,22 +2282,27 @@ public class LatinIME extends InputMethodService implements
                 return false;
             }
 
-            boolean replacePreviousPeriod = false;
-            if (processTranscript && text.length() == 1 && "!?,:;".indexOf(text.charAt(0)) >= 0
-                    && !mInputLogic.mConnection.hasSelection()) {
-                final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
-                if (before != null && before.length() == 1 && before.charAt(0) == '.') {
-                    replacePreviousPeriod = true;
+            // Normalize the entire segment here, including earlier paragraphs
+            // when a final contains line breaks. The paragraph pass also cleans
+            // existing editor context and punctuation produced by spoken commands.
+            String insertion = processTranscript
+                    ? TranscriptPostProcessor.INSTANCE.removeRedundantPunctuation(text) : text;
+            boolean replacePreviousPunctuation = false;
+            if (processTranscript && !mInputLogic.mConnection.hasSelection()) {
+                // Include a two-letter filler (um/uh), its comma, and the word boundary.
+                final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(4, 0);
+                if (before != null && before.length() > 0) {
+                    replacePreviousPunctuation = TranscriptPostProcessor.INSTANCE
+                            .shouldReplacePreviousPunctuation(before, insertion);
                 }
             }
-            String insertion = text;
             if (!processTranscript && !mInputLogic.mConnection.hasSelection()) {
                 final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(1, 0);
                 if (before != null && before.length() > 0 && !Character.isWhitespace(before.charAt(0))) {
                     insertion = " " + text;
                 }
             }
-            final boolean accepted = replacePreviousPeriod
+            final boolean accepted = replacePreviousPunctuation
                     ? mInputLogic.mConnection.replaceTextBeforeCursor(1, insertion)
                     : mInputLogic.mConnection.commitText(insertion, 1);
             if (!accepted) return false;
