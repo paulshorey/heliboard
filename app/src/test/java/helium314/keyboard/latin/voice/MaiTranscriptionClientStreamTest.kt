@@ -44,6 +44,18 @@ class MaiTranscriptionClientStreamTest {
         assertTrue(client.sendAudioChunk(byteArrayOf(1, 0)))
         assertEquals(2, session.audio.single().size)
     }
+    @Test fun providerPeriodsReachTheImeUnchangedAndDiagnosticsContainOnlyCounts() {
+        ready(); client.sendAudioChunk(ByteArray(3200))
+        val raw = "Navigation comes up from the bottom. the trigger is full width. and continues."
+        session.final(raw); pump()
+        assertTrue("text:$raw" in events)
+        val diagnostic = helium314.keyboard.latin.utils.Log.getVoiceDiagnosticsLog().last {
+            it.message.contains("MAI completed transcript")
+        }.message
+        assertTrue(diagnostic.contains("periods=3 lowercaseContinuations=2"))
+        assertFalse(diagnostic.contains(raw)); assertFalse(diagnostic.contains("Navigation"))
+    }
+
     @Test fun closesInputAndWaitsForEofAfterAllFinals() {
         ready(); client.sendAudioChunk(byteArrayOf(1, 0)); client.finishStreaming()
         assertTrue(session.inputFinished)

@@ -2294,13 +2294,15 @@ public class LatinIME extends InputMethodService implements
             // existing editor context and punctuation produced by spoken commands.
             String insertion = processTranscript
                     ? TranscriptPostProcessor.INSTANCE.removeRedundantPunctuation(text) : text;
-            boolean replacePreviousPunctuation = false;
+            TranscriptPostProcessor.PunctuationReplacement punctuationReplacement = null;
             if (processTranscript && !mInputLogic.mConnection.hasSelection()) {
-                // Include a two-letter filler (um/uh), its comma, and the word boundary.
-                final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(4, 0);
+                // Keep enough of the preceding word to recognize abbreviations
+                // and fillers when a correction spans two finalized segments.
+                final CharSequence before = mInputLogic.mConnection
+                        .getTextBeforeCursor(VOICE_PUNCTUATION_LOOKBACK, 0);
                 if (before != null && before.length() > 0) {
-                    replacePreviousPunctuation = TranscriptPostProcessor.INSTANCE
-                            .shouldReplacePreviousPunctuation(before, insertion);
+                    punctuationReplacement = TranscriptPostProcessor.INSTANCE
+                            .previousPunctuationReplacement(before, insertion);
                 }
             }
             if (!processTranscript && !mInputLogic.mConnection.hasSelection()) {
@@ -2309,8 +2311,9 @@ public class LatinIME extends InputMethodService implements
                     insertion = " " + text;
                 }
             }
-            final boolean accepted = replacePreviousPunctuation
-                    ? mInputLogic.mConnection.replaceTextBeforeCursor(1, insertion)
+            final boolean accepted = punctuationReplacement != null
+                    ? mInputLogic.mConnection.replaceTextBeforeCursor(
+                            punctuationReplacement.getBeforeLength(), punctuationReplacement.getText())
                     : mInputLogic.mConnection.commitText(insertion, 1);
             if (!accepted) return false;
             final boolean completed = !processTranscript || runTranscriptPostProcessing();
@@ -2372,6 +2375,8 @@ public class LatinIME extends InputMethodService implements
      * closing quotes/brackets before reaching the sentence-ending mark.
      */
     private static final int VOICE_CASING_LOOKBACK = 16;
+
+    private static final int VOICE_PUNCTUATION_LOOKBACK = 32;
 
     /**
      * Characters of editor context after the cursor used to detect mid-sentence

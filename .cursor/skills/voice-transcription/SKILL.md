@@ -19,7 +19,7 @@ Preserve these contracts:
 - Deduplicate result IDs, preserving repeated phrases with separate IDs.
 - Close input and wait for EOF before disposing a stopped or rotating session.
 - Accept a mic restart during drain, buffering capture until outgoing EOF and preserving transcript order.
-- Preserve model punctuation during local cleanup. Verify streaming-model support before adding generic SDK formatting/segmentation options; OutputFormat and ProfanityOption are ignored.
+- Preserve model punctuation apart from spoken commands, adjacent punctuation correction, and single periods before horizontal whitespace plus a lowercase letter. Guard common/dotted abbreviations, ellipses and paragraph breaks; apply within finals and verified cross-final replacement, preserving whitespace. This is a casing heuristic and can join intentional lowercase sentence starts. Verify streaming-model support before adding generic SDK formatting/segmentation options. The integration leaves OutputFormat and ProfanityOption unset; do not assume generic Azure options are supported.
 - Invalidate tokens on cancel/editor changes. Release all SDK handles on the worker.
 - Let the SDK own acknowledgements and recovery. Do not replay audio from the application.
 - Require validated internet before capture and observe network loss through drain. Keep the SDK Connection alive; disconnect while input is open and SDK errors end dictation without automatic retries. Mark uncertain audio with `[Dictation interrupted]` and require a deliberate new start.
@@ -27,6 +27,6 @@ Preserve these contracts:
 - Capture failures retain accepted speech to EOF, ignore later recorder callbacks, block restart while draining, and keep processing visible. Cancel dictation on editor rejection; no later final may follow an unwritten result. Cleanup and punctuation replacement select the range and use one commit operation; never delete accepted text before attempting its replacement. Restore text/cursor caches on rejected commits.
 - Before readiness, failure leaves the editor untouched. After readiness/capture, actual failures insert one literal marker, bypassing punctuation/cleanup and verifying the host caret to preserve highlighted text.
 - Carry editor protections through the MAI pipeline: verify host ranges/selections after flushing deferred batches, check belated selection callbacks against the actual caret, and cancel all work immediately on interactive hiding, input loss, or verified host clears. Null reads are unavailable; a clear does not prove submission. Screen-off hiding preserves recording.
-- Keep key/region settings and diagnostics free of raw credentials or service error details.
+- Keep key/region settings and diagnostics free of raw credentials, transcript contents, or service error details. Incoming MAI final diagnostics may include only length and punctuation counts before normalization.
 
 Validate with the client, manager, preference, transcript-formatting, and diagnostics tests, and the canonical APK build. `tools/mai-streaming-smoke-test.py` uses the Python Speech SDK for a credentialed check; a supported Android device is required to validate native execution and latency.

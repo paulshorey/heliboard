@@ -117,7 +117,9 @@ class MaiTranscriptionClient internal constructor(
                 settleBoundaries(finalReceived = true)
                 if (text.isNotBlank()) {
                     val finalText = text.trim()
-                    Log.i(TAG, "VOICE_STEP_4 MAI completed transcript (${finalText.length} chars)")
+                    Log.i(TAG, "VOICE_STEP_4 MAI completed transcript (${finalText.length} chars) " +
+                        "periods=${finalText.count { it == '.' }} " +
+                        "lowercaseContinuations=${TranscriptPostProcessor.countMidSentencePeriods(finalText)}")
                     this@MaiTranscriptionClient.callback?.onTranscriptionResult(TranscriptSegment(finalText,
                         finalText.first() in ",.!?;:%)]}、。，！？：；…"))
                     if (token != connectionToken) return@post
