@@ -15,6 +15,8 @@ class MaiTranscriptionClient internal constructor(
     private val completionTimeoutMs: Long = 60_000L,
     private val platformError: () -> String? = { deviceSupportError() },
     private val progressTimeoutMs: Long = 30_000L,
+    private val recoveryTimeoutMs: Long = 20_000L,
+    private val eofTimeoutMs: Long = 20_000L,
 ) {
     companion object {
         private const val TAG = "MaiTranscription"
@@ -47,6 +49,9 @@ class MaiTranscriptionClient internal constructor(
 
     interface StreamingCallback {
         fun onStreamReady()
+        fun onServiceConnected() {}
+        fun onStreamRecovering() {}
+        fun onStartupRejected() {}
         fun onTranscriptionResult(segment: TranscriptSegment)
         fun onPendingProcessingChanged()
         fun onStreamError(error: String, incomplete: Boolean)
@@ -82,44 +87,96 @@ class MaiTranscriptionClient internal constructor(
     private var pendingWords = false
     private var localSpeechActive = false
     private var speechStartedAt: Long? = null
+    private var activeConfig: MaiConfig? = null
+    private var activeLanguage: String? = null
+    private val replayAudio = PendingAudioReplay()
+    private val replayQueue = ArrayDeque<ByteArray>()
+    private var audioBase = 0L
+    private var replaySafe = true
+    private var retries = 0
+    private var recovering = false
+    private var recoveryStartedAt: Long? = null
+    private var recoveryTimeout: Runnable? = null
+    private var startupTimeout: Runnable? = null
+    private var eofDeadline: Long? = null
+    private var sdkReady = false
+    private var serviceConnected = false
+    private var serviceResponded = false
+    private var transportPaused = false
 
     val hasPendingProcessing: Boolean get() = finishing || unfinalizedAudio.isNotEmpty() ||
-        pendingWords || boundaries.isNotEmpty()
+        pendingWords || boundaries.isNotEmpty() || recovering
+    val hasUnconfirmedSpeech: Boolean get() = unfinalizedAudio.isNotEmpty() || pendingWords
     internal fun configurationError(config: MaiConfig): String? = platformError() ?: config.validationError()
 
     fun startStreaming(config: MaiConfig, languageTag: String?, callback: StreamingCallback) {
         cancelAll()
         this.callback = callback
         configurationError(config)?.let { fail(it); return }
+        activeConfig = config
+        activeLanguage = resolveLanguage(languageTag, config.autoDetectLanguage)
+        openSession()
+        Log.i(TAG, "VOICE_STEP_3 starting direct Azure Speech dictation")
+    }
+
+    private fun openSession() {
+        transportPaused = false
         val active = sessionFactory()
         session = active
         val token = connectionToken
-        armTimeout(START_TIMEOUT_MS, "Azure Speech session startup timed out.")
-        active.start(config, resolveLanguage(languageTag, config.autoDetectLanguage), object : MaiSpeechSession.Listener {
+        startupTimeout?.let { handler.removeCallbacks(it) }
+        startupTimeout = Runnable { if (token == connectionToken)
+            recoverOrFail("Azure Speech service startup timed out.")
+        }.also { handler.postDelayed(it, START_TIMEOUT_MS) }
+        active.start(activeConfig!!, activeLanguage, object : MaiSpeechSession.Listener {
             override fun onReady() = post(token) {
-                if (ready || finishing) return@post
-                ready = true
-                clearTimeout()
-                Log.i(TAG, "VOICE_RESPONSE Azure Speech SDK ready")
-                this@MaiTranscriptionClient.callback?.onStreamReady()
+                sdkReady = true
+                Log.i(TAG, "VOICE_RESPONSE Azure Speech local recognizer started attempt=$retries")
+                flushReplay()
+            }
+            override fun onConnected() = post(token) {
+                serviceConnected = true
+                transportPaused = false
+                startupTimeout?.let { handler.removeCallbacks(it) }; startupTimeout = null
+                if (replayQueue.isEmpty()) clearRecoveryTimeout()
+                Log.i(TAG, "VOICE_RESPONSE Azure Speech transport connected attempt=$retries")
+                this@MaiTranscriptionClient.callback?.onServiceConnected()
+                // Local startup can finish after Connected; it owns write readiness.
+                if (recovering) recovering = false
+                flushReplay()
+            }
+            override fun onDisconnected() = post(token) {
+                serviceConnected = false
+                Log.w(TAG, "VOICE_RESPONSE Azure Speech transport disconnected finishing=$finishing " +
+                    "acceptedBytes=$totalBytes finalizedBytes=$finalizedBytes attempt=$retries")
+                if (!finishing) beginRecovery()
+                // EOF can disconnect normally; keep its original absolute deadline.
             }
             override fun onFinal(resultId: String, text: String, audioEndBytes: Long, commitToken: Int) = post(token) {
                 if (resultId.isNotEmpty() && !completedIds.add(resultId)) return@post
-                if (audioEndBytes < 0 || audioEndBytes > totalBytes ||
-                    (audioEndBytes > 0 && audioEndBytes < lastResultEndBytes)) {
+                val absoluteEnd = audioBase + audioEndBytes - audioEndBytes % 2
+                if (audioEndBytes < 0 || absoluteEnd > totalBytes ||
+                    (audioEndBytes > 0 && absoluteEnd < lastResultEndBytes)) {
                     fail("Azure Speech returned inconsistent audio timing. Dictation stopped.")
                     return@post
                 }
-                lastResultEndBytes = maxOf(lastResultEndBytes, audioEndBytes)
+                lastResultEndBytes = maxOf(lastResultEndBytes, absoluteEnd)
+                serviceResponded = true
                 lastResponseAt = SystemClock.elapsedRealtime()
                 if (commitToken > 0) completedTokens.add(commitToken)
-                finalizedBytes = maxOf(finalizedBytes, audioEndBytes.coerceAtMost(totalBytes))
+                finalizedBytes = maxOf(finalizedBytes, absoluteEnd)
                 settleBoundaries(finalReceived = true)
+                replayAudio.confirm(finalizedBytes)
+                if (text.isNotBlank() && audioEndBytes == 0L && finalizedBytes <= audioBase) replaySafe = false
+                // Recognition proves remote service progress even if Connected was delayed.
+                startupTimeout?.let { handler.removeCallbacks(it) }; startupTimeout = null
+                this@MaiTranscriptionClient.callback?.onServiceConnected()
                 if (text.isNotBlank()) {
                     val finalText = text.trim()
                     Log.i(TAG, "VOICE_STEP_4 MAI completed transcript (${finalText.length} chars) " +
                         "periods=${finalText.count { it == '.' }} " +
-                        "lowercaseContinuations=${TranscriptPostProcessor.countMidSentencePeriods(finalText)}")
+                        "lowercaseContinuations=${TranscriptPostProcessor.countMidSentencePeriods(finalText)} " +
+                        "endBytes=$absoluteEnd acceptedBytes=$totalBytes attempt=$retries")
                     this@MaiTranscriptionClient.callback?.onTranscriptionResult(TranscriptSegment(finalText,
                         finalText.first() in ",.!?;:%)]}、。，！？：；…"))
                     if (token != connectionToken) return@post
@@ -128,6 +185,7 @@ class MaiTranscriptionClient internal constructor(
                 this@MaiTranscriptionClient.callback?.onPendingProcessingChanged()
             }
             override fun onInterim() = post(token) {
+                serviceResponded = true
                 lastResponseAt = SystemClock.elapsedRealtime()
                 pendingWords = true
                 // Interims prove liveness, never final coverage. They cannot move
@@ -135,24 +193,31 @@ class MaiTranscriptionClient internal constructor(
                 armProgressTimeout()
             }
             override fun onCommitRequested(token: Int, audioEndBytes: Long) = post(tokenOfConnection) {
-                boundaries.firstOrNull { it.endBytes == audioEndBytes }?.token = token
+                boundaries.firstOrNull { it.endBytes == audioBase + audioEndBytes }?.token = token
                 settleBoundaries()
                 armCompletionTimeout()
                 this@MaiTranscriptionClient.callback?.onPendingProcessingChanged()
             }
             private val tokenOfConnection = token
             override fun onEnded() = post(token) {
-                if (!finishing) { fail("Azure Speech ended the dictation session unexpectedly."); return@post }
+                if (!finishing) { recoverOrFail("Azure Speech ended the dictation session unexpectedly."); return@post }
                 // EOF is the SDK's definitive drain signal, even for advisory commits
                 // that never echo a token or speech that produces NoMatch.
                 val listener = this@MaiTranscriptionClient.callback
                 cancelAll()
                 listener?.onStreamClosed()
             }
-            override fun onError(message: String) = post(token) { fail(message) }
-            override fun onWriteAvailable() = post(token) { this@MaiTranscriptionClient.callback?.onAudioWriteAvailable() }
+            override fun onError(message: String, retryable: Boolean, startupRejection: Boolean) = post(token) {
+                Log.w(TAG, "VOICE_RESPONSE SDK cancellation retryable=$retryable attempt=$retries cause=$message")
+                if (startupRejection && !serviceResponded) this@MaiTranscriptionClient.callback?.onStartupRejected()
+                if (token != connectionToken) return@post
+                if (retryable) recoverOrFail(message) else fail(message)
+            }
+            override fun onWriteAvailable() = post(token) {
+                flushReplay()
+                if (ready) this@MaiTranscriptionClient.callback?.onAudioWriteAvailable()
+            }
         })
-        Log.i(TAG, "VOICE_STEP_3 starting direct Azure Speech dictation")
     }
 
     fun sendAudioChunk(pcmData: ByteArray, containsSpeech: Boolean = true): Boolean {
@@ -167,6 +232,7 @@ class MaiTranscriptionClient internal constructor(
             else -> { fail("Azure Speech could not accept microphone audio. Dictation stopped."); return false }
         }
         val wasPending = hasPendingProcessing
+        replayAudio.add(totalBytes, pcmData)
         totalBytes += pcmData.size
         if (containsSpeech) unfinalizedAudio.addLast(AudioProgress(totalBytes, SystemClock.elapsedRealtime()))
         armProgressTimeout()
@@ -196,7 +262,7 @@ class MaiTranscriptionClient internal constructor(
         }
         committedBytes = totalBytes
         boundaries.addLast(Boundary(totalBytes, SystemClock.elapsedRealtime()))
-        session?.commit(totalBytes)
+        session?.commit(totalBytes - audioBase)
         if (currentSpeechBoundary && finalBoundaryAt == null) {
             localSpeechActive = false
             finalBoundaryAt = SystemClock.elapsedRealtime()
@@ -215,7 +281,10 @@ class MaiTranscriptionClient internal constructor(
         clearProgressTimeout()
         session?.finishInput()
         // Never call stopContinuousRecognition here: it may truncate buffered audio.
-        armTimeout(completionTimeoutMs, "Azure Speech timed out draining the final audio.")
+        eofDeadline = eofDeadline ?: (SystemClock.elapsedRealtime() + minOf(eofTimeoutMs, completionTimeoutMs))
+        Log.i(TAG, "VOICE_STOP closing input acceptedBytes=$totalBytes finalizedBytes=$finalizedBytes")
+        armTimeout((eofDeadline!! - SystemClock.elapsedRealtime()).coerceAtLeast(0),
+            "Azure Speech timed out draining the final audio.")
         callback?.onPendingProcessingChanged()
     }
 
@@ -223,6 +292,8 @@ class MaiTranscriptionClient internal constructor(
         connectionToken++
         clearTimeout()
         clearProgressTimeout()
+        clearRecoveryTimeout()
+        startupTimeout?.let { handler.removeCallbacks(it) }; startupTimeout = null
         session?.close()
         session = null
         callback = null
@@ -242,6 +313,19 @@ class MaiTranscriptionClient internal constructor(
         pendingWords = false
         localSpeechActive = false
         speechStartedAt = null
+        activeConfig = null
+        replayAudio.clear()
+        replayQueue.clear()
+        audioBase = 0
+        replaySafe = true
+        retries = 0
+        recovering = false
+        recoveryStartedAt = null
+        eofDeadline = null
+        sdkReady = false
+        serviceConnected = false
+        serviceResponded = false
+        transportPaused = false
     }
 
     private fun settleBoundaries(finalReceived: Boolean = false) {
@@ -255,15 +339,105 @@ class MaiTranscriptionClient internal constructor(
         }
         while (boundaries.firstOrNull()?.endBytes?.let { it <= finalizedBytes } == true) boundaries.removeFirst()
         settleAudioProgress(finalReceived || settledByFinalToken)
+        replayAudio.confirm(finalizedBytes)
+    }
+
+    /** Android route observations stop capture; recognition/EOF still decide the outcome. */
+    fun onNetworkUnavailable() { if (session != null) beginRecovery() }
+
+    private fun beginRecovery() {
+        val token = connectionToken
+        if (!recovering) {
+            recovering = true
+            ready = false
+            transportPaused = true
+            recoveryStartedAt = recoveryStartedAt ?: SystemClock.elapsedRealtime()
+            callback?.onStreamRecovering()
+        }
+        if (token != connectionToken) return
+        if (recoveryTimeout != null) return
+        // Give the existing SDK connection time to recover or report Canceled.
+        recoveryTimeout = Runnable {
+            recoveryTimeout = null
+            if (token == connectionToken) recoverOrFail("Azure Speech could not restore its connection.")
+        }.also { handler.postDelayed(it, 3_000L) }
+    }
+
+    private fun recoverOrFail(message: String) {
+        val now = SystemClock.elapsedRealtime()
+        val started = recoveryStartedAt ?: now
+        recoveryStartedAt = started
+        val suffix = if (replaySafe) replayAudio.suffix(finalizedBytes, totalBytes) else null
+        if (retries >= 2 || now - started >= recoveryTimeoutMs ||
+            eofDeadline?.let { now >= it } == true || suffix == null) {
+            fail(when {
+                !replaySafe -> "$message A final transcript lacked timing needed for safe audio recovery."
+                suffix == null -> "$message Unfinished audio exceeds the safe recovery buffer."
+                else -> message
+            })
+            return
+        }
+        val previousToken = connectionToken
+        beginRecovery()
+        if (previousToken != connectionToken) return
+        clearRecoveryTimeout()
+        clearTimeout()
+        clearProgressTimeout()
+        startupTimeout?.let { handler.removeCallbacks(it) }; startupTimeout = null
+        val old = session
+        connectionToken++ // Late events from the failed recognizer cannot write text.
+        old?.close()
+        session = null
+        ready = false
+        sdkReady = false
+        serviceConnected = false
+        finishing = false
+        audioBase = finalizedBytes
+        committedBytes = finalizedBytes
+        boundaries.clear()
+        completedTokens.clear()
+        completedIds.clear()
+        replayQueue.clear()
+        replayQueue.addAll(suffix)
+        retries++
+        Log.w(TAG, "VOICE_RECOVERY replacement attempt=$retries replayBytes=${totalBytes - audioBase} " +
+            "confirmedBytes=$audioBase cause=$message")
+        val token = connectionToken
+        val deadline = minOf(started + recoveryTimeoutMs, eofDeadline ?: Long.MAX_VALUE)
+        recoveryTimeout = Runnable { if (token == connectionToken)
+            fail("Azure Speech recovery timed out. Microphone stopped.")
+        }.also { handler.postDelayed(it, (deadline - now).coerceAtLeast(0)) }
+        handler.postDelayed({ if (token == connectionToken) openSession() }, if (retries == 1) 500L else 1_500L)
+    }
+
+    private fun flushReplay() {
+        if (!sdkReady || ready || transportPaused || finishing) return
+        while (replayQueue.isNotEmpty()) {
+            when (session?.write(replayQueue.first())) {
+                MaiSpeechSession.WriteResult.ACCEPTED -> replayQueue.removeFirst()
+                MaiSpeechSession.WriteResult.BACKPRESSURE -> return
+                else -> { recoverOrFail("Azure Speech could not accept recovery audio."); return }
+            }
+        }
+        ready = true
+        if (serviceConnected) {
+            recovering = false
+            clearRecoveryTimeout()
+        }
+        callback?.onStreamReady()
+    }
+
+    private fun clearRecoveryTimeout() {
+        recoveryTimeout?.let { handler.removeCallbacks(it) }
+        recoveryTimeout = null
     }
 
     private fun fail(message: String) {
-        val pendingAudio = totalBytes > finalizedBytes || boundaries.isNotEmpty()
+        val pendingAudio = hasUnconfirmedSpeech
         val listener = callback
         cancelAll()
         val description = if (pendingAudio) "$message The last voice segment could not be finalized." else message
         Log.e(TAG, description)
-        // A detected failure is terminal even when the SDK might reconnect.
         listener?.onStreamError(description, pendingAudio)
     }
 
