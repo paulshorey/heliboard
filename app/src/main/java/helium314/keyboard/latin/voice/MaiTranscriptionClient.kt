@@ -92,6 +92,7 @@ class MaiTranscriptionClient internal constructor(
     private val replayAudio = PendingAudioReplay()
     private val replayQueue = ArrayDeque<ByteArray>()
     private var audioBase = 0L
+    private var attemptSubmittedBytes = 0L
     private var replaySafe = true
     private var retries = 0
     private var recovering = false
@@ -121,6 +122,7 @@ class MaiTranscriptionClient internal constructor(
 
     private fun openSession() {
         transportPaused = false
+        attemptSubmittedBytes = 0
         val active = sessionFactory()
         session = active
         val token = connectionToken
@@ -155,7 +157,7 @@ class MaiTranscriptionClient internal constructor(
             override fun onFinal(resultId: String, text: String, audioEndBytes: Long, commitToken: Int) = post(token) {
                 if (resultId.isNotEmpty() && !completedIds.add(resultId)) return@post
                 val absoluteEnd = audioBase + audioEndBytes - audioEndBytes % 2
-                if (audioEndBytes < 0 || absoluteEnd > totalBytes ||
+                if (audioEndBytes < 0 || audioEndBytes > attemptSubmittedBytes || absoluteEnd > totalBytes ||
                     (audioEndBytes > 0 && absoluteEnd < lastResultEndBytes)) {
                     fail("Azure Speech returned inconsistent audio timing. Dictation stopped.")
                     return@post
@@ -232,6 +234,7 @@ class MaiTranscriptionClient internal constructor(
             else -> { fail("Azure Speech could not accept microphone audio. Dictation stopped."); return false }
         }
         val wasPending = hasPendingProcessing
+        attemptSubmittedBytes += pcmData.size
         replayAudio.add(totalBytes, pcmData)
         totalBytes += pcmData.size
         if (containsSpeech) unfinalizedAudio.addLast(AudioProgress(totalBytes, SystemClock.elapsedRealtime()))
@@ -317,6 +320,7 @@ class MaiTranscriptionClient internal constructor(
         replayAudio.clear()
         replayQueue.clear()
         audioBase = 0
+        attemptSubmittedBytes = 0
         replaySafe = true
         retries = 0
         recovering = false
@@ -414,7 +418,7 @@ class MaiTranscriptionClient internal constructor(
         if (!sdkReady || ready || transportPaused || finishing) return
         while (replayQueue.isNotEmpty()) {
             when (session?.write(replayQueue.first())) {
-                MaiSpeechSession.WriteResult.ACCEPTED -> replayQueue.removeFirst()
+                MaiSpeechSession.WriteResult.ACCEPTED -> attemptSubmittedBytes += replayQueue.removeFirst().size
                 MaiSpeechSession.WriteResult.BACKPRESSURE -> return
                 else -> { recoverOrFail("Azure Speech could not accept recovery audio."); return }
             }

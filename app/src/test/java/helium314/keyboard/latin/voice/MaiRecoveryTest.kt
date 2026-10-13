@@ -138,6 +138,14 @@ class MaiRecoveryTest {
         assertEquals((0 until 300).map { it.toByte() }, active.audio.map { it[0] })
         assertEquals(2, events.count { it == "ready" })
     }
+    @Test fun replacementFinalCannotConfirmAudioStillWaitingToBeReplayed() {
+        ready(); repeat(300) { audio(it) }; active.error(); pump(); pump(500)
+        active.deferWrites = true; active.ready(); pump()
+        // Capacity accepts only 80 chunks, while the original attempt held 300.
+        active.final("Invalid future coverage.", end = 960000, token = 0); pump()
+        assertTrue(events.any { it.contains("inconsistent audio timing") })
+        assertFalse(events.any { it.startsWith("text:") }); assertFalse(client.hasPendingProcessing)
+    }
     @Test fun explicitCancelSuppressesScheduledReplacementAndClearsAudio() {
         ready(); audio(1); active.error(); pump(); client.cancelAll(); pump(30000)
         assertEquals(1, sessions.size); assertFalse(client.hasPendingProcessing)
