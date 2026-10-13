@@ -16,3 +16,5 @@ app/.attach_*
 fastlane/Appfile
 tools/*.txt
 .agents
+.env
+.env.*

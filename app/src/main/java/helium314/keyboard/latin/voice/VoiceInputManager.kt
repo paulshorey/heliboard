@@ -24,18 +24,23 @@ class VoiceInputManager internal constructor(
     companion object {
         private const val TAG = "VoiceInputManager"
         private const val MAX_PENDING_AUDIO_CHUNKS = 300 // 30 seconds at the recorder's cadence
+        internal const val MAX_PENDING_TRANSCRIPTS = 64
+        internal const val MAX_PENDING_CONTROLS = 64
+        internal const val INTERRUPTION_MARKER = "[Dictation interrupted]"
     }
 
     enum class State { IDLE, RECORDING, PAUSED }
 
     interface VoiceInputListener {
         fun onStateChanged(state: State)
-        fun onTranscriptionResult(text: String, attachesToPrevious: Boolean)
+        /** Local dispatch/cleanup success; remote Android IPC is not an editor receipt. */
+        fun onTranscriptionResult(text: String, attachesToPrevious: Boolean): Boolean
         fun onProcessingStarted()
         fun onProcessingIdle()
         fun onPendingProcessingCancelled()
         fun onError(error: String)
-        fun onTranscriptionInterrupted()
+        /** Insert literally, without transcript cleanup or replacing selected text. */
+        fun onTranscriptionInterrupted(marker: String): Boolean
         fun onPermissionRequired()
     }
 
@@ -54,11 +59,20 @@ class VoiceInputManager internal constructor(
     private var awaitingIntegrityDrain = false
     private var capturedSequence = 0L
     private var uploadedSequence = 0L
-    private var commitAtSequence: Long? = null
+    private data class CommitBoundary(val sequence: Long, val speechEpoch: Long)
+    private val commitBoundaries = ArrayDeque<CommitBoundary>()
+    private var speechEpoch = 0L
+    private var localSpeechActive = false
+    private var streamReachedReady = false
+    private var hasCapturedAudio = false
+    private var autoStopAtMs: Long? = null
+    private val pendingTranscripts = ArrayDeque<TranscriptSegment>()
+    private var dispatchingTranscripts = false
     private var connectionReadyAt = 0L
     private var rotation: Runnable? = null
     private var autoStopSilenceMs = Defaults.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS * 1000L
-    private data class BufferedAudio(val pcm: ByteArray, val capturedAt: Long, val sequence: Long)
+    private data class BufferedAudio(val pcm: ByteArray, val containsSpeech: Boolean,
+        val capturedAt: Long, val sequence: Long)
     private val pendingAudio = ArrayDeque<BufferedAudio>()
     private var audioQueueTimeout: Runnable? = null
     private val autoStop = Runnable { if (isRecording) stopRecording() }
@@ -69,7 +83,7 @@ class VoiceInputManager internal constructor(
     val state: State get() = currentState
 
     fun hasPendingProcessing(): Boolean = pendingAudio.isNotEmpty() || connecting || draining ||
-        stopRequested || client.hasPendingProcessing
+        stopRequested || client.hasPendingProcessing || pendingTranscripts.isNotEmpty() || dispatchingTranscripts
 
     fun setListener(listener: VoiceInputListener?) { this.listener = listener }
 
@@ -125,26 +139,33 @@ class VoiceInputManager internal constructor(
             override fun onRecordingStarted() {
                 if (activeSession == sessionId) Log.i(TAG, "VOICE_STEP_1 microphone started")
             }
-            override fun onAudioChunk(pcmData: ByteArray) {
+            override fun onAudioChunk(pcmData: ByteArray, containsSpeech: Boolean) {
                 if (activeSession != sessionId || captureFailed || pcmData.isEmpty()) return
+                hasCapturedAudio = true
                 if (pendingAudio.size >= MAX_PENDING_AUDIO_CHUNKS) {
                     failCapture("Voice audio buffer filled before the connection became ready. Try again.")
                     return
                 }
-                pendingAudio.addLast(BufferedAudio(pcmData, SystemClock.elapsedRealtime(), ++capturedSequence))
+                pendingAudio.addLast(BufferedAudio(pcmData, containsSpeech,
+                    SystemClock.elapsedRealtime(), ++capturedSequence))
                 armAudioQueueTimeout()
                 flushAudio()
             }
             override fun onSpeechStarted() {
-                if (activeSession != sessionId || captureFailed) return
+                if (activeSession != sessionId || captureFailed || !isRecording || stopRequested) return
+                speechEpoch++
+                localSpeechActive = true
+                client.onSpeechStarted()
                 cancelAutoStop()
                 flushAudio()
             }
             override fun onSpeechStopped() {
-                if (activeSession != sessionId || !isRecording) return
+                if (activeSession != sessionId || captureFailed || !isRecording || stopRequested) return
+                localSpeechActive = false
+                client.onSpeechStopped()
                 startAutoStop()
                 // Remember the actual pause boundary, even if new speech queues behind it.
-                commitAtSequence = capturedSequence
+                enqueueCommit(capturedSequence, speechEpoch)
                 flushAudio()
             }
             override fun onRecordingStopped() {
@@ -168,6 +189,7 @@ class VoiceInputManager internal constructor(
     fun stopRecording() {
         if (isIdle || stopRequested) return
         stopRequested = true
+        localSpeechActive = false
         cancelAutoStop()
         cancelRotation()
         recorder.stopRecording()
@@ -185,20 +207,25 @@ class VoiceInputManager internal constructor(
 
     fun pauseRecording() {
         if (!isRecording) return
+        val boundaryEpoch = speechEpoch
+        localSpeechActive = false
         recorder.pauseRecording()
+        client.onSpeechStopped()
         updateState(State.PAUSED)
         cancelAutoStop()
         val activeSession = sessionId
         handler.post {
-            if (activeSession != sessionId || !isPaused) return@post
-            commitAtSequence = capturedSequence
+            if (activeSession != sessionId || stopRequested) return@post
+            enqueueCommit(capturedSequence, boundaryEpoch)
             flushAudio()
         }
     }
 
     fun resumeRecording() {
         if (!isPaused) return
+        val activeSession = sessionId
         recorder.resumeRecording()
+        if (activeSession != sessionId || stopRequested || captureInterrupted) return
         updateState(State.RECORDING)
         startAutoStop()
         if (!ready && !connecting && !draining) connect()
@@ -230,19 +257,24 @@ class VoiceInputManager internal constructor(
                 if (!isCurrent()) return
                 connecting = false
                 ready = true
+                streamReachedReady = true
+                if (localSpeechActive && isRecording && !stopRequested) client.onSpeechStarted()
                 connectionReadyAt = SystemClock.elapsedRealtime()
                 flushAudio()
                 if (!isCurrent() || !ready) return
                 if (stopRequested) finishConnection()
                 else {
-                    if (isPaused) { commitAtSequence = capturedSequence; flushAudio() }
                     scheduleRotation()
                 }
             }
             override fun onTranscriptionResult(segment: TranscriptSegment) {
-                if (!isCurrent()) return
-                listener?.onProcessingStarted()
-                if (isCurrent()) listener?.onTranscriptionResult(segment.text, segment.attachesToPrevious)
+                if (!isCurrent() || segment.text.isBlank()) return
+                if (pendingTranscripts.size >= MAX_PENDING_TRANSCRIPTS) {
+                    failSession("Voice text queue is full. Dictation stopped before skipping text.")
+                    return
+                }
+                pendingTranscripts.addLast(segment)
+                processTranscripts(activeSession)
             }
             override fun onPendingProcessingChanged() {
                 if (!isCurrent()) return
@@ -259,7 +291,8 @@ class VoiceInputManager internal constructor(
                 else flushAudio()
             }
             override fun onFinalConfirmationStalled() {
-                if (!isCurrent() || awaitingIntegrityDrain) return
+                if (!isCurrent() || awaitingIntegrityDrain || stopRequested) return
+                if (stopForElapsedSilence()) return
                 awaitingIntegrityDrain = true
                 stopRecording()
                 listener?.onProcessingStarted()
@@ -292,7 +325,7 @@ class VoiceInputManager internal constructor(
         commitUploadedBoundary()
         while (ready && pendingAudio.isNotEmpty()) {
             val next = pendingAudio.first()
-            if (!client.sendAudioChunk(next.pcm)) return
+            if (!client.sendAudioChunk(next.pcm, next.containsSpeech)) return
             if (activeSession != sessionId) return
             pendingAudio.removeFirst()
             uploadedSequence = next.sequence
@@ -302,12 +335,47 @@ class VoiceInputManager internal constructor(
     }
 
     private fun commitUploadedBoundary() {
-        val boundary = commitAtSequence ?: return
-        if (!ready || uploadedSequence < boundary) return
-        commitAtSequence = null
-        // The worker queues this control operation before any post-pause audio.
-        // A stopped stream uses EOF instead of an extra advisory commit.
-        if (!stopRequested) client.finalizeTurn()
+        while (ready && commitBoundaries.isNotEmpty()) {
+            val boundary = commitBoundaries.first()
+            if (uploadedSequence < boundary.sequence) return
+            commitBoundaries.removeFirst()
+            // The worker queues this before post-pause audio. An older captured
+            // boundary cannot start the final deadline for a newer utterance.
+            if (!stopRequested) client.finalizeTurn(boundary.speechEpoch == speechEpoch)
+        }
+    }
+
+    private fun enqueueCommit(sequence: Long, epoch: Long) {
+        if (commitBoundaries.size >= MAX_PENDING_CONTROLS) {
+            failSession("Voice control queue is full. Dictation stopped before skipping a speech boundary.")
+            return
+        }
+        commitBoundaries.addLast(CommitBoundary(sequence, epoch))
+    }
+
+    private fun processTranscripts(activeSession: Long) {
+        if (dispatchingTranscripts) return
+        dispatchingTranscripts = true
+        try {
+            while (activeSession == sessionId && pendingTranscripts.isNotEmpty()) {
+                val segment = pendingTranscripts.first()
+                listener?.onProcessingStarted()
+                if (activeSession != sessionId) return
+                val accepted = try {
+                    listener?.onTranscriptionResult(segment.text, segment.attachesToPrevious) == true
+                } catch (_: Exception) { false }
+                if (activeSession != sessionId) return
+                if (!accepted) {
+                    failSession("The editor could not accept voice text. Dictation stopped.", mark = false)
+                    return
+                }
+                pendingTranscripts.removeFirst()
+            }
+        } finally {
+            dispatchingTranscripts = false
+            if (activeSession != sessionId && pendingTranscripts.isNotEmpty()) processTranscripts(sessionId)
+            else notifyIdle()
+        }
     }
 
     private fun finishConnection() {
@@ -351,12 +419,20 @@ class VoiceInputManager internal constructor(
         client.finishStreaming()
     }
 
-    private fun failSession(error: String, incomplete: Boolean = false) {
-        val interrupted = incomplete || pendingAudio.isNotEmpty() || captureInterrupted
+    private fun failSession(error: String, incomplete: Boolean = false, mark: Boolean = true) {
+        val startupFailure = !streamReachedReady
+        val interrupted = mark && !startupFailure && hasCapturedAudio
         cancelRecording()
-        if (interrupted) listener?.onTranscriptionInterrupted()
-        Log.e(TAG, error)
-        listener?.onError(error)
+        if (interrupted) insertInterruptionMarker()
+        Log.e(TAG, "failure startup=$startupFailure incomplete=$incomplete marker=$interrupted cause=$error")
+        listener?.onError(if (startupFailure) "Could not start dictation. $error" else error)
+    }
+
+    private fun insertInterruptionMarker() {
+        try {
+            if (listener?.onTranscriptionInterrupted(INTERRUPTION_MARKER) != true)
+                Log.w(TAG, "Editor could not dispatch the interruption marker")
+        } catch (_: Exception) { Log.w(TAG, "Editor could not dispatch the interruption marker") }
     }
 
     private fun invalidateSession() {
@@ -376,7 +452,12 @@ class VoiceInputManager internal constructor(
         awaitingIntegrityDrain = false
         capturedSequence = 0
         uploadedSequence = 0
-        commitAtSequence = null
+        commitBoundaries.clear()
+        pendingTranscripts.clear()
+        speechEpoch = 0
+        localSpeechActive = false
+        streamReachedReady = false
+        hasCapturedAudio = false
         connectionReadyAt = 0
         pendingAudio.clear()
         clearAudioQueueTimeout()
@@ -422,16 +503,23 @@ class VoiceInputManager internal constructor(
         awaitingIntegrityDrain = false
         if (captureInterrupted) {
             captureInterrupted = false
-            listener?.onTranscriptionInterrupted()
+            if (streamReachedReady && hasCapturedAudio) insertInterruptionMarker()
         }
         if (currentState == State.IDLE && !ready) network.stop()
         listener?.onProcessingIdle()
     }
     private fun startAutoStop() {
         cancelAutoStop()
+        autoStopAtMs = SystemClock.elapsedRealtime() + autoStopSilenceMs
         handler.postDelayed(autoStop, autoStopSilenceMs)
     }
-    private fun cancelAutoStop() { handler.removeCallbacks(autoStop) }
+    private fun cancelAutoStop() { handler.removeCallbacks(autoStop); autoStopAtMs = null }
+    private fun stopForElapsedSilence(): Boolean {
+        val deadline = autoStopAtMs ?: return false
+        if (!isRecording || SystemClock.elapsedRealtime() < deadline) return false
+        stopRecording()
+        return true
+    }
     private fun cancelRotation() {
         rotation?.let { handler.removeCallbacks(it) }
         rotation = null

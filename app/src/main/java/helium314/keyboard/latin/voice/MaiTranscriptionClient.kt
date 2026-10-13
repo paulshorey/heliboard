@@ -77,8 +77,14 @@ class MaiTranscriptionClient internal constructor(
     private var progressTimeout: Runnable? = null
     private var lastResultEndBytes = 0L
     private var awaitingIntegrityDrain = false
+    private var lastResponseAt: Long? = null
+    private var finalBoundaryAt: Long? = null
+    private var pendingWords = false
+    private var localSpeechActive = false
+    private var speechStartedAt: Long? = null
 
-    val hasPendingProcessing: Boolean get() = finishing || totalBytes > finalizedBytes || boundaries.isNotEmpty()
+    val hasPendingProcessing: Boolean get() = finishing || unfinalizedAudio.isNotEmpty() ||
+        pendingWords || boundaries.isNotEmpty()
     internal fun configurationError(config: MaiConfig): String? = platformError() ?: config.validationError()
 
     fun startStreaming(config: MaiConfig, languageTag: String?, callback: StreamingCallback) {
@@ -105,9 +111,10 @@ class MaiTranscriptionClient internal constructor(
                     return@post
                 }
                 lastResultEndBytes = maxOf(lastResultEndBytes, audioEndBytes)
+                lastResponseAt = SystemClock.elapsedRealtime()
                 if (commitToken > 0) completedTokens.add(commitToken)
                 finalizedBytes = maxOf(finalizedBytes, audioEndBytes.coerceAtMost(totalBytes))
-                settleBoundaries()
+                settleBoundaries(finalReceived = true)
                 if (text.isNotBlank()) {
                     val finalText = text.trim()
                     Log.i(TAG, "VOICE_STEP_4 MAI completed transcript (${finalText.length} chars)")
@@ -117,6 +124,13 @@ class MaiTranscriptionClient internal constructor(
                 }
                 armCompletionTimeout()
                 this@MaiTranscriptionClient.callback?.onPendingProcessingChanged()
+            }
+            override fun onInterim() = post(token) {
+                lastResponseAt = SystemClock.elapsedRealtime()
+                pendingWords = true
+                // Interims prove liveness, never final coverage. They cannot move
+                // the missing-final deadline anchored at a submitted boundary.
+                armProgressTimeout()
             }
             override fun onCommitRequested(token: Int, audioEndBytes: Long) = post(tokenOfConnection) {
                 boundaries.firstOrNull { it.endBytes == audioEndBytes }?.token = token
@@ -139,7 +153,7 @@ class MaiTranscriptionClient internal constructor(
         Log.i(TAG, "VOICE_STEP_3 starting direct Azure Speech dictation")
     }
 
-    fun sendAudioChunk(pcmData: ByteArray): Boolean {
+    fun sendAudioChunk(pcmData: ByteArray, containsSpeech: Boolean = true): Boolean {
         if (!ready || finishing) return false
         if (pcmData.isEmpty() || pcmData.size % 2 != 0 || pcmData.size > 3200) {
             fail("Microphone audio must contain at most 100 ms of complete PCM16 samples.")
@@ -152,13 +166,27 @@ class MaiTranscriptionClient internal constructor(
         }
         val wasPending = hasPendingProcessing
         totalBytes += pcmData.size
-        unfinalizedAudio.addLast(AudioProgress(totalBytes, SystemClock.elapsedRealtime()))
+        if (containsSpeech) unfinalizedAudio.addLast(AudioProgress(totalBytes, SystemClock.elapsedRealtime()))
         armProgressTimeout()
         if (!wasPending) callback?.onPendingProcessingChanged()
         return true
     }
 
-    fun finalizeTurn(): Boolean {
+    /** New capture must clear an older boundary even while its PCM is backpressured. */
+    fun onSpeechStarted() {
+        localSpeechActive = true
+        speechStartedAt = SystemClock.elapsedRealtime()
+        finalBoundaryAt = null
+        armProgressTimeout()
+    }
+
+    fun onSpeechStopped() {
+        localSpeechActive = false
+        speechStartedAt = null
+        armProgressTimeout()
+    }
+
+    fun finalizeTurn(currentSpeechBoundary: Boolean = true): Boolean {
         if (!ready || finishing || totalBytes <= committedBytes || totalBytes <= finalizedBytes) return false
         if (boundaries.size >= MAX_PENDING_COMMITS) {
             requestDrain()
@@ -167,6 +195,11 @@ class MaiTranscriptionClient internal constructor(
         committedBytes = totalBytes
         boundaries.addLast(Boundary(totalBytes, SystemClock.elapsedRealtime()))
         session?.commit(totalBytes)
+        if (currentSpeechBoundary && finalBoundaryAt == null) {
+            localSpeechActive = false
+            finalBoundaryAt = SystemClock.elapsedRealtime()
+            armProgressTimeout()
+        }
         armCompletionTimeout()
         callback?.onPendingProcessingChanged()
         return true
@@ -202,17 +235,24 @@ class MaiTranscriptionClient internal constructor(
         unfinalizedAudio.clear()
         lastResultEndBytes = 0
         awaitingIntegrityDrain = false
+        lastResponseAt = null
+        finalBoundaryAt = null
+        pendingWords = false
+        localSpeechActive = false
+        speechStartedAt = null
     }
 
-    private fun settleBoundaries() {
+    private fun settleBoundaries(finalReceived: Boolean = false) {
+        var settledByFinalToken = false
         // Tokens correlate explicit commits. Ordinary finals use their audio offsets.
         for (boundary in boundaries) {
             if (boundary.token > 0 && boundary.token in completedTokens) {
                 finalizedBytes = maxOf(finalizedBytes, boundary.endBytes)
+                settledByFinalToken = true
             }
         }
         while (boundaries.firstOrNull()?.endBytes?.let { it <= finalizedBytes } == true) boundaries.removeFirst()
-        settleAudioProgress()
+        settleAudioProgress(finalReceived || settledByFinalToken)
     }
 
     private fun fail(message: String) {
@@ -225,15 +265,25 @@ class MaiTranscriptionClient internal constructor(
         listener?.onStreamError(description, pendingAudio)
     }
 
-    private fun settleAudioProgress() {
+    private fun settleAudioProgress(authoritativeFinal: Boolean) {
         while (unfinalizedAudio.firstOrNull()?.endBytes?.let { it <= finalizedBytes } == true)
             unfinalizedAudio.removeFirst()
+        if (authoritativeFinal && unfinalizedAudio.isEmpty()) {
+            pendingWords = false
+            finalBoundaryAt = null
+        }
         armProgressTimeout()
     }
     private fun armProgressTimeout() {
         clearProgressTimeout()
         if (finishing || awaitingIntegrityDrain) return
-        val oldest = unfinalizedAudio.firstOrNull() ?: return
+        val oldest = unfinalizedAudio.firstOrNull()
+        val responseDeadline = oldest?.takeIf { localSpeechActive || pendingWords }?.let {
+            maxOf(it.acceptedAt, lastResponseAt ?: it.acceptedAt,
+                speechStartedAt ?: it.acceptedAt) + progressTimeoutMs
+        }
+        val finalDeadline = if (pendingWords) finalBoundaryAt?.plus(progressTimeoutMs) else null
+        val deadline = listOfNotNull(responseDeadline, finalDeadline).minOrNull() ?: return
         val token = connectionToken
         progressTimeout = Runnable {
             if (token == connectionToken) {
@@ -241,7 +291,7 @@ class MaiTranscriptionClient internal constructor(
                 callback?.onFinalConfirmationStalled()
             }
         }.also { handler.postDelayed(it,
-            (progressTimeoutMs - (SystemClock.elapsedRealtime() - oldest.acceptedAt)).coerceAtLeast(0)) }
+            (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0)) }
     }
     private fun clearProgressTimeout() {
         progressTimeout?.let { handler.removeCallbacks(it) }

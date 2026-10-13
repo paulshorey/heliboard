@@ -25,6 +25,9 @@ class VoiceInputManagerTest {
     private lateinit var recorder: VoiceRecorder
     private val sessions = mutableListOf<FakeMaiSpeechSession>()
     private val events = mutableListOf<String>()
+    private var acceptText = true
+    private var throwText = false
+    private var duringText: (() -> Unit)? = null
     private val active get() = sessions.last()
     @Before fun setUp() {
         val context = ApplicationProvider.getApplicationContext<Context>()
@@ -40,16 +43,22 @@ class VoiceInputManagerTest {
         manager = VoiceInputManager(context, recorder, client, network)
         manager.setListener(object : VoiceInputManager.VoiceInputListener {
             override fun onStateChanged(state: VoiceInputManager.State) { events.add("state:$state") }
-            override fun onTranscriptionResult(text: String, attachesToPrevious: Boolean) { events.add("text:$text") }
+            override fun onTranscriptionResult(text: String, attachesToPrevious: Boolean): Boolean {
+                events.add("text:$text")
+                duringText?.invoke()
+                if (throwText) error("host exception")
+                return acceptText
+            }
             override fun onProcessingStarted() { events.add("processing") }
             override fun onProcessingIdle() { events.add("idle") }
             override fun onPendingProcessingCancelled() { events.add("cancelled") }
             override fun onError(error: String) { events.add("error:$error") }
-            override fun onTranscriptionInterrupted() { events.add("gap") }
+            override fun onTranscriptionInterrupted(marker: String): Boolean { assertEquals(VoiceInputManager.INTERRUPTION_MARKER, marker); events.add("gap"); return true }
             override fun onPermissionRequired() { events.add("permission") }
         })
     }
     @After fun tearDown() { manager.destroy() }
+    private fun VoiceRecorder.RecordingCallback.onAudioChunk(pcm: ByteArray) = onAudioChunk(pcm, true)
     private fun pump() = shadowOf(Looper.getMainLooper()).idle()
     private fun start() { assertTrue(manager.startRecording()); active.ready(); pump() }
     private fun end(text: String) { active.final(text); active.ended(); pump() }
@@ -73,7 +82,7 @@ class VoiceInputManagerTest {
     @Test fun pauseDuringStartupAndResumeKeepsActiveSpeech() {
         manager.startRecording(); recording.onAudioChunk(byteArrayOf(1, 0))
         manager.pauseRecording(); manager.resumeRecording(); active.ready(); pump()
-        assertTrue(active.commits.isEmpty()); assertEquals(1, active.audio.size)
+        assertEquals(1, active.commits.size); assertEquals(1, active.audio.size)
         manager.stopRecording(); pump(); end("Continued speech.")
         assertTrue(manager.isIdle); assertTrue("text:Continued speech." in events)
     }
@@ -84,13 +93,13 @@ class VoiceInputManagerTest {
         assertEquals(1, sessions.size); manager.stopRecording(); pump(); end("Second.")
         assertEquals(listOf("text:First.", "text:Second."), events.filter { it.startsWith("text:") })
     }
-    @Test fun startupConnectionFailureStopsWithoutRetryAndMarksBufferedSpeech() {
+    @Test fun startupConnectionFailureStopsWithoutRetryAndLeavesTheEditorUntouched() {
         manager.startRecording(); recording.onAudioChunk(byteArrayOf(1, 0))
         val broken = active
         broken.listener.onError("Connection failed."); pump()
         assertTrue(manager.isIdle); assertFalse(manager.hasPendingProcessing())
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(5))
-        assertEquals(1, sessions.size); assertEquals(1, events.count { it == "gap" })
+        assertEquals(1, sessions.size); assertFalse("gap" in events)
         broken.final("Late reconnected text."); pump()
         assertFalse(events.any { it.startsWith("text:") })
     }
@@ -281,7 +290,7 @@ class VoiceInputManagerTest {
         start(); recording.onAudioChunk(byteArrayOf(1, 0)); active.final("Prefix."); pump()
         active.listener.onError("Disconnected."); pump()
         assertTrue(manager.isIdle); assertEquals(1, sessions.size)
-        assertFalse(events.any { it == "gap" }); assertTrue(events.any { it.contains("Disconnected") })
+        assertEquals(1, events.count { it == "gap" }); assertTrue(events.any { it.contains("Disconnected") })
         Mockito.verify(recorder).stopRecording()
     }
     @Test fun localCaptureFailureBlocksRestartUntilTailAndGapAreInserted() {
@@ -365,12 +374,12 @@ class VoiceInputManagerTest {
         manager = VoiceInputManager(context, recorder, client, network)
         manager.setListener(object : VoiceInputManager.VoiceInputListener {
             override fun onStateChanged(state: VoiceInputManager.State) { events.add("state:$state") }
-            override fun onTranscriptionResult(text: String, attachesToPrevious: Boolean) { events.add("text:$text") }
+            override fun onTranscriptionResult(text: String, attachesToPrevious: Boolean): Boolean { events.add("text:$text"); return true }
             override fun onProcessingStarted() { events.add("processing") }
             override fun onProcessingIdle() { events.add("idle") }
             override fun onPendingProcessingCancelled() { events.add("cancelled") }
             override fun onError(error: String) { events.add("error:$error") }
-            override fun onTranscriptionInterrupted() { events.add("gap") }
+            override fun onTranscriptionInterrupted(marker: String): Boolean { assertEquals(VoiceInputManager.INTERRUPTION_MARKER, marker); events.add("gap"); return true }
             override fun onPermissionRequired() {}
         })
         start(); recording.onSpeechStarted(); recording.onAudioChunk(ByteArray(3200))
@@ -391,4 +400,111 @@ class VoiceInputManagerTest {
         assertTrue(manager.isRecording)
     }
 
+    @Test fun rejectedFinalCancelsBeforeLaterFinalsAndSuppressesTheMarker() {
+        start(); recording.onAudioChunk(ByteArray(3200)); acceptText = false
+        val failed = active
+        failed.final("Unwritten."); failed.final("Later.", id = "later"); pump()
+        assertTrue(manager.isIdle); assertTrue(failed.closed)
+        assertEquals(listOf("text:Unwritten."), events.filter { it.startsWith("text:") })
+        assertFalse("gap" in events)
+        assertTrue(events.any { it.contains("editor could not accept") })
+    }
+
+    @Test fun throwingFinalCancelsWithoutRetryingTextOrInsertingAMarker() {
+        start(); recording.onAudioChunk(ByteArray(3200)); throwText = true
+        active.final("Possibly partial."); pump()
+        assertTrue(manager.isIdle); assertTrue(active.closed)
+        assertEquals(1, events.count { it.startsWith("text:") })
+        assertFalse("gap" in events)
+    }
+
+    @Test fun reentrantFinalsWaitUntilTheHeadDispatchCompletes() {
+        start(); recording.onAudioChunk(ByteArray(3200))
+        duringText = {
+            duringText = null
+            active.final("Second.", id = "second"); pump()
+            assertEquals(listOf("text:First."), events.filter { it.startsWith("text:") })
+        }
+        active.final("First.", id = "first"); pump()
+        assertEquals(listOf("text:First.", "text:Second."), events.filter { it.startsWith("text:") })
+        assertTrue(manager.isRecording)
+    }
+
+    @Test fun reentrantTranscriptOverflowStopsBeforeSkippingAResult() {
+        start(); recording.onAudioChunk(ByteArray(3200))
+        duringText = {
+            duringText = null
+            repeat(VoiceInputManager.MAX_PENDING_TRANSCRIPTS) { index ->
+                active.final("Queued $index.", id = "queued-$index")
+            }
+            pump()
+        }
+        active.final("Head.", id = "head"); pump()
+        assertTrue(manager.isIdle)
+        assertEquals(listOf("text:Head."), events.filter { it.startsWith("text:") })
+        assertTrue(events.any { it.contains("Voice text queue is full") })
+        assertEquals(1, events.count { it == "gap" })
+    }
+
+    @Test fun backpressuredSpeechBoundariesRemainOrderedAndDoNotCoalesce() {
+        start(); active.backpressure = true
+        recording.onAudioChunk(ByteArray(3200)); recording.onSpeechStopped()
+        recording.onSpeechStarted(); recording.onAudioChunk(ByteArray(3200)); recording.onSpeechStopped()
+        active.backpressure = false; active.listener.onWriteAvailable(); pump()
+        assertEquals(listOf(3200L, 6400L), active.commits.map { it.second })
+    }
+
+    @Test fun backpressuredControlOverflowIsTerminalRatherThanDroppingBoundaries() {
+        start(); active.backpressure = true
+        recording.onAudioChunk(ByteArray(3200))
+        repeat(VoiceInputManager.MAX_PENDING_CONTROLS + 1) { recording.onSpeechStopped() }
+        assertTrue(manager.isIdle); assertTrue(active.closed)
+        assertTrue(events.any { it.contains("Voice control queue is full") })
+        assertEquals(1, events.count { it == "gap" })
+    }
+
+    @Test fun resumeErrorCannotPutTheControlsBackIntoRecording() {
+        start(); manager.pauseRecording(); pump()
+        Mockito.doAnswer { recording.onRecordingError("Resume failed."); null }
+            .`when`(recorder).resumeRecording()
+        manager.resumeRecording(); pump()
+        assertEquals(VoiceInputManager.State.IDLE, manager.state)
+        assertTrue(active.inputFinished); assertFalse(active.closed)
+        active.ended(); pump()
+        assertTrue(manager.isIdle)
+    }
+    @Test fun intentionalSilenceStopDrainsQuietPcmWithoutFalseErrorsOrMarkers() {
+        start(); recording.onAudioChunk(ByteArray(3200), containsSpeech = false)
+        assertFalse(manager.hasPendingProcessing())
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(31))
+        assertTrue(active.inputFinished); assertEquals(VoiceInputManager.State.IDLE, manager.state)
+        active.ended(); pump()
+        assertTrue(manager.isIdle); assertFalse("gap" in events)
+        assertFalse(events.any { it.startsWith("error:") })
+    }
+    @Test fun cancellingAndRestartingInsideEditorDispatchDoesNotStrandTheNewFinalQueue() {
+        start(); recording.onAudioChunk(ByteArray(3200))
+        duringText = {
+            duringText = null
+            manager.cancelRecording(); assertTrue(manager.startRecording())
+            active.ready(); pump(); recording.onAudioChunk(ByteArray(3200))
+            active.final("New session.", id = "new-session"); pump()
+        }
+        active.final("Previous session.", id = "previous-session"); pump()
+        assertEquals(listOf("text:Previous session.", "text:New session."), events.filter { it.startsWith("text:") })
+        assertTrue(manager.isRecording); assertEquals(2, sessions.size)
+    }
+
+    @Test fun replacementKeepsTheActiveSpeechResponseWatchdog() {
+        start(); recording.onSpeechStarted(); recording.onAudioChunk(ByteArray(3200))
+        active.final("Prefix."); pump()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(MaiTranscriptionClient.SESSION_ROTATE_AFTER_MS))
+        recording.onAudioChunk(ByteArray(3200)); active.ended(); pump()
+        assertEquals(2, sessions.size); active.ready(); pump()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(121))
+        assertFalse(manager.isRecording); assertTrue(active.inputFinished)
+        assertTrue(manager.hasPendingProcessing()); assertFalse(manager.startRecording())
+        end("Preserved replacement tail.")
+        assertTrue(manager.isIdle); assertFalse("gap" in events)
+    }
 }

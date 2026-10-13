@@ -3,7 +3,7 @@
 Feature-specific Compose screens for the settings app.
 
 ## Direct files
-- `AboutScreen.kt` - app/about information screen.
+- `AboutScreen.kt` - app/about information and debug-log export. Export leads with redacted voice diagnostics, followed by bounded app/native warnings rather than verbose keyboard geometry or duplicate app logcat.
 - `AdvancedScreen.kt` - advanced settings screen.
 - `AppearanceScreen.kt` - appearance/theme settings screen (keyboard height appears first under a **Size and layout** heading).
 - `ColorsScreen.kt` - color customization screen.

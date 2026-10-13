@@ -1,55 +1,109 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package helium314.keyboard.latin.voice
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import helium314.keyboard.latin.utils.Log
 
 internal interface VoiceNetworkMonitor {
-    /** False means capture must not start. Callbacks run on the main looper. */
+    /** Preflight and terminal-loss observation. Callback runs on the main looper. */
     fun start(onUnavailable: () -> Unit): Boolean
     fun stop()
 }
 
-/** Android validation is a preflight signal; SDK events also check the actual service. */
-internal class AndroidVoiceNetworkMonitor(context: Context) : VoiceNetworkMonitor {
-    // The IME also constructs this on API 21. Only start(), after the SDK's
-    // API-26 support gate, may use the newer network observation methods.
-    private val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+/** Observes the default route, not merely the existence of any connected Wi-Fi. */
+internal class AndroidVoiceNetworkMonitor(private val context: Context) : VoiceNetworkMonitor {
+    private val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
     private val handler = Handler(Looper.getMainLooper())
+    private var generation = 0L
     private var callback: ConnectivityManager.NetworkCallback? = null
+    private var receiver: BroadcastReceiver? = null
 
     override fun start(onUnavailable: () -> Unit): Boolean {
         stop()
-        val manager = connectivity ?: return false
-        fun validated(): Boolean = manager.getNetworkCapabilities(manager.activeNetwork)?.let(::usable) == true
+        val connectivity = manager ?: return false
+        val token = generation
         try {
-            if (!validated()) return false
-            var current = manager.activeNetwork
-            val observer = object : ConnectivityManager.NetworkCallback() {
-                private fun active() = callback === this
-                override fun onAvailable(network: Network) { if (active()) current = network }
-                override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
-                    if (active() && current == network && !usable(capabilities)) onUnavailable()
+            val available = hasInternet()
+            Log.i("VoiceNetwork", "preflight usable=$available sdk=${Build.VERSION.SDK_INT}")
+            if (!available) return false
+            if (Build.VERSION.SDK_INT >= 24) {
+                var currentNetwork = connectivity.activeNetwork
+                val observer = object : ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: Network) {
+                        handler.post { if (generation == token) currentNetwork = network }
+                    }
+                    override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                        handler.post {
+                            if (generation == token && currentNetwork == network && !usable(capabilities)) {
+                                Log.w("VoiceNetwork", "default route lost usable capabilities " +
+                                    "internet=${capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)} " +
+                                    "validated=${capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)}")
+                                onUnavailable()
+                            }
+                        }
+                    }
+                    override fun onLost(network: Network) {
+                        handler.post {
+                            if (generation == token && currentNetwork == network) {
+                                Log.w("VoiceNetwork", "default route lost")
+                                onUnavailable()
+                            }
+                        }
+                    }
                 }
-                override fun onLost(network: Network) {
-                    if (active() && current == network) onUnavailable()
+                callback = observer
+                connectivity.registerDefaultNetworkCallback(observer)
+            } else {
+                // The app supports API 21; default-network callbacks start at 24.
+                // A dynamically registered legacy broadcast covers older devices.
+                val observer = object : BroadcastReceiver() {
+                    override fun onReceive(context: Context?, intent: Intent?) {
+                        if (generation == token && !hasInternet()) {
+                            Log.w("VoiceNetwork", "legacy connectivity broadcast: no usable route")
+                            onUnavailable()
+                        }
+                    }
                 }
+                receiver = observer
+                @Suppress("DEPRECATION")
+                context.registerReceiver(observer, IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION))
             }
-            callback = observer
-            manager.registerDefaultNetworkCallback(observer, handler)
-            if (!validated()) { stop(); return false }
+            if (!hasInternet()) { stop(); return false }
             return true
-        } catch (_: RuntimeException) { stop(); return false }
+        } catch (e: RuntimeException) {
+            Log.w("VoiceNetwork", "network observation failed: ${e.javaClass.simpleName}")
+            stop()
+            return false
+        }
     }
 
     override fun stop() {
-        val observer = callback ?: return
-        callback = null // Invalidate already queued callbacks before unregistering.
-        try { connectivity?.unregisterNetworkCallback(observer) } catch (_: RuntimeException) { }
+        generation += 1 // Already posted observations cannot kill a new recording.
+        callback?.let { try { manager?.unregisterNetworkCallback(it) } catch (_: RuntimeException) { } }
+        callback = null
+        receiver?.let { try { context.unregisterReceiver(it) } catch (_: RuntimeException) { } }
+        receiver = null
+    }
+
+    private fun hasInternet(): Boolean {
+        val connectivity = manager ?: return false
+        return if (Build.VERSION.SDK_INT >= 23) {
+            connectivity.getNetworkCapabilities(connectivity.activeNetwork)?.let(::usable) == true
+        } else {
+            // API 21–22 do not expose default-route validation. Socket failures
+            // and bounded progress deadlines remain authoritative there.
+            @Suppress("DEPRECATION")
+            (connectivity.activeNetworkInfo?.isConnected == true)
+        }
     }
 
     private fun usable(capabilities: NetworkCapabilities) =

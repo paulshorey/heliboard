@@ -24,6 +24,8 @@ internal interface MaiSpeechSession {
     interface Listener {
         fun onReady()
         fun onFinal(resultId: String, text: String, audioEndBytes: Long, commitToken: Int)
+        /** Liveness metadata only; provisional text never leaves the SDK. */
+        fun onInterim()
         fun onCommitRequested(token: Int, audioEndBytes: Long)
         fun onEnded()
         fun onError(message: String)
@@ -84,7 +86,9 @@ internal class AzureMaiSpeechSession : MaiSpeechSession {
                         endBytes, result.commitToken)
                 }
             }
-            // Intermediate hypotheses deliberately stay inside the SDK.
+            active.recognizing.addEventListener { _, event ->
+                if (!closed.get() && !failed.get() && event.result.text.isNotBlank()) listener.onInterim()
+            }
             active.canceled.addEventListener { _, event ->
                 if (closed.get() || failed.get()) return@addEventListener
                 if (event.reason == CancellationReason.Error) {

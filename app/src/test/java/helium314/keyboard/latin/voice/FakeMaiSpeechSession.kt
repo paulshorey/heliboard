@@ -42,6 +42,7 @@ internal class FakeMaiSpeechSession : MaiSpeechSession {
     }
     override fun close() { closed = true }
     fun ready() = listener.onReady()
+    fun interim() = listener.onInterim()
     fun final(text: String, id: String = "result-${commits.size}-${totalBytes}", end: Long = totalBytes,
         token: Int = commits.lastOrNull()?.first ?: 0) = listener.onFinal(id, text, end, token)
     fun ended() = listener.onEnded()

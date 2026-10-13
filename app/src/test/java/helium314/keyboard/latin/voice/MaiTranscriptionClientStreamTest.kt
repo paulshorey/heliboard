@@ -156,13 +156,13 @@ class MaiTranscriptionClientStreamTest {
         assertFalse(created)
         assertTrue(events.any { it.contains("Unsupported device.") })
     }
-    @Test fun unfinalizedAudioDeadlineCannotBeExtendedByNewAudioOrCommitCallbacks() {
+    @Test fun responseDeadlineCannotBeExtendedByNewAudioOrCommitCallbacks() {
         client.cancelAll(); events.clear(); session = FakeMaiSpeechSession()
         client = MaiTranscriptionClient({ session }, 60_000L, { null }, progressTimeoutMs = 1_000L)
         client.startStreaming(MaiConfig("key", "centralus", true), null, callback()); ready()
-        client.sendAudioChunk(ByteArray(3200))
+        client.onSpeechStarted(); client.sendAudioChunk(ByteArray(3200))
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(600))
-        client.sendAudioChunk(ByteArray(3200)); client.finalizeTurn(); pump()
+        client.sendAudioChunk(ByteArray(3200)); client.finalizeTurn(currentSpeechBoundary = false); pump()
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(500))
         assertTrue(session.inputFinished); assertFalse(session.closed)
         assertTrue("stalled" in events); assertFalse(events.any { it.startsWith("error:") })
@@ -197,4 +197,83 @@ class MaiTranscriptionClientStreamTest {
         assertTrue(events.any { it.contains("inconsistent audio timing") })
     }
 
+    private fun useShortProgressDeadline() {
+        client.cancelAll(); events.clear(); session = FakeMaiSpeechSession()
+        client = MaiTranscriptionClient({ session }, 60_000L, { null }, progressTimeoutMs = 1_000L)
+        client.startStreaming(MaiConfig("key", "centralus", true), null, callback()); ready()
+    }
+
+    @Test fun liveInterimsAllowLongSpeechWithoutInsertingProvisionalWords() {
+        useShortProgressDeadline(); client.onSpeechStarted()
+        repeat(6) {
+            client.sendAudioChunk(ByteArray(3200))
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(600))
+            session.interim(); pump()
+        }
+        assertFalse(session.inputFinished); assertFalse("stalled" in events)
+        assertFalse(events.any { it.startsWith("text:") })
+        client.finalizeTurn(); session.final("Confirmed long utterance."); pump()
+        assertTrue("text:Confirmed long utterance." in events)
+    }
+
+    @Test fun repeatedInterimsCannotExtendTheSubmittedBoundaryFinalDeadline() {
+        useShortProgressDeadline(); client.onSpeechStarted(); client.sendAudioChunk(ByteArray(3200)); session.interim(); pump()
+        client.finalizeTurn(); pump()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(600)); session.interim(); pump()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(500))
+        assertTrue("stalled" in events); assertTrue(session.inputFinished)
+        assertFalse(events.any { it.startsWith("text:") })
+    }
+
+    @Test fun newSpeechClearsTheOlderFinalDeadlineAndDelayedOlderBoundariesDoNotRearmIt() {
+        useShortProgressDeadline(); client.onSpeechStarted(); client.sendAudioChunk(ByteArray(3200)); session.interim(); pump()
+        client.finalizeTurn(); pump()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(600))
+        client.onSpeechStarted(); client.sendAudioChunk(ByteArray(3200)); session.interim(); pump()
+        client.finalizeTurn(currentSpeechBoundary = false); pump()
+        repeat(3) {
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(600)); session.interim(); pump()
+        }
+        assertFalse(session.inputFinished); assertFalse("stalled" in events)
+    }
+
+    @Test fun quietPcmNeverRequiresRecognizedWordsOrAnotherFinal() {
+        useShortProgressDeadline()
+        repeat(4) {
+            client.sendAudioChunk(ByteArray(3200), containsSpeech = false)
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(600))
+        }
+        assertEquals(4, session.audio.size); assertFalse(session.inputFinished)
+        assertFalse("stalled" in events); assertFalse(events.any { it.startsWith("text:") })
+    }
+
+    @Test fun stopClearsEarlierSpeechDeadlinesAndAcceptsLateEofFinals() {
+        useShortProgressDeadline(); client.onSpeechStarted(); client.sendAudioChunk(ByteArray(3200)); session.interim(); pump()
+        client.finalizeTurn(); pump(); client.finishStreaming()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(2_000))
+        assertFalse("stalled" in events); assertFalse(session.closed)
+        session.final("Late confirmed tail."); session.ended(); pump()
+        assertTrue("text:Late confirmed tail." in events); assertEquals("closed", events.last())
+    }
+    @Test fun newSpeechAfterAThinkingPauseStartsAFreshResponseWindow() {
+        useShortProgressDeadline(); client.onSpeechStarted(); client.sendAudioChunk(ByteArray(3200))
+        client.onSpeechStopped()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(2_000))
+        assertFalse("stalled" in events)
+        client.onSpeechStarted(); client.sendAudioChunk(ByteArray(3200)); pump()
+        assertFalse("stalled" in events)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(600)); session.interim(); pump()
+        assertFalse("stalled" in events)
+    }
+
+    @Test fun aQuietSuffixDoesNotBlockAnAuthoritativeFinalFromSettlingSpeech() {
+        useShortProgressDeadline(); client.onSpeechStarted(); client.sendAudioChunk(ByteArray(3200))
+        session.interim(); pump()
+        client.sendAudioChunk(ByteArray(3200), containsSpeech = false)
+        session.final("Confirmed speech.", end = 3200, token = 0); pump()
+        assertFalse(client.hasPendingProcessing)
+        client.onSpeechStopped()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(2_000))
+        assertFalse("stalled" in events)
+    }
 }
