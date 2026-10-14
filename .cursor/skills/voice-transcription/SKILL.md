@@ -87,7 +87,13 @@ clears it until the next boundary. Long utterances with live interims continue.
 Controls retain their captured speech epoch so backpressure cannot apply an older
 boundary's final deadline to a newer utterance.
 The setup deadline is 12 seconds across every schema tier. Stop reads finals for
-eight seconds before initiating close, with a 15-second total close deadline.
+eight seconds before initiating close, with a 15-second EOF/close deadline and a
+20-second overall deadline from the stop request, including capture shutdown,
+remaining setup and upload. Readiness, retries, EOF and finals cannot reset the
+overall budget. Completion/cancellation removes both stop timers. A restart tap
+during drain reports that processing must finish. Recheck session ownership after
+capture shutdown and the IDLE state listener so reentrant failure/cancellation
+cannot restore processing UI.
 Clear older response/final watchdogs as soon as graceful stop begins. Silence
 auto-stop is intentional: accept late finals, never promote interims, and close
 normally without a marker for unconfirmed noise/hypotheses. Actual transport,

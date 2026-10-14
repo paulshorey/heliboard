@@ -39,6 +39,8 @@ class VoiceInputManagerTest {
     private var starts = 0
     private var stopped = 0
     private var onInsert: (() -> Unit)? = null
+    private var onRecorderStop: (() -> Unit)? = null
+    private var onStateChange: ((VoiceInputManager.State) -> Unit)? = null
 
     @Before
     fun setUp() {
@@ -50,7 +52,7 @@ class VoiceInputManagerTest {
                 "hasRecordPermission", "startRecording" -> true
                 "isCurrentlySpeaking" -> speaking
                 "setCallback" -> { capture = call.arguments[0] as VoiceRecorder.RecordingCallback; null }
-                "stopRecording" -> { stopped++; null }
+                "stopRecording" -> { stopped++; onRecorderStop?.invoke(); null }
                 else -> Mockito.RETURNS_DEFAULTS.answer(call)
             }
         }
@@ -72,7 +74,7 @@ class VoiceInputManagerTest {
         }
         manager = VoiceInputManager(context, recorder, client, network)
         manager.setListener(object : VoiceInputManager.VoiceInputListener {
-            override fun onStateChanged(state: VoiceInputManager.State) { }
+            override fun onStateChanged(state: VoiceInputManager.State) { onStateChange?.invoke(state) }
             override fun onTranscriptionResult(text: String, attachesToPrevious: Boolean): Boolean {
                 if (editorThrows) error("editor disconnected")
                 onInsert?.invoke()
@@ -328,6 +330,7 @@ class VoiceInputManagerTest {
         start(); speaking = true; audio(); manager.stopRecording()
         shadowOf(Looper.getMainLooper()).idle()
         assertFalse(manager.startRecording())
+        assertTrue(errors.single().contains("wait for processing"))
         final("the final words")
         assertTrue(manager.hasPendingProcessing())
         assertTrue(processing)
@@ -490,6 +493,92 @@ class VoiceInputManagerTest {
         assertTrue(manager.isIdle)
         assertEquals(listOf("confirmed"), inserted)
         assertTrue(errors.single().contains("finish closing"))
+    }
+
+    @Test fun stopDeadlineIncludesBlockedUploadAndReleasesProcessingForExplicitRestart() {
+        start(); sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE
+        audio(containsSpeech = true)
+        val oldStream = stream
+        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
+        advance(VoiceInputManager.STOP_TIMEOUT_MS - 1)
+        assertTrue(processing)
+        assertTrue(manager.hasPendingProcessing())
+        advance(1)
+        assertTrue(manager.isIdle)
+        assertFalse(processing)
+        assertFalse(manager.hasPendingProcessing())
+        assertTrue(sent.isEmpty()) // EOF never overtakes blocked audio.
+        assertEquals(1, markers.size)
+        assertTrue(errors.single().contains("too long to finish"))
+        sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
+        start()
+        oldStream.onStreamReady()
+        oldStream.onTranscriptionResult(TranscriptSegment("late words", false))
+        oldStream.onStreamClosed()
+        advance(VoiceInputManager.DRAIN_TIMEOUT_MS)
+        assertTrue(manager.isRecording)
+        assertTrue(inserted.isEmpty())
+        assertTrue(sent.isEmpty())
+    }
+
+    @Test fun stopDeadlineIsNotResetBySetupUploadEofOrAFinal() {
+        start(ready = false); audio(containsSpeech = true)
+        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
+        advance(11_000)
+        sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE
+        stream.onStreamReady()
+        advance(4_000)
+        sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
+        advance(25)
+        assertEquals(listOf("audio:1", "finish"), sent)
+        final("confirmed words")
+        advance(4_974)
+        assertTrue(manager.hasPendingProcessing())
+        advance(1)
+        assertTrue(manager.isIdle)
+        assertFalse(processing)
+        assertEquals(listOf("confirmed words"), inserted)
+        assertTrue(errors.single().contains("too long to finish"))
+    }
+
+    @Test fun completedStopCannotTimeOutANewerRecording() {
+        start(); manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
+        stream.onStreamClosed()
+        assertTrue(manager.isIdle)
+        start()
+        advance(VoiceInputManager.STOP_TIMEOUT_MS + 1)
+        assertTrue(manager.isRecording)
+        assertFalse(processing)
+        assertTrue(errors.isEmpty())
+        assertTrue(markers.isEmpty())
+    }
+
+    @Test fun cancellationFromTheStopStateListenerCannotRestoreTheSpinner() {
+        start(); audio()
+        onStateChange = { state -> if (state == VoiceInputManager.State.IDLE) manager.cancelRecording() }
+        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(manager.isIdle)
+        assertFalse(processing)
+        assertEquals(listOf("audio:1"), sent)
+        assertTrue(markers.isEmpty())
+        advance(VoiceInputManager.STOP_TIMEOUT_MS + 1)
+        assertTrue(errors.isEmpty())
+    }
+
+    @Test fun failureDuringRecorderStopCannotRestoreTheSpinnerOrQueueEof() {
+        start(); audio(containsSpeech = true)
+        onRecorderStop = {
+            onRecorderStop = null
+            capture.onRecordingError("Microphone capture did not stop")
+        }
+        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(manager.isIdle)
+        assertFalse(processing)
+        assertEquals(listOf("audio:1"), sent)
+        assertEquals(1, markers.size)
+        assertEquals(listOf("Microphone capture did not stop"), errors)
+        advance(VoiceInputManager.STOP_TIMEOUT_MS + 1)
+        assertEquals(1, errors.size)
     }
 
     @Test fun silentCaptureDoesNotStartATranscriptProgressDeadline() {
