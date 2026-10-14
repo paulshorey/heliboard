@@ -204,7 +204,8 @@ from the stop request, including capture shutdown, any remaining setup, queued
 upload, EOF and close. Readiness, upload retries, EOF and finals cannot extend
 that overall deadline. Completion or cancellation removes both timers; expiry
 releases processing and permits an explicit new recording. A restart tap during
-drain reports that processing must finish. After capture shutdown and the IDLE
+drain reports that processing must finish and keeps the spinner visible while
+work remains pending. After capture shutdown and the IDLE
 state listener, recheck session ownership so reentrant failure/cancellation cannot
 restore the spinner. A capture thread still alive after
 two seconds reports terminal failure before the EOF barrier, blocks native capture

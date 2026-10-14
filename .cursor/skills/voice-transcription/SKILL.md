@@ -91,7 +91,8 @@ eight seconds before initiating close, with a 15-second EOF/close deadline and a
 20-second overall deadline from the stop request, including capture shutdown,
 remaining setup and upload. Readiness, retries, EOF and finals cannot reset the
 overall budget. Completion/cancellation removes both stop timers. A restart tap
-during drain reports that processing must finish. Recheck session ownership after
+during drain reports that processing must finish without hiding the spinner while
+work remains pending. Recheck session ownership after
 capture shutdown and the IDLE state listener so reentrant failure/cancellation
 cannot restore processing UI.
 Clear older response/final watchdogs as soon as graceful stop begins. Silence
