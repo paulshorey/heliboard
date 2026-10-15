@@ -22,6 +22,7 @@ Core IME pipeline tests.
 - Punctuation cleanup tests cover longer segments correcting a preceding period or comma, every occurrence across incoming line breaks and existing paragraph text, verified host-selection rejection before a longer correction can write text, deferred-editor comma corrections, and preservation of standalone ellipses.
 - Comma cleanup must not remove the comma required to recognize `um,`/`uh,` fillers before paragraph cleanup; the integration regression checks fillers directly followed by punctuation.
 - Host-clear tests also cover unchanged selection, extracted-text notifications without selection callbacks, partial/belated/stale-token updates, unavailable host reads, rejected monitors, fullscreen monitor ownership, editor restarts, and late finals/markers after a clear (including fields that started empty). Lifecycle tests require immediate cancellation on interactive keyboard hiding/input-view finish, while preserving screen-off recording. Active-manager mocks transition to idle on cancellation, matching production.
+- Voice feedback tests drive the real IME listener and processing indicator: blocked-restart feedback keeps the spinner visible while processing is pending, and a terminal error clears it after work ends.
 - The mix of Java and Kotlin tests here is intentional; keep whichever language is clearest for the target code.
 
 ## Keep this file current
