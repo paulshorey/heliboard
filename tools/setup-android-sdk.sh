@@ -4,8 +4,13 @@
 set -e
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$PROJECT_ROOT/.android-sdk}"
-CMDLINE_TOOLS_URL="https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$PROJECT_ROOT/.android-sdk}}"
+case "$(uname -s)" in
+  Linux) SDK_HOST=linux ;;
+  Darwin) SDK_HOST=mac ;;
+  *) echo "Use Android Studio SDK Manager on this platform." >&2; exit 1 ;;
+esac
+CMDLINE_TOOLS_URL="https://dl.google.com/android/repository/commandlinetools-${SDK_HOST}-11076708_latest.zip"
 
 echo "Android SDK will be installed to: $ANDROID_SDK_ROOT"
 
@@ -14,7 +19,7 @@ if [[ ! -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]]; then
   echo "Downloading Android command-line tools..."
   mkdir -p "$ANDROID_SDK_ROOT"
   tmpdir=$(mktemp -d)
-  trap "rm -rf $tmpdir" EXIT
+  trap 'rm -rf "$tmpdir"' EXIT
   curl -fsSL -o "$tmpdir/cmdline-tools.zip" "$CMDLINE_TOOLS_URL"
   unzip -q "$tmpdir/cmdline-tools.zip" -d "$tmpdir"
   mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
@@ -33,9 +38,16 @@ echo "Installing platform 35, build-tools 35.0.0, NDK 28.0.13004108..."
   "build-tools;35.0.0" \
   "ndk;28.0.13004108"
 
-# Create local.properties
+# Preserve Android Studio's other local properties.
 LOCAL_PROPERTIES="$PROJECT_ROOT/local.properties"
-echo "sdk.dir=$ANDROID_SDK_ROOT" > "$LOCAL_PROPERTIES"
+python3 - "$LOCAL_PROPERTIES" "$ANDROID_SDK_ROOT" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+lines = p.read_text().splitlines() if p.exists() else []
+lines = [line for line in lines if not line.startswith('sdk.dir=')]
+p.write_text('\n'.join(lines + ['sdk.dir=' + sys.argv[2]]) + '\n')
+PY
 echo "Created $LOCAL_PROPERTIES"
 
 # Export for current shell
