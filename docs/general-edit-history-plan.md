@@ -378,7 +378,7 @@ A regression test (see §7) will assert the exact requirement‑3 ordering scena
     empty-state copy. Keep existing `fullapp_*` strings that still apply to live
     drafts.
 - `docs/gemini-transcription.md` is unrelated; update
-  `.cursor/skills/full-app-mode/SKILL.md` and the relevant `AGENTS.md`
+  `.codex/skills/full-app-mode/SKILL.md` and the relevant `AGENTS.md`
   files (`settings/`, `latin/`, `settings/screens/`, new `edithistory/`) to
   describe the split.
 

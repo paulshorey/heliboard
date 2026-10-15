@@ -60,16 +60,11 @@ Android picks the best-matching `values-*` folder. Keyboard height and key aspec
 | `values-sw768dp/` | Large tablet portrait |
 | `values-sw768dp-land/` | Large tablet landscape |
 
-## Current fraction values
+## Read current values from resources
 
-| Qualifier | Hint letter (holo / lxx) | Hint label (holo / lxx) |
-|-----------|--------------------------|-------------------------|
-| `values/config.xml` | 31% / 31% | 52% / 37% |
-| `values-land/config.xml` | 37% / 37% | 60% / 37% |
-| `values-sw600dp/config.xml` | 29% / 29% | 35% / 25% |
-| `values-sw600dp-land/config.xml` | 29% / 29% | 42% / 25% |
-| `values-sw768dp/config.xml` | 31% / 31% | 35% / 25% |
-| `values-sw768dp-land/config.xml` | 37% / 37% | 35% / 25% |
+Use `rg 'config_key_hint_(letter|label)_ratio' app/src/main/res/values*/config.xml`
+when tuning sizes. The resource files are authoritative; do not copy a static
+value table into this skill where it can drift from the rendered keyboard.
 
 ## Tuning guidelines
 

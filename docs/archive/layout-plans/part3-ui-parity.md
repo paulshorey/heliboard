@@ -1,3 +1,6 @@
+> Historical design notes, moved from the former agent configuration folder.
+> Check current code and `layouts.md` before using these as an implementation plan.
+
 # HeliBoard User-Editable Keyboard Layouts — Part 3: UI Parity & Forking
 
 This is the third and final plan to implement user-editable keyboard layouts. The goal of this phase is to deliver the full user-facing capability: allowing users to add, edit, delete, and import custom layouts across ALL layout slots (MAIN, SYMBOLS, FUNCTIONAL, etc.) and easily create a custom copy of any built-in layout with a single tap.
