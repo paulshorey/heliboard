@@ -111,7 +111,6 @@
     <string name="delete_swipe">Löschen durch Wischen</string>
     <string name="prefs_force_incognito_mode_summary">Deaktiviert das Lernen von neuen Wörtern</string>
     <string name="more_keys_strip_description">Mehr Tasten</string>
-    <string name="number_row_summary">Zahlenzeile immer anzeigen</string>
     <string name="number_row">Zahlenzeile</string>
     <string name="show_hints">Tasten-Hinweise anzeigen</string>
     <string name="incognito">Inkognito-Modus erzwingen</string>
@@ -152,13 +151,11 @@
     <string name="restore_error">Fehler beim Wiederherstellen der Sicherung: %s</string>
     <string name="theme_colors">Farben</string>
     <string name="select_color_functional_key_background">Funktionstastenhintergrund</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Sebeolsik 390)</string>
     <string name="add_to_personal_dictionary_summary">Persönliches Wörterbuch des Gerätes verwenden, um gelernte Wörter zu speichern</string>
     <string name="user_dict_word_already_present">Dieses Wort ist bereits im Benutzer-Wörterbuch %s vorhanden. Bitte gib ein anderes Wort ein.</string>
     <string name="style_name_Rounded" tools:keep="@string/style_name_Rounded">Abgerundet</string>
     <string name="button_backup">Sicherung</string>
     <string name="theme_name_black" tools:keep="@string/theme_name_black">Schwarz</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Sebeolsik Final)</string>
     <string name="theme_name_chocolate" tools:keep="@string/theme_name_chocolate">Schokolade</string>
     <string name="remove_dictionary_message">Soll das vom Benutzer hinzugefügte Wörterbuch \"%s\" wirklich entfernt werden?</string>
     <string name="theme_name_cloudy" tools:keep="@string/theme_name_cloudy">Wolkig</string>
@@ -340,7 +337,6 @@
     <string name="gesture_floating_preview_dynamic_summary">Die Vorschau während einer Geste mitbewegen</string>
     <string name="gesture_trail_fadeout_duration">Anzeigedauer der Gestenspur</string>
     <string name="prefs_space_bar_text">Benutzerdefinierter Text auf der Leertaste</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Zahlenzeile</string>
     <string name="layout_emoji_bottom_row" tools:keep="@string/layout_emoji_bottom_row">Emoji untere Zeile</string>
     <string name="layout_clip_bottom_row" tools:keep="@string/layout_clip_bottom_row">Zwischenablage untere Zeile</string>
     <string name="icon_style">Symbolstil</string>
@@ -373,7 +369,6 @@
     <string name="customize_background_image_landscape">Hintergrundbild setzen (Querformat)</string>
     <string name="customize_toolbar_key_code_reset_message">Wirklich alle benutzerdefinierten Tastencodes zurücksetzen?</string>
     <string name="enable_split_keyboard_landscape">Geteilte Tastatur aktivieren (Querformat)</string>
-    <string name="number_row_hints">Hinweise auf der Zahlenzeile zeigen</string>
     <string name="split" tools:keep="@string/split">Getrennte Tastatur</string>
     <string name="prefs_font_scale">Tastatur-Schriftgrad</string>
     <string name="prefs_emoji_font_scale">Emoji-Ansicht Schriftgrad</string>
@@ -395,7 +390,6 @@
     <string name="show_tld_popup_keys">Zeige TLD-Popup-Tasten</string>
     <string name="show_tld_popup_keys_summary">Ersetze Punkt-Tastenpopups mit Top-Level-Domains wenn URLs und Mailadressen eingegeben werden</string>
     <string name="prefs_always_show_suggestions_except_web_text">Nicht immer Vorschläge für Web-Editierfelder anzeigen</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">Zahlenreihe (Basis)</string>
     <string name="prefs_always_show_suggestions_except_web_text_summary">Web-Eingabefelder (meist in Browsern) sind eine häufige Ursache für Probleme mit der Einstellung \"Immer Vorschläge anzeigen\"</string>
     <string name="after_numpad_and_space">Drücken der Eingabetaste oder der Leertaste nach anderen Tasten im Ziffernblock</string>
     <string name="settings_category_space">Leertaste</string>
@@ -438,7 +432,6 @@
     <string name="layout_emoji_bottom_row_with_action" tools:keep="@string/layout_emoji_bottom_row_with_action">Emoji untere Zeile mit Aktions-Taste</string>
     <string name="layout_clip_bottom_row_with_action" tools:keep="@string/layout_clip_bottom_row_with_action">Zwischenablage untere Zeile mit Aktions-Taste</string>
     <string name="custom_emoji_font">Benutzerdefinierte Emoji-Schriftart aus Datei festlegen</string>
-    <string name="number_row_in_symbols">Zeilenzeile in Symbol-Ansicht anzeigen</string>
     <string name="clipboard_history_pinned_first">Angeheftete Elemente zuerst anzeigen</string>
     <string name="subtype_mhr">Ostmari</string>
     <string name="subtype_khipro_bn">%s (Khipro)</string>

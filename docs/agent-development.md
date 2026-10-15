@@ -92,12 +92,42 @@ signed PR artifact. SDK/Device Manager can install missing components and create
 an emulator. No live Gemini key is needed for JVM tests, compilation or settings
 smoke checks. Real transcription requires the developer's key in app settings.
 
-The audit's `:app:lintDebug` run reported **820 errors, 125 warnings and 3 hints**
-on the unchanged Android sources. Its first failure is `ConcurrentHashMap.merge`
-in `EmailsDictionary.kt:190` requiring API 24 while `minSdk` is 21; missing
-translations also account for a large part of the report. Keep lint available as
-a diagnostic, and scope cleanup/desugaring/translation-baseline decisions before
-making it a required check. This infrastructure change does not suppress findings.
+The infrastructure audit's `:app:lintDebug` run reported **820 errors, 125 warnings
+and 3 hints**. A subsequent cleanup reproduced that count and reduced it to
+**600 errors, 120 warnings and 3 hints**, without disabling checks, changing
+severities or adding a baseline:
+
+- Enabled core library desugaring, which already had its dependency declared.
+  This backports `ConcurrentHashMap.merge` while preserving atomic email usage
+  increments on API 21–23. Java language desugaring alone does not backport
+  library APIs; see [Android's desugaring guide](https://developer.android.com/studio/write/java8-support).
+- Removed 219 obsolete translations across 48 locale files for seven keys with
+  no remaining default string or consumer: `number_row_summary`,
+  `number_row_hints`, `number_row_in_symbols`, `layout_number_row`,
+  `layout_number_row_basic`, `subtype_generic_sebeolsik_390` and
+  `subtype_generic_sebeolsik_final`. Five related unused-resource warnings also
+  disappeared.
+- Changed the accessibility singleton to retain the application context and its
+  services, rather than retaining a `LatinIME` service instance. Lint still
+  reports two `StaticFieldLeak` warnings based on the singleton field types;
+  those warnings were not suppressed. `RichInputMethodManager` is initialized
+  from the application in `App.onCreate`.
+- Replaced delete-then-rename email saves with `AtomicFile`, retaining the TSV
+  format and serialized disk access. `openRead()` recovers interrupted commits,
+  including API 21's backup-only case. Regression coverage runs on API 21 and 35.
+- Excluded `AGENTS.md` from assets in every build variant. The inherited APK
+  included four such files, and emoji validation tried to parse Markdown as
+  emoji data. Variant-specific filters append to the common exclusions.
+- Corrected external-link tests to require an HTTP(S) scheme instead of trying
+  to open local filenames such as `HeliBoard.apk` as URLs. Connect/read waits
+  are bounded to 10 seconds each.
+
+All remaining lint errors are `MissingTranslation` findings. These need actual
+translations or an explicit supported-language policy; copying English into each
+locale would hide missing work. Other warning categories include unused resources
+and attributes, dependency updates, plural candidates and layout conventions.
+Lint remains diagnostic and currently fails. Keep its findings visible until the
+remaining backlog and any baseline policy are deliberately addressed.
 
 ## Codex desktop actions
 

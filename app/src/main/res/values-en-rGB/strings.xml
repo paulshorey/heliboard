@@ -94,7 +94,6 @@
     <string name="user_dict_settings_more_languages">"More languages…"</string>
     <string name="spell_checker_service_name">HeliBoard Spell Checker</string>
     <string name="android_spell_checker_settings">HeliBoard Spell Checker Settings</string>
-    <string name="number_row_summary">Always show number row</string>
     <string name="delete_swipe">Delete swipe</string>
     <string name="prefs_force_incognito_mode_summary">Disable learning of new words</string>
     <string name="show_emoji_key">Emoji key</string>

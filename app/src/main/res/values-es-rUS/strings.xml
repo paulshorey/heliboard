@@ -106,7 +106,6 @@
     <string name="delete_swipe">Borrar deslizando</string>
     <string name="autospace_after_punctuation">Espacio después del punto</string>
     <string name="incognito">Forzar modo incógnito</string>
-    <string name="number_row_summary">Mostrar siempre la fila de números</string>
     <string name="prefs_long_press_keyboard_to_change_lang_summary">Mantener presionada la barra espaciadora nos mostrará los distintos métodos de entrada disponibles</string>
     <string name="delete_swipe_summary">Deslice el dedo desde la tecla eliminar para seleccionar y eliminar porciones más grandes de texto a la vez</string>
     <string name="autospace_after_punctuation_summary">Insertar automáticamente un espacio después del punto al escribir una palabra nueva</string>
@@ -277,8 +276,6 @@
     <string name="var_toolbar_direction">Dirección variable de la barra de herramientas</string>
     <string name="var_toolbar_direction_summary">Invertir la dirección cuando se selecciona un subtipo de teclado de derecha a izquierda</string>
     <string name="subtype_probhat_bn_BD">%s (Probhat)</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Sebeolsik 390)</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Sebeolsik Final)</string>
     <string name="theme_name_ocean" tools:keep="@string/theme_name_ocean">Océano</string>
     <string name="theme_name_dark" tools:keep="@string/theme_name_dark">Oscuro</string>
     <string name="theme_name_darker" tools:keep="@string/theme_name_darker">Más oscuro</string>
@@ -348,7 +345,6 @@
     <string name="gesture_floating_preview_static_summary">Ver la palabra sugerida mientras de realizan gestos</string>
     <string name="gesture_floating_preview_dynamic_summary">Mover la vista previa durante los gestos</string>
     <string name="gesture_trail_fadeout_duration">Duración del rastro gestual</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Fila numérica</string>
     <string name="prefs_space_bar_text">Texto personalizado en la barra espaciadora</string>
     <string name="layout_emoji_bottom_row" tools:keep="@string/layout_emoji_bottom_row">Fila inferior de emojis</string>
     <string name="layout_clip_bottom_row" tools:keep="@string/layout_clip_bottom_row">Fila inferior del portapapeles</string>

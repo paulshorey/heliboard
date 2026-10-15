@@ -110,7 +110,6 @@
     <string name="settings_category_input">Vstup</string>
     <string name="settings_category_additional_keys">Dodatečné klávesy</string>
     <string name="delete_swipe">Mazat posunutím</string>
-    <string name="number_row_summary">Vždy aktivní číselný řádek</string>
     <string name="show_hints">Nápověda kláves</string>
     <string name="show_hints_summary">Nápověda při dlouhém stisku</string>
     <string name="prefs_long_press_keyboard_to_change_lang">Změnit metodu zadávání mezerníkem</string>
@@ -254,8 +253,6 @@
     <string name="full_right" tools:keep="@string/full_right">Úplně vpravo</string>
     <string name="show_popup_hints_summary">Zobrazit tipy, pokud dlouhé stisknutí klávesy aktivuje další funkce</string>
     <string name="subtype_akkhor_bn_BD">%s (Akkhor)</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Sebeolsik 390)</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Sebeolsik Final)</string>
     <string name="button_load_custom">Načíst soubor</string>
     <string name="user_dict_add_word_button">Přidat slovo</string>
     <string name="theme_name_light" tools:keep="@string/theme_name_light">Světlý</string>
@@ -330,7 +327,6 @@
     <string name="word_left" tools:keep="@string/word_left">Slovo doleva</string>
     <string name="word_right" tools:keep="@string/word_right">Slovo doprava</string>
     <string name="show_popup_keys_main">Přidat velmi běžné varianty (výchozí)</string>
-    <string name="number_row_hints">Zobrazit nápovědy na číselném řádku</string>
     <string name="locales_with_dict">Jazyky se slovníky</string>
     <string name="button_save_file">Uložit do souboru</string>
     <string name="quick_pin_toolbar_keys">Připnout klávesu do panelu nástrojů při dlouhém podržení</string>
@@ -342,7 +338,6 @@
     <string name="label_space_key_for_number_layout" tools:keep="@string/label_space_key_for_number_layout">Mezerník (číselné rozložení)</string>
     <string name="label_resize_onehanded_key" tools:keep="@string/label_resize_onehanded_key">Změnit velikost režimu jedné ruky</string>
     <string name="customize_icons_reset_message">Opravdu chcete resetovat všechny přizpůsobené ikony?</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">Číselný řádek (základní)</string>
     <string name="label_shift_key_shifted" tools:keep="@string/label_shift_key_shifted">Shift (stisknutý)</string>
     <string name="toast_msg_clipboard_copy">Obsah zkopírován</string>
     <string name="subtype_baishakhi_bn_IN">%s (Baishakhi)</string>
@@ -383,7 +378,6 @@
     <string name="customize_toolbar_key_code_reset_message">Opravdu chcete vymazat všechny přizpůsobené kódy kláves?</string>
     <string name="settings_screen_secondary_layouts">Sekundární rozložení</string>
     <string name="layout_functional_keys_tablet" tools:keep="@string/layout_functional_keys_tablet">Funkční klávesy (velká obrazovka)</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Číselný řádek</string>
     <string name="switch_keyboard_after">Přepnout na hlavní klávesnici po…</string>
     <string name="after_clip">Výběr záznamu v historii schránky</string>
     <string name="after_symbol_and_space">Stisknutí klávesy Enter nebo mezerníku v zobrazení znaků</string>
@@ -442,6 +436,5 @@
     <string name="subtype_mhr">Mari (východní)</string>
     <string name="layout_emoji_bottom_row_with_action" tools:keep="@string/layout_emoji_bottom_row_with_action">Spodní řádek emodži s akční klávesou</string>
     <string name="layout_clip_bottom_row_with_action" tools:keep="@string/layout_clip_bottom_row_with_action">Spodní řádek schránky s akční klávesou</string>
-    <string name="number_row_in_symbols">Zobrazit číselný řádek na obrazovce znaků</string>
     <string name="custom_emoji_font">Nastavit vlastní písmo emodži ze souboru</string>
 </resources>

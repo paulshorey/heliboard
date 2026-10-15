@@ -99,7 +99,6 @@
     <string name="settings_category_additional_keys">Додатни кључеви</string>
     <string name="auto_correction_confidence">Поузданост ауто-корекције</string>
     <string name="autospace_after_punctuation">Аутоматски размак после интерпункције</string>
-    <string name="number_row_summary">Увек прикажи ред са бројевима</string>
     <string name="show_hints">Прикажи кључне савете</string>
     <string name="settings_category_clipboard_history">Историја међуспремника</string>
     <string name="settings_category_correction">Исправке</string>

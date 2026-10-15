@@ -162,7 +162,6 @@ Nouveau dictionnaire:
     <string name="prefs_force_incognito_mode_summary">Désactive l\'apprentissage de nouveaux mots</string>
     <string name="language_and_layouts_title">Langues &amp; Dispositions</string>
     <string name="more_keys_strip_description">Touches supplémentaires</string>
-    <string name="number_row_summary">Toujours afficher la ligne de chiffres</string>
     <string name="localized_number_row">Ligne de chiffres en language local</string>
     <string name="localized_number_row_summary">Privilégie les chiffres en language local à la place des chiffres latins</string>
     <string name="prefs_long_press_keyboard_to_change_lang">Changer le mode de saisie avec la barre d\'espace</string>
@@ -276,8 +275,6 @@ Nouveau dictionnaire:
     <string name="available_dictionary_experimental">%s (expérimental)</string>
     <string name="version">Version</string>
     <string name="file_read_error">Impossible de lire le fichier</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Sebeolsik 390)</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Sebeolsik Final)</string>
     <string name="var_toolbar_direction">Sens variable de la barre d\'outils</string>
     <string name="prefs_long_press_symbol_for_numpad">Appui long sur la touche des symboles pour afficher le pavé numérique</string>
     <string name="layout_phone" tools:keep="@string/layout_phone">Pavé téléphonique</string>
@@ -346,7 +343,6 @@ Nouveau dictionnaire:
     <string name="gesture_floating_preview_static">Aperçu flottant</string>
     <string name="gesture_trail_fadeout_duration">Durée du tracé du geste</string>
     <string name="icon_style">Style de l\'icône</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Rangée de chiffres</string>
     <string name="prefs_space_bar_text">Texte personnalisé sur la barre d\'espace</string>
     <string name="layout_clip_bottom_row" tools:keep="@string/layout_clip_bottom_row">Rangée inférieure du presse-papier</string>
     <string name="layout_emoji_bottom_row" tools:keep="@string/layout_emoji_bottom_row">Rangée inférieure des émojis</string>
@@ -383,7 +379,6 @@ Nouveau dictionnaire:
     <string name="prefs_font_scale">Échelle de police du clavier</string>
     <string name="prefs_emoji_font_scale">Échelle de police de la vue Emoji</string>
     <string name="prefs_side_padding_scale">Espacement latéral</string>
-    <string name="number_row_hints">Afficher les symboles sur la rangée numérique</string>
     <string name="prefs_language_swipe_distance">Distance de balayage pour changer de langue</string>
     <string name="enable_split_keyboard_landscape">Activer le clavier divisé (paysage)</string>
     <string name="split" tools:keep="@string/split">Clavier divisé</string>
@@ -402,7 +397,6 @@ Nouveau dictionnaire:
     <string name="show_tld_popup_keys_summary">Remplacer les suggestions de la touche point par des extensions de domaine (TLD) lors de la saisie d’URL ou d’adresses e-mail</string>
     <string name="after_numpad_and_space">Appuyé sur Entrée ou sur la barre d\'espace après d\'autres touches du pavé numérique</string>
     <string name="prefs_always_show_suggestions_except_web_text_summary">Les champs d\'édition Web (principalement présents dans les navigateurs) sont une cause très courante de problèmes avec le paramètre « Toujours afficher les suggestions »</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">Rangée numérique (standard)</string>
     <string name="prefs_always_show_suggestions_except_web_text">Ne pas forcer l\'affichage des suggestions pour les champs de saisie web</string>
     <string name="settings_category_space">Espace</string>
     <string name="autospace_before_gesture_typing">Espace automatique avant de saisir un mot par geste</string>
@@ -446,6 +440,5 @@ Nouveau dictionnaire:
     <string name="subtype_mhr">Mari (Eastern)</string>
     <string name="layout_emoji_bottom_row_with_action" tools:keep="@string/layout_emoji_bottom_row_with_action">Rangée inférieure (emoji) avec touche d\'action</string>
     <string name="layout_clip_bottom_row_with_action" tools:keep="@string/layout_clip_bottom_row_with_action">Rangée inférieure du presse-papiers avec touche d\'action</string>
-    <string name="number_row_in_symbols">Afficher la ligne numérique en mode symboles</string>
     <string name="custom_emoji_font">Définir une police d\'emoji personnalisée à partir d\'un fichier</string>
 </resources>

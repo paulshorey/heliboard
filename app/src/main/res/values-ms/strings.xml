@@ -167,10 +167,8 @@
     <string name="more_keys_strip_description">Kekunci lagi</string>
     <string name="language_and_layouts_title">Bahasa &amp; Susunatur</string>
     <string name="number_row">Baris nombor</string>
-    <string name="number_row_summary">Sentiasa tunjukkan baris nombor</string>
     <string name="localized_number_row">Setempatkan baris nombor</string>
     <string name="localized_number_row_summary">Pilih nombor setempat daripada nombor Latin</string>
-    <string name="number_row_hints">Tunjukkan pembayang pada baris nombor</string>
     <string name="show_hints">Tunjukkan pembayang kekunci</string>
     <string name="show_hints_summary">Tunjukkan pembayang jika ditekan lama</string>
     <string name="popup_order_and_hint_source">Susunan kekunci popup dan sumber pembayang</string>

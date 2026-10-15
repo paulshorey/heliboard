@@ -14,6 +14,7 @@ Accessibility delegates and virtual node support for keyboard surfaces.
 ## Non-obvious notes
 - Virtual node geometry must track the currently rendered keyboard exactly or TalkBack navigation becomes misleading.
 - Popup keys and long-press behavior need separate accessibility handling from the main keyboard.
+- `AccessibilityUtils` is process-wide; retain only the application context and its services, never an IME service instance.
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.

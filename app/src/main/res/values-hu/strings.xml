@@ -106,7 +106,6 @@
     <string name="enable_clipboard_history_summary">Ha le van tiltva, a vágólapbillentyű beilleszti a vágólap tartalmát, ha van</string>
     <string name="clipboard_history_retention_time">Előzmények megőrzésének ideje</string>
     <string name="prefs_keyboard_height_scale">Billentyűzet magassága</string>
-    <string name="number_row_summary">A számsor mindig jelenjen meg</string>
     <string name="show_hints">Billentyűtippek megjelenítése</string>
     <string name="show_hints_summary">Nyomva tartási tippek megjelenítése</string>
     <string name="prefs_long_press_keyboard_to_change_lang_summary">A szóközbillentyű nyomva tartásával a beviteli mód kiválasztási menüje jelenik meg</string>
@@ -215,8 +214,6 @@
     <string name="redo" tools:keep="@string/redo">Mégis</string>
     <string name="show_popup_hints">Funkcióbillentyűk megjelenítése</string>
     <string name="subtype_akkhor_bn_BD">%s (Akkhor)</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Sebeolsik 390)</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Sebeolsik Végleges)</string>
     <string name="message_add_custom_layout">Válasszon ki egy kompatibilis formátumú fájlt. A formátumokkal kapcsolatos információk a(z) %s oldalon találhatók.</string>
     <string name="button_load_custom">Fájl betöltése</string>
     <string name="file_read_error">Fájl nem olvasható</string>
@@ -329,7 +326,6 @@
     <string name="auto_correct_shortcuts_summary">Ha engedélyezve van, a gyorsbillentyűk kibővíthetők az automatikus javítással</string>
     <string name="center_suggestion_text_to_enter">Mindig a középső javaslat használata</string>
     <string name="center_suggestion_text_to_enter_summary">Szóköz vagy írásjel leütésével a középső javaslat beírása</string>
-    <string name="number_row_hints">Tippek megjelenítése a számsorban</string>
     <string name="show_tld_popup_keys_summary">Webcímek és e-mail-címek beírásakor a pont billentyű leütésére megjelenő felugró ablakokat cserélje ki felső szintű tartománynevekre</string>
     <string name="toolbar_mode_expandable">Eszköztárbillentyűk és javaslatok</string>
     <string name="toolbar_mode_toolbar_keys">Csak eszköztárbillentyűk</string>
@@ -384,8 +380,6 @@
     <string name="layout_in_use">Figyelmeztetés: az elrendezés jelenleg használatban van</string>
     <string name="settings_screen_secondary_layouts">Másodlagos elrendezés</string>
     <string name="layout_functional_keys_tablet" tools:keep="@string/layout_functional_keys_tablet">Funkcióbillentyűk (nagy kijező)</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Számsor</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">Számsor (alap)</string>
     <string name="customize_currencies_detail">A fő és legfeljebb 6 másodlagos pénznemszimbólum beállítása, szóközzel elválasztva</string>
     <string name="switch_keyboard_after">Átváltás a fő billentyűzetre miután…</string>
     <string name="after_clip">A vágólap előzménybejegyzésének kiválasztása</string>
@@ -440,6 +434,5 @@
     <string name="subtype_mhr">Mari (keleti)</string>
     <string name="layout_emoji_bottom_row_with_action" tools:keep="@string/layout_emoji_bottom_row_with_action">Emodzsik alsó sora akciógombbal</string>
     <string name="layout_clip_bottom_row_with_action" tools:keep="@string/layout_clip_bottom_row_with_action">Vágólap alsó sora akciógombbal</string>
-    <string name="number_row_in_symbols">Számsor megjelenítése a szimbólumnézetben</string>
     <string name="custom_emoji_font">Egyéni emodzsi-betűtípus beállítása fájlból</string>
 </resources>
