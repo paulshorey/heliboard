@@ -35,7 +35,7 @@ Gemini Live realtime transcription pipeline (`gemini-3.5-transcribe-live`).
 - Early punctuation normalization preserves the required comma on `um,`/`uh,` filler fragments so paragraph-level filler removal can still recognize and remove the whole fragment before final punctuation cleanup.
 - Replacement verification temporarily closes/reopens the host batch for editors that defer edits. Prepare paragraph correction from the current cache and verify that the host's original range matches it after flushing. Delayed intermediate selection callbacks must not cancel dictation when the host's current caret matches the expected voice caret.
 - The fixed mic in `suggestions_strip.xml` starts this pipeline; the toolbar VOICE key switches to Android's shortcut voice IME.
-- Preference keys live in `latin/settings`; UI lives in `settings/screens`. Protocol rationale and device acceptance checks are in `docs/gemini-transcription.md` and `.cursor/skills/voice-transcription/`.
+- Preference keys live in `latin/settings`; UI lives in `settings/screens`. Protocol rationale and device acceptance checks are in `docs/gemini-transcription.md` and `.codex/skills/voice-transcription/`.
 - `streamingEndpoint` and `socketFactory` are test seams for local WebSocket and bounded-sender tests. The API key travels in a query parameter and must stay redacted in diagnostics.
 
 ## Keep this file current

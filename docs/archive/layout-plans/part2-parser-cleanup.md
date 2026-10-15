@@ -1,3 +1,6 @@
+> Historical design notes, moved from the former agent configuration folder.
+> Check current code and `layouts.md` before using these as an implementation plan.
+
 # HeliBoard User-Editable Keyboard Layouts — Part 2: Parser Cleanup
 
 This is the second of three plans to implement user-editable keyboard layouts. The goal of this phase is to make the keyboard parser stop prepending the number row dynamically and instead rely solely on the layout file's row count. We will clean up dead configuration fields, support localized digits on baked top rows, fix off-by-one bugs in the extra-keys mechanism, and add JUnit tests.
