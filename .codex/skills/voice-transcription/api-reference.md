@@ -193,7 +193,12 @@ buffer, so HeliBoard does not use it.
   prevents.
 - Graceful shutdown: stop/join capture, queue EOF after the posted tail, read
   finals for 8 s, then initiate close 1000. A nonempty socket queue is failure.
-  The manager bounds the total finish/close wait to 15 s and blocks restart.
+  The manager bounds EOF/close to 15 s and the entire stop to 20 s from the stop
+  request, including capture shutdown, remaining setup and upload. Readiness,
+  retries, EOF and finals cannot reset that budget. Completion/cancellation removes
+  both timers. A blocked restart reports that processing must finish. Recheck
+  session ownership after capture shutdown and the IDLE state listener before
+  restoring processing UI.
   Clear old response/final timers at stop. Silence auto-stop drains and completes
   without an interruption marker for unconfirmed noise/hypotheses; real failures
   still report interruptions. Interims never become editor text.
