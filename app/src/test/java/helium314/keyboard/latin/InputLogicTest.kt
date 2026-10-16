@@ -10,7 +10,10 @@ import android.os.Message
 import android.os.PowerManager
 import android.text.InputType
 import android.view.KeyEvent
+import android.view.View
 import android.view.inputmethod.*
+import android.widget.ProgressBar
+import android.widget.TextView
 import androidx.core.content.edit
 import helium314.keyboard.ShadowInputMethodManager2
 import helium314.keyboard.ShadowLocaleManagerCompat
@@ -33,6 +36,7 @@ import helium314.keyboard.latin.utils.getTimestampFormatter
 import helium314.keyboard.latin.utils.prefs
 import helium314.keyboard.latin.voice.VoiceInputManager
 import org.junit.runner.RunWith
+import org.mockito.ArgumentCaptor
 import org.mockito.Mockito
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
@@ -662,6 +666,37 @@ class InputLogicTest {
         latinIME.onFinishInputView(true)
         Mockito.verify(manager).cancelRecording()
         Mockito.verify(manager, Mockito.never()).stopRecording()
+    }
+
+    @Test fun blockedVoiceRestartFeedbackKeepsSpinnerUntilPendingProcessingEnds() {
+        reset()
+        val manager = mockActiveVoiceManager()
+        Mockito.`when`(manager.hasPendingProcessing()).thenReturn(true)
+        LatinIME::class.java.getDeclaredMethod("setupVoiceInputListener").apply {
+            isAccessible = true
+            invoke(latinIME)
+        }
+        val callback = ArgumentCaptor.forClass(VoiceInputManager.VoiceInputListener::class.java)
+        Mockito.verify(manager).setListener(callback.capture())
+        val indicator = ProgressBar(latinIME)
+        val field = KeyboardSwitcher::class.java.getDeclaredField("mProcessingIndicator").apply { isAccessible = true }
+        val previousIndicator = field.get(latinIME.mKeyboardSwitcher)
+        val toastField = KeyboardSwitcher::class.java.getDeclaredField("mFakeToastView").apply { isAccessible = true }
+        val previousToast = toastField.get(latinIME.mKeyboardSwitcher)
+        try {
+            field.set(latinIME.mKeyboardSwitcher, indicator)
+            // Supply the toast view normally created with the keyboard UI.
+            toastField.set(latinIME.mKeyboardSwitcher, TextView(latinIME))
+            callback.value.onProcessingStarted()
+            callback.value.onError("Finishing dictation. Please wait for processing to finish.")
+            assertEquals(View.VISIBLE, indicator.visibility)
+            Mockito.`when`(manager.hasPendingProcessing()).thenReturn(false)
+            callback.value.onError("Dictation took too long to finish. Please try again.")
+            assertEquals(View.GONE, indicator.visibility)
+        } finally {
+            field.set(latinIME.mKeyboardSwitcher, previousIndicator)
+            toastField.set(latinIME.mKeyboardSwitcher, previousToast)
+        }
     }
 
     @Test fun turningOffTheScreenStillAllowsTheActiveRecordingToContinue() {

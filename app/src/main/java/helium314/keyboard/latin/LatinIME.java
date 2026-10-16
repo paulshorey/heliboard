@@ -2233,7 +2233,10 @@ public class LatinIME extends InputMethodService implements
             @Override
             public void onError(@NonNull String error) {
                 // The manager logs the cause and session snapshot once.
-                mKeyboardSwitcher.hideProcessingIndicator();
+                // A blocked restart is feedback while the old session still drains.
+                if (mVoiceInputManager == null || !mVoiceInputManager.hasPendingProcessing()) {
+                    mKeyboardSwitcher.hideProcessingIndicator();
+                }
                 showVoiceErrorToast(error);
             }
 

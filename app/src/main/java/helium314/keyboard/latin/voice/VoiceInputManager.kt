@@ -41,6 +41,7 @@ class VoiceInputManager internal constructor(
         internal const val STREAM_CONNECT_TIMEOUT_MS = 12_000L
         internal const val PROGRESS_TIMEOUT_MS = 30_000L
         internal const val DRAIN_TIMEOUT_MS = 15_000L
+        internal const val STOP_TIMEOUT_MS = 20_000L
         private const val AUDIO_RETRY_MS = 25L
         internal const val INTERRUPTION_MARKER = "[Dictation interrupted]"
     }
@@ -97,6 +98,7 @@ class VoiceInputManager internal constructor(
     private var finalTimeout: Runnable? = null
     private var sessionLimit: Runnable? = null
     private var drainTimeout: Runnable? = null
+    private var stopTimeout: Runnable? = null
     private var sessionStartedAtMs = 0L
     private var capturedChunks = 0
     private var capturedSpeechChunks = 0
@@ -141,7 +143,11 @@ class VoiceInputManager internal constructor(
 
     fun startRecording(): Boolean {
         // IDLE also means the mic has stopped while the previous connection drains.
-        if (!isIdle) return false
+        if (currentState != State.IDLE) return false
+        if (sessionOpen) {
+            listener?.onError("Finishing dictation. Please wait for processing to finish.")
+            return false
+        }
         if (!voiceRecorder.hasRecordPermission()) {
             Log.w(TAG, "start rejected: microphone permission required")
             listener?.onPermissionRequired()
@@ -263,6 +269,7 @@ class VoiceInputManager internal constructor(
     private fun stopRecording(reason: StopReason) {
         if (!sessionOpen || isSessionStopping) return
         val sessionId = activeSessionId
+        val requestedAtMs = SystemClock.elapsedRealtime()
         isSessionStopping = true
         stopReason = reason
         localSpeechActive = false
@@ -276,7 +283,20 @@ class VoiceInputManager internal constructor(
         sessionLimit?.let(mainHandler::removeCallbacks)
         sessionLimit = null
         voiceRecorder.stopRecording()
+        // Capture shutdown or a listener can cancel the session reentrantly.
+        // Do not restore processing UI or schedule work for that old session.
+        if (!isCurrent(sessionId)) return
+        stopTimeout = Runnable {
+            stopTimeout = null
+            if (isCurrent(sessionId)) failSession("Dictation took too long to finish. Please try again.")
+        }.also {
+            // Include capture shutdown, setup, queued upload and EOF/close in
+            // one budget. Readiness, backpressure retries and finals cannot reset it.
+            val remainingMs = (requestedAtMs + STOP_TIMEOUT_MS - SystemClock.elapsedRealtime()).coerceAtLeast(0)
+            mainHandler.postDelayed(it, remainingMs)
+        }
         updateState(State.IDLE)
+        if (!isCurrent(sessionId)) return
         listener?.onProcessingStarted()
         // AudioRecord.stop/join ensures the recorder's last posted chunks precede
         // this barrier. Retain those chunks, then enqueue EOF behind all of them.
@@ -652,7 +672,7 @@ class VoiceInputManager internal constructor(
         activeSessionId += 1
         networkMonitor.stop()
         cancelAutoStopTimer()
-        listOf(audioRetry, connectTimeout, responseTimeout, finalTimeout, sessionLimit, drainTimeout)
+        listOf(audioRetry, connectTimeout, responseTimeout, finalTimeout, sessionLimit, drainTimeout, stopTimeout)
             .forEach { it?.let(mainHandler::removeCallbacks) }
         audioRetry = null
         connectTimeout = null
@@ -660,6 +680,7 @@ class VoiceInputManager internal constructor(
         finalTimeout = null
         sessionLimit = null
         drainTimeout = null
+        stopTimeout = null
         isStreamingReady = false
         isStreamingConnecting = false
         isSessionStopping = false

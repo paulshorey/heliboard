@@ -199,7 +199,15 @@ There is no stale-interim insertion timer. An interim is never evidence that all
 speech was received. On explicit stop, stop/join the recorder, process its already
 posted tail callbacks, enqueue EOF, and read for eight seconds before initiating
 WebSocket close. A nonempty transport queue at that deadline is failure. The
-manager also bounds the complete finish/close wait to 15 seconds. A capture thread still alive after
+manager bounds EOF/close to 15 seconds, plus the entire stop operation to 20 seconds
+from the stop request, including capture shutdown, any remaining setup, queued
+upload, EOF and close. Readiness, upload retries, EOF and finals cannot extend
+that overall deadline. Completion or cancellation removes both timers; expiry
+releases processing and permits an explicit new recording. A restart tap during
+drain reports that processing must finish and keeps the spinner visible while
+work remains pending. After capture shutdown and the IDLE
+state listener, recheck session ownership so reentrant failure/cancellation cannot
+restore the spinner. A capture thread still alive after
 two seconds reports terminal failure before the EOF barrier, blocks native capture
 reuse, and keeps its original recording callback for all late reads. Pause/resume
 changes the capture phase so an interrupted native read cannot falsely abort
@@ -270,8 +278,10 @@ Deadlines are anchored rather than reset by each PCM chunk:
   bytes after the last speech frame; FIFO queue size distinguishes queued speech
   from its quiet/control suffix. A duplicate authoritative final also advances
   progress, even when transcript assembly suppresses the duplicate editor write.
-- EOF: cancel the earlier response/final watchdogs, read finals for eight seconds
-  before initiating close, and allow 15 seconds for the full close wait.
+- Stop request: cancel the earlier response/final watchdogs and start one
+  20-second budget for capture shutdown, remaining setup, upload, EOF and close.
+  Within that budget, read finals for eight seconds after EOF before initiating
+  close, and allow at most 15 seconds from EOF for close completion.
 
 The configured local silence timeout is a normal stop reason. It drains the same
 connection and accepts late authoritative finals, then completes without a marker
