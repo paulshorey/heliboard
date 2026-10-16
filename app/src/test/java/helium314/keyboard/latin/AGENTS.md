@@ -13,6 +13,7 @@ Core IME pipeline tests.
 ## Subfolders
 - `utils/` - focused utility tests, including `PinnedToolbarLayoutTest.kt` for even-width secondary-toolbar fitting on narrow screens.
 - `voice/` - transcription pipeline tests.
+- `personalization/` - email extraction and dictionary persistence tests, including interrupted atomic writes and concurrent usage counts on API 21 and 35.
 
 ## Non-obvious notes
 - `InputLogicTest.kt` is the most important behavior-regression suite for ordinary typing.

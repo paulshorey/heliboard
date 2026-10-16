@@ -106,7 +106,6 @@
     <string name="spell_checker_service_name">HeliBoard-stavekontrol</string>
     <string name="show_hints">Vis tastehints</string>
     <string name="number_row">Talrække</string>
-    <string name="number_row_summary">Vis altid talrækken</string>
     <string name="prefs_keyboard_height_scale">Skala for tastaturhøjde</string>
     <string name="show_emoji_key">Emoji-tast</string>
     <string name="prefs_long_press_keyboard_to_change_lang">Skift inputmetode med mellemrumstasten</string>
@@ -169,7 +168,6 @@
     <string name="file_read_error">Kan ikke læse fil</string>
     <string name="customize_currencies_detail">Indstil primær og op til 6 sekundære valutasymboler, adskilt med mellemrum</string>
     <string name="show_popup_hints">Vis funktionelle hints</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Sebeolsik 390)</string>
     <string name="subtype_xdq">Kaitag</string>
     <string name="button_select_language">Vælg sprog</string>
     <string name="available_dictionary_experimental">%s (eksperimentel)</string>
@@ -246,7 +244,6 @@
     <string name="dictionary_load_error">Fejl under indlæsning af ordbogsfil</string>
     <string name="backup_error">Backup-fejl: %s</string>
     <string name="select_word" tools:keep="@string/select_word">Vælg ord</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Talrække</string>
     <string name="prefs_key_emoji_max_sdk">Tilsidesæt Emoji-version</string>
     <string name="theme_colors">Farver</string>
     <string name="theme_name_darker" tools:keep="@string/theme_name_darker">Mørkere</string>
@@ -254,7 +251,6 @@
     <string name="prefs_font_scale">Tastaturets skriftstørrelse</string>
     <string name="prefs_emoji_font_scale">Skriftstørrelse i emoji-visning</string>
     <string name="replace_dictionary_message">Erstat brugertilføjet ordbog \"%1$s\"?\n\nNuværende ordbog:\n%2$s\n\nNy ordbog:\n%3$s</string>
-    <string name="number_row_hints">Vis hints på talrækken</string>
     <string name="left" tools:keep="@string/left">Venstre</string>
     <string name="right" tools:keep="@string/right">Højre</string>
     <string name="up" tools:keep="@string/up">Op</string>

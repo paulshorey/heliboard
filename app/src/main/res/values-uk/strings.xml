@@ -164,7 +164,6 @@
     <string name="more_keys_strip_description">Більше клавіш</string>
     <string name="prefs_keyboard_height_scale">Масштабування клавіатури по висоті</string>
     <string name="number_row">Рядок цифр</string>
-    <string name="number_row_summary">Завжди показувати рядок цифр</string>
     <string name="key_borders">Контури клавіш</string>
     <string name="settings_category_additional_keys">Додаткові клавіші</string>
     <string name="auto_correction_confidence">Конфіденційність автовиправлення</string>
@@ -255,8 +254,6 @@
     <string name="delete_layout">Справді видалити власну розкладку %s?</string>
     <string name="layout_error">Помилка розкладки: %s</string>
     <string name="subtype_probhat_bn_BD">%s (Пробгат)</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Себольсік 390)</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Себольсік Фінальна)</string>
     <string name="subtype_generic_student">%s (Студентська)</string>
     <string name="message_add_custom_layout">Виберіть файл у сумісному форматі. Інформація про формати доступна %s.</string>
     <string name="button_title_add_custom_layout">Додати власну розкладку</string>
@@ -337,7 +334,6 @@
     <string name="layout_functional_keys" tools:keep="@string/layout_functional_keys">Функціональні клавіші</string>
     <string name="layout_functional_keys_symbols" tools:keep="@string/layout_functional_keys_symbols">Функціональні клавіші (Символи)</string>
     <string name="layout_functional_keys_symbols_shifted" tools:keep="@string/layout_functional_keys_symbols_shifted">Функціональні клавіші (Додаткові символи)</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Ряд з цифрами</string>
     <string name="gesture_floating_preview_static">Плавучий передперегляд</string>
     <string name="gesture_floating_preview_static_summary">Показувати пропозицію під час вводу жестами</string>
     <string name="gesture_floating_preview_dynamic_summary">Переміщувати передперегляд під час вводу жестами</string>
@@ -382,7 +378,6 @@
     <string name="prefs_font_scale">Шкала шрифту клавіатури</string>
     <string name="prefs_emoji_font_scale">Шкала шрифту перегляду емоджі</string>
     <string name="prefs_side_padding_scale">Шкала бічного відступу</string>
-    <string name="number_row_hints">Показувати підказки в рядку з цифрами</string>
     <string name="prefs_language_swipe_distance">Відстань проведення для перемикання мови</string>
     <string name="suggest_emojis">Запропонувати емодзі</string>
     <string name="suggest_emojis_summary">Пропонувати емодзі зі словника у підказках в горі клавіатури</string>
@@ -422,7 +417,6 @@
     <string name="layout_in_use">Увага: цей макет наразі використовується</string>
     <string name="settings_screen_secondary_layouts">Додаткові макети</string>
     <string name="layout_functional_keys_tablet" tools:keep="@string/layout_functional_keys_tablet">Функціональні клавіші (великий екран)</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">Ряд цифр (базовий)</string>
     <string name="after_numpad_and_space">Натискання Enter або пробілу після інших клавіш на цифровій клавіатурі</string>
     <string name="get_colors_message">Ви можете знаходити та ділитися темами в %s .</string>
     <string name="get_layouts_message">Ви можете знайти та поділитися макетами клавіатури в %s .</string>

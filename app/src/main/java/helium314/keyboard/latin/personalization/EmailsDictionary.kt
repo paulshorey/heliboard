@@ -4,8 +4,11 @@ package helium314.keyboard.latin.personalization
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.util.AtomicFile
 import helium314.keyboard.latin.utils.Log
 import java.io.File
+import java.io.FileNotFoundException
+import java.io.FileOutputStream
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -131,16 +134,20 @@ object EmailsDictionary {
 
     private fun load() {
         val f = file() ?: return
-        if (!f.isFile) return
         try {
-            f.readLines().forEach { line ->
-                val trimmed = line.trim()
-                if (trimmed.isEmpty()) return@forEach
-                val parts = trimmed.split('\t')
-                val email = parts.getOrNull(0)?.lowercase() ?: return@forEach
-                val count = parts.getOrNull(1)?.toIntOrNull() ?: 1
-                if (email.contains('@')) entries[email] = count
+            // openRead also restores the last committed file after an interrupted save.
+            AtomicFile(f).openRead().bufferedReader().useLines { lines ->
+                lines.forEach { line ->
+                    val trimmed = line.trim()
+                    if (trimmed.isEmpty()) return@forEach
+                    val parts = trimmed.split('\t')
+                    val email = parts.getOrNull(0)?.lowercase() ?: return@forEach
+                    val count = parts.getOrNull(1)?.toIntOrNull() ?: 1
+                    if (email.contains('@')) entries[email] = count
+                }
             }
+        } catch (_: FileNotFoundException) {
+            // A dictionary is created only after the first recorded address.
         } catch (t: Throwable) {
             Log.w(TAG, "Failed to load emails dictionary", t)
         }
@@ -149,19 +156,22 @@ object EmailsDictionary {
     @Synchronized
     private fun save() {
         val f = file() ?: return
+        val atomicFile = AtomicFile(f)
+        var stream: FileOutputStream? = null
         try {
-            val tmp = File(f.parentFile, f.name + ".tmp")
-            tmp.bufferedWriter().use { out ->
-                for ((email, count) in entries) {
-                    out.write(email)
-                    out.write("\t")
-                    out.write(count.toString())
-                    out.write("\n")
-                }
+            stream = atomicFile.startWrite()
+            val out = stream.bufferedWriter()
+            for ((email, count) in entries) {
+                out.write(email)
+                out.write("\t")
+                out.write(count.toString())
+                out.write("\n")
             }
-            if (f.exists()) f.delete()
-            tmp.renameTo(f)
+            // AtomicFile owns the stream: flush the writer before it syncs and closes it.
+            out.flush()
+            atomicFile.finishWrite(stream)
         } catch (t: Throwable) {
+            atomicFile.failWrite(stream)
             Log.w(TAG, "Failed to save emails dictionary", t)
         }
     }

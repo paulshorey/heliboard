@@ -69,8 +69,10 @@ android {
         base.archivesBaseName = "HeliBoard_" + defaultConfig.versionName
         // got a little too big for GitHub after some dependency upgrades, so we remove the largest dictionary
         androidComponents.onVariants { variant: ApplicationVariant ->
+            // Folder guidance is source documentation, never runtime keyboard/emoji data.
+            variant.androidResources.ignoreAssetsPatterns.add("AGENTS.md")
             if (variant.buildType == "debug") {
-                variant.androidResources.ignoreAssetsPatterns = listOf("main_ro.dict")
+                variant.androidResources.ignoreAssetsPatterns.add("main_ro.dict")
                 variant.proguardFiles = emptyList()
                 //noinspection ProguardAndroidTxtUsage we intentionally use the "normal" file here
                 variant.proguardFiles.add(project.layout.buildDirectory.file(getDefaultProguardFile("proguard-android.txt").absolutePath))
@@ -106,6 +108,8 @@ android {
     }
 
     compileOptions {
+        // Backport newer java.util APIs (including ConcurrentHashMap.merge) to API 21.
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }

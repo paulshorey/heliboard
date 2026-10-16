@@ -145,7 +145,6 @@
     <string name="select_input_method">Выберыце метад ўводу</string>
     <string name="hidden_features_title">Апісанне схаваных функцый</string>
     <string name="hidden_features_summary">Паказаць функцыі, якія могуць застацца незаўважанымі</string>
-    <string name="number_row_summary">Заўсёды паказваць лічбавы радок</string>
     <string name="delete_swipe">Выдаліць свайпам</string>
     <string name="subtype_akkhor_bn_BD">%s (Акхор)</string>
     <string name="prefs_narrow_key_gaps">Павялічаныя клавішы</string>
@@ -222,8 +221,6 @@
     <string name="localized_number_row">Лакалізаваць лікавы радок</string>
     <string name="add_to_personal_dictionary_summary">Выкарыстоўваць асабісты слоўнік прылады для захоўвання вывучаных слоў</string>
     <string name="subtype_probhat_bn_BD">%s (Прабгат)</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Себяольсік 390)</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Себяольсік фінальная)</string>
     <string name="remove_dictionary_message">Выдаліць карыстальніцкі слоўнік «%s»?</string>
     <string name="popup_keys_number" tools:keep="@string/popup_keys_number">Шэраг з лічбамі</string>
     <string name="popup_order">Выберыце парадак ўсплывальных клавіш</string>
@@ -346,7 +343,6 @@
     <string name="auto_correct_shortcuts">Аўтакарэкцыя спалучэнняў клавіш</string>
     <string name="auto_correct_shortcuts_summary">Калі ўключана, спалучэнні клавіш могуць быць пашыраны з дапамогай аўтакарэкцыі</string>
     <string name="prefs_side_padding_scale">Маштаб бакавога водступу</string>
-    <string name="number_row_hints">Паказваць падказкі ў шэрагу з лічбамі</string>
     <string name="locales_with_dict">Мовы са слоўнікамі</string>
     <string name="custom_subtype">Карыстацкі падтып</string>
     <string name="layout_emoji_bottom_row" tools:keep="@string/layout_emoji_bottom_row">Радок эмодзі ўнізе</string>
@@ -354,7 +350,6 @@
     <string name="layout_in_use">Папярэджанне: раскладка ў дадзены момант выкарыстоўваецца</string>
     <string name="customize_icons">Наладзіць значкі</string>
     <string name="customize_icons_reset_message">Сапраўды скінуць усе настроеныя значкі?</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Шэраг з лічбамі</string>
     <string name="customize_background_image_landscape">Усталяваць фонавы малюнак (альбомная)</string>
     <string name="prefs_key_emoji_max_sdk">Перавызначыць версію эмодзі</string>
     <string name="subtype_dru">Даргінскі (Урахі)</string>
@@ -392,7 +387,6 @@
     <string name="label_shortcut_key_disabled" tools:keep="@string/label_shortcut_key_disabled">Галасавы ўвод адключаны</string>
     <string name="label_toolbar_key" tools:keep="@string/label_toolbar_key">Паказаць / схаваць панэль інструментаў</string>
     <string name="prefs_always_show_suggestions_except_web_text">Не заўсёды паказваць падказкі для палёў уводу на вэб-старонках</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">Шэраг з лічбамі (асноўны)</string>
     <string name="subtype_baishakhi_bn_IN">%s (Байсахі)</string>
     <string name="settings_category_space">Прабел</string>
     <string name="autospace_after_gesture_typing">Аўтапрабел пасля набору слова жэстамі</string>

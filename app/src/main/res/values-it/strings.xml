@@ -108,7 +108,6 @@
     <string name="delete_swipe_summary">Scorri indietro partendo da \'Backspace\' per rimuovere più caratteri o parole in una sola volta</string>
     <string name="incognito">Modalità incognito</string>
     <string name="show_emoji_key">Tasto emoji</string>
-    <string name="number_row_summary">Mostra sempre la riga dei numeri</string>
     <string name="show_hints">Mostra indicatori sui tasti</string>
     <string name="show_hints_summary">Suggerisce in piccolo sul tasto il carattere ottenibile con la pressione lunga</string>
     <string name="prefs_long_press_keyboard_to_change_lang">Cambia metodo di immissione con la barra spaziatrice</string>
@@ -200,8 +199,6 @@
     <string name="popup_keys_layout" tools:keep="@string/popup_keys_layout">Layout</string>
     <string name="more_autocorrect_summary">Correzione automatica anche quando non è esplicitamente richiesta dal campo di input</string>
     <string name="language_switch_key_switch_both">Cambia entrambi</string>
-    <string name="subtype_generic_sebeolsik_390">%s (tipo tastiera Sebeolsik 390)</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Tipo tastiera Sebeolsik Final)</string>
     <string name="day_or_night_day">Chiaro</string>
     <string name="customize_background_image">Imposta un\'immagine di sfondo</string>
     <string name="layout_symbols_shifted">Altri simboli</string>
@@ -347,7 +344,6 @@
     <string name="gesture_trail_fadeout_duration">Durata della traccia del gesto</string>
     <string name="gesture_floating_preview_static">Anteprima mobile dinamica</string>
     <string name="gesture_floating_preview_dynamic_summary">Sposta l\'anteprima seguendo il gesto</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Riga dei numeri</string>
     <string name="prefs_space_bar_text">Testo personalizzato sulla barra spaziatrice</string>
     <string name="layout_emoji_bottom_row" tools:keep="@string/layout_emoji_bottom_row">Selettore emoji (ultima riga in basso)</string>
     <string name="layout_clip_bottom_row" tools:keep="@string/layout_clip_bottom_row">Cronologia appunti (ultima riga in basso)</string>
@@ -389,7 +385,6 @@
     <string name="prefs_font_scale">Dimensione dei caratteri della tastiera</string>
     <string name="prefs_emoji_font_scale">Dimensione delle emoji</string>
     <string name="prefs_side_padding_scale">Spaziatura laterale</string>
-    <string name="number_row_hints">Mostra suggerimenti sulla riga dei numeri</string>
     <string name="auto_correct_shortcuts">Scorciatoie correzione</string>
     <string name="name_invalid">Nome non valido</string>
     <string name="prefs_language_swipe_distance">Distanza del trascinamento per il cambio lingua</string>
@@ -405,7 +400,6 @@
     <string name="after_numpad_and_space">Dopo uno spazio o la pressione di ⏎ (invio) dal tastierino numerico</string>
     <string name="prefs_always_show_suggestions_except_web_text">Non forzare i suggerimenti in tutti i campi di testo</string>
     <string name="prefs_always_show_suggestions_except_web_text_summary">I campi di testo Web (specie all\'interno dei browser) sono una causa ricorrente di problemi con i suggerimenti sempre attivi</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">Barra dei numeri (base)</string>
     <string name="settings_category_space">Spazio</string>
     <string name="shift_removes_autospace_summary">Nessuno spazio automatico alla pressione di ⇧ (maiuscolo) dopo un gesto</string>
     <string name="autospace_after_suggestion">Spazio automatico dopo la scelta di una parola suggerita</string>

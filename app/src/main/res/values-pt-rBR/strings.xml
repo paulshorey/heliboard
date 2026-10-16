@@ -46,7 +46,6 @@
     <string name="show_hints_summary">Mostrar dicas com toque longo</string>
     <string name="prefs_long_press_keyboard_to_change_lang_summary">Segurar na tecla de espaço mostrará um menu de seleção de metódo de entrada</string>
     <string name="prefs_keyboard_height_scale">Escala da altura do teclado</string>
-    <string name="number_row_summary">Sempre mostrar a linha de números</string>
     <string name="subtype_en_GB">Inglês (Reino Unido)</string>
     <string name="subtype_en_US">Inglês (Estados Unidos)</string>
     <string name="subtype_es_US">Espanhol (Estados Unidos)</string>
@@ -211,8 +210,6 @@
     <string name="select_color_accent">Destaque</string>
     <string name="show_horizontal_space_swipe">Gesto de deslizar horizontal na barra de espaço</string>
     <string name="space_swipe_move_cursor_entry">Mover cursor</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Sebeolsik 390)</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Sebeolsik Final)</string>
     <string name="button_title_add_custom_layout">Adicionar layout customizado</string>
     <string name="message_add_custom_layout">Selecionar um arquivo num formato compatível. Infomações sobre os formatos estão disponíveis em %s.</string>
     <string name="edit_layout">Toque para editar o layout bruto</string>
@@ -348,7 +345,6 @@
     <string name="gesture_floating_preview_dynamic_summary">Mover a pré-visualização durante um gesto</string>
     <string name="gesture_trail_fadeout_duration">Tempo de vida do percurso do gesto</string>
     <string name="icon_style">Estilo do ícone</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Linha de números</string>
     <string name="prefs_space_bar_text">Texto customizado na barra de espaço</string>
     <string name="layout_emoji_bottom_row" tools:keep="@string/layout_emoji_bottom_row">Linha inferior de emojis</string>
     <string name="layout_clip_bottom_row" tools:keep="@string/layout_clip_bottom_row">Linha inferior da área de transferência</string>
@@ -386,7 +382,6 @@
     <string name="prefs_font_scale">Escala da fonte do teclado</string>
     <string name="prefs_emoji_font_scale">Escala da fonte na visualização de emoji</string>
     <string name="prefs_side_padding_scale">Escala do espaço lateral</string>
-    <string name="number_row_hints">Mostrar dicas na linha de números</string>
     <string name="prefs_language_swipe_distance">Distância do deslize para alterar idioma</string>
     <string name="split" tools:keep="@string/split">Teclado separado</string>
     <string name="enable_split_keyboard_landscape">Ativar teclado separado (paisagem)</string>
@@ -404,7 +399,6 @@
     <string name="show_tld_popup_keys">Mostrar teclas de TLD</string>
     <string name="show_tld_popup_keys_summary">Substituir os pop-ups da tecla de ponto com domínios de topo ao digitar URLs e endereços de e-mail</string>
     <string name="after_numpad_and_space">Pressionando enter ou espaço após outras teclas no teclado de números</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">Linha de números (básica)</string>
     <string name="prefs_always_show_suggestions_except_web_text">Não mostrar sugestões para campos de edição da web sempre</string>
     <string name="prefs_always_show_suggestions_except_web_text_summary">Campos de edição da web (encontrados normalmente em navegadores) são uma causa comum de problemas com a configuração de sempre mostrar sugestões</string>
     <string name="settings_category_space">Espaço</string>
@@ -449,6 +443,5 @@
     <string name="subtype_mhr">Mari (Oriental)</string>
     <string name="layout_emoji_bottom_row_with_action" tools:keep="@string/layout_emoji_bottom_row_with_action">Fileira inferior de emojis com tecla de ação</string>
     <string name="layout_clip_bottom_row_with_action" tools:keep="@string/layout_clip_bottom_row_with_action">Fileira inferior da área de transferência com tecla de ação</string>
-    <string name="number_row_in_symbols">Mostrar linha de números no modo de símbolos</string>
     <string name="custom_emoji_font">Definir fonte de emojis personalizada a partir de um arquivo</string>
 </resources>

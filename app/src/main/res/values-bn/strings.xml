@@ -81,7 +81,6 @@
     <string name="prefs_force_incognito_mode_summary">নতুন শব্দ শিখন নিষ্ক্রিয়করণ</string>
     <string name="more_keys_strip_description">অতিরিক্ত বোতাম</string>
     <string name="number_row">নম্বর সারি</string>
-    <string name="number_row_summary">সর্বদা নম্বর সারি প্রদর্শন</string>
     <string name="show_hints">বোতামের ইঙ্গিত প্রদর্শন</string>
     <string name="show_hints_summary">দীর্ঘ চাপের ইঙ্গিত প্রদর্শন</string>
     <string name="show_popup_hints">ফাংশনাল ইঙ্গিত প্রদর্শন</string>
@@ -103,8 +102,6 @@
     <string name="subtype_probhat_bn_BD">%s (প্রভাত)</string>
     <string name="subtype_baishakhi_bn_IN">%s (বৈশাখী)</string>
     <string name="subtype_generic_compact">%s (সংক্ষিপ্ত)</string>
-    <string name="subtype_generic_sebeolsik_390">%s (সেবালসিক ৩৯০)</string>
-    <string name="subtype_generic_sebeolsik_final">%s (সেবালসিক চূড়ান্ত)</string>
     <string name="subtype_no_language">ভাষাহীন</string>
     <string name="subtype_emoji">ইমোজি</string>
     <string name="add">সংযুক্ত করুন</string>
@@ -343,7 +340,6 @@
     <string name="gesture_floating_preview_static">ভাসমান প্রাগ্‌দর্শন</string>
     <string name="gesture_floating_preview_dynamic_summary">অঙ্গুলিহেলনের সময় প্রাগ্‌দর্শন স্থানান্তর</string>
     <string name="icon_style">আইকনের শৈলী</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">নম্বর সারি</string>
     <string name="prefs_space_bar_text">স্পেসবারে নিজস্বীকৃত লেখা</string>
     <string name="layout_emoji_bottom_row" tools:keep="@string/layout_emoji_bottom_row">ইমোজির নিম্ন সারি</string>
     <string name="layout_clip_bottom_row" tools:keep="@string/layout_clip_bottom_row">ক্লিপবোর্ডের নিম্ন সারি</string>
@@ -380,7 +376,6 @@
     <string name="prefs_font_scale">কিবোর্ড ফন্ট স্কেল</string>
     <string name="prefs_emoji_font_scale">ইমোজি দর্শনের ফন্ট স্কেল</string>
     <string name="prefs_side_padding_scale">পার্শ্ব প্যাডিং স্কেল</string>
-    <string name="number_row_hints">নম্বর সারিতে ইঙ্গিত প্রদর্শন</string>
     <string name="enable_split_keyboard_landscape">বিভক্ত কিবোর্ড সক্রিয়করণ (ল্যান্ডস্কেপ)</string>
     <string name="split" tools:keep="@string/split">বিভক্ত কিবোর্ড</string>
     <string name="delete_confirmation">%s বিলোপ করতে নিশ্চিত?</string>
@@ -396,7 +391,6 @@
     <string name="show_tld_popup_keys">টিএলডি পপআপ বোতাম প্রদর্শন</string>
     <string name="show_tld_popup_keys_summary">ইউআরএল ও ইমেইল ঠিকানা লেখার জন্য দাঁড়ি বোতাম টপ লেভেল ডোমেইন দ্বারা প্রতিস্থাপন</string>
     <string name="after_numpad_and_space">নম্বর প্যাডে অন্য বোতামের পরে এন্টার বা স্পেস চাপ</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">নম্বর সারি (প্রাথমিক)</string>
     <string name="prefs_always_show_suggestions_except_web_text">ওয়েব সম্পাদনা ফিল্ডে সর্বদা পরামর্শ প্রদর্শন করবে না</string>
     <string name="prefs_always_show_suggestions_except_web_text_summary">ওয়েব সম্পাদনা ফিল্ড (প্রধানত ব্রাউজারে উপলভ্য) সর্বদা পরামর্শ প্রদর্শন সেটিংসে সমস্যার একটি সাধারণ কারণ</string>
     <string name="settings_category_space">স্পেস</string>
@@ -441,6 +435,5 @@
     <string name="subtype_mhr">মারি (পূর্ব)</string>
     <string name="layout_emoji_bottom_row_with_action" tools:keep="@string/layout_emoji_bottom_row_with_action">অ্যাকশন বোতামসহ ইমোজির নিম্ন সারি</string>
     <string name="layout_clip_bottom_row_with_action" tools:keep="@string/layout_clip_bottom_row_with_action">অ্যাকশন বোতামসহ ক্লিপবোর্ডের নিম্ন সারি</string>
-    <string name="number_row_in_symbols">প্রতীক দর্শনে নম্বর সারি প্রদর্শন</string>
     <string name="custom_emoji_font">ফাইল থেকে নিজস্বীকৃত ইমোজি ফন্ট নির্ধারণ</string>
 </resources>

@@ -94,7 +94,6 @@
     <string name="spell_checker_service_name">Verificação ortográfica HeliBoard</string>
     <string name="android_spell_checker_settings">Definições de verificação ortográfica HeliBoard</string>
     <string name="number_row">Número de linha</string>
-    <string name="number_row_summary">Mostrar sempre n.º de linha</string>
     <string name="prefs_force_incognito_mode_summary">Desativar aprendizagem de palavras</string>
     <string name="incognito">Impor modo incógnito</string>
     <string name="show_emoji_key">Tecla de emoji</string>
@@ -200,7 +199,6 @@
     <string name="url_detection_title">Deteção de URL</string>
     <string name="language_and_layouts_title">Idiomas e Layouts</string>
     <string name="localized_number_row_summary">Preferir números localizados em vez de latim</string>
-    <string name="number_row_hints">Mostrar dicas na linha de números</string>
     <string name="popup_order_and_hint_source">Ordem das teclas de pop-up e fonte de dicas</string>
     <string name="hint_source">Selecionar fonte de dicas</string>
     <string name="popup_order">Selecionar ordem do pop-up de teclas</string>
@@ -250,7 +248,6 @@
     <string name="layout_clip_bottom_row" tools:keep="@string/layout_clip_bottom_row">Última fila da área de transferência</string>
     <string name="layout_emoji_bottom_row" tools:keep="@string/layout_emoji_bottom_row">Última fila de emojis</string>
     <string name="prefs_bottom_padding_scale">Espaçamento em baixo</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Sebeolsik Final)</string>
     <string name="subtype_generic_student">%s (Estudante)</string>
     <string name="button_load_custom">Carregar ficheiro</string>
     <string name="prefs_side_padding_scale">Espaçamento ao lado</string>
@@ -258,7 +255,6 @@
     <string name="subtype_xdq">Kaitag</string>
     <string name="subtype_generic_phonetic">%s (Fonético)</string>
     <string name="layout_symbols_shifted" tools:keep="@string/layout_symbols_shifted">Mais símbolos</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Linha de números</string>
     <string name="summary_customize_background_image_landscape">Se não definido, a imagem de retrato será usada</string>
     <string name="layout_phone" tools:keep="@string/layout_phone">Telefone</string>
     <string name="prefs_emoji_skin_tone">Cor de pele padrão para emojis</string>
@@ -272,7 +268,6 @@
     <string name="subtype_with_layout_generic">%1$s (%2$s)</string>
     <string name="subtype_generic_extended">%s (Extendido)</string>
     <string name="subtype_baishakhi_bn_IN">%s (Baishakhi)</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Sebeolsik 390)</string>
     <string name="load">Carregar</string>
     <string name="button_title_add_custom_layout">Adicionar layout customizado</string>
     <string name="message_add_custom_layout">Selecionar ficheiro num formato compatível. Informação sobre os formatos está disponível em %s.</string>
@@ -291,7 +286,6 @@
     <string name="layout_number" tools:keep="@string/layout_number">Telemóvel</string>
     <string name="layout_numpad" tools:keep="@string/layout_numpad">Numpad</string>
     <string name="layout_numpad_landscape" tools:keep="@string/layout_numpad_landscape">Numpad (paisagem)</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">Linha de números (básica)</string>
     <string name="customize_background_image">Definir imagem de fundo</string>
     <string name="customize_background_image_landscape">Definir imagem de fundo (paisagem)</string>
     <string name="customize_currencies">Personalizar moedas</string>
@@ -440,6 +434,5 @@
     <string name="subtype_khipro_bn">%s (Khipro)</string>
     <string name="layout_emoji_bottom_row_with_action" tools:keep="@string/layout_emoji_bottom_row_with_action">Fila inferior de emojis com tecla de ação</string>
     <string name="layout_clip_bottom_row_with_action" tools:keep="@string/layout_clip_bottom_row_with_action">Fila inferior da área de transferência com tecla de ação</string>
-    <string name="number_row_in_symbols">Mostrar fila de números no modo de símbolos</string>
     <string name="custom_emoji_font">Definir fonte de emojis personalizada de ficheiro</string>
 </resources>

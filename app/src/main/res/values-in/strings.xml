@@ -99,7 +99,6 @@
     <string name="enable_clipboard_history">Aktifkan riwayat papan klip</string>
     <string name="clipboard_history_retention_time">Waktu simpan riwayat</string>
     <string name="show_hints">Tampilkan petunjuk tombol</string>
-    <string name="number_row_summary">Selalu tampilkan baris angka</string>
     <string name="abbreviation_unit_minutes">%s mnt</string>
     <string name="spell_checker_service_name">Pemeriksa Ejaan HeliBoard</string>
     <string name="android_spell_checker_settings">Pengaturan Pemeriksa Ejaan HeliBoard</string>
@@ -181,7 +180,6 @@
     <string name="show_popup_hints_summary">Tampilkan petunjuk jika menekan suatu tombol dengan lama memicu fungsi tambahan</string>
     <string name="prefs_narrow_key_gaps">Sempitkan jarak antara tombol</string>
     <string name="prefs_bottom_padding_scale">Skala bantalan bawah</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Sebeolsik Final)</string>
     <string name="button_load_custom">Muat file</string>
     <string name="file_read_error">File tidak terbaca</string>
     <string name="delete_layout">Yakin ingin menghapus tata letak kustom %s?</string>
@@ -191,7 +189,6 @@
     <string name="prefs_always_show_suggestions">Selalu tampilkan saran</string>
     <string name="backup_restore_title">Pencadangan dan pemulihan</string>
     <string name="one_handed" tools:keep="@string/one_handed">Mode satu tangan</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Sebeolsik 390)</string>
     <string name="button_title_add_custom_layout">Tambahkan tata letak kustom</string>
     <string name="split_spacer_scale">Jarak pisah</string>
     <string name="prefs_always_show_suggestions_summary">Abaikan permintaan aplikasi lain untuk menonaktifkan saran (dapat menimbulkan masalah)</string>
@@ -304,7 +301,6 @@
     <string name="gesture_floating_preview_dynamic_summary">Pindahkan pratinjau selama gerakan</string>
     <string name="gesture_trail_fadeout_duration">Umur jejak gerakan</string>
     <string name="prefs_space_bar_text">Teks khusus pada bilah spasi</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Baris nomor</string>
     <string name="customize_currencies">Sesuaikan mata uang</string>
     <string name="toast_msg_clipboard_copy">Konten disalin</string>
     <string name="auto_show_toolbar">Bilah alat pertunjukan otomatis</string>
@@ -395,12 +391,10 @@
     <string name="prefs_font_scale">Skala font keyboard</string>
     <string name="prefs_emoji_font_scale">Skala font tampilan emoji</string>
     <string name="prefs_side_padding_scale">Skala bantalan samping</string>
-    <string name="number_row_hints">Tampilkan petunjuk pada baris nomor</string>
     <string name="prefs_language_swipe_distance">Beralih Jarak Gesek Bahasa</string>
     <string name="locales_with_dict">Bahasa dengan kamus</string>
     <string name="split" tools:keep="@string/split">Keyboard terpisah</string>
     <string name="get_colors_message">Anda dapat menemukan dan berbagi warna di %s.</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">Baris nomor (dasar)</string>
     <string name="prefs_always_show_suggestions_except_web_text_summary">Bidang edit web (kebanyakan ditemukan di browser) adalah penyebab yang sangat umum untuk masalah dengan pengaturan saran yang selalu ditampilkan</string>
     <string name="prefs_always_show_suggestions_except_web_text">Jangan selalu menampilkan saran untuk bidang edit web</string>
     <string name="settings_category_space">Spasi</string>

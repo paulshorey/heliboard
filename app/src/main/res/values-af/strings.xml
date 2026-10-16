@@ -104,7 +104,6 @@
     <string name="spell_checker_service_name">HeliBoard Spell Checker</string>
     <string name="android_spell_checker_settings">HeliBoard Spell Checker Settings</string>
     <string name="number_row">Nommers ry</string>
-    <string name="number_row_summary">Wys altyd die nommers ry</string>
     <string name="show_hints">Wys sleutel wenke</string>
     <string name="show_hints_summary">Wys lang-druk wenke</string>
     <string name="prefs_long_press_keyboard_to_change_lang">Verander toevoer modus met spasiebalk</string>

@@ -106,7 +106,6 @@
     <string name="enable_clipboard_history">Włącz historię schowka</string>
     <string name="incognito">Wymuś tryb incognito</string>
     <string name="clipboard_history_retention_time">Czas przechowywania historii</string>
-    <string name="number_row_summary">Zawsze pokazuj rząd numeryczny</string>
     <string name="prefs_long_press_keyboard_to_change_lang">Zmień metodę wprowadzania za pomocą spacji</string>
     <string name="show_hints_summary">Pokazuj wskazówki dotyczące długiego naciśnięcia przycisku</string>
     <string name="delete_swipe_summary">Przesuń palcem od klawisza usuwania, aby zaznaczyć i usunąć większe fragmenty tekstu za jednym razem</string>
@@ -152,13 +151,11 @@
     <string name="restore_error">Błąd podczas przywracania kopii zapasowej: %s</string>
     <string name="theme_colors">Kolory</string>
     <string name="select_color_functional_key_background">Tło klawiszy funkcyjnych</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Sebeolsik 390)</string>
     <string name="add_to_personal_dictionary_summary">Używaj słownika osobistego do przechowywania nauczonych słów</string>
     <string name="user_dict_word_already_present">To słowo znajduje się już w słowniku: %s. Wpisz inne.</string>
     <string name="style_name_Rounded" tools:keep="@string/style_name_Rounded">Zaokrąglony</string>
     <string name="button_backup">Kopia</string>
     <string name="theme_name_black" tools:keep="@string/theme_name_black">Czarne</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Sebeolsik Final)</string>
     <string name="theme_name_chocolate" tools:keep="@string/theme_name_chocolate">Czekoladowe</string>
     <string name="remove_dictionary_message">Na pewno usunąć słownik \"%s\" dodany przez użytkownika?</string>
     <string name="theme_name_cloudy" tools:keep="@string/theme_name_cloudy">Pochmurne</string>
@@ -384,7 +381,6 @@
     <string name="gesture_trail_fadeout_duration">Czas trwania śladu gestu</string>
     <string name="gesture_floating_preview_static">Pływający podgląd</string>
     <string name="icon_style">Styl ikon</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Rząd numeryczny</string>
     <string name="prefs_space_bar_text">Własny tekst na klawiszu spacji</string>
     <string name="layout_emoji_bottom_row" tools:keep="@string/layout_emoji_bottom_row">Dolny rząd w widoku emotikonów</string>
     <string name="layout_clip_bottom_row" tools:keep="@string/layout_clip_bottom_row">Dolny rząd w widoku schowka</string>
@@ -421,7 +417,6 @@
     <string name="prefs_font_scale">Rozmiar czcionki klawiatury</string>
     <string name="prefs_emoji_font_scale">Rozmiar czcionki w widoku emoji</string>
     <string name="prefs_side_padding_scale">Rozmiar bocznego odstępu</string>
-    <string name="number_row_hints">Pokaż wskazówki na wierszu numerycznym</string>
     <string name="prefs_language_swipe_distance">Zmień język - odległość przesunięcia</string>
     <string name="enable_split_keyboard_landscape">Włącz podzieloną klawiaturę (poziomo)</string>
     <string name="split" tools:keep="@string/split">Podziel klawiaturę</string>
@@ -439,7 +434,6 @@
     <string name="show_tld_popup_keys">Pokaż wyskakujące okienka TLD</string>
     <string name="show_tld_popup_keys_summary">Zastąp wyskakujące okienka klawisza kropki domenami najwyższego poziomu podczas wpisywania adresów URL i adresów e-mail</string>
     <string name="after_numpad_and_space">Naciśnięciu enter lub spacji po innych klawiszach w klawiaturze numerycznej</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">Rząd numeryczny (podstawowy)</string>
     <string name="prefs_always_show_suggestions_except_web_text">Nie zawsze pokazuj sugestie dla pól edycji w sieci</string>
     <string name="prefs_always_show_suggestions_except_web_text_summary">Pola edycji w sieci (zwykle znajdujące się w przeglądarkach) są bardzo częstą przyczyną problemów z ustawieniem \"zawsze pokazuj sugestie\"</string>
     <string name="settings_category_space">Spacja</string>

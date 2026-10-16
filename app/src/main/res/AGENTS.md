@@ -61,6 +61,7 @@ Android resources: strings, themes, layouts, drawables, IME metadata, and densit
 - Strip/keyboard sizing lives mainly in `values/config.xml` (plus `values-sw*` / `values-land` overrides): `config_suggestions_strip_height`, `config_secondary_toolbar_height`, `config_default_keyboard_height`, `config_key_vertical_gap_*`, and `config_keyboard_*_padding_holo`. Toolbar-to-first-row gap (`config_keyboard_toolbar_gap`, 4dp) and number-row label nudge (`config_number_row_label_inset_top`, 2dp, label-only) live in `values/dimens.xml`.
 - Many behavior changes touch both code and resources; for example, key hint sizing spans `values/`, drawables, and keyboard rendering code.
 - Default English/source strings belong in `values/`; translations should follow the same keys unless a locale genuinely needs a behavioral override.
+- Remove obsolete localized keys when their canonical strings and consumers are removed. Old number-row options and `subtype_generic_sebeolsik_*` names were removed after their consumers disappeared; do not restore those translations without a current default and consumer.
 - When you change a themed icon or background, check whether the sibling theme variants need equivalent updates.
 
 ## Keep this file current

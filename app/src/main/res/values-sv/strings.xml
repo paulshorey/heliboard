@@ -102,7 +102,6 @@
     <string name="spell_checker_service_name">HeliBoards stavningskontroll</string>
     <string name="android_spell_checker_settings">Inställningar för HeliBoards stavningskontroll</string>
     <string name="number_row">Sifferrad</string>
-    <string name="number_row_summary">Visa alltid sifferraden</string>
     <string name="show_emoji_key">Emoji-tangent</string>
     <string name="ime_settings">HeliBoard-inställningar</string>
     <string name="show_hints_summary">Visa tips för långtryckning</string>

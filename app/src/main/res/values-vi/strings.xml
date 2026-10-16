@@ -174,15 +174,12 @@
     <string name="label_resize_onehanded_key" tools:keep="@string/label_resize_onehanded_key">Thay đổi kích thước chế độ 1 tay</string>
     <string name="add_new_dictionary_title">Thêm từ điển từ file</string>
     <string name="theme_name_darker" tools:keep="@string/theme_name_darker">Màu tối hơn</string>
-    <string name="number_row_summary">Luôn hiển thị số hàng</string>
     <string name="center_suggestion_text_to_enter">Luôn hiển thị chữ được gợi ý ở giữa</string>
     <string name="layout_symbols_arabic" tools:keep="@string/layout_symbols_arabic">Ký hiệu (tiếng Ả Rập)</string>
     <string name="layout_symbols_shifted" tools:keep="@string/layout_symbols_shifted">Ký hiệu khác</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">Số hàng (cơ bản)</string>
     <string name="abbreviation_unit_minutes">nhỏ nhất %s</string>
     <string name="dictionary_settings_category">Từ điển</string>
     <string name="prefs_force_incognito_mode_summary">Tắt trình học từ mới</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Số hàng</string>
     <string name="custom_font">Cài đặt phông chữ tuỳ chỉnh từ tập tin</string>
     <string name="add_dictionary">Chọn từ điển để thêm. File từ điển có dạng .dict có thể tải %s.</string>
     <string name="theme_name_dark" tools:keep="@string/theme_name_dark">Màu tối</string>

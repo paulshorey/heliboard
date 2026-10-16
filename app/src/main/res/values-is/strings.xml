@@ -141,7 +141,6 @@
     <string name="emoji" tools:keep="@string/emoji">Tjáningartákn</string>
     <string name="customize_icons">Sérsníða táknmyndir</string>
     <string name="layout_phone" tools:keep="@string/layout_phone">Sími</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Talnaröð</string>
     <string name="day_or_night_day">Dagur</string>
     <string name="left" tools:keep="@string/left">Vinstri</string>
     <string name="right" tools:keep="@string/right">Hægri</string>
@@ -164,7 +163,6 @@
     <string name="button_restore">Endurheimta</string>
     <string name="url_detection_title">Greina slóðir</string>
     <string name="language_and_layouts_title">Tungumál og framsetning</string>
-    <string name="number_row_summary">Alltaf sýna talnaröð</string>
     <string name="number_row">Talnaröð</string>
     <string name="popup_keys_language_priority" tools:keep="@string/popup_keys_language_priority">Tungumál (forgangs)</string>
     <string name="clipboard" tools:keep="@string/clipboard">Klippispjald</string>
@@ -174,9 +172,7 @@
     <string name="file_read_error">Get ekki lesið skrá</string>
     <string name="button_load_custom">Hlaða inn skrá</string>
     <string name="subtype_xdq">Kaitag</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Sebeolsik 390)</string>
     <string name="subtype_probhat_bn_BD">%s (Probhat)</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Sebeolsik Final)</string>
     <string name="customize_background_image_landscape">Setja bakgrunnsmynd (lárétt)</string>
     <string name="setup_step3_action">Stilla lyklaborðið</string>
     <string name="available_dictionary_experimental">%s (á tilraunastigi)</string>
@@ -366,7 +362,6 @@
     <string name="layout_functional_keys_symbols_shifted" tools:keep="@string/layout_functional_keys_symbols_shifted">Aðgerðalyklar (fleiri tákn)</string>
     <string name="select_color_suggestion">Texti á tillöguborða</string>
     <string name="auto_show_toolbar_summary">Birta verkfærastikuna ef innsláttur byrjar eða texti er valinn</string>
-    <string name="number_row_hints">Birta ábendingar á talnaröð</string>
     <string name="popup_order">Veldu röðun sprettlykla</string>
     <string name="pinned_toolbar_keys">Veldu fasta lykla á verkfærastiku</string>
     <string name="show_popup_hints">Birta ábendingar á aðgerðalyklum</string>

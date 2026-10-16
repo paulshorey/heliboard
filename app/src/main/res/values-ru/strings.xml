@@ -95,7 +95,6 @@
     <string name="user_dict_settings_all_languages">Для всех языков</string>
     <string name="user_dict_settings_more_languages">Другие языки…</string>
     <string name="number_row">Ряд с цифрами</string>
-    <string name="number_row_summary">Всегда показывать ряд с цифрами</string>
     <string name="show_hints">Показывать дополнительные символы</string>
     <string name="show_hints_summary">Показывать дополнительные символы для ввода долгим нажатием</string>
     <string name="prefs_narrow_key_gaps">Увеличенные клавиши</string>
@@ -189,9 +188,7 @@
     <string name="theme_name_dynamic" tools:keep="@string/theme_name_dynamic">Динамические цвета</string>
     <string name="show_popup_hints">Показать функциональные подсказки</string>
     <string name="message_add_custom_layout">Выберите файл в совместимом формате. Информация о форматах доступна %s.</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Себольсик 390)</string>
     <string name="add_to_personal_dictionary_summary">Использовать личный словарь устройства для хранения выученных слов</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Себольсик финальная)</string>
     <string name="theme_name_chocolate" tools:keep="@string/theme_name_chocolate">Шоколад</string>
     <string name="theme_name_cloudy" tools:keep="@string/theme_name_cloudy">Облачная</string>
     <string name="day_or_night_day">День</string>
@@ -336,7 +333,6 @@
     <string name="show_popup_keys_main">Добавить самые распространённые варианты (по умолчанию)</string>
     <string name="remove_redundant_popups">Удалить лишние всплывающие окна</string>
     <string name="remove_redundant_popups_summary">Убрать всплывающие клавиши, присутствующие в базовой раскладке</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Ряд с цифрами</string>
     <string name="gesture_floating_preview_static_summary">Показывать предложенное слово во время набора жестами</string>
     <string name="gesture_trail_fadeout_duration">Время жизни следа жеста</string>
     <string name="prefs_space_bar_text">Пользовательский текст на клавише пробела</string>
@@ -377,7 +373,6 @@
     <string name="prefs_key_emoji_max_sdk">Переопределить версию эмодзи</string>
     <string name="summary_customize_background_image_landscape">Если не установлено, будет использоваться портретное изображение</string>
     <string name="customize_background_image_landscape">Установить фоновое изображение (ландшафт)</string>
-    <string name="number_row_hints">Показывать подсказки в ряду с цифрами</string>
     <string name="prefs_language_swipe_distance">Расстояние смахивания для переключения языка</string>
     <string name="enable_split_keyboard_landscape">Включить разделение клавиатуры (ландшафт)</string>
     <string name="split" tools:keep="@string/split">Разделение клавиатуры</string>
@@ -396,7 +391,6 @@
     <string name="show_tld_popup_keys_summary">При вводе URL и адресов электронной почты заменить всплывающие подсказки клавиши точки на подсказки с доменами верхнего уровня</string>
     <string name="after_numpad_and_space">Нажатия Enter или пробела после других клавиш на цифровой клавиатуре</string>
     <string name="prefs_always_show_suggestions_except_web_text_summary">Поля ввода на веб-страницах (в основном в браузерах) часто вызывают проблемы с настройкой постоянного отображения подсказок</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">Ряд с цифрами (основной)</string>
     <string name="prefs_always_show_suggestions_except_web_text">Не всегда показывать подсказки для полей ввода на веб-страницах</string>
     <string name="settings_category_space">Пробел</string>
     <string name="autospace_after_suggestion">Автопробел после ручного выбора предложения</string>
@@ -440,6 +434,5 @@
     <string name="subtype_mhr">Луговомарийский (Лугововосточный марийский)</string>
     <string name="layout_emoji_bottom_row_with_action" tools:keep="@string/layout_emoji_bottom_row_with_action">Нижний ряд эмодзи с кнопкой действия</string>
     <string name="layout_clip_bottom_row_with_action" tools:keep="@string/layout_clip_bottom_row_with_action">Панель буфера обмена внизу с кнопкой действия</string>
-    <string name="number_row_in_symbols">Показывать ряд цифр в режиме символов</string>
     <string name="custom_emoji_font">Указать пользовательский шрифт эмодзи из файла</string>
 </resources>

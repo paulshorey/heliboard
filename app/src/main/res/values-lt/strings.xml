@@ -199,10 +199,8 @@
     <string name="more_keys_strip_description">Daugiau klavišų</string>
     <string name="language_and_layouts_title">Kalbos ir išdėstymai</string>
     <string name="number_row">Skaičių eilė</string>
-    <string name="number_row_summary">Visada rodyti skaičių eilę</string>
     <string name="localized_number_row">Pritaikyti skaičių eilę</string>
     <string name="localized_number_row_summary">Pirmenybę teikti pritaikytiem skaičiam</string>
-    <string name="number_row_hints">Skaičių eilėje rodyti patarimus</string>
     <string name="save_subtype_per_app">Prisiminti kalbą programoje</string>
     <string name="show_hints">Rodyti klavišų patarimus</string>
     <string name="show_hints_summary">Rodyti ilgo paspaudimo patarimus</string>
@@ -249,8 +247,6 @@
     <string name="prefs_narrow_key_gaps">Sumažinti klavišų tarpus</string>
     <string name="prefs_keyboard_height_scale">Klaviatūros dydžio keitimas</string>
     <string name="prefs_bottom_padding_scale">Apačios dydžio keitimas</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Sebeolsik 390)</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Sebeolsik paskutinis)</string>
     <string name="button_title_add_custom_layout">Pridėti pasirinktinį išdėstymą</string>
     <string name="message_add_custom_layout">Pasirinkite failą suderinamu formatu. Informacija apie formatus prieinama čia %s.</string>
     <string name="button_load_custom">Įkelti failą</string>
@@ -295,8 +291,6 @@
     <string name="layout_number" tools:keep="@string/layout_number">Skaičiai</string>
     <string name="layout_numpad" tools:keep="@string/layout_numpad">Skaičių įvestis</string>
     <string name="layout_numpad_landscape" tools:keep="@string/layout_numpad_landscape">Skaičių įvestis (horizontaliai)</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Skaičių eilė</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">Skaičių eilė (pagrindinis) \\</string>
     <string name="show_tld_popup_keys_summary">Rašant URL arba el. paštą pakeisti kablelio klavišo iššokantį langą su aukščiausio lygio domenu</string>
     <string name="quick_pin_toolbar_keys_summary">Bus išjungti kiti(neprisegti) įrankių juostos mygtukai ilgo paspaudimo veiksmai</string>
     <string name="show_popup_hints">Rodyti funkcinius patarimus</string>

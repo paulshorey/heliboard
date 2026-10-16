@@ -19,6 +19,7 @@ Top-level test package for keyboard, parser, subtype, and IME behavior.
 
 ## Non-obvious notes
 - `XLinkTest.kt` intentionally carries an `X` prefix because test ordering/class-loading has mattered here before.
+- External link checks require an HTTP(S) scheme, so local filenames such as `HeliBoard.apk` are not mistaken for URLs. Network connections have bounded connect/read timeouts.
 - The `latin/` subtree contains the highest-value regression coverage for typing behavior.
 
 ## Keep this file current

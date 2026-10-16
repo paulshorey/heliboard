@@ -108,7 +108,6 @@
     <string name="delete_swipe">Svayp bilan o\'chirish</string>
     <string name="prefs_force_incognito_mode_summary">Yangi so\'zlarni o\'rganishni o\'chirib qo\'yish</string>
     <string name="number_row">Sonlar qatori</string>
-    <string name="number_row_summary">Har doim raqamlar qatorini ko\'rsatish</string>
     <string name="prefs_long_press_keyboard_to_change_lang">Bo\'sh joy tugmasi bilan kiritish usulini o\'zgartirish</string>
     <string name="prefs_long_press_keyboard_to_change_lang_summary">Bo\'sh joy tugmachasini uzoq bosib turish, kiritish usulini tanlash menyusini taklif qiladi</string>
     <string name="prefs_keyboard_height_scale">Klaviatura balandligi o\'lchovi</string>

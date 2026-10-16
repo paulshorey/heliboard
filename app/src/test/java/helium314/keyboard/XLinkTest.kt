@@ -36,7 +36,7 @@ class XLinkTest { // Without the X, SubtypeTests fail with ClassCastException. W
     @Test fun readmeLinks() {
         val file = File("../README.md")
         if (!file.exists()) return // skip if README.md doesn't exist
-        val linkRegex = "(?:https?:\\/\\/.)?(?:www\\.)?[-a-zA-Z0-9@%._\\+~#=]{2,256}\\.[a-z]{2,6}\\b(?:[-a-zA-Z0-9@:%_\\+.~#?&\\/\\/=]*)".toRegex()
+        val linkRegex = "https?://(?:www\\.)?[-a-zA-Z0-9@%._\\+~#=]{2,256}\\.[a-z]{2,6}\\b(?:[-a-zA-Z0-9@:%_\\+.~#?&\\/\\/=]*)".toRegex()
         val links = linkRegex.findAll(file.readText())
         links.forEach {
             if (it.value.contains("heli", true))
@@ -47,7 +47,7 @@ class XLinkTest { // Without the X, SubtypeTests fail with ClassCastException. W
     @Test fun layoutsLinks() {
         val file = File("../layouts.md")
         if (!file.exists()) return // skip if layouts.md doesn't exist
-        val linkRegex = "(?:https?:\\/\\/.)?(?:www\\.)?[-a-zA-Z0-9@%._\\+~#=]{2,256}\\.[a-z]{2,6}\\b(?:[-a-zA-Z0-9@:%_\\+.~#?&\\/\\/=]*)".toRegex()
+        val linkRegex = "https?://(?:www\\.)?[-a-zA-Z0-9@%._\\+~#=]{2,256}\\.[a-z]{2,6}\\b(?:[-a-zA-Z0-9@:%_\\+.~#?&\\/\\/=]*)".toRegex()
         val links = linkRegex.findAll(file.readText())
         links.forEach {
             if (it.value.contains("heli", true))
@@ -76,6 +76,8 @@ class XLinkTest { // Without the X, SubtypeTests fail with ClassCastException. W
             return checkWikiLink(link)
         val url = URL(link)
         val connection = url.openConnection() as HttpURLConnection
+        connection.connectTimeout = 10_000
+        connection.readTimeout = 10_000
         connection.requestMethod = "HEAD"
         if (connection.responseCode != 200)
             println("error checking $link")
@@ -85,6 +87,8 @@ class XLinkTest { // Without the X, SubtypeTests fail with ClassCastException. W
     private fun checkWikiLink(link: String) {
         val url = URL(link)
         val connection = url.openConnection() as HttpURLConnection
+        connection.connectTimeout = 10_000
+        connection.readTimeout = 10_000
         if (connection.responseCode != 200)
             println("error checking $link")
         assertEquals(200, connection.responseCode)
