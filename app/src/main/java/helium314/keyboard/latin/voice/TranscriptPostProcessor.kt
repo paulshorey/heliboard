@@ -7,15 +7,48 @@ package helium314.keyboard.latin.voice
  * "um,", "uh,") and spelled-out punctuation names that the speaker dictates
  * as voice commands (e.g. "exclamation point", "comma").
  *
- * Rules are applied case-insensitively, longest match first, so that patterns
+ * Spoken-command rules match capitalized sentence-form commands, longest first, so patterns
  * with surrounding punctuation context (like ". Exclamation point.") are consumed
- * before shorter ambiguous ones (like "exclamation point.").
+ * before shorter ones (like "Exclamation point."). Redundant periods and commas before
+ * correction punctuation are removed after command conversion.
  */
 object TranscriptPostProcessor {
 
     data class Rule(val find: String, val replace: String)
 
     val rules: List<Rule> = buildRules()
+
+    private const val CORRECTION_PUNCTUATION = "!?,:;"
+    private val redundantPunctuation = Regex("""[.,]+(?=[$CORRECTION_PUNCTUATION])|,+(?=\.)""")
+
+    /**
+     * Replace the previous character only when normalization changes just that
+     * character. Context includes a trailing filler and its word boundary so its
+     * comma can remain recognizable until paragraph cleanup removes the filler.
+     */
+    fun shouldReplacePreviousPunctuation(previousContext: CharSequence, text: String): Boolean {
+        if (previousContext.isEmpty() || text.isEmpty()) return false
+        val boundary = previousContext.toString() + text[0]
+        val replacement = previousContext.subSequence(0, previousContext.length - 1).toString() + text[0]
+        return removeRedundantPunctuation(boundary) == replacement
+    }
+
+    /**
+     * Remove adjacent periods/commas before `!`, `?`, `,`, `:`, or `;`, plus commas
+     * before `.`, throughout [text]. Mixed runs are removed in one pass so the
+     * result is stable across repeated cleanup. Other punctuation, standalone
+     * ellipses, and marks separated by whitespace are preserved. Keep a comma
+     * attached to "um"/"uh" until paragraph cleanup can remove the filler too.
+     */
+    fun removeRedundantPunctuation(text: String): String =
+        redundantPunctuation.replace(text) { match ->
+            val start = match.range.first
+            if (match.value[0] == ',' && start >= 2 && fillerLengthAt(text, start - 2) == 2) {
+                ","
+            } else {
+                ""
+            }
+        }
 
     private val disfluencyReplacements = listOf(
         Rule("—", ""),
@@ -41,6 +74,7 @@ object TranscriptPostProcessor {
         for (rule in rules) {
             result = result.replace(rule.find, rule.replace)
         }
+        result = removeRedundantPunctuation(result)
         return if (result != paragraph) result else null
     }
 

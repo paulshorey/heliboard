@@ -13,4 +13,9 @@ app/.cxx
 app/.attach_*
 fastlane/Appfile
 tools/*.txt
-.agents
+.env
+.env.*
+.android-env
+__pycache__/
+*.pyc
+artifacts/

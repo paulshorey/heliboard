@@ -5,13 +5,17 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class LogVoiceDiagnosticsTest {
     @Test
     fun `voice package tags are included`() {
         assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "VoiceInputManager", "VOICE_STEP_1 start")))
         assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "VoiceRecorder", "Recording started")))
         assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "GeminiTranscription", "stream ready")))
+        assertTrue(Log.isVoiceDiagnosticLine(LogLine('W', "VoiceNetwork", "default route lost")))
     }
 
     @Test
@@ -25,6 +29,11 @@ class LogVoiceDiagnosticsTest {
     fun `unrelated latin ime messages are excluded`() {
         assertFalse(Log.isVoiceDiagnosticLine(LogLine('I', "LatinIME", "Starting input. Cursor position = 0,0")))
         assertFalse(Log.isVoiceDiagnosticLine(LogLine('I', "LatinIME", "onConfigurationChanged")))
+    }
+
+    @Test fun `voice selection checks are retained without unrelated connection traces`() {
+        assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "RichInputConnection", "VOICE selection verification verified=false")))
+        assertFalse(Log.isVoiceDiagnosticLine(LogLine('W', "RichInputConnection", "cached text out of sync, reloading")))
     }
 
     @Test
@@ -76,5 +85,48 @@ class LogVoiceDiagnosticsTest {
         assertEquals(2, filtered.size)
         assertEquals("marker-new-1", filtered[0].message)
         assertEquals("marker-new-2", filtered[1].message)
+    }
+
+    @Test
+    fun `zero or negative line limits return no diagnostics`() {
+        val lines = listOf(LogLine('E', "VoiceInputManager", "failure"))
+        assertTrue(Log.filterVoiceDiagnosticsLines(lines, 0).isEmpty())
+        assertTrue(Log.filterVoiceDiagnosticsLines(lines, -1).isEmpty())
+        assertTrue(Log.getVoiceDiagnosticsLog(0).isEmpty())
+    }
+
+    @Test
+    fun `keyboard trace volume cannot evict a voice failure`() {
+        val marker = "retention test failure"
+        Log.e("VoiceInputManager", marker)
+        repeat(12_100) { Log.d("KeyboardParser", "geometry trace $it") }
+        assertTrue(Log.getVoiceDiagnosticsLog().any { it.message == marker })
+        assertFalse(Log.getLog().any { it.message == marker })
+    }
+
+    @Test
+    fun `voice history is bounded even when general history wraps`() {
+        repeat(600) { Log.i("VoiceRecorder", "bounded voice history $it") }
+        val voice = Log.getVoiceDiagnosticsLog()
+        assertEquals(Log.DEFAULT_VOICE_DIAGNOSTICS_MAX_LINES, voice.size)
+        assertEquals("bounded voice history 100", voice.first().message)
+        assertEquals("bounded voice history 599", voice.last().message)
+    }
+
+    @Test
+    fun `debug export leads with voice diagnostics and collapses duplicate warnings`() {
+        val voice = LogLine('W', "GeminiTranscription", "close code=1011 reason=prepayment credits depleted ?key=secret")
+        val repeat = LogLine('W', "RichInputConnection", "cached text out of sync, reloading")
+        val noise = LogLine('D', "KeyboardParser", "adding key q")
+        val native = "10-06 10:39:50.174 100 100 W NativeCrash: useful native warning"
+        val system = "10-06 10:39:50.174 100 100 W GeminiTranscription: duplicate close\n$native"
+        val export = Log.formatDebugLogExport(listOf(noise, repeat, repeat, repeat), listOf(voice), "3.6 (3604)", system)
+        assertTrue(export.startsWith("HeliBoard voice diagnostics"))
+        assertTrue(export.contains("close code=1011 reason=prepayment credits depleted ?key=[redacted]"))
+        assertFalse(export.contains("secret"))
+        assertTrue(export.contains("[repeated 3 times]"))
+        assertFalse(export.contains("adding key q"))
+        assertFalse(export.contains("duplicate close"))
+        assertTrue(export.contains(native))
     }
 }
