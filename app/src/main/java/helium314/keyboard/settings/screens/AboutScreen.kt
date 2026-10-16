@@ -168,9 +168,16 @@ fun createAboutSettings(context: Context) = listOf(
             scope.launch(Dispatchers.IO) {
                 ctx.getActivity()?.contentResolver?.openOutputStream(uri)?.use { os ->
                     os.writer().use { writer ->
-                        val logcat = Runtime.getRuntime().exec("logcat -d -b all *:W").inputStream.use { it.reader().readText() }
-                        val internal = Log.getLog().joinToString("\n")
-                        writer.write(logcat + "\n\n" + internal)
+                        val logcat = runCatching {
+                            Runtime.getRuntime().exec(arrayOf(
+                                "logcat", "-d", "-t", "200", "-b", "main,system", "-v", "threadtime",
+                                "--pid", android.os.Process.myPid().toString(), "*:W"
+                            )).inputStream.use { it.reader().readText() }
+                        }.getOrElse { "Android logcat unavailable: ${it.javaClass.simpleName}" }
+                        writer.write(Log.formatDebugLogExport(
+                            Log.getLog(), Log.getVoiceDiagnosticsLog(),
+                            "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", logcat
+                        ))
                     }
                 }
             }

@@ -1,5 +1,15 @@
-# Source this to set ANDROID_HOME/ANDROID_SDK_ROOT when SDK is at default location.
-# Use after running tools/setup-android-sdk.sh, or when SDK is pre-installed.
-export ANDROID_HOME="${ANDROID_HOME:-/workspace/.android-sdk}"
+# Source this to export HeliBoard build env for the current shell.
+# Paths are repo-relative, so this works outside /workspace checkouts.
+_HELIO_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-${_HELIO_REPO_ROOT}/.android-sdk}}"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
-export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+if [[ -z "${JAVA_HOME:-}" ]]; then
+  if [[ -x /usr/lib/jvm/java-21-openjdk-amd64/bin/javac ]]; then
+    export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+  elif command -v javac >/dev/null 2>&1; then
+    JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")"
+    export JAVA_HOME
+  fi
+fi
+export PATH="${JAVA_HOME:+$JAVA_HOME/bin:}$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+unset _HELIO_REPO_ROOT

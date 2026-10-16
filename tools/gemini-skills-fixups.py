@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Local corrections applied on top of the vendored google-gemini/gemini-skills files.
 
-The skills under `.cursor/skills/gemini-*` are vendored verbatim from upstream. A few
+The skills under `.codex/skills/gemini-*` are vendored verbatim from upstream. A few
 upstream code samples do not run as written, and agents copy those samples into real
 code, so we patch them locally. Because `tools/sync-gemini-skills.sh` re-downloads the
 upstream files, every correction lives here instead of being hand-edited, and each one
@@ -35,32 +35,7 @@ class Fixup:
 
 FIXUPS: tuple[Fixup, ...] = (
     Fixup(
-        path=".cursor/skills/gemini-interactions-api/references/migration.md",
-        why="steps[-1] is Python-only negative indexing and returns undefined in JS; the "
-            "skill documents output_text as the language-neutral helper.",
-        old="| **Response text** | `response.text` | `interaction.steps[-1].content[0].text` |",
-        new="| **Response text** | `response.text` | `interaction.output_text` |",
-    ),
-    Fixup(
-        path=".cursor/skills/gemini-interactions-api/references/migration.md",
-        why="Same negative-index problem in the migration checklist item.",
-        old="- [ ] Replaced `response.text` → `interaction.steps[-1].content[0].text`",
-        new="- [ ] Replaced `response.text` → `interaction.output_text`",
-    ),
-    Fixup(
-        path=".cursor/skills/gemini-interactions-api/SKILL.md",
-        why="'cancelled' is a terminal status (see the skill's own Status values list), so "
-            "the Python poll loop never exits for a cancelled background interaction. The "
-            "JS sample in the same section already handles it.",
-        old='    elif interaction.status == "failed":\n'
-            '        print(f"Failed: {interaction.error}")\n'
-            "        break",
-        new='    elif interaction.status in ("failed", "cancelled"):\n'
-            '        print(f"Failed: {interaction.status}")\n'
-            "        break",
-    ),
-    Fixup(
-        path=".cursor/skills/gemini-live-api-dev/SKILL.md",
+        path=".codex/skills/gemini-live-api-dev/SKILL.md",
         why="Section is titled 'Receiving Audio and Text' and tells the reader to process "
             "all parts, but the Python loop only reads inline_data, dropping model text "
             "when the session uses the TEXT response modality.",
@@ -76,7 +51,7 @@ FIXUPS: tuple[Fixup, ...] = (
             '                    print(f"Gemini: {part.text}")',
     ),
     Fixup(
-        path=".cursor/skills/gemini-live-api-dev/SKILL.md",
+        path=".codex/skills/gemini-live-api-dev/SKILL.md",
         why="Same dropped text parts in the JavaScript receive loop.",
         old="if (content?.modelTurn?.parts) {\n"
             "  for (const part of content.modelTurn.parts) {\n"
@@ -94,24 +69,7 @@ FIXUPS: tuple[Fixup, ...] = (
             "  }\n"
             "}",
     ),
-    Fixup(
-        path=".cursor/skills/gemini-interactions-api/SKILL.md",
-        why="Template literal is missing the ${...} interpolation marker, so it prints the "
-            "literal placeholder instead of the environment id.",
-        old="console.log(`Environment ID: {interaction.environment_id}`);",
-        new="console.log(`Environment ID: ${interaction.environment_id}`);",
-    ),
-    Fixup(
-        path=".cursor/skills/gemini-interactions-api/SKILL.md",
-        why="'base_agent=' is not valid object-literal syntax, so the TypeScript custom-agent "
-            "sample fails to parse before any API call.",
-        old="const agent = await client.agents.create({\n"
-            '    id: "code-reviewer",\n'
-            '    base_agent="antigravity-preview-05-2026",',
-        new="const agent = await client.agents.create({\n"
-            '    id: "code-reviewer",\n'
-            '    base_agent: "antigravity-preview-05-2026",',
-    ),
+
 )
 
 APPLIED, PENDING, OBSOLETE, AMBIGUOUS = "APPLIED", "PENDING", "OBSOLETE", "AMBIGUOUS"
