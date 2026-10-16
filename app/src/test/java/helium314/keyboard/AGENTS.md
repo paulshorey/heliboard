@@ -12,7 +12,7 @@ Top-level test package for keyboard, parser, subtype, and IME behavior.
 
 ## Subfolders
 - `keyboard/internal/` - `KeyboardStateEmojiToggleTest.kt` for palette-based emoji-key toggle, including physical-shortcut and shift-lock cases.
-- `latin/` - core IME pipeline tests.
+- `latin/` - core IME pipeline tests, including `ShowPinnedToolbarSettingTest.kt` for the pinned second-row setting.
 - `latin/utils/` - `PinnedToolbarLayoutTest.kt` for even-width secondary-toolbar fitting on narrow screens.
 - `latin/edithistory/` - edit history store tests.
 - `settings/` - fullapp/settings result tests.

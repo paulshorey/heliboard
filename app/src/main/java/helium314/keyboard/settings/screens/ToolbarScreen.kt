@@ -65,6 +65,8 @@ fun ToolbarScreen(
         if (toolbarMode in listOf(ToolbarMode.EXPANDABLE, ToolbarMode.TOOLBAR_KEYS))
             Settings.PREF_TOOLBAR_KEYS else null,
         if (toolbarMode in listOf(ToolbarMode.EXPANDABLE, ToolbarMode.SUGGESTION_STRIP))
+            Settings.PREF_SHOW_PINNED_TOOLBAR else null,
+        if (toolbarMode in listOf(ToolbarMode.EXPANDABLE, ToolbarMode.SUGGESTION_STRIP))
             Settings.PREF_PINNED_TOOLBAR_KEYS else null,
         if (clipboardToolbarVisible) Settings.PREF_CLIPBOARD_TOOLBAR_KEYS else null,
         if (clipboardToolbarVisible) Settings.PREF_TOOLBAR_CUSTOM_KEY_CODES else null,
@@ -100,6 +102,13 @@ fun createToolbarSettings(context: Context) = listOf(
     },
     Setting(context, Settings.PREF_TOOLBAR_KEYS, R.string.toolbar_keys) {
         ReorderSwitchPreference(it, Defaults.PREF_TOOLBAR_KEYS)
+    },
+    Setting(context, Settings.PREF_SHOW_PINNED_TOOLBAR,
+        R.string.show_pinned_toolbar, R.string.show_pinned_toolbar_summary)
+    {
+        SwitchPreference(it, Defaults.PREF_SHOW_PINNED_TOOLBAR) {
+            KeyboardSwitcher.getInstance().setThemeNeedsReload()
+        }
     },
     Setting(context, Settings.PREF_PINNED_TOOLBAR_KEYS, R.string.pinned_toolbar_keys) {
         ReorderSwitchPreference(it, Defaults.PREF_PINNED_TOOLBAR_KEYS)

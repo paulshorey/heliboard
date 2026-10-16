@@ -42,6 +42,18 @@ fun createToolbarKey(context: Context, key: ToolbarKey): ImageButton {
  * scrolling. Clear both, use equal [LinearLayout] weights, and scale the icon
  * down if the slot is narrower than the drawable.
  */
+/**
+ * Whether the pinned secondary-toolbar row should occupy space in the IME.
+ * A hidden row is GONE, so wrap_content height and
+ * [helium314.keyboard.keyboard.KeyboardSwitcher.getSecondaryToolbarHeight] both drop that strip.
+ */
+fun shouldShowPinnedToolbarRow(
+    showPinnedToolbar: Boolean,
+    suggestionStripHidden: Boolean,
+    deviceLocked: Boolean,
+    hasPinnedKeys: Boolean,
+): Boolean = showPinnedToolbar && !suggestionStripHidden && !deviceLocked && hasPinnedKeys
+
 fun applyPinnedToolbarKeyLayout(button: ImageButton) {
     button.layoutParams = LinearLayout.LayoutParams(
         0,
