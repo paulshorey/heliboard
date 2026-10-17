@@ -35,7 +35,7 @@ or `--apk` for the canonical build. SDK-only installation is available through
 Do not point a macOS shell at a Linux SDK installation.
 
 There is no app server or database service to start. Clipboard data lives in
-on-device SQLite. Gemini keys belong in app settings, never in agent config.
+on-device SQLite. Azure Speech keys and regions belong in app settings, never in agent config.
 For Codex desktop setup scripts/actions and emulator work, read
 `docs/agent-development.md`; app-generated local-environment files have their own
 schema and must not be guessed from Cursor's former `environment.json`.

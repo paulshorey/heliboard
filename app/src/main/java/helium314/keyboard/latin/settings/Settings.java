@@ -174,14 +174,11 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
     public static final String PREF_TOOLBAR_MODE = "toolbar_mode";
     public static final String PREF_TOOLBAR_HIDING_GLOBAL = "toolbar_hiding_global";
 
-    // Voice Input (Gemini Live transcription)
-    public static final String PREF_GEMINI_API_KEY = "gemini_api_key";
-    public static final String PREF_GEMINI_TRANSCRIPTION_MODE = "gemini_transcription_mode";
-    public static final String PREF_GEMINI_END_OF_SPEECH_SILENCE_MS = "gemini_end_of_speech_silence_ms";
-    public static final String PREF_GEMINI_AUTO_DETECT_LANGUAGE = "gemini_auto_detect_language";
-    public static final String PREF_GEMINI_USE_EDITOR_CONTEXT = "gemini_use_editor_context";
-    public static final String PREF_GEMINI_CUSTOM_VOCABULARY = "gemini_custom_vocabulary";
-    public static final String PREF_VOICE_CHUNK_SILENCE_SECONDS = "voice_chunk_silence_seconds";
+    // Voice Input (MAI streaming transcription)
+    public static final String PREF_MAI_API_KEY = "mai_api_key";
+    public static final String PREF_MAI_REGION = "mai_region";
+    public static final String PREF_MAI_AUTO_DETECT_LANGUAGE = "mai_auto_detect_language";
+    public static final String PREF_VOICE_CHUNK_SILENCE_MS = "voice_chunk_silence_ms";
     public static final String PREF_VOICE_SILENCE_THRESHOLD = "voice_silence_threshold";
     public static final String PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = "voice_auto_stop_silence_seconds";
 

@@ -32,7 +32,6 @@ import helium314.keyboard.settings.screens.PersonalDictionaryScreen
 import helium314.keyboard.settings.screens.PreferencesScreen
 import helium314.keyboard.settings.screens.SecondaryLayoutScreen
 import helium314.keyboard.settings.screens.SetupAppScreen
-import helium314.keyboard.settings.screens.VoiceVocabularyScreen
 import helium314.keyboard.settings.screens.SubtypeScreen
 import helium314.keyboard.settings.screens.TextCorrectionScreen
 import helium314.keyboard.settings.screens.ToolbarScreen
@@ -114,9 +113,6 @@ fun SettingsNavHost(
         composable(SettingsDestination.VoiceDiagnostics) {
             VoiceDiagnosticsScreen(onClickBack = ::goBack)
         }
-        composable(SettingsDestination.VoiceVocabulary) {
-            VoiceVocabularyScreen(onClickBack = ::goBack)
-        }
         composable(SettingsDestination.FullappDrafts) {
             FullappDraftsScreen(onClickBack = ::goBack)
         }
@@ -173,7 +169,6 @@ object SettingsDestination {
     const val SetupApp = "setup_app"
     const val Transcription = "transcription"
     const val VoiceDiagnostics = "voice_diagnostics"
-    const val VoiceVocabulary = "voice_vocabulary"
     const val FullappDrafts = "fullapp_drafts"
     const val Debug = "debug"
     const val Appearance = "appearance"

@@ -1,0 +1,153 @@
+# MAI voice transcription
+
+HeliBoard sends microphone audio directly to **Microsoft MAI-Transcribe-2-Streaming** using **Azure Speech SDK 1.52.0** for Android. Microsoft hosts the model; the app needs a Speech resource key and matching region. Completed segments enter the active editor through `InputConnection`.
+
+## Azure setup
+
+1. Sign in to [the Azure portal](https://portal.azure.com/) with a Microsoft or organizational account and an Azure subscription with billing enabled.
+2. Create a **Speech** resource and a resource group. Select **Central US** (`centralus`), **Sweden Central** (`swedencentral`), or **Southeast Asia** (`southeastasia`). Use the region nearest the device, among the supported regions.
+3. Select a pricing tier suitable for paid usage and review the current [Speech pricing](https://azure.microsoft.com/pricing/details/speech/). Do not assume the standard Speech free allowance covers this preview model.
+4. Open the resource's **Keys and Endpoint** page. Copy KEY 1 or KEY 2 and note its region.
+5. In **HeliBoard Settings → Transcription**, enter the **Azure Speech API key** and **Azure Speech region**. Grant microphone permission and use the fixed right-edge microphone.
+
+The app defaults the region to `centralus`; the value must match the resource that issued the key. There is no model deployment name or server to manage. Onboarding routes to the same Transcription screen. Local validation checks required configuration but does not establish cloud access.
+
+Use the [official MAI Speech SDK guide](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming-speech-sdk) for current regions, capabilities, and preview status. The model is in public preview. The integration selects the case-sensitive service identifier `mai-transcribe-2-streaming` explicitly, and constructs `wss://<region>.stt.speech.microsoft.com/speech/universal/v2` from the region. The SDK authenticates with the resource key.
+
+The model's display name is **MAI-Transcribe-2-Streaming**. Earlier Microsoft examples also used that capitalization as the SDK selector; the current guide uses lowercase. A live Central US check on October 5, 2026 with SDK 1.52.0 rejected that selector with `Unknown speech.context.model.name`; changing only the selector to `mai-transcribe-2-streaming` returned a successful final transcript. The Android client and smoke test use this verified lowercase service ID.
+
+Keys are masked in settings and stored in the app's existing private preferences. Never embed a shared billing key in an APK, source, or script. Each installation can use its owner's resource key. A centrally billed deployment should provide short-lived authorization tokens through an authenticated backend rather than distributing a shared key.
+
+## Local macOS credentials
+
+Use the repository helper to install an isolated Python Speech SDK environment and store your existing resource key in the native macOS Keychain:
+
+```bash
+./tools/azure-speech-local.sh setup
+./tools/azure-speech-local.sh configure \
+  --region centralus --resource YOUR_SPEECH_RESOURCE \
+  --tenant YOUR_TENANT --subscription YOUR_SUBSCRIPTION_ID
+./tools/azure-speech-local.sh status
+```
+
+`configure` prompts for the key without echoing it. Automation can supply it over stdin with `--key-stdin`; do not put a literal key in a command, shell history, or argument. The key is stored under Keychain service `HeliBoard.AzureSpeech` and account matching the resource name. The metadata file `~/Library/Application Support/HeliBoard/azure-speech.json` contains region, resource, and optional tenant/subscription identifiers. The Python environment is in the same directory under `speech-venv`. Neither location is part of the repository.
+
+Run commands with credentials supplied only to that child process:
+
+```bash
+./tools/azure-speech-local.sh smoke-test --pcm /path/to/mono-16khz.pcm --language en-US
+./tools/azure-speech-local.sh run -- python3 /path/to/your-speech-tool.py
+```
+
+The helper sets `SPEECH_KEY` and `SPEECH_REGION` for the command and uses the isolated environment's Python. It does not export the key globally or change shell startup files. `status` reports availability without printing the key, including `key_available: false` for a missing entry. Credentialed commands still fail when the key is absent, and Keychain access errors remain errors. To configure a device, `./tools/azure-speech-local.sh copy-key` deliberately copies it to the macOS clipboard; paste it into **Settings → Transcription → Azure Speech API key** and use the profile's region. Installing or rebuilding an APK does not transfer Mac credentials to Android.
+
+Azure CLI management uses a separate interactive `az login --tenant YOUR_TENANT`, followed by `az account set --subscription YOUR_SUBSCRIPTION_ID`. Speech SDK authentication uses the resource key and region and does not require a CLI sign-in.
+
+## Android integration
+
+The Android Gradle dependency is `com.microsoft.cognitiveservices.speech:client-sdk:1.52.0`. Kotlin calls the SDK's Java API directly. The package includes consumer shrinker rules and device-native libraries for `arm64-v8a`, `armeabi-v7a`, and `x86_64`.
+
+SDK dictation requires **Android 8.0/API 26 or newer** on one of those architectures. The keyboard's overall minimum remains API 21. Unsupported devices receive a dictation error before SDK creation. The SDK's context provider does not load its native recognition libraries at app startup.
+
+`VoiceRecorder` emits headerless, signed little-endian PCM16, mono at 16 kHz in 100 ms chunks. `VoiceInputManager` buffers up to 300 startup chunks and stops with an explicit error on overflow. Every captured PCM chunk, including locally quiet audio, enters the FIFO. Local VAD requests commits and controls auto-stop; it never discards audio based on a silence classification. This avoids cutting quiet speech before a detected onset and sends silence until pause/stop/auto-stop. Local silence, pause, and auto-stop remain configurable.
+
+**Chunk silence duration** uses milliseconds in the UI, stored preferences, and recording configuration. Its default is **1000 ms**, and its range is **100–30000 ms**; values such as **750 ms** remain subsecond in the recorder. Silence detection evaluates audio every 100 ms, so observed boundaries follow that cadence. Saved durations in seconds are converted once without changing the user's chosen duration. **Silence threshold** defaults to **100 RMS**. Auto-stop remains in seconds, defaulting to 30 seconds. Explicit saved settings survive upgrades.
+
+`MaiTranscriptionClient` owns main-looper lifecycle state and stale-session guards. `AzureMaiSpeechSession` in `MaiSpeechSession.kt` owns the SDK's `SpeechConfig`, `AudioStreamFormat`, `PushAudioInputStream`, `AudioConfig`, and `SpeechRecognizer`. JNI operations, startup waits, and cleanup run on a serial background executor. The JNI upload work queue is bounded to 256 KB. Backpressure leaves the next chunk at the head of the manager FIFO; a worker-capacity callback resumes upload. All 300 full-size startup chunks can drain across multiple capacity windows. Silence commits wait for their recorded pause boundary; EOF and rotation wait for the full FIFO. The worker serializes writes and control operations so resumed audio follows its preceding commit. A local write is an SDK memory copy, not a service acknowledgment. The SDK owns acknowledgment handling. A separate bounded, memory-only PCM journal retains the unfinished suffix for replacement after a terminal transient SDK cancellation; it is not a service ACK queue. Native creation, writes and disposal share one process-wide worker, so a rapid restart cannot create new handles while the preceding recognizer is still disposing.
+
+The model detects language automatically when no hint is configured. When automatic detection is disabled, the client supplies the current keyboard's BCP-47 locale as a recognition hint. No editor text or recognition vocabulary is sent to the service.
+
+## Final results and lifecycle
+
+Only `RecognizedSpeech` final results reach the editor. `NoMatch` settles processing without inserting text. The SDK's intermediate hypotheses never enter the editor. Duplicate result IDs are ignored; identical text with different IDs is preserved for deliberate repetitions.
+
+Local silence and pause request `PushAudioInputStream.commit()` only for new, unfinalized audio. Each request records the captured-chunk sequence at that pause. If backpressure delays upload, the commit is queued as soon as that boundary is accepted, before audio captured after the pause. Resuming cannot move the boundary into the next phrase. Captured advisory requests form a FIFO bounded to 64 controls. Overflow is terminal; requests are never dropped or coalesced. A speech epoch prevents a delayed old boundary from starting a final deadline for newer speech. This SDK API is advisory: a positive token can correlate a subsequent final result; zero means the request was rejected. Tokens are not guaranteed to be echoed. Final audio offsets also settle pending boundaries. Microsoft documents these offsets as covering submitted segments, which can include silence; the app does not assume every final reaches the requested boundary.
+
+When a boundary remains unconfirmed for 60 seconds, or the pending-boundary count reaches 64, the manager closes input and drains the session to definitive EOF. It keeps receiving outgoing finals and buffers new microphone audio before starting a replacement. Missing an advisory acknowledgment alone never reports lost speech. A failure to reach EOF within the separate 20-second drain deadline is an error.
+
+Pause commits speech and retains the SDK session for resume. Stop drains queued microphone callbacks, closes the push input stream, and **waits for EOF/session termination** while final results continue arriving. It does not immediately stop recognition, which could discard the last words. EOF settles remaining advisory boundaries, including non-speech input. The application drain deadline is 20 seconds, not a service latency guarantee.
+
+A mic restart during drain immediately resumes local capture and buffers new audio until outgoing EOF. The next SDK session starts afterward, preserving transcript order. A restart before input has closed continues the open session and keeps its buffered tail. Cancel remains the explicit way to discard pending results.
+
+A microphone initialization/read failure or local audio-buffer overflow stops capture and reports one error without cancelling the outgoing recognizer. Already uploaded speech continues to final results and EOF. Accepted buffered audio drains through a replacement when needed, in order; audio exceeding the buffer limit cannot be retained. Later microphone callbacks are ignored, and restarting is blocked until accepted speech drains. The processing indicator stays visible while any work remains, including across errors and individual final insertions. After draining a failed capture, the app inserts `[Dictation interrupted]` before allowing a new recording. Explicit cancel discards pending work and the marker.
+
+Cancellation, destruction, and editor changes invalidate tokens immediately. Stale SDK callbacks cannot insert into a new editor. Session rotation after 55 minutes closes/drains the outgoing input while new microphone chunks buffer, then starts a replacement.
+
+## Connection loss and transcript integrity
+
+A transport disconnect now **stops microphone capture but preserves saved audio for bounded recovery**. Start still requires an Android default network with both `INTERNET` and `VALIDATED` capabilities. A network-loss observation requests recovery rather than discarding queued speech. Android validation does not prove the Azure endpoint is reachable. The observer remains active while pending speech drains and is unregistered when the session ends or is cancelled.
+
+Local completion of `startContinuousRecognitionAsync()` permits PCM writes; it is not remote readiness. `Connection.connected` is logged separately and cancels the service-startup deadline. Finals also prove service progress. A disconnect while input is open gives the existing SDK three seconds to reconnect or deliver its actual `Canceled` reason, rather than suppressing that reason with an immediate generic disconnect error. Reconnection resumes processing saved audio and closes input; capture never resumes automatically. Disconnect during intentional EOF is only diagnostic and does not fail otherwise successful finalization. See [Microsoft's connection-event contract](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/how-to-control-connections).
+
+Transient cancellation codes (`ConnectionFailure`, `ServiceTimeout`, `ServiceUnavailable`, `ServiceError`, `ServiceRedirectTemporary`), an unexpected session end, or expired reconnect grace can create at most two replacement recognizers with 500 ms / 1500 ms backoff. Authentication, forbidden/configuration errors, quota errors, invalid PCM, JNI write failures, and inconsistent final timing remain terminal. Every replacement invalidates old callbacks before disposal; error details are never forwarded or logged.
+
+`PendingAudioReplay` retains at most 30 seconds (960 KB) of submitted PCM in memory. Final offsets and correlated final commit tokens prune confirmed audio. Replacement replays only the complete retained suffix after that boundary, trims partial chunks to PCM sample alignment, and maps new result offsets back onto the recording's absolute byte timeline. Replay obeys the same worker backpressure as ordinary upload, and completes before the manager releases newer locally queued audio or EOF. If the complete unfinished suffix has been evicted, or visible text had no usable final timing, replacement fails explicitly rather than skipping audio or replaying a confirmed prefix. Public final timing cannot prove every spoken word was recognized; device testing must check text around recovery boundaries. No transcript edits are retried.
+
+Recovery has a 20-second budget and never extends an existing EOF deadline. In addition, the manager starts an absolute 20-second timer at mic stop, covering startup, upload, replay and EOF together. A normal explicit restart while draining still buffers new capture in order; a restart during recovery/capture failure reports that saved audio is finishing. Timeout, cancellation and EOF release the spinner and restart gate. There is no automatic microphone restart after recovery.
+
+The oldest local PCM waiting for upload has a **30-second** deadline. Active speech/pending recognized words also have a **30-second response watchdog**, refreshed by SDK intermediate/final events. Intermediate events expose only a liveness notification; provisional text stays inside the SDK. The separate **30-second missing-final wait** begins when the current speech epoch's advisory boundary is submitted, only for pending recognized words. Repeated interims or boundaries cannot extend that wait. New speech clears it, and a delayed older boundary cannot apply a final deadline to a newer utterance. This allows long utterances with live interims. Quiet PCM alone does not require a final. These are application policy limits, not Azure latency guarantees. A stalled response/final stops capture, blocks restart, and preserves accepted finals through EOF. Intentional silence auto-stop takes precedence at equal deadlines and closes without a marker for unconfirmed noise/hypotheses. Actual microphone, network, queue, upload and EOF failures retain the interruption policy. Startup has a separate 30-second deadline; explicit stop clears speech watchdogs and uses a 20-second EOF deadline. Continuing capture during replacement remains bounded by the local FIFO deadline and capacity.
+
+Previously inserted finals remain in the editor. Startup rejection before readiness leaves the editor untouched and reports the reason. Terminal failure after remote readiness attempts one literal marker only for unconfirmed speech or undispatched text, not merely an advisory boundary or quiet tail. Failure rejects stale callbacks, clears pending audio and requires a deliberate new start. The marker bypasses transcript normalization and paragraph cleanup, verifies the actual host caret, and preserves highlighted text. A final stays at the bounded transcript FIFO head until local insertion/cleanup succeeds; rejection or exception cancels all later writes without retry or marker. Remote `InputConnection` booleans report IPC dispatch rather than actual host acceptance; verification cannot certify full insertion in every editor.
+
+A 100 ms PCM chunk is an ordered audio buffer, **not an independently transcribed text job**. The public Speech SDK provides finals for segments, segment timing, advisory commit correlation, and connection status; it does not expose a per-chunk transcription receipt or a proof that every spoken word was recognized. `NoMatch` is a legitimate recognition outcome. Timing gaps may be silence and cannot locate missing words reliably, so the app does not insert guessed placeholders between otherwise valid results. TCP/SDK ordering and a bounded FIFO preserve the order of accepted audio; terminal failure handling prevents continuation after a detected gap. An unnoticed service/model omission within apparently successful finals remains outside what this API can prove.
+
+The SDK owns recovery on its existing connection. Application replacement uses only the bounded final-offset suffix described above; it never parses undocumented ACK payloads. Diagnostics include local/transport readiness, retryable cancellation codes, attempts, accepted/final byte counts, EOF and punctuation counts, and native disposal duration, without raw SDK details, credentials, transcripts or audio.
+
+Sources: [MAI streaming lifecycle and timing](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming-speech-sdk), [Java Connection events](https://learn.microsoft.com/en-us/java/api/com.microsoft.cognitiveservices.speech.connection), [PushAudioInputStream.write](https://learn.microsoft.com/en-us/java/api/com.microsoft.cognitiveservices.speech.audio.pushaudioinputstream), and [Android network state](https://developer.android.com/develop/connectivity/network-ops/reading-network-state).
+
+`LatinIME` clears typed-word state with `finishInput()`, commits finals through `InputConnection`, and runs local punctuation/paragraph/filler cleanup. Cleanup and punctuation replacement select a verified host range and replace it in one commit, never deleting confirmed text first. Temporarily close/reopen the host batch so deferred editors apply earlier edits before reading original/selected text. Unavailable/mismatched host selections stop dictation. On rejection/exception, restore the caret and refresh text/cursor caches best-effort without retrying a possibly partial edit. Delayed selection callbacks continue recording only when the current host caret matches the expected voice caret. See the [Android InputConnection contract](https://developer.android.com/reference/android/view/inputmethod/InputConnection).
+
+Interactive keyboard hiding, input/view finish, target changes and verified host clears immediately cancel all voice work, including EOF drain. A dedicated extracted-text monitor plus actual host reads detect nonempty-to-empty transitions even without cursor movement or notifications. Preserve the framework's fullscreen extractor token. Null queries mean unavailable, and highlighted text is not an empty field. A clear alone does not prove submission or hide the keyboard. Screen-off hiding alone preserves recording; explicit mic stop drains. Capture errors retain processing UI through accepted finals; failed resume and no-op pause taps cannot show recording again.
+
+## Sentence structure and punctuation
+
+`AzureMaiSpeechSession` forwards the SDK's final text, and the client only trims surrounding whitespace and records result/attachment metadata. Neither the audio FIFO nor its silence/pause boundary controls append punctuation to the editor. The local casing helper preserves capitals after sentence-ending punctuation. Local spoken-command conversion can produce an explicitly requested period; filler cleanup can retain a period already present. For ordinary phrases such as `bottom. the` and `width. and`, code inspection points to provider punctuation, possibly influenced by advisory commit timing. Without the original audio/raw service result, the exact cause of a device example is not proven.
+
+Local correction removes a single period followed by horizontal spaces/tabs and a Unicode lowercase letter: `bottom. the` becomes `bottom the`. It preserves whitespace, uppercase sentence starts, paragraph breaks, ellipses, decimals/URLs without spaces, common abbreviations (`Dr.`, `Prof.`, `etc.`), and dotted abbreviations (`e.g.`, `U.S.`, `p.m.`). Keep spelled-out command terminators intact until command conversion. This is a casing heuristic, not a grammatical sentence detector; an intentionally lowercase sentence start can still be joined.
+
+Apply correction to every incoming final, including earlier paragraphs in a multiline final, and after paragraph command/filler cleanup. A continuation spanning final results uses the same verified range replacement as other punctuation corrections. Include any spaces/tabs already after the previous period in that range and retain them in its replacement. This also repairs the first paragraph when the new final later contains a newline. Rejected, ignored or unverifiable host selections/commits stop insertion without deleting accepted text. Markers bypass correction.
+
+Voice diagnostics report `periods` and `lowercaseContinuations` on the incoming MAI final before local normalization. These counts can establish that a suspicious combination occurred inside a provider final without logging the transcript; separate-final boundaries may have zero within-final continuation counts. Retest the same phrase both continuously and with short thinking pauses to compare segmentation. The correction does not change silence timing, upload order, or final-only delivery.
+
+The streaming model supplies punctuation in its final text. Local cleanup preserves that punctuation, including em dashes, apart from explicit spoken commands and editor-aware insertion adjustments. Only confirmed finals enter the editor; provisional text can still change as more audio context arrives.
+
+The integration leaves generic `OutputFormat` and `ProfanityOption` settings unset; current MAI support must be verified before adding either option. The current [MAI streaming guide](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming-speech-sdk) does not document a punctuation-strength option, custom prompts, phrase lists, or semantic-segmentation settings for this model. Do not apply generic Azure Speech options without verifying MAI support. `transcribeStyle: clean` is documented for the [file-transcription API](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe), not this streaming SDK integration.
+
+For users whose sentences are split at thinking pauses, try increasing **Chunk silence duration** from the **1000 ms** default to **3000 or 4000 ms**. This delays explicit commit requests and the local silence gate, letting more audio arrive together; it cannot force the model's own sentence boundaries. Treat this as a tuning experiment with a tradeoff in final-result latency, not a guaranteed accuracy improvement. Keep auto-stop longer than the chunk-silence duration, accounting for its seconds unit. Use the correct keyboard-language hint for consistent single-language dictation, and automatic detection for mixed-language speech.
+
+Compare the same recordings at different settings, including multi-clause sentences, short pauses, questions, names, and dictated punctuation. Measure both final-text quality and the delay after speaking before changing defaults. No live quality comparison has established a better default yet.
+
+## Validation
+
+Run:
+
+```bash
+./gradlew :app:testDebugNoMinifyUnitTest \
+  --tests 'helium314.keyboard.latin.voice.*' \
+  --tests 'helium314.keyboard.latin.utils.LogVoiceDiagnosticsTest' \
+  --tests 'helium314.keyboard.latin.InputLogicTest'
+python3 -B -m unittest discover -s tools -p 'test_azure_speech_local.py'
+./tools/build-dist-apk.sh
+```
+
+Tests use `FakeMaiSpeechSession` to exercise startup gating, final delivery, NoMatch, advisory commits without token/timing confirmation, EOF draining and replacement, mic restart during drain, cancellation, offline preflight/network loss, terminal service failures, stale reconnection callbacks, bounded write backpressure with 300 full-size PCM chunks, upload/final-progress deadlines, error UI/editor rejection, rotation, punctuation preservation, and configuration without loading device-native libraries in the JVM. Compiling and packaging against the published SDK verifies API compatibility. Cloud access, recognition quality, latency, and JNI execution still require a live service/device check.
+
+For a credentialed service check, install `azure-cognitiveservices-speech==1.52.0` in a compatible Python environment and set `SPEECH_KEY` and `SPEECH_REGION` outside the repository. Run:
+
+```bash
+python3 tools/mai-streaming-smoke-test.py --pcm /path/to/mono-16khz.pcm --language en-US
+```
+
+Use headerless 16 kHz mono PCM16. Omitting `--language` uses automatic detection. The tool paces audio, closes the input, and waits for final results/session termination. It prints final transcripts intentionally, and returns failure on service errors or drain timeout.
+
+On a supported Android device, check short and long uninterrupted speech, pause/resume during backpressure, immediate stop/restart, repeated phrases, network interruption, editor rejection, keyboard hiding, and host clearing without cursor movement. Include punctuation across segments, highlighted text during failure, and editors that buffer batch edits. Inspect Settings → Transcription → Voice diagnostics for lifecycle and length messages without raw transcripts or credentials.
+
+For device recovery testing, start dictation online and speak a confirmed prefix, then disable both Wi-Fi and mobile data while continuing to speak. Check that capture stops, recovery retains the confirmed prefix and unfinished suffix, restoring connectivity allows saved speech to finish once, and recording never resumes automatically. Leave connectivity unavailable past the recovery/stop deadline and check one marker only for uncertain speech, an idle spinner, and a working explicit restart. Also test rapid stop/start repeatedly and stop before remote readiness. Also verify an offline start, a valid Wi-Fi/mobile handoff, and a brief local silence/NoMatch without a false guessed gap. Do not assume toggling only Wi-Fi removes internet when mobile data is enabled.
+
+## October 13 disconnect investigation
+
+The supplied diagnostic history contains eight interruption failures, all from the old immediate `Connection.disconnected` handler. Several occur approximately one second after the locally logged SDK-ready event; one follows three successful finals. No Android network-loss callback appears in those failure records. The old handler discarded the actual cancellation reason and prevented SDK recovery, so the logs do not establish whether the initiating disconnect was authentication, routing, service behavior or a transient transport problem. The new diagnostics preserve that distinction.
+
+The same supplied finals report zero within-final lowercase-period continuations. This supports investigating punctuation at finalized-chunk boundaries; it does not prove why the provider or chunk boundaries produced earlier periods. Keep the existing guarded normalization and include final byte/attempt metadata in further captures.
+
+A local macOS Speech SDK 1.52 probe with a synthetic phrase completed three consecutive sessions, including an advisory commit, with normal EndOfStream/NoError and no lost final. Local startup/sessionStarted preceded remote Connected by roughly 0.3–0.4 seconds. One post-EOF stop call took about ten seconds; Android diagnostics now record disposal timing and replacement creation waits for old cleanup. This confirms the readiness distinction and service access on that network, but does not reproduce the Android disconnects or verify recovery under a real outage.

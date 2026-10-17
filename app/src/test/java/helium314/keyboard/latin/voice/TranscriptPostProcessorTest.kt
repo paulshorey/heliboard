@@ -56,6 +56,53 @@ class TranscriptPostProcessorTest {
         assertNull(TranscriptPostProcessor.processCurrentParagraph(text))
     }
 
+    @Test fun `removes the two mid-sentence periods in the reported navigation example`() {
+        val original = "Navigation comes up from the bottom. the trigger is full width but short height. " +
+            "User should be able to swipe up on it. Sidebar will be full width. " +
+            "and should go up almost to the top when opened."
+        val corrected = "Navigation comes up from the bottom the trigger is full width but short height. " +
+            "User should be able to swipe up on it. Sidebar will be full width " +
+            "and should go up almost to the top when opened."
+        assertEquals(corrected, process(original))
+        assertEquals(2, TranscriptPostProcessor.countMidSentencePeriods(original))
+        assertNull(TranscriptPostProcessor.processCurrentParagraph(corrected))
+    }
+
+    @Test fun `period continuation cleanup preserves horizontal spacing and supports Unicode lowercase`() {
+        assertEquals("bottom  the width\tand café était prêt", process("bottom.  the width.\tand café. était prêt"))
+    }
+
+    @Test fun `continuation cleanup preserves capitalized sentences newlines and other endings`() {
+        val text = "Done. Next.\nnext paragraph.\r\nnext line. 3 items. ! Really? and Yes! but Wait... and wait… again."
+        assertNull(TranscriptPostProcessor.processCurrentParagraph(text))
+    }
+
+    @Test fun `continuation cleanup preserves common and dotted abbreviations`() {
+        val text = "Ask Dr. smith or Prof. jones, e.g. these U.S. government rules, " +
+            "i.e. this p.m. appointment, approx. ten items, etc. and others."
+        assertNull(TranscriptPostProcessor.processCurrentParagraph(text))
+        assertEquals(0, TranscriptPostProcessor.countMidSentencePeriods(text))
+    }
+
+    @Test fun `continuation cleanup preserves decimals versions and URLs without intervening spaces`() {
+        val text = "3.14 v1.2 example.com https://example.org/a.b .hidden"
+        assertNull(TranscriptPostProcessor.processCurrentParagraph(text))
+    }
+
+    @Test fun `continuation cleanup composes with existing punctuation and filler correction`() {
+        val corrected = process("Navigation, Um, comes up from the bottom. the width.,! and more")
+        assertEquals("Navigation comes up from the bottom the width! and more", corrected)
+        assertNull(TranscriptPostProcessor.processCurrentParagraph(corrected))
+    }
+
+    @Test fun `period cleanup keeps spoken commands available before conversion`() {
+        assertEquals("Done. New paragraph. the next part", TranscriptPostProcessor.removeRedundantPunctuation(
+            "Done. New paragraph. the next part"
+        ))
+        assertEquals("Done.\n\n the next part", process("Done. New paragraph. the next part"))
+        assertEquals("Done, the next part", process("Done. Comma. the next part"))
+    }
+
     // --- Exclamation point (capitalized command form) ---
 
     @Test
@@ -360,6 +407,18 @@ class TranscriptPostProcessorTest {
             " — ",
             process("Dash.")
         )
+    }
+
+    @Test
+    fun `preserves model em dash without joining adjacent words`() {
+        assertNull(TranscriptPostProcessor.processCurrentParagraph("Wait—please stop."))
+        assertNull(TranscriptPostProcessor.processCurrentParagraph("This matters — a lot."))
+    }
+
+    @Test
+    fun `dictated dash survives cleanup after the next completed segment`() {
+        val first = process("Something. Dash.")
+        assertEquals("Something — more detail.", process(first + "more detail."))
     }
 
     // --- Open quote / Close quote ---

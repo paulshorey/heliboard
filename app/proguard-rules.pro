@@ -12,3 +12,8 @@
 # after upgrading to gradle 8, stack traces contain "unknown source"
 -keepattributes SourceFile,LineNumberTable
 -dontobfuscate
+
+# Optional Reactor instrumentation from the Speech SDK's azure-core dependency.
+# Neither server-side Micrometer context propagation nor BlockHound is enabled here.
+-dontwarn io.micrometer.context.ContextAccessor
+-dontwarn reactor.blockhound.integration.BlockHoundIntegration

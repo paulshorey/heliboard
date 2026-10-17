@@ -11,7 +11,7 @@ from an agent's changes to a phone-installable APK and an honest testing handoff
 | `.codex/skills` | Canonical physical skill files, as requested |
 | `.agents/skills` | Symlink to the canonical skills; Codex's documented repository discovery path |
 | `.cursor` | Compatibility symlink to `.codex`, with no second skill copy |
-| `.codex/config.toml` | Codex project MCP configuration, using the existing public Gemini Docs URL |
+| `.codex/config.toml` | Codex project MCP configuration, with an empty server map for the MAI integration |
 | `.codex/mcp.json` | Small compatibility adapter; checked against TOML for drift |
 | Cursor `environment.json` | Deleted: its startup format is not Codex local-environment configuration |
 | Old layout plans | Moved to `docs/archive/layout-plans` and labeled historical; useful design evidence, not current instructions |
@@ -19,15 +19,11 @@ from an agent's changes to a phone-installable APK and an honest testing handoff
 | `android-workspace-setup`, `development` | Rewritten around tool discovery, worktrees, targeted checks and explicit device selection |
 | `full-app-mode`, `voice-transcription` | Retained with their references: both describe current product architecture |
 | `key-hint-sizing` | Retained; stale numeric snapshot replaced with a lookup in authoritative resources |
-| `gemini-api-dev`, `gemini-live-api-dev` | Retained: provider API/reference skills used by this app |
-| `gemini-interactions-api` | Deleted with its lock entry/fixups: no Interactions API integration exists in app/tools |
-| Provider refresh | Installer runs in scratch storage, then copies only validated downloads; it cannot delete `.agents` |
 | APK handoff check | Source and binary fingerprints, pushed-commit URL, PR template and a lightweight CI workflow |
 
-Provider skills retain their existing upstream content rather than upgrading
-models/SDK recommendations incidentally. Refresh those deliberately through
-`tools/sync-gemini-skills.sh`; review changes and update local sample corrections
-in `tools/gemini-skills-fixups.py`.
+The voice skill and its API/data-flow references describe MAI through the Azure
+Speech SDK. Provider-specific configuration and refresh tools from the previous
+integration remain removed.
 
 ## Daily workflow
 
@@ -89,8 +85,8 @@ paths and uses an installed SDK. Existing `local.properties` remains authoritati
 Open the repository in Android Studio, select its bundled JDK for Gradle and let
 sync finish. Use `debugNoMinify` for debugger iteration; `debug` is the shared-key
 signed PR artifact. SDK/Device Manager can install missing components and create
-an emulator. No live Gemini key is needed for JVM tests, compilation or settings
-smoke checks. Real transcription requires the developer's key in app settings.
+an emulator. No live Azure Speech key is needed for JVM tests, compilation or settings
+smoke checks. Real transcription requires the developer's Speech key and matching region in app settings.
 
 The infrastructure audit's `:app:lintDebug` run reported **820 errors, 125 warnings
 and 3 hints**. A subsequent cleanup reproduced that count and reduced it to
@@ -149,8 +145,8 @@ A setup script is not an environment-export hook for subsequent shells; each
 helper discovers/sources its own environment. Do not save an action with a fixed
 worktree path or personal device serial. The scripts above are ready to use;
 this PR does not edit the desktop application's private state or global settings.
-New chats should discover eight project skills through `.agents/skills`. Check
-the skill selector and Gemini Docs tools in a fresh trusted project session after
+New chats should discover six project skills through `.agents/skills`. Check
+the skill selector in a fresh trusted project session after
 merging; configuring files does not prove session discovery/connection.
 
 ## Human acceptance for each product change
@@ -169,7 +165,7 @@ Choose relevant cases and record the phone/app/version and result in the PR:
 - For voice work, test short/long utterances, pause/resume, explicit stop with a
   trailing phrase, silence, network loss, field changes/hiding and host clears.
   Inspect preserved inserted text and interruption behavior; no provisional text
-  should become editor content. Use `docs/gemini-transcription.md` for its full matrix.
+  should become editor content. Use `docs/mai-transcription.md` for its full matrix.
 
 JVM results and emulator screenshots do not replace ergonomic typing, real radio,
 real microphone, real provider or host-app acceptance on the developer's phone.
@@ -207,7 +203,7 @@ These are proposals, not installed tools or verified capabilities.
    private-repo downloads need login before changing today's checked-in APK contract.
 5. **Codex UI action export and fresh-session acceptance.** Save the actions above
    through Local environments, commit the generated configuration, then verify a
-   new worktree runs setup, lists the eight skills, calls Gemini Docs and runs the
+   new worktree runs setup, lists the six skills and runs the
    Build APK action. Acceptance is observed behavior in that client, not TOML parsing.
 
 ## Authoritative references

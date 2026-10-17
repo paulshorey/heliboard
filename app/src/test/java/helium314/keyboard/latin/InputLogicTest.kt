@@ -114,6 +114,27 @@ class InputLogicTest {
         assertEquals("", composingText)
     }
 
+    @Test fun voiceCaptureErrorKeepsProcessingVisibleWhileAcceptedFinalsDrain() {
+        reset()
+        val manager = Mockito.mock(VoiceInputManager::class.java)
+        val switcher = Mockito.mock(KeyboardSwitcher::class.java)
+        Mockito.`when`(manager.hasPendingProcessing()).thenReturn(true)
+        var listener: VoiceInputManager.VoiceInputListener? = null
+        Mockito.doAnswer { listener = it.getArgument(0); null }.`when`(manager)
+            .setListener(Mockito.any(VoiceInputManager.VoiceInputListener::class.java))
+        LatinIME::class.java.getDeclaredField("mVoiceInputManager").apply { isAccessible = true; set(latinIME, manager) }
+        LatinIME::class.java.getDeclaredField("mKeyboardSwitcher").apply { isAccessible = true; set(latinIME, switcher) }
+        LatinIME::class.java.getDeclaredMethod("setupVoiceInputListener").apply { isAccessible = true; invoke(latinIME) }
+        listener!!.onError("Microphone failed.")
+        Mockito.verify(switcher).showProcessingIndicator()
+        Mockito.verify(switcher, Mockito.never()).hideProcessingIndicator()
+        assertEquals(true, listener!!.onTranscriptionResult("Pending final.", false))
+        Mockito.`when`(manager.hasPendingProcessing()).thenReturn(false)
+        listener!!.onProcessingIdle()
+        Mockito.verify(switcher).hideProcessingIndicator()
+        assertEquals("Pending final.", getText())
+    }
+
     @Test fun voiceTranscriptionReplacesSelectedText() {
         reset()
         setText("hello cruel world")
@@ -173,6 +194,91 @@ class InputLogicTest {
 
         assertEquals("Done?!", getText())
         checkConnectionConsistency()
+    }
+
+    private fun deliverPreparedVoiceFinal(text: String) {
+        val prepare = LatinIME::class.java.getDeclaredMethod(
+            "prepareVoiceTranscriptionText", String::class.java, Boolean::class.javaPrimitiveType
+        ).apply { isAccessible = true }
+        val prepared = prepare.invoke(latinIME, text, false) as String
+        assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(latinIME, prepared))
+    }
+
+    @Test fun voicePeriodCleanupHandlesTheReportedExampleInOneFinal() {
+        reset()
+        deliverPreparedVoiceFinal("Navigation comes up from the bottom. the trigger is full width but short height. " +
+            "User should be able to swipe up on it. Sidebar will be full width. " +
+            "and should go up almost to the top when opened.")
+        assertEquals("Navigation comes up from the bottom the trigger is full width but short height. " +
+            "User should be able to swipe up on it. Sidebar will be full width " +
+            "and should go up almost to the top when opened.", text)
+        checkConnectionConsistency()
+    }
+
+    @Test fun voicePeriodCleanupHandlesTheReportedExampleAcrossFinals() {
+        for (deferred in listOf(false, true)) {
+            reset(); deferBatchEdits = deferred
+            for (segment in listOf(
+                "Navigation comes up from the bottom.",
+                "the trigger is full width but short height.",
+                "User should be able to swipe up on it.",
+                "Sidebar will be full width.",
+                "and should go up almost to the top when opened."
+            )) deliverPreparedVoiceFinal(segment)
+            assertEquals("Navigation comes up from the bottom the trigger is full width but short height. " +
+                "User should be able to swipe up on it. Sidebar will be full width " +
+                "and should go up almost to the top when opened.", text)
+            assertEquals(0, batchEdit); checkConnectionConsistency()
+        }
+    }
+
+    @Test fun voicePeriodBoundaryCorrectionPreservesExistingWhitespaceAndEarlierParagraphs() {
+        for (whitespace in listOf("", " ", "  ", "\t")) {
+            reset(); setText("bottom.$whitespace"); deferBatchEdits = true
+            deliverPreparedVoiceFinal("the trigger. and more\nNext paragraph. another clause")
+            assertEquals("bottom${whitespace.ifEmpty { " " }}the trigger and more\nNext paragraph another clause", getText())
+            assertEquals(0, batchEdit); checkConnectionConsistency()
+        }
+    }
+
+    @Test fun voicePeriodBoundaryCorrectionPreservesAbbreviationsAndUppercaseSentences() {
+        for (previous in listOf("Dr.", "Prof.", "e.g.", "U.S.", "Wait...")) {
+            reset(); setText(previous)
+            deliverPreparedVoiceFinal("the example")
+            assertEquals("$previous the example", getText()); checkConnectionConsistency()
+        }
+        reset(); setText("Done."); deliverPreparedVoiceFinal("Next sentence.")
+        assertEquals("Done. Next sentence.", getText()); checkConnectionConsistency()
+    }
+
+    @Test fun rejectedPeriodContinuationSelectionStopsBeforeWritingTheNewFinal() {
+        for (whitespace in listOf("", " ", "\t")) {
+            reset(); setText("bottom.$whitespace"); rejectSelection = true
+            val insertion = if (whitespace.isEmpty()) " the trigger" else "the trigger"
+            assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, insertion))
+            assertEquals("bottom.$whitespace", getText()); assertEquals(0, commitCalls)
+            assertEquals(0, batchEdit); checkConnectionConsistency()
+        }
+    }
+
+    @Test fun rejectedPeriodContinuationCommitPreservesTheExistingPeriodAndCaret() {
+        reset(); setText("bottom. "); rejectCommit = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "the trigger"))
+        assertEquals("bottom. ", getText()); assertEquals(text.length, cursor)
+        assertEquals(0, batchEdit); checkConnectionConsistency()
+    }
+
+    @Test fun ignoredHostSelectionCannotAppendADuplicateContinuation() {
+        reset(); setText("bottom. "); ignoreSelection = true
+        assertEquals(false, commitVoiceTranscriptionTextMethod.invoke(latinIME, "the trigger"))
+        assertEquals("bottom. ", getText()); assertEquals(0, commitCalls)
+        assertEquals(0, batchEdit); checkConnectionConsistency()
+    }
+
+    @Test fun lowercaseContinuationAfterAParagraphBreakKeepsThePeriod() {
+        reset(); setText("Done.\n")
+        deliverPreparedVoiceFinal("the next paragraph")
+        assertEquals("Done.\nthe next paragraph", getText()); checkConnectionConsistency()
     }
 
     @Test fun voicePunctuationCleanupCoversEveryParagraphInTheIncomingSegment() {

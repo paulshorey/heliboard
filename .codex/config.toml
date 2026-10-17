@@ -1,3 +1,2 @@
-# Project-scoped, public documentation only. Loaded by Codex in trusted projects.
-[mcp_servers.gemini-docs]
-url = "https://gemini-api-docs-mcp.dev"
+# Project-scoped MCP servers. No provider documentation server is required for MAI.
+[mcp_servers]

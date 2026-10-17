@@ -25,7 +25,7 @@ heliboard_android_env() {
     echo "A JDK is required; use Android Studio's JDK 21 or set JAVA_HOME." >&2
     return 1
   fi
-  major="$(java -version 2>&1 | sed -nE '1s/.*version "([0-9]+).*/\1/p')"
+  major="$(java -version 2>&1 | sed -nE 's/.*version "([0-9]+).*/\1/p')"
   if [[ ! "$major" =~ ^[0-9]+$ ]] || (( major < 17 || major > 24 )); then
     echo "Use JDK 17–24 with the Gradle 8.14 wrapper; JDK 21 is recommended (found ${major:-unknown})." >&2
     return 1

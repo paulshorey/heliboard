@@ -2,8 +2,6 @@
 """Check the portable agent discovery/configuration contract without Android or network."""
 import json
 from pathlib import Path
-import subprocess
-import sys
 import tomllib
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -27,10 +25,6 @@ def main():
         if name != entry.name or name in names or not any(line.startswith('description: ') for line in frontmatter.splitlines()):
             raise ValueError(f'Invalid or duplicate skill metadata: {entry}')
         names.add(name)
-    locked = json.loads((ROOT / 'skills-lock.json').read_text())['skills']
-    if set(locked) != {name for name in names if name.startswith('gemini-')}:
-        raise ValueError('Provider skill lockfile differs from installed skills')
-    subprocess.run([sys.executable, str(ROOT / 'tools/gemini-skills-fixups.py'), '--check'], check=True)
     print(f'Agent infrastructure verified: {len(names)} skills, discovery symlinks and MCP adapters.')
 
 

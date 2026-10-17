@@ -20,7 +20,7 @@ Suggestion strip UI and the expanded more-suggestions panel.
 - `ToolbarMode` changes the meaning of prefs: `EXPANDABLE` shows suggestions plus a toggled toolbar, `SUGGESTION_STRIP` keeps suggestions and pinned keys only, `TOOLBAR_KEYS` hides word suggestions and shows toolbar keys, and `HIDDEN` removes `SuggestionStripView` from `LatinIME`.
 - Pinned keys render in the **Secondary Toolbar** (`R.id.pinned_keys` in `secondary_toolbar.xml`), a sibling below `SuggestionStripView` in `main_keyboard_frame.xml`. `KeyboardSwitcher` calls `populatePinnedKeys()` after inflation; each button uses `applyPinnedToolbarKeyLayout` from `ToolbarUtils.kt`. `LatinIME` includes secondary-toolbar height in strip/inset math.
 - Toolbar `EMOJI` is handled by `KeyboardState` (palette-based toggle; details in `keyboard/internal/AGENTS.md`).
-- There are two voice controls: the fixed right-edge `voice_input_key` starts/stops Gemini Live transcription through `LatinIME.onVoiceInputClicked`, while `ToolbarKey.VOICE` sends `KeyCode.VOICE_INPUT` and switches to the system shortcut/voice IME.
+- There are two voice controls: the fixed right-edge `voice_input_key` starts/stops MAI streaming transcription through `LatinIME.onVoiceInputClicked`, while `ToolbarKey.VOICE` sends `KeyCode.VOICE_INPUT` and switches to the system shortcut/voice IME.
 - External/inline suggestion views replace the word row and disable more-suggestions gestures while shown. `ToolbarKey.CLOSE_HISTORY` is an internal key used for those close buttons, not a normal user-facing toolbar item.
 
 ## Keep this file current

@@ -1,4 +1,4 @@
-"""Exercise tool discovery and isolated skill refresh without machine/network changes."""
+"""Exercise tool discovery without machine/network changes."""
 import os
 from pathlib import Path
 import shutil
@@ -58,40 +58,13 @@ class AndroidEnvironmentTest(unittest.TestCase):
         self.assertNotEqual(self.run_env().returncode, 0)
         self.assertFalse((self.root / 'local.properties').exists())
 
-
-class SkillRefreshTest(unittest.TestCase):
-    def test_refresh_preserves_discovery_and_stages_downloads(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            (root / 'tools').mkdir()
-            shutil.copy2(TOOLS / 'sync-gemini-skills.sh', root / 'tools')
-            fixups = root / 'tools/gemini-skills-fixups.py'
-            fixups.write_text('#!/bin/sh\nexit 0\n')
-            fixups.chmod(0o755)
-            (root / '.codex/skills').mkdir(parents=True)
-            (root / '.codex/skills/local-skill').mkdir()
-            (root / '.agents').mkdir()
-            (root / '.agents/skills').symlink_to('../.codex/skills', target_is_directory=True)
-            binaries = root / 'bin'
-            binaries.mkdir()
-            installer = binaries / 'npx'
-            installer.write_text('''#!/bin/sh
-set -eu
-for skill in gemini-api-dev gemini-live-api-dev; do
-  mkdir -p ".agents/skills/$skill"
-  echo "downloaded $skill" > ".agents/skills/$skill/SKILL.md"
-done
-echo '{"skills":{}}' > skills-lock.json
-''')
-            installer.chmod(0o755)
-            result = subprocess.run(['bash', 'tools/sync-gemini-skills.sh'], cwd=root,
-                                    env=dict(os.environ, PATH=f'{binaries}:{os.environ["PATH"]}'),
-                                    text=True, capture_output=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertTrue((root / '.agents/skills').is_symlink())
-            self.assertTrue((root / '.codex/skills/local-skill').is_dir())
-            for skill in ['gemini-api-dev', 'gemini-live-api-dev']:
-                self.assertEqual((root / f'.agents/skills/{skill}/SKILL.md').read_text(), f'downloaded {skill}\n')
+    def test_jvm_option_banner_does_not_hide_the_java_version(self):
+        java = Path(self.env['JAVA_HOME']) / 'bin/java'
+        java.write_text('#!/bin/sh\necho "Picked up JAVA_TOOL_OPTIONS: -XX:TieredStopAtLevel=1" >&2\n'
+                        'echo \'openjdk version "21.0.10"\' >&2\n')
+        result = self.run_env()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, str(self.sdk))
 
 
 if __name__ == '__main__':

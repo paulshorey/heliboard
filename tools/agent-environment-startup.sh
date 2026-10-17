@@ -363,7 +363,7 @@ Build / run:
 Notes:
   - This is an Android keyboard. There is no dev server to keep running.
   - Persistence is on-device SQLite (heliboard.db), not a hosted database.
-  - Gemini Live voice needs a user-supplied API key in the app settings;
+  - MAI streaming voice needs an Azure endpoint, deployment, and API key in app settings;
     do not put secrets in this script.
 EOF
 }

@@ -14,7 +14,7 @@ class LogVoiceDiagnosticsTest {
     fun `voice package tags are included`() {
         assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "VoiceInputManager", "VOICE_STEP_1 start")))
         assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "VoiceRecorder", "Recording started")))
-        assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "GeminiTranscription", "stream ready")))
+        assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "MaiTranscription", "stream ready")))
         assertTrue(Log.isVoiceDiagnosticLine(LogLine('W', "VoiceNetwork", "default route lost")))
     }
 
@@ -45,7 +45,7 @@ class LogVoiceDiagnosticsTest {
     @Test
     fun `voice response lines are included`() {
         assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "VoiceInputManager", "VOICE_RESPONSE ok in 120ms (turn_finalize): transcript received")))
-        assertTrue(Log.isVoiceDiagnosticLine(LogLine('E', "VoiceInputManager", "VOICE_RESPONSE timeout after 15000ms (audio_pending): no Gemini response")))
+        assertTrue(Log.isVoiceDiagnosticLine(LogLine('E', "VoiceInputManager", "VOICE_RESPONSE timeout after 15000ms (audio_pending): no MAI response")))
     }
 
     @Test
@@ -61,12 +61,17 @@ class LogVoiceDiagnosticsTest {
     }
 
     @Test
+    fun `redact azure api key header`() {
+        assertEquals("api_key=[redacted]", Log.redactVoiceDiagnosticMessage("api-key=secret"))
+    }
+
+    @Test
     fun `redact api key in url query string`() {
         val redacted = Log.redactVoiceDiagnosticMessage(
-            "opening wss://generativelanguage.googleapis.com/ws/x?key=AIzaSecret123&alt=json"
+            "opening wss://centralus.stt.speech.microsoft.com/speech/universal/v2?key=Secret123"
         )
         assertEquals(
-            "opening wss://generativelanguage.googleapis.com/ws/x?key=[redacted]&alt=json",
+            "opening wss://centralus.stt.speech.microsoft.com/speech/universal/v2?key=[redacted]",
             redacted
         )
     }
@@ -115,14 +120,14 @@ class LogVoiceDiagnosticsTest {
 
     @Test
     fun `debug export leads with voice diagnostics and collapses duplicate warnings`() {
-        val voice = LogLine('W', "GeminiTranscription", "close code=1011 reason=prepayment credits depleted ?key=secret")
+        val voice = LogLine('W', "MaiTranscription", "connection failed code=AuthenticationFailure ?key=secret")
         val repeat = LogLine('W', "RichInputConnection", "cached text out of sync, reloading")
         val noise = LogLine('D', "KeyboardParser", "adding key q")
         val native = "10-06 10:39:50.174 100 100 W NativeCrash: useful native warning"
-        val system = "10-06 10:39:50.174 100 100 W GeminiTranscription: duplicate close\n$native"
+        val system = "10-06 10:39:50.174 100 100 W MaiTranscription: duplicate close\n$native"
         val export = Log.formatDebugLogExport(listOf(noise, repeat, repeat, repeat), listOf(voice), "3.6 (3604)", system)
         assertTrue(export.startsWith("HeliBoard voice diagnostics"))
-        assertTrue(export.contains("close code=1011 reason=prepayment credits depleted ?key=[redacted]"))
+        assertTrue(export.contains("connection failed code=AuthenticationFailure ?key=[redacted]"))
         assertFalse(export.contains("secret"))
         assertTrue(export.contains("[repeated 3 times]"))
         assertFalse(export.contains("adding key q"))

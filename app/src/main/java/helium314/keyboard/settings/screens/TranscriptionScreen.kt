@@ -25,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
@@ -56,30 +57,13 @@ fun TranscriptionScreen(
     if ((b?.value ?: 0) < 0)
         Log.v("irrelevant", "stupid way to trigger recomposition on preference change")
 
-    var geminiApiKey by remember {
-        mutableStateOf(TranscriptionPreferences.readGeminiApiKey(prefs))
+    var maiApiKey by remember { mutableStateOf(TranscriptionPreferences.readMaiApiKey(prefs)) }
+    var maiRegion by remember { mutableStateOf(TranscriptionPreferences.readMaiRegion(prefs)) }
+    var maiAutoDetectLanguage by remember {
+        mutableStateOf(TranscriptionPreferences.readMaiAutoDetectLanguage(prefs))
     }
-    var geminiSmartMode by remember {
-        mutableStateOf(TranscriptionPreferences.readGeminiSmartMode(prefs))
-    }
-    var geminiUseEditorContext by remember {
-        mutableStateOf(TranscriptionPreferences.readGeminiUseEditorContext(prefs))
-    }
-    var geminiAutoDetectLanguage by remember {
-        mutableStateOf(TranscriptionPreferences.readGeminiAutoDetectLanguage(prefs))
-    }
-    var geminiEndOfSpeechSilenceMs by remember {
-        mutableStateOf(
-            TranscriptionPreferences.readGeminiEndOfSpeechSilenceMs(prefs).toString()
-        )
-    }
-    var chunkSilenceSeconds by remember {
-        mutableStateOf(
-            prefs.getInt(
-                Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS,
-                Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS
-            ).toString()
-        )
+    var chunkSilenceMs by remember {
+        mutableStateOf(TranscriptionPreferences.readVoiceChunkSilenceMs(prefs).toString())
     }
     var silenceThreshold by remember {
         mutableStateOf(
@@ -109,42 +93,26 @@ fun TranscriptionScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(innerPadding)
             ) {
+                Text(
+                    text = stringResource(R.string.mai_transcription_summary),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(vertical = 8.dp),
+                )
                 InlineTextField(
-                    label = stringResource(R.string.gemini_api_key_title),
-                    summary = stringResource(R.string.gemini_api_key_summary),
-                    value = geminiApiKey,
-                    onValueChange = { newValue ->
-                        geminiApiKey = newValue.trim()
-                        TranscriptionPreferences.writeGeminiApiKey(prefs, newValue)
-                    },
-                    minLines = 1,
-                    maxLines = 2
+                    label = stringResource(R.string.mai_region_title),
+                    summary = stringResource(R.string.mai_region_summary),
+                    value = maiRegion,
+                    onValueChange = { maiRegion = it; TranscriptionPreferences.writeMaiRegion(prefs, it) },
+                    maxLines = 1,
                 )
-                BooleanSettingRow(
-                    label = stringResource(R.string.gemini_smart_mode_title),
-                    summary = stringResource(R.string.gemini_smart_mode_summary),
-                    checked = geminiSmartMode,
-                    onCheckedChange = { checked ->
-                        geminiSmartMode = checked
-                        TranscriptionPreferences.writeGeminiSmartMode(prefs, checked)
-                    }
+                InlineTextField(
+                    label = stringResource(R.string.mai_api_key_title),
+                    summary = stringResource(R.string.mai_api_key_summary),
+                    value = maiApiKey,
+                    onValueChange = { maiApiKey = it; TranscriptionPreferences.writeMaiApiKey(prefs, it) },
+                    maxLines = 1,
+                    secret = true,
                 )
-                BooleanSettingRow(
-                    label = stringResource(R.string.gemini_use_editor_context_title),
-                    summary = stringResource(R.string.gemini_use_editor_context_summary),
-                    checked = geminiUseEditorContext,
-                    onCheckedChange = { checked ->
-                        geminiUseEditorContext = checked
-                        TranscriptionPreferences.writeGeminiUseEditorContext(prefs, checked)
-                    }
-                )
-                Preference(
-                    name = stringResource(R.string.voice_vocabulary_title),
-                    description = stringResource(R.string.voice_vocabulary_summary),
-                    onClick = {
-                        SettingsDestination.navigateTo(SettingsDestination.VoiceVocabulary)
-                    },
-                ) { NextScreenIcon() }
                 Preference(
                     name = stringResource(R.string.voice_diagnostics_title),
                     description = stringResource(R.string.voice_diagnostics_summary),
@@ -153,48 +121,32 @@ fun TranscriptionScreen(
                     },
                 ) { NextScreenIcon() }
                 BooleanSettingRow(
-                    label = stringResource(R.string.gemini_auto_detect_language_title),
-                    summary = stringResource(R.string.gemini_auto_detect_language_summary),
-                    checked = geminiAutoDetectLanguage,
-                    onCheckedChange = { checked ->
-                        geminiAutoDetectLanguage = checked
-                        TranscriptionPreferences.writeGeminiAutoDetectLanguage(prefs, checked)
-                    }
+                    label = stringResource(R.string.mai_auto_detect_language_title),
+                    summary = stringResource(R.string.mai_auto_detect_language_summary),
+                    checked = maiAutoDetectLanguage,
+                    onCheckedChange = {
+                        maiAutoDetectLanguage = it
+                        TranscriptionPreferences.writeMaiAutoDetectLanguage(prefs, it)
+                    },
                 )
                 InlineTextField(
-                    label = stringResource(R.string.gemini_end_of_speech_silence_ms_title),
-                    summary = stringResource(R.string.gemini_end_of_speech_silence_ms_summary),
-                    value = geminiEndOfSpeechSilenceMs,
+                    label = stringResource(R.string.voice_chunk_silence_ms_title),
+                    summary = stringResource(R.string.voice_chunk_silence_ms_summary),
+                    value = chunkSilenceMs,
                     onValueChange = { newValue ->
-                        geminiEndOfSpeechSilenceMs = newValue
+                        chunkSilenceMs = newValue
                         newValue.toIntOrNull()?.let { parsed ->
-                            TranscriptionPreferences.writeGeminiEndOfSpeechSilenceMs(prefs, parsed)
+                            TranscriptionPreferences.writeVoiceChunkSilenceMs(prefs, parsed)
                         }
                     },
-                    minLines = 1,
-                    maxLines = 1
-                )
-                InlineTextField(
-                    label = stringResource(R.string.voice_chunk_silence_seconds_title),
-                    summary = stringResource(R.string.voice_chunk_silence_seconds_summary),
-                    value = chunkSilenceSeconds,
-                    onValueChange = { newValue ->
-                        chunkSilenceSeconds = newValue
-                        newValue.toIntOrNull()?.let { parsed ->
-                            prefs.edit {
-                                putInt(
-                                    Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS,
-                                    parsed.coerceIn(1, 30)
-                                )
-                            }
-                        }
-                    },
+                    keyboardType = KeyboardType.Number,
                     minLines = 1,
                     maxLines = 1
                 )
 
                 InlineTextField(
                     label = stringResource(R.string.voice_silence_threshold_title),
+                    keyboardType = KeyboardType.Number,
                     value = silenceThreshold,
                     onValueChange = { newValue ->
                         silenceThreshold = newValue
@@ -213,6 +165,7 @@ fun TranscriptionScreen(
 
                 InlineTextField(
                     label = stringResource(R.string.voice_auto_stop_silence_seconds_title),
+                    keyboardType = KeyboardType.Number,
                     value = autoStopSilenceSeconds,
                     onValueChange = { newValue ->
                         autoStopSilenceSeconds = newValue
@@ -284,7 +237,9 @@ private fun InlineTextField(
     onValueChange: (String) -> Unit,
     summary: String? = null,
     minLines: Int = 1,
-    maxLines: Int = 3
+    maxLines: Int = 3,
+    secret: Boolean = false,
+    keyboardType: KeyboardType = KeyboardType.Text,
 ) {
     Column(
         modifier = Modifier
@@ -313,6 +268,12 @@ private fun InlineTextField(
             maxLines = maxLines,
             textStyle = MaterialTheme.typography.bodySmall,
             shape = MaterialTheme.shapes.small,
+            visualTransformation = if (secret) androidx.compose.ui.text.input.PasswordVisualTransformation()
+                else androidx.compose.ui.text.input.VisualTransformation.None,
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                keyboardType = if (secret) KeyboardType.Password else keyboardType,
+                autoCorrectEnabled = false,
+            ),
         )
     }
 }

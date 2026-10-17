@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package helium314.keyboard.latin.voice
 
+import java.util.Locale
+
 /**
  * Post-processes transcribed text at the paragraph level to fix patterns that
  * the realtime STT provider cannot handle — primarily filler fragments (e.g.
@@ -17,9 +19,44 @@ object TranscriptPostProcessor {
     data class Rule(val find: String, val replace: String)
 
     val rules: List<Rule> = buildRules()
+    // Keep command terminators intact until paragraph cleanup converts them.
+    private val periodTerminatingCommands = rules.map { it.find }.filter {
+        it.first().isUpperCase() && it.endsWith('.')
+    }
 
     private const val CORRECTION_PUNCTUATION = "!?,:;"
     private val redundantPunctuation = Regex("""[.,]+(?=[$CORRECTION_PUNCTUATION])|,+(?=\.)""")
+    private val continuationPeriod = Regex("""(?<!\.)\.(?=[ \t]+\p{Ll})""")
+    private val dottedAbbreviation = Regex("""(?:\p{L}\.)+\p{L}""")
+    private val periodAbbreviations = setOf(
+        "dr", "mr", "mrs", "ms", "prof", "sr", "jr", "st", "vs", "etc",
+        "approx", "dept", "fig", "no", "inc", "ltd",
+    )
+
+    data class PunctuationReplacement(val beforeLength: Int, val text: String)
+
+    /**
+     * Prepare one verified replacement across a final-result boundary. Preserve
+     * any horizontal whitespace already in the editor when removing its period.
+     * The full incoming segment is needed: a leading space alone cannot tell us
+     * whether the next word is a lowercase continuation or a new sentence.
+     */
+    fun previousPunctuationReplacement(previousContext: CharSequence, text: String): PunctuationReplacement? {
+        if (previousContext.isEmpty() || text.isEmpty()) return null
+        var periodIndex = previousContext.length - 1
+        while (periodIndex >= 0 && isHorizontalWhitespace(previousContext[periodIndex])) periodIndex--
+        if (periodIndex >= 0 && previousContext[periodIndex] == '.') {
+            val boundary = previousContext.toString() + text
+            if (continuationPeriod.findAll(boundary).any {
+                    it.range.first == periodIndex && !isProtectedPeriod(boundary, periodIndex)
+                }) {
+                val whitespace = previousContext.subSequence(periodIndex + 1, previousContext.length)
+                return PunctuationReplacement(previousContext.length - periodIndex, whitespace.toString() + text)
+            }
+        }
+        return if (shouldReplacePreviousPunctuation(previousContext, text)) PunctuationReplacement(1, text)
+            else null
+    }
 
     /**
      * Replace the previous character only when normalization changes just that
@@ -37,11 +74,13 @@ object TranscriptPostProcessor {
      * Remove adjacent periods/commas before `!`, `?`, `,`, `:`, or `;`, plus commas
      * before `.`, throughout [text]. Mixed runs are removed in one pass so the
      * result is stable across repeated cleanup. Other punctuation, standalone
-     * ellipses, and marks separated by whitespace are preserved. Keep a comma
+     * ellipses, and marks separated by whitespace are preserved. Also remove a
+     * single period before horizontal whitespace and a lowercase letter, while
+     * retaining abbreviations and paragraph breaks. Keep a comma
      * attached to "um"/"uh" until paragraph cleanup can remove the filler too.
      */
-    fun removeRedundantPunctuation(text: String): String =
-        redundantPunctuation.replace(text) { match ->
+    fun removeRedundantPunctuation(text: String): String {
+        val adjacentCorrected = redundantPunctuation.replace(text) { match ->
             val start = match.range.first
             if (match.value[0] == ',' && start >= 2 && fillerLengthAt(text, start - 2) == 2) {
                 ","
@@ -49,9 +88,28 @@ object TranscriptPostProcessor {
                 ""
             }
         }
+        return continuationPeriod.replace(adjacentCorrected) { match ->
+            if (isProtectedPeriod(adjacentCorrected, match.range.first)) "." else ""
+        }
+    }
+
+    /** Diagnostic count only; never include the matched text in voice logs. */
+    fun countMidSentencePeriods(text: String): Int = continuationPeriod.findAll(text).count {
+        !isProtectedPeriod(text, it.range.first)
+    }
+
+    private fun isProtectedPeriod(text: String, periodIndex: Int): Boolean {
+        var start = periodIndex
+        while (start > 0 && (text[start - 1].isLetter() || text[start - 1] == '.')) start--
+        val token = text.substring(start, periodIndex)
+        return token.lowercase(Locale.ROOT) in periodAbbreviations || dottedAbbreviation.matches(token) ||
+            periodTerminatingCommands.any { command ->
+                val commandStart = periodIndex + 1 - command.length
+                commandStart >= 0 && text.regionMatches(commandStart, command, 0, command.length)
+            }
+    }
 
     private val disfluencyReplacements = listOf(
-        Rule("—", ""),
         Rule(", hmm.", ""),
         Rule(" hmm.", ""),
         Rule("hmm.", ""),
@@ -82,10 +140,8 @@ object TranscriptPostProcessor {
      * Remove common dictated filler fragments the transcription model returns
      * as text.
      *
-     * Gemini's smart mode removes most disfluencies itself, and verbatim mode
-     * deliberately keeps them, but either can still surface short comma-attached
-     * fragments ("um,", "uh,"). Cleaning at paragraph level handles both
-     * within-chunk fillers and fillers split across finalized chunks, because
+     * Cleanup at paragraph level handles both within-segment fillers and
+     * fillers split across completed MAI transcripts, because
      * [LatinIME][helium314.keyboard.latin.LatinIME] runs this pass after each
      * commit inside the same batch edit.
      */

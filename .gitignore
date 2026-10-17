@@ -3,6 +3,8 @@
 .gradle
 .kotlin
 local.properties
+# Local Azure Speech credentials
+/.env
 .android-sdk
 .DS_Store
 Gemfile
