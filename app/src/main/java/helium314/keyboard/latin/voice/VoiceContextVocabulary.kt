@@ -3,23 +3,8 @@ package helium314.keyboard.latin.voice
 
 import java.util.Locale
 
-/**
- * Builds the `inputAudioTranscription.customVocabulary` list sent to Gemini at
- * the start of every transcription session.
- *
- * Custom vocabulary is the documented speech-biasing channel for
- * `gemini-3.5-transcribe-live`, and it is how HeliBoard makes dictated text
- * agree with what the user has already typed. Names, product names and jargon
- * sitting in the editor right before the caret are exactly the words a speech
- * model is most likely to get wrong, and exactly the words the user expects to
- * come back spelled and capitalized the way they wrote them.
- *
- * Priority order, because Google notes accuracy is best at roughly 100 terms
- * even though 1,000 are accepted:
- * 1. the user's own list — explicit intent,
- * 2. the built-in product/technical terms,
- * 3. terms harvested from the editor, nearest the caret first.
- */
+/** Builds Muse keyword hints: user terms, built-in terms, then harvested proper nouns.
+ * The cap is app policy. Only individual words are sent, never editor paragraphs. */
 object VoiceContextVocabulary {
 
     /**
@@ -92,7 +77,7 @@ object VoiceContextVocabulary {
             for (term in terms) {
                 if (result.size >= limit) return
                 val cleaned = term.trim()
-                if (cleaned.length < MIN_TERM_LENGTH || cleaned.length > MAX_TERM_LENGTH) continue
+                if (cleaned.length < MIN_TERM_LENGTH || cleaned.length > 100) continue
                 val key = cleaned.lowercase(Locale.US)
                 // Map.putIfAbsent is API 24+; minSdk is 21.
                 if (!result.containsKey(key)) result[key] = cleaned

@@ -21,7 +21,7 @@
 | `development` | Local Gradle, Android Studio, device/emulator validation |
 | `full-app-mode` | Current standalone editor, drafts and InputConnection sync |
 | `key-hint-sizing` | Current keyboard drawing/resource sizing rules |
-| `voice-transcription` | Shipping Gemini voice behavior; API/data-flow references are local |
+| `voice-transcription` | Shipping Muse voice behavior; API/data-flow references are local |
 | `gemini-api-dev`, `gemini-live-api-dev` | Vendored provider documentation, source hashes in `skills-lock.json` |
 
 The Interactions skill was removed because HeliBoard has no Interactions integration.

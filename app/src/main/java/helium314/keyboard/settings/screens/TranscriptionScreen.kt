@@ -56,22 +56,14 @@ fun TranscriptionScreen(
     if ((b?.value ?: 0) < 0)
         Log.v("irrelevant", "stupid way to trigger recomposition on preference change")
 
-    var geminiApiKey by remember {
-        mutableStateOf(TranscriptionPreferences.readGeminiApiKey(prefs))
+    var museApiKey by remember {
+        mutableStateOf(TranscriptionPreferences.readMuseApiKey(context))
     }
-    var geminiSmartMode by remember {
-        mutableStateOf(TranscriptionPreferences.readGeminiSmartMode(prefs))
+    var museUseEditorContext by remember {
+        mutableStateOf(TranscriptionPreferences.readMuseUseEditorContext(prefs))
     }
-    var geminiUseEditorContext by remember {
-        mutableStateOf(TranscriptionPreferences.readGeminiUseEditorContext(prefs))
-    }
-    var geminiAutoDetectLanguage by remember {
-        mutableStateOf(TranscriptionPreferences.readGeminiAutoDetectLanguage(prefs))
-    }
-    var geminiEndOfSpeechSilenceMs by remember {
-        mutableStateOf(
-            TranscriptionPreferences.readGeminiEndOfSpeechSilenceMs(prefs).toString()
-        )
+    var museAutoDetectLanguage by remember {
+        mutableStateOf(TranscriptionPreferences.readMuseAutoDetectLanguage(prefs))
     }
     var chunkSilenceSeconds by remember {
         mutableStateOf(
@@ -110,32 +102,25 @@ fun TranscriptionScreen(
                     .padding(innerPadding)
             ) {
                 InlineTextField(
-                    label = stringResource(R.string.gemini_api_key_title),
-                    summary = stringResource(R.string.gemini_api_key_summary),
-                    value = geminiApiKey,
+                    label = stringResource(R.string.muse_api_key_title),
+                    summary = stringResource(R.string.muse_api_key_summary),
+                    value = museApiKey,
                     onValueChange = { newValue ->
-                        geminiApiKey = newValue.trim()
-                        TranscriptionPreferences.writeGeminiApiKey(prefs, newValue)
+                        museApiKey = newValue.trim()
+                        TranscriptionPreferences.writeMuseApiKey(context, newValue)
                     },
                     minLines = 1,
-                    maxLines = 2
+                    maxLines = 1,
+                    secret = true
                 )
+                Text(stringResource(R.string.muse_speaker_summary), modifier = Modifier.padding(12.dp))
                 BooleanSettingRow(
-                    label = stringResource(R.string.gemini_smart_mode_title),
-                    summary = stringResource(R.string.gemini_smart_mode_summary),
-                    checked = geminiSmartMode,
+                    label = stringResource(R.string.muse_use_editor_context_title),
+                    summary = stringResource(R.string.muse_use_editor_context_summary),
+                    checked = museUseEditorContext,
                     onCheckedChange = { checked ->
-                        geminiSmartMode = checked
-                        TranscriptionPreferences.writeGeminiSmartMode(prefs, checked)
-                    }
-                )
-                BooleanSettingRow(
-                    label = stringResource(R.string.gemini_use_editor_context_title),
-                    summary = stringResource(R.string.gemini_use_editor_context_summary),
-                    checked = geminiUseEditorContext,
-                    onCheckedChange = { checked ->
-                        geminiUseEditorContext = checked
-                        TranscriptionPreferences.writeGeminiUseEditorContext(prefs, checked)
+                        museUseEditorContext = checked
+                        TranscriptionPreferences.writeMuseUseEditorContext(prefs, checked)
                     }
                 )
                 Preference(
@@ -153,26 +138,13 @@ fun TranscriptionScreen(
                     },
                 ) { NextScreenIcon() }
                 BooleanSettingRow(
-                    label = stringResource(R.string.gemini_auto_detect_language_title),
-                    summary = stringResource(R.string.gemini_auto_detect_language_summary),
-                    checked = geminiAutoDetectLanguage,
+                    label = stringResource(R.string.muse_auto_detect_language_title),
+                    summary = stringResource(R.string.muse_auto_detect_language_summary),
+                    checked = museAutoDetectLanguage,
                     onCheckedChange = { checked ->
-                        geminiAutoDetectLanguage = checked
-                        TranscriptionPreferences.writeGeminiAutoDetectLanguage(prefs, checked)
+                        museAutoDetectLanguage = checked
+                        TranscriptionPreferences.writeMuseAutoDetectLanguage(prefs, checked)
                     }
-                )
-                InlineTextField(
-                    label = stringResource(R.string.gemini_end_of_speech_silence_ms_title),
-                    summary = stringResource(R.string.gemini_end_of_speech_silence_ms_summary),
-                    value = geminiEndOfSpeechSilenceMs,
-                    onValueChange = { newValue ->
-                        geminiEndOfSpeechSilenceMs = newValue
-                        newValue.toIntOrNull()?.let { parsed ->
-                            TranscriptionPreferences.writeGeminiEndOfSpeechSilenceMs(prefs, parsed)
-                        }
-                    },
-                    minLines = 1,
-                    maxLines = 1
                 )
                 InlineTextField(
                     label = stringResource(R.string.voice_chunk_silence_seconds_title),
@@ -284,7 +256,8 @@ private fun InlineTextField(
     onValueChange: (String) -> Unit,
     summary: String? = null,
     minLines: Int = 1,
-    maxLines: Int = 3
+    maxLines: Int = 3,
+    secret: Boolean = false
 ) {
     Column(
         modifier = Modifier
@@ -313,6 +286,11 @@ private fun InlineTextField(
             maxLines = maxLines,
             textStyle = MaterialTheme.typography.bodySmall,
             shape = MaterialTheme.shapes.small,
+            visualTransformation = if (secret) androidx.compose.ui.text.input.PasswordVisualTransformation()
+                else androidx.compose.ui.text.input.VisualTransformation.None,
+            keyboardOptions = if (secret) androidx.compose.foundation.text.KeyboardOptions(
+                keyboardType = androidx.compose.ui.text.input.KeyboardType.Password)
+                else androidx.compose.foundation.text.KeyboardOptions.Default,
         )
     }
 }

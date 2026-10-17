@@ -19,7 +19,7 @@ from an agent's changes to a phone-installable APK and an honest testing handoff
 | `android-workspace-setup`, `development` | Rewritten around tool discovery, worktrees, targeted checks and explicit device selection |
 | `full-app-mode`, `voice-transcription` | Retained with their references: both describe current product architecture |
 | `key-hint-sizing` | Retained; stale numeric snapshot replaced with a lookup in authoritative resources |
-| `gemini-api-dev`, `gemini-live-api-dev` | Retained: provider API/reference skills used by this app |
+| `gemini-api-dev`, `gemini-live-api-dev` | Retained for historical/future Gemini provider work; current Muse protocol uses the voice skill |
 | `gemini-interactions-api` | Deleted with its lock entry/fixups: no Interactions API integration exists in app/tools |
 | Provider refresh | Installer runs in scratch storage, then copies only validated downloads; it cannot delete `.agents` |
 | APK handoff check | Source and binary fingerprints, pushed-commit URL, PR template and a lightweight CI workflow |
@@ -89,7 +89,7 @@ paths and uses an installed SDK. Existing `local.properties` remains authoritati
 Open the repository in Android Studio, select its bundled JDK for Gradle and let
 sync finish. Use `debugNoMinify` for debugger iteration; `debug` is the shared-key
 signed PR artifact. SDK/Device Manager can install missing components and create
-an emulator. No live Gemini key is needed for JVM tests, compilation or settings
+an emulator. No live Muse key is needed for JVM tests, compilation or settings
 smoke checks. Real transcription requires the developer's key in app settings.
 
 The infrastructure audit's `:app:lintDebug` run reported **820 errors, 125 warnings
@@ -169,7 +169,7 @@ Choose relevant cases and record the phone/app/version and result in the PR:
 - For voice work, test short/long utterances, pause/resume, explicit stop with a
   trailing phrase, silence, network loss, field changes/hiding and host clears.
   Inspect preserved inserted text and interruption behavior; no provisional text
-  should become editor content. Use `docs/gemini-transcription.md` for its full matrix.
+  should become editor content. Use `docs/muse-transcription.md` for its full matrix.
 
 JVM results and emulator screenshots do not replace ergonomic typing, real radio,
 real microphone, real provider or host-app acceptance on the developer's phone.

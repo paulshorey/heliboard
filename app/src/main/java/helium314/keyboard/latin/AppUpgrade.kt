@@ -600,8 +600,7 @@ object AppUpgrade {
                 }
             }
         }
-        TranscriptionPreferences.migrateLegacyProviderPrefs(prefs)
-        TranscriptionPreferences.migrateGeminiVoiceDefaults(prefs)
+        TranscriptionPreferences.readMuseCustomVocabularyRaw(prefs)
         upgradeToolbarPrefs(prefs)
         LayoutUtilsCustom.onLayoutFileChanged() // just to be sure
         prefs.edit { putInt(Settings.PREF_VERSION_CODE, BuildConfig.VERSION_CODE) }
