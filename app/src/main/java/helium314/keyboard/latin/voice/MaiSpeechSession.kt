@@ -12,6 +12,7 @@ import com.microsoft.cognitiveservices.speech.audio.AudioInputStream
 import com.microsoft.cognitiveservices.speech.audio.AudioStreamFormat
 import com.microsoft.cognitiveservices.speech.audio.PushAudioInputStream
 import helium314.keyboard.latin.settings.TranscriptionPreferences.MaiConfig
+import helium314.keyboard.latin.utils.Log
 import java.math.BigInteger
 import java.net.URI
 import java.util.concurrent.Executors
@@ -22,13 +23,16 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal interface MaiSpeechSession {
     enum class WriteResult { ACCEPTED, BACKPRESSURE, CLOSED }
     interface Listener {
+        /** Local recognizer initialization permits writes; it is not service acceptance. */
         fun onReady()
+        fun onConnected() {}
+        fun onDisconnected() {}
         fun onFinal(resultId: String, text: String, audioEndBytes: Long, commitToken: Int)
         /** Liveness metadata only; provisional text never leaves the SDK. */
         fun onInterim()
         fun onCommitRequested(token: Int, audioEndBytes: Long)
         fun onEnded()
-        fun onError(message: String)
+        fun onError(message: String, retryable: Boolean = false, startupRejection: Boolean = false)
         fun onWriteAvailable()
     }
     fun start(config: MaiConfig, language: String?, listener: Listener)
@@ -40,7 +44,12 @@ internal interface MaiSpeechSession {
 
 /** Serializes JNI calls off the main thread. The SDK owns ACKs and audio recovery. */
 internal class AzureMaiSpeechSession : MaiSpeechSession {
-    private val worker = Executors.newSingleThreadExecutor { task -> Thread(task, "MAI-Speech-SDK") }
+    companion object {
+        // A replacement must not create native handles while its predecessor is
+        // still stopping/disposal is running. One process-wide lane also avoids
+        // accumulating a new cleanup thread on every rapid mic tap or retry.
+        private val worker = Executors.newSingleThreadExecutor { task -> Thread(task, "MAI-Speech-SDK") }
+    }
     private val closed = AtomicBoolean(false)
     private val failed = AtomicBoolean(false)
     private var listener: MaiSpeechSession.Listener? = null
@@ -68,11 +77,13 @@ internal class AzureMaiSpeechSession : MaiSpeechSession {
             val active = SpeechRecognizer(speechConfig, audioConfig)
             recognizer = active
             connection = Connection.fromRecognizer(active).also { transport ->
+                transport.connected.addEventListener { _, _ ->
+                    if (!closed.get() && !failed.get()) listener.onConnected()
+                }
                 transport.disconnected.addEventListener { _, _ ->
-                    // Closing input deliberately can disconnect as recognition reaches EOF.
-                    // While input is open, do not allow the SDK to silently reconnect capture.
-                    if (!inputClosed.get() && !ended.get())
-                        fail("Azure Speech disconnected. Dictation stopped; check your internet connection.")
+                    // This is a transport observation, not a recognition cancellation.
+                    // Let the SDK reconnect or deliver its actual Canceled error code.
+                    if (!closed.get() && !failed.get() && !ended.get()) listener.onDisconnected()
                 }
             }
             active.recognized.addEventListener { _, event ->
@@ -102,7 +113,11 @@ internal class AzureMaiSpeechSession : MaiSpeechSession {
                         else -> "Azure Speech connection failed (${code.name}). Check your internet connection."
                     }
                     // errorDetails may echo credentials or text; never log or forward it.
-                    fail(message)
+                    fail(message, code in setOf(CancellationErrorCode.ConnectionFailure,
+                        CancellationErrorCode.ServiceTimeout, CancellationErrorCode.ServiceUnavailable,
+                        CancellationErrorCode.ServiceError, CancellationErrorCode.ServiceRedirectTemporary),
+                        code in setOf(CancellationErrorCode.AuthenticationFailure, CancellationErrorCode.Forbidden,
+                            CancellationErrorCode.BadRequest, CancellationErrorCode.TooManyRequests))
                 } else if (event.reason == CancellationReason.EndOfStream) {
                     ended.set(true)
                     listener.onEnded()
@@ -135,14 +150,19 @@ internal class AzureMaiSpeechSession : MaiSpeechSession {
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         worker.execute {
+            val started = System.nanoTime()
+            Log.i("MaiTranscription", "VOICE_STOP native disposal started ended=${ended.get()}")
             try { recognizer?.stopContinuousRecognitionAsync()?.get(5, TimeUnit.SECONDS) }
-            catch (_: Exception) { /* Release handles even after a failed stop. */ }
+            catch (_: Exception) {
+                Log.w("MaiTranscription", "VOICE_STOP native stop did not finish within its cleanup wait")
+            }
             for (release in listOf<() -> Unit>({ connection?.close() }, { recognizer?.close() }, { audioConfig?.close() },
                 { if (!inputClosed.get()) stream?.close() }, { audioFormat?.close() }, { speechConfig?.close() })) {
                 try { release() } catch (_: Exception) { /* Continue releasing other JNI handles. */ }
             }
+            Log.i("MaiTranscription", "VOICE_STOP native disposal finished elapsedMs=${
+                TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)}")
         }
-        worker.shutdown()
     }
 
     private fun submit(action: () -> Unit) {
@@ -157,7 +177,7 @@ internal class AzureMaiSpeechSession : MaiSpeechSession {
             }
         }
     }
-    private fun fail(message: String) {
-        if (!closed.get() && failed.compareAndSet(false, true)) listener?.onError(message)
+    private fun fail(message: String, retryable: Boolean = false, startupRejection: Boolean = false) {
+        if (!closed.get() && failed.compareAndSet(false, true)) listener?.onError(message, retryable, startupRejection)
     }
 }

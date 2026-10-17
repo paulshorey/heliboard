@@ -65,6 +65,7 @@ class VoiceInputManager internal constructor(
     private var localSpeechActive = false
     private var streamReachedReady = false
     private var hasCapturedAudio = false
+    private var hasInsertedTranscript = false
     private var autoStopAtMs: Long? = null
     private val pendingTranscripts = ArrayDeque<TranscriptSegment>()
     private var dispatchingTranscripts = false
@@ -75,6 +76,7 @@ class VoiceInputManager internal constructor(
         val capturedAt: Long, val sequence: Long)
     private val pendingAudio = ArrayDeque<BufferedAudio>()
     private var audioQueueTimeout: Runnable? = null
+    private var stopTimeout: Runnable? = null
     private val autoStop = Runnable { if (isRecording) stopRecording() }
 
     val isRecording: Boolean get() = currentState == State.RECORDING
@@ -96,7 +98,11 @@ class VoiceInputManager internal constructor(
     }
 
     fun startRecording(): Boolean {
-        if (currentState != State.IDLE || captureInterrupted || awaitingIntegrityDrain) return false
+        if (currentState != State.IDLE) return false
+        if (captureInterrupted || awaitingIntegrityDrain) {
+            listener?.onError("Finishing saved dictation audio. Please wait for processing to finish.")
+            return false
+        }
         if (!recorder.hasRecordPermission()) {
             listener?.onPermissionRequired()
             return false
@@ -107,7 +113,7 @@ class VoiceInputManager internal constructor(
         if (!continuing) {
             invalidateSession()
             val token = sessionId
-            if (!network.start { if (token == sessionId) failSession("Internet connection lost. Dictation stopped.", true) }) {
+            if (!network.start { if (token == sessionId) client.onNetworkUnavailable() }) {
                 listener?.onError("No validated internet connection. Connect before starting dictation.")
                 return false
             }
@@ -115,6 +121,7 @@ class VoiceInputManager internal constructor(
             // A mic restart must preserve the outgoing session's finals. Capture now
             // and buffer until its EOF; if input is still open, simply keep using it.
             stopRequested = false
+            clearStopTimeout()
             if (draining) rotating = true
             val previousSession = sessionId
             flushAudio()
@@ -188,13 +195,20 @@ class VoiceInputManager internal constructor(
 
     fun stopRecording() {
         if (isIdle || stopRequested) return
+        val activeSession = sessionId
+        val requestedAt = SystemClock.elapsedRealtime()
         stopRequested = true
         localSpeechActive = false
         cancelAutoStop()
         cancelRotation()
         recorder.stopRecording()
         updateState(State.IDLE)
-        val activeSession = sessionId
+        if (activeSession != sessionId || !stopRequested) return
+        stopTimeout = Runnable {
+            if (activeSession == sessionId && stopRequested)
+                failSession("Dictation took too long to finish saved audio. Please try again.", client.hasUnconfirmedSpeech)
+        }.also { handler.postDelayed(it,
+            (20_000L - (SystemClock.elapsedRealtime() - requestedAt)).coerceAtLeast(0)) }
         // AudioRecord callbacks already queued on the main looper include the last chunk.
         handler.post { if (activeSession == sessionId) finishConnection() }
     }
@@ -256,8 +270,8 @@ class VoiceInputManager internal constructor(
             override fun onStreamReady() {
                 if (!isCurrent()) return
                 connecting = false
+                draining = false
                 ready = true
-                streamReachedReady = true
                 if (localSpeechActive && isRecording && !stopRequested) client.onSpeechStarted()
                 connectionReadyAt = SystemClock.elapsedRealtime()
                 flushAudio()
@@ -266,6 +280,23 @@ class VoiceInputManager internal constructor(
                 else {
                     scheduleRotation()
                 }
+            }
+            override fun onServiceConnected() {
+                if (isCurrent()) streamReachedReady = true
+            }
+            override fun onStartupRejected() {
+                if (isCurrent() && !hasInsertedTranscript) streamReachedReady = false
+            }
+            override fun onStreamRecovering() {
+                if (!isCurrent()) return
+                awaitingIntegrityDrain = true
+                rotating = false
+                ready = false
+                connecting = true
+                stopRecording()
+                if (!isCurrent()) return
+                listener?.onProcessingStarted()
+                listener?.onError("Dictation connection interrupted. Microphone stopped; recovering saved audio.")
             }
             override fun onTranscriptionResult(segment: TranscriptSegment) {
                 if (!isCurrent() || segment.text.isBlank()) return
@@ -303,6 +334,11 @@ class VoiceInputManager internal constructor(
                 ready = false
                 connecting = false
                 draining = false
+                if (pendingAudio.isNotEmpty() && stopRequested) {
+                    rotating = false
+                    connect()
+                    return
+                }
                 if (rotating) {
                     rotating = false
                     if (currentState != State.IDLE || pendingAudio.isNotEmpty()) {
@@ -370,6 +406,7 @@ class VoiceInputManager internal constructor(
                     return
                 }
                 pendingTranscripts.removeFirst()
+                hasInsertedTranscript = true
             }
         } finally {
             dispatchingTranscripts = false
@@ -421,7 +458,9 @@ class VoiceInputManager internal constructor(
 
     private fun failSession(error: String, incomplete: Boolean = false, mark: Boolean = true) {
         val startupFailure = !streamReachedReady
-        val interrupted = mark && !startupFailure && hasCapturedAudio
+        val uncertainSpeech = incomplete || client.hasUnconfirmedSpeech || pendingAudio.any { it.containsSpeech } ||
+            pendingTranscripts.isNotEmpty()
+        val interrupted = mark && !startupFailure && uncertainSpeech
         cancelRecording()
         if (interrupted) insertInterruptionMarker()
         Log.e(TAG, "failure startup=$startupFailure incomplete=$incomplete marker=$interrupted cause=$error")
@@ -458,9 +497,11 @@ class VoiceInputManager internal constructor(
         localSpeechActive = false
         streamReachedReady = false
         hasCapturedAudio = false
+        hasInsertedTranscript = false
         connectionReadyAt = 0
         pendingAudio.clear()
         clearAudioQueueTimeout()
+        clearStopTimeout()
         if (hadPending) listener?.onPendingProcessingCancelled()
         notifyIdle()
     }
@@ -492,6 +533,10 @@ class VoiceInputManager internal constructor(
         audioQueueTimeout?.let { handler.removeCallbacks(it) }
         audioQueueTimeout = null
     }
+    private fun clearStopTimeout() {
+        stopTimeout?.let { handler.removeCallbacks(it) }
+        stopTimeout = null
+    }
 
     private fun updateState(value: State) {
         if (currentState == value) return
@@ -500,6 +545,7 @@ class VoiceInputManager internal constructor(
     }
     private fun notifyIdle() {
         if (hasPendingProcessing()) return
+        clearStopTimeout()
         awaitingIntegrityDrain = false
         if (captureInterrupted) {
             captureInterrupted = false

@@ -144,9 +144,10 @@ class MaiTranscriptionClientStreamTest {
         session.listener.onError("Connection failed."); pump()
         assertTrue(events.any { it.startsWith("error:false:") })
     }
-    @Test fun unexpectedSessionStopReportsUnfinalizedAudio() {
+    @Test fun unexpectedSessionStopRequestsRecoveryInsteadOfDiscardingAudio() {
         ready(); client.sendAudioChunk(byteArrayOf(1, 0)); session.ended(); pump()
-        assertTrue(events.any { it.startsWith("error:true:") })
+        assertFalse(events.any { it.startsWith("error:") })
+        assertTrue(client.hasPendingProcessing)
         assertFalse("closed" in events)
     }
     @Test fun eofTimeoutDoesNotPromoteAnyProvisionalText() {

@@ -41,7 +41,11 @@ internal class FakeMaiSpeechSession : MaiSpeechSession {
         if (deferWrites) work.addLast(task) else task.run()
     }
     override fun close() { closed = true }
-    fun ready() = listener.onReady()
+    fun ready() { listener.onReady(); listener.onConnected() }
+    fun disconnected() = listener.onDisconnected()
+    fun connected() = listener.onConnected()
+    fun error(message: String = "ConnectionFailure", retryable: Boolean = true, startupRejection: Boolean = false) =
+        listener.onError(message, retryable, startupRejection)
     fun interim() = listener.onInterim()
     fun final(text: String, id: String = "result-${commits.size}-${totalBytes}", end: Long = totalBytes,
         token: Int = commits.lastOrNull()?.first ?: 0) = listener.onFinal(id, text, end, token)
