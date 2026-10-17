@@ -115,7 +115,6 @@
     <string name="clipboard_history_retention_time">기록 보존 시간</string>
     <string name="incognito">강제 시크릿 모드</string>
     <string name="more_keys_strip_description">더 많은 키</string>
-    <string name="number_row_summary">항상 숫자 행 표시</string>
     <string name="show_hints">키 힌트 표시</string>
     <string name="show_hints_summary">길게 누르기 힌트 표시</string>
     <string name="prefs_long_press_keyboard_to_change_lang">스페이스로 입력 방법 변경</string>

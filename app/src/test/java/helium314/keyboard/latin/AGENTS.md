@@ -13,6 +13,7 @@ Core IME pipeline tests.
 ## Subfolders
 - `utils/` - focused utility tests, including `PinnedToolbarLayoutTest.kt` for even-width secondary-toolbar fitting on narrow screens.
 - `voice/` - transcription pipeline tests.
+- `personalization/` - email extraction and dictionary persistence tests, including interrupted atomic writes and concurrent usage counts on API 21 and 35.
 
 ## Non-obvious notes
 - `InputLogicTest.kt` is the most important behavior-regression suite for ordinary typing.
@@ -22,6 +23,7 @@ Core IME pipeline tests.
 - Punctuation cleanup tests cover longer segments correcting a preceding period or comma, every occurrence across incoming line breaks and existing paragraph text, verified host-selection rejection before a longer correction can write text, deferred-editor comma corrections, and preservation of standalone ellipses. The MAI lowercase-continuation regression uses the complete reported example and split finals; tests cover existing whitespace, multiline finals, abbreviations, capitalized sentence starts, paragraph breaks, deferred batches, and rejected/ignored replacement selections or commits.
 - Comma cleanup must not remove the comma required to recognize `um,`/`uh,` fillers before paragraph cleanup; the integration regression checks fillers directly followed by punctuation.
 - Host-clear tests also cover unchanged selection, extracted-text notifications without selection callbacks, partial/belated/stale-token updates, unavailable host reads, rejected monitors, fullscreen monitor ownership, editor restarts, and late finals/markers after a clear (including fields that started empty). Lifecycle tests require immediate cancellation on interactive keyboard hiding/input-view finish, while preserving screen-off recording. Active-manager mocks transition to idle on cancellation, matching production.
+- Voice feedback tests drive the real IME listener and processing indicator: blocked-restart feedback keeps the spinner visible while processing is pending, and a terminal error clears it after work ends.
 - The mix of Java and Kotlin tests here is intentional; keep whichever language is clearest for the target code.
 
 ## Keep this file current

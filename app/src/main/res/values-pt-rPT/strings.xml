@@ -110,7 +110,6 @@
     <string name="prefs_force_incognito_mode_summary">Desativar aprendizagem de palavras</string>
     <string name="more_keys_strip_description">Mais teclas</string>
     <string name="number_row">Linha de números</string>
-    <string name="number_row_summary">Mostrar sempre linha de números</string>
     <string name="show_hints">Mostrar dicas de teclas</string>
     <string name="prefs_long_press_keyboard_to_change_lang">Alterar método de entrada com a tecla de Espaço</string>
     <string name="prefs_long_press_keyboard_to_change_lang_summary">Toque longo na tecla de Espaço abre o menu de seleção do método de entrada</string>
@@ -185,7 +184,6 @@
     <string name="custom_font">Definir fonte a partir de um ficheiro</string>
     <string name="summary_customize_background_image_landscape">Se não for definido, será usada a imagem vertical</string>
     <string name="customize_toolbar_key_code_reset_message">Limpar mesmo todos os códigos de teclas personalizados?</string>
-    <string name="number_row_hints">Mostrar dicas na linha de números</string>
     <string name="prefs_language_swipe_distance">Mudar a distância de deslizamento do idioma</string>
     <string name="popup_keys_number" tools:keep="@string/popup_keys_number">Linha de números</string>
     <string name="popup_keys_layout" tools:keep="@string/popup_keys_layout">Esquema</string>
@@ -243,7 +241,6 @@
     <string name="hint_source">Selecionar fonte de dicas</string>
     <string name="prefs_bottom_padding_scale">Escala do espaço inferior</string>
     <string name="delete_layout">Excluir mesmo o esquema personalizado %s?</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">Linha de números (básica)</string>
     <string name="customize_background_image">Definir imagem de fundo</string>
     <string name="label_zwnj_key" tools:keep="@string/label_zwnj_key">Não-conector de zero largura</string>
     <string name="close_history" tools:keep="@string/close_history">Fechar histórico da área de transferência</string>
@@ -295,7 +292,6 @@
     <string name="shift_removes_autospace_summary">Maiús elimina o espaço automático pendente</string>
     <string name="autospace_before_gesture_typing">Espaço automático antes de digitar uma palavra ao deslizar</string>
     <string name="autospace_after_gesture_typing">Espaço automática após digitar uma palavra com gestos</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Linha de números</string>
     <string name="show_tld_popup_keys">Mostrar teclas de TLD</string>
     <string name="show_tld_popup_keys_summary">Substituir popups de ponto final por domínios de topo ao digitar URLs e endereços de e-mail</string>
     <string name="split" tools:keep="@string/split">Teclado dividido</string>
@@ -428,8 +424,6 @@
     <string name="subtype_generic_extended">%s (Extendido)</string>
     <string name="subtype_probhat_bn_BD">%s (Probhat)</string>
     <string name="subtype_baishakhi_bn_IN">%s (Baishakhi)</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Sebeolsik 390)</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Sebeolsik Final)</string>
     <string name="subtype_generic_student">%s (Estudante)</string>
     <string name="inline_emoji_search">Pesquisa de emoji embutida</string>
     <string name="inline_emoji_search_summary">Apenas sugerir emojis quando uma palavra é precedida por dois pontos</string>

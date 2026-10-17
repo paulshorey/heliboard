@@ -28,6 +28,7 @@ class VoiceInputManagerTest {
     private var acceptText = true
     private var throwText = false
     private var duringText: (() -> Unit)? = null
+    private var duringState: ((VoiceInputManager.State) -> Unit)? = null
     private val active get() = sessions.last()
     @Before fun setUp() {
         val context = ApplicationProvider.getApplicationContext<Context>()
@@ -42,7 +43,10 @@ class VoiceInputManagerTest {
         network = FakeVoiceNetworkMonitor()
         manager = VoiceInputManager(context, recorder, client, network)
         manager.setListener(object : VoiceInputManager.VoiceInputListener {
-            override fun onStateChanged(state: VoiceInputManager.State) { events.add("state:$state") }
+            override fun onStateChanged(state: VoiceInputManager.State) {
+                events.add("state:$state")
+                duringState?.invoke(state)
+            }
             override fun onTranscriptionResult(text: String, attachesToPrevious: Boolean): Boolean {
                 events.add("text:$text")
                 duringText?.invoke()
@@ -83,6 +87,66 @@ class VoiceInputManagerTest {
         assertTrue(manager.isIdle); assertFalse(manager.hasPendingProcessing())
         assertEquals(1, events.count { it == "gap" })
         assertTrue(manager.startRecording())
+    }
+    @Test fun cancellingDuringRecorderStopCannotRestoreProcessingOrQueueEof() {
+        start(); recording.onAudioChunk(ByteArray(3200))
+        val stopped = active
+        var cancelOnce = true
+        Mockito.doAnswer {
+            if (cancelOnce) {
+                cancelOnce = false
+                manager.cancelRecording()
+            }
+            null
+        }.`when`(recorder).stopRecording()
+        events.clear()
+        manager.stopRecording(); pump()
+        assertTrue(manager.isIdle); assertFalse(manager.hasPendingProcessing())
+        assertFalse("processing" in events); assertFalse(stopped.inputFinished)
+        assertFalse("gap" in events)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(VoiceInputManager.STOP_TIMEOUT_MS + 1))
+        assertFalse(events.any { it.startsWith("error:") })
+    }
+    @Test fun restartingDuringRecorderStopCannotPutTheNewRecordingBackIntoIdle() {
+        start(); recording.onAudioChunk(ByteArray(3200))
+        var restartOnce = true
+        Mockito.doAnswer {
+            if (restartOnce) {
+                restartOnce = false
+                manager.cancelRecording()
+                assertTrue(manager.startRecording())
+                active.ready(); pump()
+            }
+            null
+        }.`when`(recorder).stopRecording()
+        manager.stopRecording(); pump()
+        assertTrue(manager.isRecording); assertEquals(2, sessions.size)
+        assertFalse(active.inputFinished)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(VoiceInputManager.STOP_TIMEOUT_MS + 1))
+        assertTrue(manager.isRecording); assertFalse(events.any { it.startsWith("error:") })
+    }
+    @Test fun cancellationFromTheStopStateListenerCannotRestoreProcessing() {
+        start(); recording.onAudioChunk(ByteArray(3200))
+        val stopped = active
+        duringState = { if (it == VoiceInputManager.State.IDLE) manager.cancelRecording() }
+        events.clear()
+        manager.stopRecording(); pump()
+        assertTrue(manager.isIdle); assertFalse(manager.hasPendingProcessing())
+        assertFalse("processing" in events); assertFalse(stopped.inputFinished)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(VoiceInputManager.STOP_TIMEOUT_MS + 1))
+        assertFalse(events.any { it.startsWith("error:") }); assertFalse("gap" in events)
+    }
+    @Test fun readinessAndFinalProgressCannotExtendTheWholeStopDeadline() {
+        manager.startRecording(); recording.onAudioChunk(ByteArray(3200))
+        manager.stopRecording(); pump()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(VoiceInputManager.STOP_TIMEOUT_MS - 1000))
+        active.ready(); pump()
+        active.final("Confirmed before the deadline."); pump()
+        assertTrue(manager.hasPendingProcessing())
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1001))
+        assertTrue(manager.isIdle); assertFalse(manager.hasPendingProcessing())
+        assertTrue("text:Confirmed before the deadline." in events); assertFalse("gap" in events)
+        assertTrue(events.any { it.contains("too long to finish saved audio") })
     }
     @Test fun localSdkStartupWithoutRemoteConnectionDoesNotPrintInterruptionMarker() {
         manager.startRecording(); active.listener.onReady(); pump()

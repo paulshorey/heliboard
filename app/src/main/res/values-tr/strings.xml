@@ -112,7 +112,6 @@
     <string name="enable_clipboard_history">Pano geçmişini etkinleştir</string>
     <string name="enable_clipboard_history_summary">Devre dışı bırakılırsa, pano tuşu varsa pano içeriğini yapıştıracaktır</string>
     <string name="clipboard_history_retention_time">Geçmiş saklama süresi</string>
-    <string name="number_row_summary">Her zaman sayı satırını göster</string>
     <string name="more_keys_strip_description">Diğer tuşlar</string>
     <string name="show_hints">Tuş ipuçlarını göster</string>
     <string name="show_hints_summary">Uzun basma ipuçlarını göster</string>
@@ -315,8 +314,6 @@
     <string name="show_popup_hints">İşlevsel ipuçlarını göster</string>
     <string name="pinned_toolbar_keys">Sabitlenmiş araç çubuğu tuşlarını seç</string>
     <string name="quick_pin_toolbar_keys">Uzun basıldığında araç çubuğu tuşunu sabitle</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Sebeolsik 390)</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Sebeolsik Final)</string>
     <string name="theme_style">Stil</string>
     <string name="theme_name_dark" tools:keep="@string/theme_name_dark">Koyu</string>
     <string name="theme_name_ocean" tools:keep="@string/theme_name_ocean">Okyanus</string>
@@ -348,7 +345,6 @@
     <string name="backup_restore_message">Kaydet yada dosyadan yükle. Uyarı: geri yükleme mevcut verilerin üzerine yazacaktır</string>
     <string name="no_dictionary_message">"Sözlük olmadan yalnızca daha önce girdiğin metin için öneriler alırsın.&lt;br&gt;
 \n        %1$s sözlüklerini indirebilir veya \"%2$s\" için bir sözlüğün doğrudan %3$s indirilip indirilemeyeceğini kontrol edebilirsin."</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Sayı satırı</string>
     <string name="icon_style">Simge stili</string>
     <string name="prefs_space_bar_text">Boşluk çubuğu özel metni</string>
     <string name="layout_emoji_bottom_row" tools:keep="@string/layout_emoji_bottom_row">Emoji alt satırı</string>
@@ -358,7 +354,6 @@
     <string name="label_delete_key" tools:keep="@string/label_delete_key">Sil</string>
     <string name="settings_category_space">Boşluk</string>
     <string name="name_invalid">Geçersiz ad</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">Sayı satırı (temel)</string>
     <string name="prefs_emoji_font_scale">Emoji görüntüleme boyutu</string>
     <string name="label_toolbar_key" tools:keep="@string/label_toolbar_key">Araç çubuğunu göster/gizle</string>
     <string name="vibrate_in_dnd_mode">Rahatsız etme kipinde titret</string>
@@ -370,7 +365,6 @@
     <string name="use_apps_dict">Uygulama adlarında ara</string>
     <string name="use_apps_dict_summary">Öneriler ve düzeltmeler için yüklü uygulamaların adlarını kullan</string>
     <string name="toolbar_mode">Araç çubuğu kipi</string>
-    <string name="number_row_hints">Sayı satırında ipuçlarını göster</string>
     <string name="split" tools:keep="@string/split">Bölünmüş klavye</string>
     <string name="prefs_emoji_skin_tone">Varsayılan emoji cilt tonu</string>
     <string name="prefs_emoji_skin_tone_neutral">Doğal</string>

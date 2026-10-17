@@ -2231,7 +2231,7 @@ public class LatinIME extends InputMethodService implements
 
             @Override
             public void onError(@NonNull String error) {
-                // Capture failures drain accepted audio before reporting idle.
+                // Capture failures and blocked restarts can still be draining saved audio.
                 refreshVoiceProcessingIndicator();
                 showVoiceErrorToast(error);
             }

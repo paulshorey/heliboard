@@ -1,0 +1,19 @@
+name: Agent and APK handoff
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+jobs:
+  handoff:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # Check the artifact against its actual source branch, not GitHub's merge commit.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - run: python3 tools/check-agent-infrastructure.py
+      - run: python3 -m unittest discover -s tools/tests -v
+      - run: python3 tools/apk-handoff.py check

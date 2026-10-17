@@ -140,7 +140,6 @@
     <string name="backup_restore_title">Copie de rezervă și restaurare</string>
     <string name="popup_order">Selectează ordinea tastelor pop-up</string>
     <string name="number_row">Rând de numere</string>
-    <string name="number_row_summary">Se afișează întotdeauna rândul de numere</string>
     <string name="localized_number_row">Localizează rândul de numere</string>
     <string name="localized_number_row_summary">Preferă numerele localizate în detrimentul celor latine</string>
     <string name="show_hints">Se afișează indicii tastelor</string>
@@ -269,8 +268,6 @@
     <string name="add_dictionary">Selectează un dicționar de adăugat. Dicționarele în format .dict pot fi descărcate %s.</string>
     <string name="theme_name_dark" tools:keep="@string/theme_name_dark">Întunecată</string>
     <string name="subtype_probhat_bn_BD">%s (Probhat)</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Sebeolsik 390)</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Sebeolsik Final)</string>
     <string name="customize_background_image">Setează imaginea de fundal</string>
     <string name="day_or_night_image">Setezi imaginea pentru modul zi sau noapte?</string>
     <string name="day_or_night_day">Zi</string>
@@ -317,7 +314,6 @@
     <string name="gesture_floating_preview_dynamic_summary">Mută previzualizarea în timpul unui gest</string>
     <string name="gesture_trail_fadeout_duration">Durata de viață a traseului gesturilor</string>
     <string name="pinned_toolbar_keys">Selectează tastele fixate din bara de instrumente</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Rând de numere</string>
     <string name="subtype_generic_phonetic">%s (Fonetic)</string>
     <string name="subtype_dru">Dargwa (Urakhi)</string>
     <string name="key_code">Cod tastă</string>
@@ -388,7 +384,6 @@
     <string name="prefs_emoji_font_scale">Scală font vizualizare emoji</string>
     <string name="label_bin" tools:keep="@string/label_bin">Coș</string>
     <string name="prefs_side_padding_scale">Scală umplutură laterală</string>
-    <string name="number_row_hints">Afișează indicii pe rândul cu numere</string>
     <string name="prefs_language_swipe_distance">Distanța de deplasare pentru comutarea limbii</string>
     <string name="get_colors_message">Poți găsi și împărtăși culori în %s.</string>
     <string name="discussion_section_link">secțiunea de discuții</string>
@@ -404,7 +399,6 @@
     <string name="autospace_after_suggestion">Spațiu automat după ce s-a ales o sugestie</string>
     <string name="settings_category_space">Spațiu</string>
     <string name="autospace_before_gesture_typing">Spațiu automat înainte de tastarea unui cuvânt prin gesturi</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">Rândul cu numere (de bază)</string>
     <string name="prefs_emoji_key_fit">Scalarea dimensiunii tastelor emoji împreună cu dimensiunea fontului</string>
     <string name="backup_restored">Copie de rezervă restabilită</string>
     <string name="after_numpad_and_space">Apăsarea tastei Enter sau a barei de spațiu după alte taste de pe tastatura numerică</string>

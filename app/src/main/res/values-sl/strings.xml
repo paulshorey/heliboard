@@ -95,7 +95,6 @@
     <string name="auto_correction_confidence">Interval zaupanja samodejnih popravkov</string>
     <string name="delete_swipe_summary">Podrsaj z vračalke, da izbereš in izbrišeš večje dele besedila naenkrat</string>
     <string name="incognito">Vsiljen prikriti način</string>
-    <string name="number_row_summary">Vedno pokaži vrstico s številkami</string>
     <string name="show_hints">Prikaži namige tipk</string>
     <string name="prefs_long_press_keyboard_to_change_lang">Spremeni način vnosa s preslednico</string>
     <string name="key_borders">Robovi tipk</string>

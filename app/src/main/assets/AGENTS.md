@@ -18,6 +18,7 @@ Runtime data loaded from assets rather than compiled resource values.
 - Do not add `AGENTS.md` or any other non-dictionary files inside `dicts/`, because they can be mistaken for shipped dictionary assets.
 
 ## Non-obvious notes
+- Folder-local `AGENTS.md` files are documentation. The app build excludes them from packaged assets in every variant, so runtime asset enumeration never treats them as keyboard or emoji data.
 - `khipro-mappings.json` is effectively part of the input-method logic for that layout family, not just passive data.
 - `dictionaries_in_dict_repo.csv` is maintained by tooling and should not drift from `tools/release.py` expectations.
 

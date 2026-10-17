@@ -92,7 +92,6 @@
     <string name="user_dict_settings_all_languages">"For alle språk"</string>
     <string name="user_dict_settings_more_languages">Flere språk…</string>
     <string name="day_night_mode_summary">Basert på systeminnstillinger</string>
-    <string name="number_row_summary">Alltid vis tallraden</string>
     <string name="day_night_mode">Automatisk dag/nattmodus</string>
     <string name="prefs_long_press_keyboard_to_change_lang_summary">Langtrykke på mellomromstasten for inndatametode-valgmeny</string>
     <string name="ime_settings">HeliBoard-innstillinger</string>
@@ -225,7 +224,6 @@
     <string name="toolbar_keys">Velg verktøylinjetaster</string>
     <string name="subtype_akkhor_bn_BD">%s (Akkhor)</string>
     <string name="about_github_link">Se på GitHub</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Sebeolsik Final)</string>
     <string name="button_load_custom">Last inn fil</string>
     <string name="layout_error">Oppsettsfeil: %s</string>
     <string name="customize_background_image">Sett bakgrunnsbilde</string>
@@ -288,7 +286,6 @@
     <string name="message_add_custom_layout">Legg til fil med kompatibelt format. Informasjon om kompatible format %s.</string>
     <string name="theme_name_darker" tools:keep="@string/theme_name_darker">Mørkere</string>
     <string name="save_log">Lagre logg</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Sebeolsik 390)</string>
     <string name="no_dictionary_message">Uten ordbok vil du kun få forslag til tekst som du tidligere har skrevet.&lt;br&gt;
 \n........Du kan laste ned ordbøker %1$s, eller sjekke om ordbok for \"%2$s\" kan lastes ned direkte %3$s.</string>
     <string name="user_dict_word_already_present">Dette ordet finnes allerede i %s brukerordbok. Vennligst skriv et annet.</string>

@@ -26,6 +26,7 @@ class VoiceInputManager internal constructor(
         private const val MAX_PENDING_AUDIO_CHUNKS = 300 // 30 seconds at the recorder's cadence
         internal const val MAX_PENDING_TRANSCRIPTS = 64
         internal const val MAX_PENDING_CONTROLS = 64
+        internal const val STOP_TIMEOUT_MS = 20_000L
         internal const val INTERRUPTION_MARKER = "[Dictation interrupted]"
     }
 
@@ -202,13 +203,16 @@ class VoiceInputManager internal constructor(
         cancelAutoStop()
         cancelRotation()
         recorder.stopRecording()
-        updateState(State.IDLE)
+        // Capture shutdown can cancel or replace this session reentrantly.
         if (activeSession != sessionId || !stopRequested) return
         stopTimeout = Runnable {
             if (activeSession == sessionId && stopRequested)
                 failSession("Dictation took too long to finish saved audio. Please try again.", client.hasUnconfirmedSpeech)
         }.also { handler.postDelayed(it,
-            (20_000L - (SystemClock.elapsedRealtime() - requestedAt)).coerceAtLeast(0)) }
+            (STOP_TIMEOUT_MS - (SystemClock.elapsedRealtime() - requestedAt)).coerceAtLeast(0)) }
+        updateState(State.IDLE)
+        if (activeSession != sessionId || !stopRequested) return
+        listener?.onProcessingStarted()
         // AudioRecord callbacks already queued on the main looper include the last chunk.
         handler.post { if (activeSession == sessionId) finishConnection() }
     }

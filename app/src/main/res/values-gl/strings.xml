@@ -105,7 +105,6 @@
     <string name="label_wait_key">"Espera"</string>
     <string name="abbreviation_unit_minutes">%s min</string>
     <string name="subtype_akkhor_bn_BD">%s (Akkhor)</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Sebeolsik 390)</string>
     <string name="available_dictionary_experimental">%s (experimental)</string>
     <string name="user_dict_settings_add_weight_value">Tamaño:</string>
     <string name="user_dict_add_word_button">Engadir unha palabra</string>
@@ -201,7 +200,6 @@
     <string name="more_keys_strip_description">Máis teclas</string>
     <string name="language_and_layouts_title">Idiomas e Disposicións</string>
     <string name="number_row">Número de fila</string>
-    <string name="number_row_summary">Mostrar sempre o número de fila</string>
     <string name="localized_number_row">Traducir número de fila</string>
     <string name="show_hints">Mostrar suxestións de teclas</string>
     <string name="show_hints_summary">Mostrar suxestións ao manter presa</string>
@@ -230,7 +228,6 @@
     <string name="prefs_narrow_key_gaps">Espazo reducido entre teclas</string>
     <string name="prefs_keyboard_height_scale">Escala de altura do teclado</string>
     <string name="prefs_bottom_padding_scale">Escala do espazo inferior do teclado</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Sebeolsik Final)</string>
     <string name="button_title_add_custom_layout">Engadir disposición persoal</string>
     <string name="message_add_custom_layout">Elixe un ficheiro cun formato compatible. Tes información sobre os formatos en %s.</string>
     <string name="button_load_custom">Cargar ficheiro</string>
@@ -348,7 +345,6 @@
     <string name="gesture_floating_preview_dynamic_summary">Mover a vista previa durante o xesto</string>
     <string name="gesture_trail_fadeout_duration">Duración do xesto</string>
     <string name="gesture_floating_preview_static">Vista previa aboiando</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Número de fila</string>
     <string name="icon_style">Estilo da icona</string>
     <string name="prefs_space_bar_text">Texto persoal na barra de espazo</string>
     <string name="layout_emoji_bottom_row" tools:keep="@string/layout_emoji_bottom_row">Liña inferior de emoji</string>
@@ -386,7 +382,6 @@
     <string name="prefs_font_scale">Escala do tamaño da letra</string>
     <string name="prefs_emoji_font_scale">Escala da visualización de emoji</string>
     <string name="prefs_side_padding_scale">Escala da marxe lateral</string>
-    <string name="number_row_hints">Mostrar suxestións na fila de números</string>
     <string name="layout_in_use">Aviso: xa se está usando a disposición</string>
     <string name="get_colors_message">Podes atopar e compartir cores na %s.</string>
     <string name="settings_screen_secondary_layouts">Disposicións secundarias</string>
@@ -398,7 +393,6 @@
     <string name="custom_subtype">Subtipo personalizado</string>
     <string name="prefs_always_show_suggestions_except_web_text">Non mostrar sempre suxestións para os campos texto nas webs</string>
     <string name="prefs_always_show_suggestions_except_web_text_summary">Os campos de texto nas webs (principalmente no navegador) son causa frecuente de problemas coas suxestións automáticas</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">Fila de números (básica)</string>
     <string name="show_tld_popup_keys_summary">Substitúe na emerxente da tecla do punto con dominios de alto nivel ao escribir URL e enderezos de correo</string>
     <string name="show_tld_popup_keys">Mostrar teclas emerxentes TLD</string>
     <string name="after_numpad_and_space">Ao premer enter ou espazo após escribir no teclado numérico</string>

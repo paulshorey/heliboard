@@ -1,3 +1,6 @@
+> Historical design notes, moved from the former agent configuration folder.
+> Check current code and `layouts.md` before using these as an implementation plan.
+
 # HeliBoard User-Editable Keyboard Layouts — Part 1: Bake Number Row
 
 This is the first of three plans to implement user-editable keyboard layouts. The goal of this phase is to make built-in layout files WYSIWYG by baking the top number row directly into the asset files, without changing any rendering behavior.

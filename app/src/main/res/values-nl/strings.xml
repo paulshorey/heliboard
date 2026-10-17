@@ -103,7 +103,6 @@
     <string name="delete_swipe">Verwijderen met veegbeweging</string>
     <string name="enable_clipboard_history">Klembordgeschiedenis inschakelen</string>
     <string name="more_keys_strip_description">Meer toetsen</string>
-    <string name="number_row_summary">Cijferregel altijd weergeven</string>
     <string name="delete_swipe_summary">Veeg vanaf de delete-toets om grotere stukken tekst in één keer te selecteren en verwijderen</string>
     <string name="spell_checker_service_name">HeliBoard-spellingcontrole</string>
     <string name="android_spell_checker_settings">HeliBoard-spellingcontrole-instellingen</string>
@@ -240,8 +239,6 @@
     <string name="dictionary_file_error">Fout: Geselecteerd bestand is geen geldig woordenboekbestand</string>
     <string name="layout_phone_symbols" tools:keep="@string/layout_phone_symbols">Telefoonsymbolen</string>
     <string name="subtype_mns">Mansi</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Sebeolsik 390)</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Sebeolsik Final)</string>
     <string name="subtype_generic_student">%s (Student)</string>
     <string name="button_title_add_custom_layout">Aangepaste lay-out toevoegen</string>
     <string name="message_add_custom_layout">Selecteer een bestand in een compatibel formaat. Informatie over de formaten is beschikbaar %s.</string>
@@ -384,7 +381,6 @@
     <string name="gesture_floating_preview_static">Zwevend voorbeeld</string>
     <string name="gesture_floating_preview_static_summary">Zie het voorgestelde woord tijdens het gebaar</string>
     <string name="icon_style">Pictogramstijl</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Cijferregel</string>
     <string name="prefs_space_bar_text">Aangepaste tekst op spatiebalk</string>
     <string name="layout_clip_bottom_row" tools:keep="@string/layout_clip_bottom_row">Klembord onderste regel</string>
     <string name="layout_emoji_bottom_row" tools:keep="@string/layout_emoji_bottom_row">Emoji onderste regel</string>
@@ -421,7 +417,6 @@
     <string name="prefs_font_scale">Schaal van toetsenbordlettertype</string>
     <string name="prefs_emoji_font_scale">Schaal van Emoji-weergave</string>
     <string name="prefs_side_padding_scale">Schaal van vulling zijkanten</string>
-    <string name="number_row_hints">Hints weergeven bij cijferregel</string>
     <string name="prefs_language_swipe_distance">Veegafstand voor taal wisselen</string>
     <string name="enable_split_keyboard_landscape">Gesplitst toetsenbord inschakelen (liggend)</string>
     <string name="split" tools:keep="@string/split">Gesplitst toetsenbord</string>
@@ -439,7 +434,6 @@
     <string name="show_tld_popup_keys">TLD-opties weergeven</string>
     <string name="show_tld_popup_keys_summary">Vervang pop-ups met interpunctie door topleveldomeinen bij het typen van URL\'s en e-mailadressen</string>
     <string name="after_numpad_and_space">Druk op enter of spatie na andere toetsen in het numpad</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">Cijferregel (basis)</string>
     <string name="prefs_always_show_suggestions_except_web_text">Suggesties voor webbewerkingsvelden niet altijd weergeven</string>
     <string name="prefs_always_show_suggestions_except_web_text_summary">Webbewerkingsvelden (meestal te vinden in browsers) zijn een veel voorkomende oorzaak van problemen met de instelling Altijd suggesties weergeven</string>
     <string name="settings_category_space">Spatie</string>

@@ -10,26 +10,31 @@ To generate the phone-installable debug APK and place it in the canonical reposi
 ./tools/build-dist-apk.sh
 ```
 
-This script:
+The build discovers the installed Android SDK/JDK, verifies the APK signature and
+writes `dist/HeliBoard.apk` plus `dist/apk-metadata.json`. It preserves other files
+in `dist`. Every new or updated PR includes a fresh APK, including infrastructure
+and documentation changes, on desktop and cloud.
 
-- sets up the Android SDK for the current shell if needed
-- builds the debug APK with Gradle
-- removes older files from `./dist`
-- writes the latest installable artifact into `./dist/`
+After committing and pushing the task, APK and metadata, get its immutable download link:
 
-Only one installable APK should exist in `./dist` at a time, and regenerating it should overwrite the previous artifact.
-
-## Run in debug mode
-
-```
-./gradlew installDebug && adb logcat -c && adb logcat -v time | grep -E 'LatinIME|VoiceInputManager|MaiTranscription|VoiceRecorder|VOICE_'
+```bash
+python3 tools/apk-handoff.py link
 ```
 
-or just install without logs:
+Include that link in the PR body and handoff. The PR check detects stale source or
+changed APK bytes. See [agent development and testing](docs/agent-development.md)
+for Android Studio, Codex actions, manual phone checks and the tooling roadmap.
 
+## Local validation and installation
+
+```bash
+./tools/android-dev.sh doctor
+./tools/android-dev.sh smoke
+./tools/android-dev.sh install SERIAL  # select an authorized phone/emulator explicitly
 ```
-./gradlew installDebug
-```
+
+Use `debugNoMinify` in Android Studio for faster debugger iteration. The canonical
+PR APK uses `debug` and the shared debug key, so updates preserve app data.
 
 ## Remove disfluencies
 
@@ -71,7 +76,7 @@ See [the MAI pipeline guide](docs/mai-transcription.md) for account setup, archi
 
 ## Related docs
 
-- Fullapp architecture: `docs/fullapp-keyboard.md`
+- Fullapp architecture: `.codex/skills/full-app-mode/SKILL.md`
 - MAI transcription pipeline: `docs/mai-transcription.md`
 - Agent instructions: `AGENTS.md`
-- MAI API notes for this app: `.cursor/skills/voice-transcription/api-reference.md`
+- MAI API notes for this app: `.codex/skills/voice-transcription/api-reference.md`

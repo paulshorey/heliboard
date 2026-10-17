@@ -3,10 +3,14 @@
 Longer-form architecture notes that complement the shorter folder-local AGENTS files.
 
 ## Direct files
-- `mai-transcription.md` - MAI Speech SDK integration, Azure account/key/region setup, session lifecycle, bounded FIFO, connection failure/deadline policy, interruption markers, final insertion, and validation.
+- `mai-transcription.md` - MAI Speech SDK integration, Azure key/region setup, bounded audio/recovery, deadlines, interruption markers, final insertion, and validation.
+- `agent-development.md` - current agent tooling audit, APK/PR contract, local validation, manual acceptance and prioritized follow-up implementation plan.
 - `input-simplified.md` - explains the mirror-based current-word architecture and why the host editor is treated as a committed-text sink.
 - `recent-number-row-changes.md` - number-row bake migration notes and layout/parser troubleshooting.
 - `general-edit-history-plan.md` - implementation plan for generalizing the fullapp edit history into a bounded, general-purpose edit history that also captures regular-keyboard typing, without breaking fullapp draft sync.
+
+## Subfolders
+- `archive/layout-plans/` - historical design notes, moved out of active agent configuration; check current code before treating their status as current.
 
 ## Non-obvious notes
 - These docs overlap intentionally with root guidance and skills; use them when you need design rationale rather than just file lookup.

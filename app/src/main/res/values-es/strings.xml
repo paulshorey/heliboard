@@ -92,7 +92,6 @@
     <string name="user_dict_settings_all_languages">"Todos los idiomas"</string>
     <string name="user_dict_settings_more_languages">"Más idiomas…"</string>
     <string name="day_night_mode_summary">La apariencia seguirá los ajustes del sistema</string>
-    <string name="number_row_summary">Mostrar siempre fila de números</string>
     <string name="settings_category_additional_keys">Teclas adicionales</string>
     <string name="prefs_long_press_keyboard_to_change_lang">Cambiar método de entrada con la barra espaciadora</string>
     <string name="prefs_long_press_keyboard_to_change_lang_summary">Al presionar por mucho tiempo la barra espaciadora, aparecerá el menú de selección del método de entrada</string>
@@ -302,8 +301,6 @@
     <string name="auto_hide_toolbar_summary">Ocultar barra de herramientas cuando hay sugerencias disponibles</string>
     <string name="select_color_suggestion">Texto de la tira de sugerencias</string>
     <string name="subtype_probhat_bn_BD">%s (Bengalí)</string>
-    <string name="subtype_generic_sebeolsik_390">%s (Sebeolsik 390)</string>
-    <string name="subtype_generic_sebeolsik_final">%s (Sebeolsik Final)</string>
     <string name="theme_name_blue_gray" tools:keep="@string/theme_name_blue_gray">Azúl grisáceo</string>
     <string name="theme_name_chocolate" tools:keep="@string/theme_name_chocolate">Chocolate</string>
     <string name="theme_name_cloudy" tools:keep="@string/theme_name_cloudy">Nuboso</string>
@@ -327,7 +324,6 @@
     <string name="suggest_clipboard_content_summary">Sugerir contenido más reciente del portapapeles</string>
     <string name="icon_style">Estilo de iconos</string>
     <string name="gesture_floating_preview_dynamic_summary">Mover vista previa flotante durante gesto</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">Fila numérica</string>
     <string name="gesture_fast_typing_cooldown">Tiempo de espera de la escritura rápida</string>
     <string name="gesture_fast_typing_cooldown_instant">Siempre iniciar instantáneamente</string>
     <string name="prefs_space_bar_text">Texto personalizado en la barra de espacio</string>
@@ -388,7 +384,6 @@
     <string name="custom_subtype">Subtipo personalizado</string>
     <string name="prefs_always_show_suggestions_except_web_text_summary">Los campos de edición web (que se encuentran sobre todo en los navegadores) son una causa muy común de problemas con la configuración de mostrar siempre sugerencias</string>
     <string name="prefs_always_show_suggestions_except_web_text">No mostrar siempre las sugerencias para los campos de edición web</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">Fila de números (básica)</string>
     <string name="subtype_baishakhi_bn_IN">%s (Baishakhi)</string>
     <string name="name_invalid">Nombre inválido</string>
     <string name="enable_split_keyboard_landscape">Habilitar teclado dividido (paisaje)</string>
@@ -407,7 +402,6 @@
     <string name="delete_confirmation">¿Borrar %s realmente?</string>
     <string name="settings_screen_secondary_layouts">Diseños secundarios</string>
     <string name="layout_functional_keys_tablet" tools:keep="@string/layout_functional_keys_tablet">Teclas funcionales (pantalla grande)</string>
-    <string name="number_row_hints">Mostrar pistas en la fila de números</string>
     <string name="prefs_language_swipe_distance">Distancia de deslizamiento para cambiar de idioma</string>
     <string name="locales_with_dict">Idiomas con diccionarios</string>
     <string name="split" tools:keep="@string/split">Teclado dividido</string>
@@ -448,6 +442,5 @@
     <string name="toolbar_mode">Modo barra de herramientas</string>
     <string name="toolbar_mode_expandable" tools:keep="@string/toolbar_mode_expandable">Teclas y sugerencias de la barra de herramientas</string>
     <string name="toolbar_mode_toolbar_keys" tools:keep="@string/toolbar_mode_toolbar_keys">Solo teclas de la barra de herramientas</string>
-    <string name="number_row_in_symbols">Muestra una línea con números en la vista de símbolos</string>
     <string name="custom_emoji_font">Aplica una fuente de emoticonos personalizada desde un fichero</string>
 </resources>

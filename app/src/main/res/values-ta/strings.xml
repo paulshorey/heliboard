@@ -197,10 +197,8 @@
     <string name="more_keys_strip_description">மேலும் விசைகள்</string>
     <string name="language_and_layouts_title">மொழிகள் &amp; தளவமைப்புகள்</string>
     <string name="number_row">எண் வரிசை</string>
-    <string name="number_row_summary">எப்போதும் எண் வரிசையைக் காட்டு</string>
     <string name="localized_number_row">எண் வரிசையை உள்ளூர்மயமாக்கு</string>
     <string name="localized_number_row_summary">லத்தீன் எண்களை விட உள்ளூர்மயமாக்கலை விரும்புங்கள்</string>
-    <string name="number_row_hints">எண் வரிசையில் குறிப்புகளைக் காட்டு</string>
     <string name="save_subtype_per_app">ஒவ்வொரு பயன்பாட்டிற்கும் மொழியை நினைவில் கொள்ளுங்கள்</string>
     <string name="show_hints">முக்கிய குறிப்புகளைக் காட்டு</string>
     <string name="show_hints_summary">நீண்ட அழுத்த குறிப்புகளைக் காட்டு</string>
@@ -275,8 +273,6 @@
     <string name="subtype_baishakhi_bn_IN">%s (பைசாகி)</string>
     <string name="subtype_khipro_bn">%s (கிப்ரோ)</string>
     <string name="subtype_generic_phonetic">%s (ஒலிப்பு)</string>
-    <string name="subtype_generic_sebeolsik_390">%s (செபியோல்சிக் 390)</string>
-    <string name="subtype_generic_sebeolsik_final">%s (செபியோல்சிக் இறுதி)</string>
     <string name="subtype_generic_student">%s (மாணவர்)</string>
     <string name="load">ஏற்றவும்</string>
     <string name="button_title_add_custom_layout">தனிப்பயன் அமைப்பைச் சேர்க்கவும்</string>
@@ -302,8 +298,6 @@
     <string name="layout_number" tools:keep="@string/layout_number">எண்கள்</string>
     <string name="layout_numpad" tools:keep="@string/layout_numpad">எண்பலகை</string>
     <string name="layout_numpad_landscape" tools:keep="@string/layout_numpad_landscape">எண்பலகை (நிலப்பரப்பு)</string>
-    <string name="layout_number_row" tools:keep="@string/layout_number_row">எண் வரிசை</string>
-    <string name="layout_number_row_basic" tools:keep="@string/layout_number_row_basic">எண் வரிசை (அடிப்படை)</string>
     <string name="layout_emoji_bottom_row" tools:keep="@string/layout_emoji_bottom_row">ஈமோசி கீழ் வரிசை</string>
     <string name="layout_emoji_bottom_row_with_action" tools:keep="@string/layout_emoji_bottom_row_with_action">செயல் விசையுடன் ஈமோசியின் கீழ் வரிசை</string>
     <string name="layout_clip_bottom_row" tools:keep="@string/layout_clip_bottom_row">இடைநிலைப்பலகை கீழ் வரிசை</string>

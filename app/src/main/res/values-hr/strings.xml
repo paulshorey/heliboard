@@ -115,7 +115,6 @@
     <string name="autospace_after_punctuation_summary">Automatski dodaj razmak nakon interpunkcije kad pišeš novu riječ</string>
     <string name="incognito">Prisili inkognito način rada</string>
     <string name="more_keys_strip_description">Više tipki</string>
-    <string name="number_row_summary">Uvijek pokaži broj retka</string>
     <string name="show_hints">Pokaži savjete tipki</string>
     <string name="show_hints_summary">Pokaži savjete pri dugom pritisku tipke</string>
     <string name="prefs_long_press_keyboard_to_change_lang">Promijeni način unosa s razmaknicom</string>

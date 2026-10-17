@@ -1,3 +1,6 @@
+> Historical design notes, moved from the former agent configuration folder.
+> Check current code and `layouts.md` before using these as an implementation plan.
+
 # HeliBoard User-Editable Keyboard Layouts — Implementation Plan
 
 > This document serves as the high-level Overview and Index. Follow the sub-plans sequentially.
@@ -25,7 +28,7 @@ The implementation is split into **three independent, sequentially-delivered pla
  ┌─────────────────────────────────────────────────────────────┐
  │                    1. BAKE NUMBER ROW                       │
  │  Prepend number rows directly into built-in layout assets  │
- │  File: .cursor/plans/part1-bake-number-row.md               │
+ │  File: docs/archive/layout-plans/part1-bake-number-row.md               │
  └──────────────────────────────┬──────────────────────────────┘
                                 │
                                 ▼
@@ -33,7 +36,7 @@ The implementation is split into **three independent, sequentially-delivered pla
  │                    2. PARSER CLEANUP                        │
  │  Stop dynamic prepending, support localized digits pass,    │
  │  fix off-by-one '+' offsets, and sweep away dead preferences │
- │  File: .cursor/plans/part2-parser-cleanup.md                │
+ │  File: docs/archive/layout-plans/part2-parser-cleanup.md                │
  └──────────────────────────────┬──────────────────────────────┘
                                 │
                                 ▼
@@ -41,7 +44,7 @@ The implementation is split into **three independent, sequentially-delivered pla
  │                    3. UI PARITY & FORKING                   │
  │  Extract LayoutSlotEditor, implement Fork icon, wire all    │
  │  slots, add helper warnings and search-empty tips          │
- │  File: .cursor/plans/part3-ui-parity.md                     │
+ │  File: docs/archive/layout-plans/part3-ui-parity.md                     │
  └─────────────────────────────────────────────────────────────┘
 ```
 

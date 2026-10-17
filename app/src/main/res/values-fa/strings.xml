@@ -112,7 +112,6 @@
     <string name="enable_clipboard_history_summary">اگر غیرفعال باشد، کلید کلیپ بورد، محتوای خود را در صورت وجود جایگذاری می‌کند</string>
     <string name="abbreviation_unit_minutes">%sدقیقه.</string>
     <string name="number_row">ردیف اعداد</string>
-    <string name="number_row_summary">همیشه ردیف اعداد نشان داده شود</string>
     <string name="prefs_long_press_keyboard_to_change_lang">روش ورودی را با کلید فاصله تغییر دهید</string>
     <string name="delete_swipe">حذف با کشیدن</string>
     <string name="delete_swipe_summary">برای انتخاب و حذف یکباره بخش‌های بزرگ‌تر از متن، روی کلید حذف بکشید</string>

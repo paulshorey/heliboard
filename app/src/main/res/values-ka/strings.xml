@@ -121,7 +121,6 @@
     <string name="settings_category_additional_keys">დამატებითი ღილაკები</string>
     <string name="settings_category_suggestions">მინიშნებები</string>
     <string name="settings_category_experimental">ექსპერიმენტალური</string>
-    <string name="number_row_summary">რიცხვებიანი მწკრივის ყოველთვის ჩვენება</string>
     <string name="abbreviation_unit_minutes">%sწთ.</string>
     <string name="clipboard_history_retention_time">ისტორიის შენახვის დრო</string>
     <string name="more_keys_strip_description">მეტი ღილაკი</string>

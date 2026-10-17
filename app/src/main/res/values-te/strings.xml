@@ -91,7 +91,6 @@
     <string name="user_dict_settings_edit_dialog_title">"పదాన్ని సవరించు"</string>
     <string name="user_dict_settings_all_languages">"అన్ని భాషల కోసం"</string>
     <string name="user_dict_settings_more_languages">"మరిన్ని భాషలు…"</string>
-    <string name="number_row_summary">సంఖ్యల వరుసను ఎల్లప్పుడూ చూపండి</string>
     <string name="incognito">అజ్ఞాత పద్దతి ప్రయోగించండి</string>
     <string name="select_input_method">"ఇన్‌పుట్ పద్ధతిని ఎంచుకోండి"</string>
     <string name="prefs_force_incognito_mode_summary">కొత్త పదముల అభ్యాసమును ఆపండి</string>

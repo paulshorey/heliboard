@@ -34,9 +34,10 @@ class AccessibilityUtils private constructor() {
     private var mTypedWord: String? = null
 
     private fun initInternal(context: Context) {
-        mContext = context
-        mAccessibilityManager = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
-        mAudioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        // This singleton outlives each IME service instance.
+        mContext = context.applicationContext
+        mAccessibilityManager = mContext.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+        mAudioManager = mContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     }
 
     /**

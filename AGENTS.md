@@ -13,7 +13,7 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
 - `app/src/main/jni/` - native dictionary/suggestion/proximity code used through JNI.
 - `app/src/test/` - JVM and Robolectric tests.
 - `docs/` - deeper design notes such as `input-simplified.md` and `mai-transcription.md`.
-- `.cursor/` - Cursor cloud environment and HeliBoard product skills.
+- `.codex/` - canonical Android/product skills and project agent configuration; `.agents/skills` links here for discovery and `.cursor` is a compatibility symlink.
 - `tools/` - SDK setup, local macOS Speech Keychain configuration, portable cloud-agent startup, canonical APK build, release scripts, and the `tools:make-emoji-keys` helper module.
 
 ## High-value entry points
@@ -44,14 +44,32 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
 - The closest folder-local `AGENTS.md` is usually more detailed than this root file; follow it once you know which subtree you are in.
 - Build the canonical installable artifact with `./tools/build-dist-apk.sh`, which writes `dist/HeliBoard.apk`.
 - An optional local `.env` contains `SPEECH_KEY` and `SPEECH_REGION` for manual access. Keep it Git-ignored with owner-only permissions; never commit or embed its credentials in an APK. Android still reads its own Transcription settings.
-- For a Linux cloud-agent machine that is not this Cursor environment, run `./tools/agent-environment-startup.sh` (then `source ./.android-env`). Clipboard history is on-device SQLite (`heliboard.db`); there is no server database or long-running app process to start.
+- For a fresh Linux agent machine, run `./tools/agent-environment-startup.sh` (then `source ./.android-env`). Clipboard history is on-device SQLite (`heliboard.db`); there is no server database or long-running app process to start.
+
+## Required PR handoff
+
+- Every new or updated PR, including infrastructure/documentation work, must build
+  `./tools/build-dist-apk.sh` after the final file edits on its feature branch.
+  Desktop agents have the same requirement as cloud agents. Read
+  `.codex/skills/android-build-apk/SKILL.md` when preparing the handoff.
+- Commit and push `dist/HeliBoard.apk` and `dist/apk-metadata.json` with the task.
+  Run `python3 tools/apk-handoff.py link` after pushing and include its immutable
+  download link in both the PR description and final response. Rebuild after
+  later file edits; the lightweight PR workflow checks freshness and bytes.
+- Run relevant local checks through `./tools/android-dev.sh`; report what passed
+  and what remains for manual phone testing. A build or JVM test does not prove
+  on-device typing, host-editor or microphone behavior. See
+  `docs/agent-development.md` for the testing matrix and tooling roadmap.
+- If a build is blocked by external prerequisites, preserve work in a draft PR
+  with the actual blocker and an explicitly unavailable APK. Never link an old
+  binary as though it contains the current changes.
 
 ## Suggested reading order
 1. Root `AGENTS.md`
 2. `app/src/main/AGENTS.md` or `app/src/main/java/helium314/keyboard/AGENTS.md`, depending on whether you are changing Android app wiring or Java/Kotlin package code
 3. The `AGENTS.md` in the exact folder you plan to edit
-4. Relevant long-form docs under `docs/` or task-specific guides under `.cursor/skills/`
-5. `.cursor/AGENTS.md` when the task involves Cursor agent setup or product skills
+4. Relevant long-form docs under `docs/` or task-specific guides under `.codex/skills/`
+5. `.codex/AGENTS.md` when the task involves Codex agent setup or product skills
 
 ## Keep this file current
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.
