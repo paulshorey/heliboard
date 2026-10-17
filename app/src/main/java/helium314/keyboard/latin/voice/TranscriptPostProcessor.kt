@@ -63,6 +63,14 @@ object TranscriptPostProcessor {
         Rule(" and.", "."),
     )
 
+    /** Muse supplies final wording. Apply only explicit sentence-form spoken commands. */
+    fun processMuseParagraph(paragraph: String): String? {
+        var result = paragraph
+        for (rule in rules) result = result.replace(rule.find, rule.replace)
+        result = removeRedundantPunctuation(result)
+        return result.takeIf { it != paragraph }
+    }
+
     /**
      * Analyze [paragraph] and return the corrected text, or `null` if no rules matched.
      */

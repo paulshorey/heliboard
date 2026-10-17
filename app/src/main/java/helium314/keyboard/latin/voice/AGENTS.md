@@ -1,44 +1,30 @@
 # latin/voice
 
-Gemini Live realtime transcription pipeline (`gemini-3.5-transcribe-live`).
+Muse Voice Transcribe realtime dictation (`muse-voice-transcribe-1.0`).
 
 ## Direct files
-- `GeminiTranscriptionClient.kt` - Live API WebSocket client, tiered `setup` payload, base64 audio framing, transcript reassembly from `serverContent.inputTranscription`.
-- `TranscriptSegment.kt` - finalized transcript chunk shared between the client and the IME pipeline.
-- `TranscriptPostProcessor.kt` - local cleanup/formatting for finalized transcript text.
-- `VoiceContextVocabulary.kt` - builds `inputAudioTranscription.customVocabulary` from user terms, built-in terms, and proper nouns harvested from editor text.
-- `VoiceInputManager.kt` - record/stream/orchestrate voice sessions and deliver finalized text.
-- `VoiceRecorder.kt` - microphone capture of PCM audio.
-- `VoiceNetworkMonitor.kt` - default-network preflight and terminal loss observation across supported Android versions.
+- `MuseTranscriptionClient.kt` - JSON handshake, paced raw binary PCM, provider events, per-turn deadlines and EOF/close.
+- `MuseTurnAssembler.kt` - completed-turn ordering, first-speaker selection and filtering, unresolved attribution and duplicate final handling.
+- `TranscriptSegment.kt` - finalized append-only editor chunk.
+- `TranscriptPostProcessor.kt` - `processMuseParagraph` handles explicit spoken commands; legacy pure shaping helpers are not on the Muse path.
+- `VoiceContextVocabulary.kt` - keyword hints from user terms, built-ins and optionally harvested editor words.
+- `VoiceInputManager.kt` - capture/transport orchestration, bounded FIFO and local insertion acknowledgment, pause-silence generation, stop and cancellation.
+- `VoiceRecorder.kt` - PCM16 capture, 24 kHz preferred/16 kHz fallback, local RMS activity and native pause/resume ownership.
+- `VoiceNetworkMonitor.kt` - validated default-network preflight and terminal loss observation, with API 21–22 fallback.
 
-## Non-obvious notes
-- Accuracy takes priority over latency. Only `inputTranscription` reaches the editor; interims are never promoted after EOF, timeout, failure, or replacement. `modelTurn` is ignored.
-- `VoiceInputManager` serializes capture, controls, callbacks, and local insertion results on the main looper. Keep a transcript at the FIFO head until the listener reports local dispatch/cleanup success; Android IPC does not return the host editor's acceptance. Rejection/exception stops all later writes; never retry a possibly partial edit.
-- One recording owns one connection. Transport failure, network loss, queue overflow, protocol error, or timeout is terminal. `goAway`/nine minutes stops capture and drains; require explicit restart. Only setup-schema fallback before readiness may retry, within the original 12-second deadline.
-- `VoiceNetworkMonitor` requires validated default internet on API 23+, connectedness on 21–22, observes loss through drain, and invalidates queued observations when stopped. Default-network callbacks are API 24+; the older path uses a dynamic receiver.
-- Audio and `audioStreamEnd` share one FIFO. Bound raw PCM to 960,000 bytes and encoded socket audio to 256 KiB. Backpressure retains the exact head; controls must never overtake it. Locally queued boundary controls and finalized text are each bounded to 64 entries; overflow stops without dropping/coalescing data.
-- Forward quiet PCM too. Each PCM callback snapshots raw-energy speech evidence at capture time, separately from the smoothed speaking flag and speech-stop silence window. Local RMS VAD controls silence finalization and auto-stop, never which microphone samples are sent.
-- `send(true)` is local acceptance, not server receipt. Input transcripts are independent of turn messages; `turnComplete` is not an audio watermark. Oldest queued PCM, active local speech and pending recognized words without a response have 30-second deadlines. A missing-final deadline applies to recognized words, not raw RMS spikes, and starts when the current speech epoch's `audioStreamEnd` is submitted; repeated controls/interims cannot extend it. New onset clears the final wait until the next boundary. A delayed older boundary must not impose a deadline on a newer utterance. Long speech with live interims can continue. Graceful stop clears earlier speech watchdogs, reads finals for 8 seconds, and bounds EOF/close to 15 seconds. An additional 20-second deadline from the stop request includes capture shutdown, setup, upload and close; readiness, EOF and finals cannot reset it. End/cancellation removes both stop timers.
-- A final cannot clear pending speech while annotated speech remains in the PCM or socket queue. Quiet PCM and controls alone do not block a final. The sender tracks encoded bytes after its last accepted speech frame; FIFO queue size distinguishes that quiet/control suffix from queued speech. A later final, including a duplicate authoritative final suppressed as editor text, can clear pending speech after those frames drain; draining alone is not acknowledgment.
-- Failure invalidates recording/connection generations before stopping capture. Preserve inserted text and mark possible loss once with `[Dictation interrupted]` if audio was captured and the stream reached readiness. Startup rejection before `setupComplete` leaves the editor untouched and reports why dictation could not start; no audio was submitted. Suppress the marker after editor rejection or cancellation.
-- Local silence auto-stop is intentional. Drain/accept late finals, never promote interims, and complete a normal close without a marker for unconfirmed noise/hypotheses. If silence and a speech watchdog expire together, normal silence stop takes precedence. Actual microphone, network, upload, protocol, queue and drain failures still report interruptions. Auto-stop timing still uses adaptive local activity.
-- Classify depleted prepayment credits from the service detail before a generic quota/status message, including status-less/truncated 1011 closes and HTTP handshake bodies. A rejected project never reconnects automatically.
-- Log session phase/elapsed time, captured/accepted audio counts, queue sizes, final acceptance, finalization controls, and response/interim/final/boundary ages. Close diagnostics retain code, readiness and sanitized service detail. Do not log transcript payloads or every PCM/interim/timer event.
-- Explicit mic stop joins the recorder, then processes already-posted tail callbacks before queuing EOF. Recheck session ownership after capture shutdown and the IDLE state listener so reentrant failure/cancellation cannot restore the spinner. IDLE while draining still blocks a new recording and reports that processing must finish. Keyboard hiding while interactive, input target loss, and confirmed host clears cancel all work immediately, suppress markers, remove processing UI, and allow an explicit new recording. Screen-off hiding alone preserves recording.
-- A missed recorder join reports terminal failure before the EOF barrier. Retain the live thread to block capture reuse, and snapshot the callback for the entire recording loop so late native reads keep their original generation.
-- Pause/resume changes the native capture phase. Ignore a result/exception from a read interrupted by the older phase even after rapid resume; new-phase microphone errors remain terminal. The manager's state listener owns voice controls, so a no-op pause tap while draining cannot make them show recording again.
-- `inputAudioTranscription` is beside `generationConfig`; `responseModalities: ["TEXT"]` is inside it. Audio waits for `setupComplete` and uses base64 JSON text frames. `SetupTier` negotiates only unsupported setup fields, never transport recovery.
-- Finalized transcripts can be deltas or cumulative extensions. `TranscriptAccumulator` emits suffixes for prefix extensions, all unrelated text, and no identical repeat within a turn. `attachesToPrevious` handles punctuation/mid-word extensions.
-- `VoiceContextVocabulary` sends only harvested words, never editor paragraphs or seeded history. Editor context is read once per explicit recording.
-- Insertion and cleanup happen in `LatinIME` through `InputConnection`. `RichInputConnection` returns local dispatch success and refreshes its text/cursor caches after rejected/throwing edits. Cleanup/punctuation verify actual host selection positions and selected text before one replacement commit, never delete then insert; unavailable/mismatched selection stops insertion. Markers collapse highlighted text to a verified caret at its end, or skip insertion. Restore the caret best-effort on failure without retrying text.
-- `TranscriptPostProcessor.removeRedundantPunctuation` removes immediately preceding period/comma runs before `!`, `?`, `,`, `:`, and `;`, plus commas before `.`, throughout incoming segments and after paragraph command conversion. `shouldReplacePreviousPunctuation` applies the same normalizer to a short editor suffix plus the segment's first character before verified replacement, including longer segments. Whitespace-separated marks, ordinary periods/commas, ellipses without correction marks, and closing quotes/brackets are preserved. Literal interruption markers bypass these transforms.
-- Early punctuation normalization preserves the required comma on `um,`/`uh,` filler fragments so paragraph-level filler removal can still recognize and remove the whole fragment before final punctuation cleanup.
-- Replacement verification temporarily closes/reopens the host batch for editors that defer edits. Prepare paragraph correction from the current cache and verify that the host's original range matches it after flushing. Delayed intermediate selection callbacks must not cancel dictation when the host's current caret matches the expected voice caret.
-- The fixed mic in `suggestions_strip.xml` starts this pipeline; the toolbar VOICE key switches to Android's shortcut voice IME.
-- Preference keys live in `latin/settings`; UI lives in `settings/screens`. Protocol rationale and device acceptance checks are in `docs/gemini-transcription.md` and `.codex/skills/voice-transcription/`.
-- `streamingEndpoint` and `socketFactory` are test seams for local WebSocket and bounded-sender tests. The API key travels in a query parameter and must stay redacted in diagnostics.
+## Contracts
+- Read `docs/muse-transcription.md` before changes. Accuracy takes priority over latency. Partials never reach the editor. Only completed attributed turns do.
+- Select the earliest nonempty speech turn's speaker, by observed start order. Labels are session-scoped; filtering only promises sequential-speaker behavior. Missing/mixed labels hold text and fail instead of guessing. Never split a completed turn using partial text.
+- One recording owns one socket. No reconnect/replay/automatic rotation. Stop/drain at 55 minutes; explicit restart resets speaker selection.
+- Send `Bearer <key>` in the first JSON frame, wait for `{sessionId: ...}`, then raw binary PCM. Local silence cannot finalize a turn. Only EOF sends `endStream`; read until close 1000.
+- Bound raw PCM to 30 seconds at the actual sample rate and transcript/pending turn FIFOs to 64. Retain exact FIFO heads on backpressure. Never drop/coalesce audio. Pace near real time and cap audio lead/socket queue at two seconds.
+- Pause stops microphone capture and uses generated silence on the same audio FIFO, behind posted capture tail. Resume/end/cancel removes the generator. Paused time may be billed.
+- Recognized turns wait at most 30 seconds after provider speechEnd for a completed attributed result. Long speech with progress continues. Overall stop is bounded to 60 seconds, including capture, setup, upload and close.
+- Callbacks, controls, timers and insertion acknowledgments are main-looper serialized and generation fenced. Retain transcript FIFO head until local dispatch/cleanup success. Android InputConnection booleans are dispatch, not host acceptance. Rejection/exception stops later writes without retrying partial edits.
+- Startup rejection leaves the editor untouched. Actual failure after readiness/capture attempts one literal interruption marker. Editor rejection and cancellation suppress markers; intentional discarded speakers and quiet tails do not create missing-text failures.
+- Preserve interactive hiding, host-clear and input-target cancellation, native capture thread/phase ownership, verified selected-range replacement and deferred-editor checks. Screen-off hiding alone preserves capture. Explicit stop drains.
+- Credentials and transcript payloads stay out of diagnostics. Only words harvested for keywords may leave editor context. Settings keys/UI live in their respective settings packages.
+- The fixed strip mic starts this pipeline; toolbar VOICE invokes the Android system voice IME.
 
 ## Keep this file current
-- Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.
-- If a change here affects neighboring folders or a cross-folder contract, update those AGENTS.md files in the same PR.
-- Treat stale agent documentation as a bug.
+Update this map and neighboring AGENTS/docs when files or contracts change.

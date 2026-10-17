@@ -197,7 +197,7 @@ public class LatinIME extends InputMethodService implements
 
     private final ClipboardHistoryManager mClipboardHistoryManager = new ClipboardHistoryManager(this);
 
-    // Voice input manager (local recording + Gemini Live transcription)
+    // Voice input manager (local recording + Muse Live transcription)
     private VoiceInputManager mVoiceInputManager;
     // Use a separate token from InputMethodService's fullscreen extractor.
     private int mVoiceEditorMonitorToken = 0x56000000;
@@ -2351,7 +2351,7 @@ public class LatinIME extends InputMethodService implements
         }
 
         final String corrected =
-                TranscriptPostProcessor.INSTANCE.processCurrentParagraph(paragraph);
+                TranscriptPostProcessor.INSTANCE.processMuseParagraph(paragraph);
         if (corrected == null) {
             return true;
         }
@@ -2385,13 +2385,8 @@ public class LatinIME extends InputMethodService implements
         final CharSequence rawBefore =
                 mInputLogic.mConnection.getTextBeforeCursor(VOICE_CASING_LOOKBACK, 0);
         final CharSequence beforeCursor = (rawBefore != null) ? rawBefore : "";
-        String cased =
-                TranscriptPostProcessor.INSTANCE.adjustLeadingCasing(text, beforeCursor);
-        final CharSequence rawAfter =
-                mInputLogic.mConnection.getTextAfterCursor(VOICE_PUNCTUATION_LOOKAHEAD, 0);
-        final CharSequence afterCursor = (rawAfter != null) ? rawAfter : "";
-        cased = TranscriptPostProcessor.INSTANCE
-                .stripTrailingPunctuationIfMidSentence(cased, afterCursor);
+        // Preserve Muse's completed wording, casing and punctuation.
+        final String cased = text;
         if (beforeCursor.length() == 0) {
             return cased;
         }
@@ -2430,7 +2425,7 @@ public class LatinIME extends InputMethodService implements
     }
 
     /**
-     * Maximum chars of editor text scanned to seed Gemini's speech-biasing
+     * Maximum chars of editor text scanned to seed Muse's speech-biasing
      * vocabulary. Only harvested terms are sent, never this text itself, so the
      * window can be generous.
      */

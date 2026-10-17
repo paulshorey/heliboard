@@ -22,14 +22,14 @@ import org.robolectric.Shadows.shadowOf
 class VoiceInputManagerTest {
     private lateinit var manager: VoiceInputManager
     private lateinit var capture: VoiceRecorder.RecordingCallback
-    private lateinit var stream: GeminiTranscriptionClient.StreamingCallback
+    private lateinit var stream: MuseTranscriptionClient.StreamingCallback
     private var network = FakeNetwork()
     private val sent = mutableListOf<String>()
     private val inserted = mutableListOf<String>()
     private val markers = mutableListOf<String>()
     private val errors = mutableListOf<String>()
     private var speaking = false
-    private var sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
+    private var sendResult = MuseTranscriptionClient.AudioSendResult.ACCEPTED
     private var transportQueued = false
     private var transportQueuedSilence = false
     private var editorAccepts = true
@@ -46,26 +46,26 @@ class VoiceInputManagerTest {
     fun setUp() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.prefs().edit().clear().commit()
-        TranscriptionPreferences.writeGeminiApiKey(context.prefs(), "test-key")
+        TranscriptionPreferences.writeMuseApiKey(context, "test-key")
         val recorder = Mockito.mock(VoiceRecorder::class.java) { call ->
             when (call.method.name.substringBefore('$')) {
                 "hasRecordPermission", "startRecording" -> true
+                "getSampleRate" -> 24000
                 "isCurrentlySpeaking" -> speaking
                 "setCallback" -> { capture = call.arguments[0] as VoiceRecorder.RecordingCallback; null }
                 "stopRecording" -> { stopped++; onRecorderStop?.invoke(); null }
                 else -> Mockito.RETURNS_DEFAULTS.answer(call)
             }
         }
-        val client = Mockito.mock(GeminiTranscriptionClient::class.java) { call ->
+        val client = Mockito.mock(MuseTranscriptionClient::class.java) { call ->
             when (call.method.name.substringBefore('$')) {
-                "startStreaming" -> { starts++; stream = call.arguments[2] as GeminiTranscriptionClient.StreamingCallback; null }
+                "startStreaming" -> { starts++; stream = call.arguments[2] as MuseTranscriptionClient.StreamingCallback; null }
                 "offerAudioChunk" -> {
-                    if (sendResult == GeminiTranscriptionClient.AudioSendResult.ACCEPTED) {
+                    if (sendResult == MuseTranscriptionClient.AudioSendResult.ACCEPTED) {
                         sent.add("audio:${(call.arguments[0] as ByteArray)[0]}")
                     }
                     sendResult
                 }
-                "finalizeTurn" -> { sent.add("end"); finalizeAccepts }
                 "finishStreaming" -> { sent.add("finish"); finalizeAccepts }
                 "hasQueuedFrames" -> transportQueued || transportQueuedSilence
                 "hasQueuedSpeechFrames" -> transportQueued
@@ -90,12 +90,39 @@ class VoiceInputManagerTest {
         })
     }
 
+    @Test fun localSilenceDoesNotCommitTurnsAndPauseSendsSilenceUntilResume() {
+        start(); audio(7); capture.onSpeechStopped()
+        assertEquals(listOf("audio:7"), sent)
+        manager.pauseRecording(); advance(250)
+        assertEquals(listOf("audio:7", "audio:0", "audio:0", "audio:0"), sent)
+        assertTrue(manager.isPaused)
+        manager.resumeRecording(); val before = sent.size; advance(250)
+        assertEquals(before, sent.size)
+        audio(9); assertEquals("audio:9", sent.last())
+        assertTrue(errors.isEmpty())
+    }
+
+    @Test fun filteredSpeakerFinalSettlesPendingSpeechWithoutAnEditorWrite() {
+        start(); speaking = true; audio(); capture.onSpeechStarted(); stream.onInterimTranscription()
+        stream.onServerResponse(true) // provider completed a discarded nonselected turn
+        speaking = false; capture.onSpeechStopped()
+        manager.stopRecording(); advance(1); stream.onStreamClosed()
+        assertTrue(manager.isIdle); assertTrue(markers.isEmpty()); assertTrue(inserted.isEmpty())
+    }
+
+    @Test fun pauseAndResumeKeepSyntheticSilenceBehindBlockedMicrophoneTail() {
+        start(); sendResult = MuseTranscriptionClient.AudioSendResult.BACKPRESSURE
+        audio(7); manager.pauseRecording(); advance(1); manager.resumeRecording(); audio(9)
+        sendResult = MuseTranscriptionClient.AudioSendResult.ACCEPTED; advance(25)
+        assertEquals(listOf("audio:7", "audio:0", "audio:9"), sent)
+    }
+
     @After fun tearDown() { manager.destroy() }
     private fun start(ready: Boolean = true) {
         assertTrue(manager.startRecording())
         if (ready) stream.onStreamReady()
     }
-    private fun audio(value: Int = 1, size: Int = 3200, containsSpeech: Boolean = speaking) =
+    private fun audio(value: Int = 1, size: Int = 4800, containsSpeech: Boolean = speaking) =
         capture.onAudioChunk(ByteArray(size) { value.toByte() }, containsSpeech)
     private fun final(text: String) {
         stream.onTranscriptionResult(TranscriptSegment(text, false))
@@ -147,14 +174,14 @@ class VoiceInputManagerTest {
     }
 
     @Test fun backpressureRetainsEveryAudioChunkAndStopCannotOvertakeIt() {
-        start(); sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE
+        start(); sendResult = MuseTranscriptionClient.AudioSendResult.BACKPRESSURE
         repeat(300) { audio(it % 100) }
         manager.stopRecording()
         shadowOf(Looper.getMainLooper()).idle()
         assertTrue(sent.isEmpty())
         assertFalse(manager.startRecording())
         assertTrue(manager.hasPendingProcessing())
-        sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
+        sendResult = MuseTranscriptionClient.AudioSendResult.ACCEPTED
         advance(30)
         assertEquals((0 until 300).map { "audio:${it % 100}" } + "finish", sent)
         stream.onStreamClosed()
@@ -162,22 +189,11 @@ class VoiceInputManagerTest {
         assertTrue(markers.isEmpty())
     }
 
-    @Test fun silencePauseAndStopControlsKeepTheirPositionInTheAudioQueue() {
-        start(); sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE
-        audio(1); capture.onSpeechStopped(); audio(2)
-        manager.pauseRecording(); shadowOf(Looper.getMainLooper()).idle()
-        manager.resumeRecording(); audio(3); manager.stopRecording()
-        shadowOf(Looper.getMainLooper()).idle()
-        sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
-        advance(30)
-        assertEquals(listOf("audio:1", "end", "audio:2", "end", "audio:3", "finish"), sent)
-    }
-
     @Test fun overflowStopsInsteadOfDroppingTheOldestAudio() {
-        start(); sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE
+        start(); sendResult = MuseTranscriptionClient.AudioSendResult.BACKPRESSURE
         repeat(301) { audio() }
         assertTrue(manager.isIdle)
-        sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
+        sendResult = MuseTranscriptionClient.AudioSendResult.ACCEPTED
         advance(40_000)
         assertTrue(sent.isEmpty())
         assertEquals(1, markers.size)
@@ -185,7 +201,7 @@ class VoiceInputManagerTest {
     }
 
     @Test fun oldestUploadDeadlineCannotBePostponedByMoreAudio() {
-        start(); sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE
+        start(); sendResult = MuseTranscriptionClient.AudioSendResult.BACKPRESSURE
         audio(); advance(15_000); audio(); advance(15_100)
         assertTrue(manager.isIdle)
         assertEquals(1, markers.size)
@@ -216,46 +232,6 @@ class VoiceInputManagerTest {
         assertEquals(listOf("All of the long utterance."), inserted)
     }
 
-    @Test fun interimsAfterSpeechEndsCannotPostponeTheFinalDeadline() {
-        start(); speaking = true; audio(); capture.onSpeechStarted()
-        manager.pauseRecording(); shadowOf(Looper.getMainLooper()).idle()
-        repeat(29) {
-            advance(1000); stream.onInterimTranscription(); stream.onServerResponse(false)
-        }
-        advance(1001)
-        assertTrue(manager.isIdle)
-        assertTrue(errors.single().contains("No final transcript"))
-        assertTrue(inserted.isEmpty())
-        assertEquals(1, markers.size)
-    }
-
-    @Test fun anInterimAfterAPauseWithoutLocalSpeechUsesTheSubmittedBoundaryDeadline() {
-        start(); audio(0)
-        manager.pauseRecording(); shadowOf(Looper.getMainLooper()).idle()
-        advance(20_000)
-        stream.onInterimTranscription(); stream.onServerResponse(false)
-        advance(10_001)
-        assertTrue(manager.isIdle)
-        assertTrue(errors.single().contains("No final transcript"))
-        assertEquals(1, markers.size)
-    }
-
-    @Test fun speechResumingAfterATwentySecondPauseStartsANewFinalWait() {
-        start(); speaking = true; audio(); capture.onSpeechStarted()
-        stream.onInterimTranscription(); stream.onServerResponse(false)
-        speaking = false; capture.onSpeechStopped()
-        advance(20_000)
-        speaking = true; audio(); capture.onSpeechStarted()
-        repeat(20) {
-            advance(1000); audio(); stream.onInterimTranscription(); stream.onServerResponse(false)
-        }
-        assertTrue(manager.isRecording)
-        speaking = false; capture.onSpeechStopped()
-        final("The resumed utterance.")
-        assertTrue(errors.isEmpty())
-        assertTrue(markers.isEmpty())
-    }
-
     @Test fun aLongPauseAfterAConfirmedFinalDoesNotInventPendingSpeech() {
         start(); speaking = true; audio(); capture.onSpeechStarted(); final("First sentence.")
         speaking = false; audio(0); capture.onSpeechStopped()
@@ -271,20 +247,12 @@ class VoiceInputManagerTest {
         assertEquals(listOf("First sentence.", "Second sentence."), inserted)
     }
 
-    @Test fun turnCompleteCannotHideAnUnconfirmedTailOnStop() {
-        start(); audio(); stream.onInterimTranscription(); stream.onServerResponse(false)
-        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
-        stream.onServerResponse(false); stream.onStreamClosed()
-        assertTrue(manager.isIdle)
-        assertEquals(1, markers.size)
-    }
-
     @Test fun earlierFinalCannotAcknowledgeAudioStillWaitingInTheManager() {
         start(); speaking = true; audio(1)
-        sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE
+        sendResult = MuseTranscriptionClient.AudioSendResult.BACKPRESSURE
         audio(2); final("confirmed prefix")
         manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
-        sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
+        sendResult = MuseTranscriptionClient.AudioSendResult.ACCEPTED
         advance(30); stream.onStreamClosed()
         assertTrue(manager.isIdle)
         assertEquals(listOf("confirmed prefix"), inserted)
@@ -299,18 +267,6 @@ class VoiceInputManagerTest {
         manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
         stream.onStreamClosed()
         assertTrue(manager.isIdle)
-        assertEquals(listOf("confirmed prefix"), inserted)
-        assertEquals(1, markers.size)
-    }
-
-    @Test fun queuedAudioKeepsTheOriginalFinalProgressDeadlineAfterAnEarlierFinal() {
-        start(); speaking = true; audio()
-        stream.onInterimTranscription(); stream.onServerResponse(false)
-        manager.pauseRecording(); shadowOf(Looper.getMainLooper()).idle(); advance(29_000)
-        transportQueued = true; final("confirmed prefix")
-        advance(1100)
-        assertTrue(manager.isIdle)
-        assertTrue(errors.single().contains("No final transcript"))
         assertEquals(listOf("confirmed prefix"), inserted)
         assertEquals(1, markers.size)
     }
@@ -378,29 +334,11 @@ class VoiceInputManagerTest {
     }
 
     @Test fun failedSendAndFailedFinalizeDoNotReconnect() {
-        start(); sendResult = GeminiTranscriptionClient.AudioSendResult.FAILED; audio()
+        start(); sendResult = MuseTranscriptionClient.AudioSendResult.FAILED; audio()
         advance(40_000)
         assertTrue(manager.isIdle)
         assertEquals(1, starts)
         assertEquals(1, markers.size)
-    }
-
-    @Test fun failedPauseFinalizationStopsTheSession() {
-        start(); audio(); finalizeAccepts = false; manager.pauseRecording()
-        shadowOf(Looper.getMainLooper()).idle()
-        assertTrue(manager.isIdle)
-        assertEquals(1, markers.size)
-    }
-
-    @Test fun plannedSessionEndDrainsWithoutCreatingAReplacementConnection() {
-        start(); speaking = true; audio()
-        stream.onSessionExpiring(30_000)
-        shadowOf(Looper.getMainLooper()).idle()
-        assertEquals("finish", sent.last())
-        final("last words"); stream.onStreamClosed()
-        assertTrue(manager.isIdle)
-        assertEquals(1, starts)
-        assertTrue(markers.isEmpty())
     }
 
     @Test fun microphoneErrorIsTerminalAndLateAudioIsIgnored() {
@@ -413,30 +351,22 @@ class VoiceInputManagerTest {
         assertEquals(1, markers.size)
     }
 
-    @Test fun setupFallbackKeepsTheOriginalConnectionDeadline() {
-        start(ready = false); audio(); advance(11_000)
-        stream.onHandshakeRestarted(); advance(1100)
-        assertTrue(manager.isIdle)
-        assertTrue(errors.single().contains("connection timed out"))
-        assertTrue(markers.isEmpty())
-    }
-
     @Test fun startupRejectionStopsCaptureAndLeavesTheExistingEditorTextUntouched() {
         inserted.add("existing editor text")
         start(ready = false); audio()
-        stream.onStreamError(GeminiTranscriptionClient.CREDITS_DEPLETED_ERROR)
+        stream.onStreamError("Muse rejected billing")
         stream.onStreamReady(); audio(2); final("late words")
         assertTrue(manager.isIdle)
         assertTrue(stopped > 0)
         assertEquals(listOf("existing editor text"), inserted)
         assertTrue(markers.isEmpty())
         assertTrue(sent.isEmpty())
-        assertEquals(listOf("Could not start dictation. ${GeminiTranscriptionClient.CREDITS_DEPLETED_ERROR}"), errors)
+        assertEquals(listOf("Could not start dictation. Muse rejected billing"), errors)
     }
 
     @Test fun quietPcmIsNotDiscardedWhileWaitingForSpeech() {
         start(); capture.onSpeechStopped(); audio(0); audio(1)
-        assertEquals(listOf("end", "audio:0", "audio:1"), sent)
+        assertEquals(listOf("audio:0", "audio:1"), sent)
     }
 
     @Test fun cancelDiscardsPendingWorkWithoutAnInterruptionMarker() {
@@ -492,25 +422,26 @@ class VoiceInputManagerTest {
         advance(VoiceInputManager.DRAIN_TIMEOUT_MS + 1)
         assertTrue(manager.isIdle)
         assertEquals(listOf("confirmed"), inserted)
-        assertTrue(errors.single().contains("finish closing"))
+        assertTrue(errors.single().contains("too long to finish"))
     }
 
-    @Test fun stopDeadlineIncludesBlockedUploadAndReleasesProcessingForExplicitRestart() {
-        start(); sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE
+    @Test fun blockedUploadFailsBeforeOverallStopDeadlineAndAllowsExplicitRestart() {
+        ApplicationProvider.getApplicationContext<Context>().prefs().edit().putInt("voice_auto_stop_silence_seconds", 300).commit()
+        start(); sendResult = MuseTranscriptionClient.AudioSendResult.BACKPRESSURE
         audio(containsSpeech = true)
         val oldStream = stream
         manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
-        advance(VoiceInputManager.STOP_TIMEOUT_MS - 1)
+        advance(VoiceInputManager.PROGRESS_TIMEOUT_MS - 1)
         assertTrue(processing)
         assertTrue(manager.hasPendingProcessing())
-        advance(1)
+        advance(30)
         assertTrue(manager.isIdle)
         assertFalse(processing)
         assertFalse(manager.hasPendingProcessing())
         assertTrue(sent.isEmpty()) // EOF never overtakes blocked audio.
         assertEquals(1, markers.size)
-        assertTrue(errors.single().contains("too long to finish"))
-        sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
+        assertTrue(errors.single().contains("upload stalled"))
+        sendResult = MuseTranscriptionClient.AudioSendResult.ACCEPTED
         start()
         oldStream.onStreamReady()
         oldStream.onTranscriptionResult(TranscriptSegment("late words", false))
@@ -525,14 +456,14 @@ class VoiceInputManagerTest {
         start(ready = false); audio(containsSpeech = true)
         manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
         advance(11_000)
-        sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE
+        sendResult = MuseTranscriptionClient.AudioSendResult.BACKPRESSURE
         stream.onStreamReady()
         advance(4_000)
-        sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
+        sendResult = MuseTranscriptionClient.AudioSendResult.ACCEPTED
         advance(25)
         assertEquals(listOf("audio:1", "finish"), sent)
         final("confirmed words")
-        advance(4_974)
+        advance(44_974)
         assertTrue(manager.hasPendingProcessing())
         advance(1)
         assertTrue(manager.isIdle)
@@ -542,6 +473,7 @@ class VoiceInputManagerTest {
     }
 
     @Test fun completedStopCannotTimeOutANewerRecording() {
+        ApplicationProvider.getApplicationContext<Context>().prefs().edit().putInt("voice_auto_stop_silence_seconds", 300).commit()
         start(); manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
         stream.onStreamClosed()
         assertTrue(manager.isIdle)
@@ -622,12 +554,12 @@ class VoiceInputManagerTest {
     @Test fun onlyQueuedManagerSilenceDoesNotPreventAcceptingACompleteFinal() {
         start(); speaking = true; audio()
         speaking = false; capture.onSpeechStopped()
-        sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE; audio(0)
+        sendResult = MuseTranscriptionClient.AudioSendResult.BACKPRESSURE; audio(0)
         final("All spoken words.")
         manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
-        sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
+        sendResult = MuseTranscriptionClient.AudioSendResult.ACCEPTED
         advance(30); stream.onStreamClosed()
-        assertEquals(listOf("audio:1", "end", "audio:0", "finish"), sent)
+        assertEquals(listOf("audio:1", "audio:0", "finish"), sent)
         assertTrue(markers.isEmpty())
         assertTrue(errors.isEmpty())
     }
@@ -746,24 +678,13 @@ class VoiceInputManagerTest {
         assertEquals(1, markers.size)
     }
 
-    @Test fun controlQueueOverflowStopsWithoutLettingControlsOvertakeBlockedAudio() {
-        start(); sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE; audio()
-        repeat(VoiceInputManager.MAX_PENDING_CONTROLS + 1) {
-            manager.pauseRecording(); shadowOf(Looper.getMainLooper()).idle(); manager.resumeRecording()
-        }
-        assertTrue(manager.isIdle)
-        assertTrue(sent.isEmpty())
-        assertTrue(errors.single().contains("control queue is full"))
-        assertEquals(1, markers.size)
-    }
-
     @Test fun aBackpressuredOlderBoundaryDoesNotStartAFinalWaitDuringTheNextUtterance() {
         start(); audio(containsSpeech = true); capture.onSpeechStarted()
         stream.onInterimTranscription(); stream.onServerResponse(false)
-        sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE
+        sendResult = MuseTranscriptionClient.AudioSendResult.BACKPRESSURE
         audio(); capture.onSpeechStopped()
         advance(1000); audio(containsSpeech = true); capture.onSpeechStarted()
-        sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED; advance(30)
+        sendResult = MuseTranscriptionClient.AudioSendResult.ACCEPTED; advance(30)
         repeat(35) {
             advance(1000); audio(containsSpeech = true)
             stream.onInterimTranscription(); stream.onServerResponse(false)

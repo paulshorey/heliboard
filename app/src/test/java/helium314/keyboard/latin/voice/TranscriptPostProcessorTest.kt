@@ -6,6 +6,16 @@ import org.junit.Test
 
 class TranscriptPostProcessorTest {
 
+    @Test fun musePreservesFillerWordsSelfCorrectionsAndSentenceCase() {
+        val text = "Um, I meant Tuesday—actually Wednesday. And. Amazon is next."
+        assertNull(TranscriptPostProcessor.processMuseParagraph(text))
+    }
+
+    @Test fun museStillConvertsExplicitSpokenCommandsAndNormalizesTheirPunctuation() {
+        assertEquals("That was great!", TranscriptPostProcessor.processMuseParagraph("That was great. Exclamation point."))
+        assertNull(TranscriptPostProcessor.processMuseParagraph("add a comma here"))
+    }
+
     private fun process(input: String): String =
         TranscriptPostProcessor.processCurrentParagraph(input) ?: input
 

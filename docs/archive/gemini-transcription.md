@@ -1,3 +1,5 @@
+> Historical Gemini implementation, retained for comparison. Current behavior: [Muse](../muse-transcription.md).
+
 # Gemini Live Transcription Architecture
 
 HeliBoard uses Google Gemini's Live API for voice input, with the dedicated
