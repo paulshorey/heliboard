@@ -16,8 +16,10 @@ VoiceInputManager FIFO → MuseTranscriptionClient (paced binary WebSocket) →
 MuseTurnAssembler → completed selected-speaker TranscriptSegment → acknowledged
 manager FIFO → LatinIME/InputConnection.
 
-- Default mode is DIARIZATION with first-speaker filtering. Explicit Responsive dictation selects ENDPOINTING with all voices and no attribution gate. Both modes still require speechEnd and speechComplete. Mode is fixed for a recording.
-- Timing diagnostics are opt-in metadata only. Capture and socket receipt timestamps precede main-handler dispatch. Audio/progress logs are sampled; transcripts, labels, keys and session IDs are never logged.
+- DIARIZATION with first-speaker filtering is the only app mode. Keep the original
+  recorder callback, PCM queue and request configuration from the working Muse
+  baseline; the responsive/timing runtime experiment was rolled back after a
+  same-phone punctuation regression. Old experimental preference keys are ignored.
 - Accuracy over latency. Partials never become editor text. In DIARIZATION use
   speechComplete, not transcript.final or speechEnd, for completed text.
 - First JSON frame authenticates with authorization.accessToken = Bearer <key>.

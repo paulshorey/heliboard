@@ -4,8 +4,7 @@ Muse Voice Transcribe realtime dictation (`muse-voice-transcribe-1.0`).
 
 ## Direct files
 - `MuseTranscriptionClient.kt` - JSON handshake, paced raw binary PCM, provider events, per-turn deadlines and EOF/close.
-- `MuseTurnAssembler.kt` - completed-turn ordering, default first-speaker selection/filtering, opt-in unfiltered endpointing and duplicate final handling.
-- `MuseLatencyDiagnostics.kt` - opt-in bounded event receipt/release timing and punctuation counts, with no text, labels or credentials.
+- `MuseTurnAssembler.kt` - completed-turn ordering, first-speaker selection/filtering and duplicate final handling.
 - `TranscriptSegment.kt` - finalized append-only editor chunk.
 - `TranscriptPostProcessor.kt` - `processMuseParagraph` handles explicit spoken commands; legacy pure shaping helpers are not on the Muse path.
 - `VoiceContextVocabulary.kt` - keyword hints from user terms, built-ins and optionally harvested editor words.
@@ -14,8 +13,7 @@ Muse Voice Transcribe realtime dictation (`muse-voice-transcribe-1.0`).
 - `VoiceNetworkMonitor.kt` - validated default-network preflight and terminal loss observation, with API 21–22 fallback.
 
 ## Contracts
-- Read `docs/muse-transcription.md` before changes. Accuracy takes priority over latency. Partials never reach the editor. Default DIARIZATION requires completed attributed turns; explicit Responsive dictation uses ENDPOINTING with no speaker filtering. Never change mode mid-session.
-- Timing diagnostics are off by default, local/bounded and metadata only. Snapshot settings at mic start. Recorder timestamps precede main-looper posting; socket timestamps precede client-handler posting. Sample audio/progress diagnostics at most once per second.
+- Read `docs/muse-transcription.md` before changes. Accuracy takes priority over latency. Partials never reach the editor. DIARIZATION is the only app mode and requires completed attributed turns. Preserve the original recorder callback, PCM queue and request configuration after the responsive/timing experiment's phone punctuation regression; retired experiment preferences are ignored.
 - Select the earliest nonempty speech turn's speaker, by observed start order. Labels are session-scoped; filtering only promises sequential-speaker behavior. Missing/mixed labels hold text and fail instead of guessing. Never split a completed turn using partial text.
 - One recording owns one socket. No reconnect/replay/automatic rotation. Stop/drain at 55 minutes; explicit restart resets speaker selection.
 - Send `Bearer <key>` in the first JSON frame, wait for `{sessionId: ...}`, then raw binary PCM. Local silence cannot finalize a turn. Only EOF sends `endStream`; read until close 1000.

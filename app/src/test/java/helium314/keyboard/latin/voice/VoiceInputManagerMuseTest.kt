@@ -68,17 +68,15 @@ class VoiceInputManagerMuseTest {
         transport.onMessage(socket, json.toString())
         shadowOf(Looper.getMainLooper()).idle()
     }
-    private fun event(type: String, id: Int = 1, progress: Int = 100, text: String = "") = message(
+    private fun event(type: String, id: Int = 1, progress: Int = 100, text: String = "", label: String = "A") = message(
         JSONObject().put("type", type).put("turnId", id).put("audioProcessedMs", progress)
-            .put("transcript", text).put("label", "A"))
-    private fun start(responsive: Boolean = false) {
-        TranscriptionPreferences.writeMuseResponsiveDictation(context.prefs(), responsive)
+            .put("transcript", text).put("label", label))
+    private fun start() {
         assertTrue(manager.startRecording())
         transport.onOpen(socket, Response.Builder().request(socket.request()).protocol(Protocol.HTTP_1_1)
             .code(101).message("Switching").build())
         shadowOf(Looper.getMainLooper()).idle()
-        assertEquals(if (responsive) "ENDPOINTING" else "DIARIZATION",
-            JSONObject(socket.controls.single()).getString("mode"))
+        assertEquals("DIARIZATION", JSONObject(socket.controls.single()).getString("mode"))
         message(JSONObject().put("sessionId", "private-session"))
         capture.onAudioChunk(ByteArray(4800), containsSpeech = true) // Local RMS false positive.
         assertEquals(1, socket.audio.size)
@@ -100,9 +98,38 @@ class VoiceInputManagerMuseTest {
         start(); event("speechStart"); event("speechEnd")
         stopAndClose(); assertNoInterruption()
     }
-    @Test fun processedWordlessNoiseClosesWithoutMarkerInEndpointingMode() {
-        start(responsive = true); event("speechStart"); event("speechEnd")
+    @Test fun retiredExperimentalPreferencesCannotChangeTheWireMode() {
+        context.prefs().edit().putBoolean("muse_responsive_dictation", true)
+            .putBoolean("muse_timing_diagnostics", true).commit()
+        start(); event("speechStart"); event("speechEnd")
         stopAndClose(); assertNoInterruption()
+    }
+    @Test fun capturePreservesQuietPcmAndOnlyCompletedFirstSpeakerPunctuationReachesTheEditor() {
+        start()
+        val quiet = ByteArray(4800) { (it % 7).toByte() }
+        val speech = ByteArray(4800) { (it % 113).toByte() }
+        capture.onAudioChunk(quiet, containsSpeech = false)
+        capture.onAudioChunk(speech, containsSpeech = true)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(225))
+        assertEquals(3, socket.audio.size)
+        assertContentEquals(quiet, socket.audio[1].toByteArray())
+        assertContentEquals(speech, socket.audio[2].toByteArray())
+        event("speechStart", progress = 300); event("speaker", progress = 300)
+        event("transcript", progress = 300, text = "first sentence is this clear yes")
+        event("speechEnd", progress = 300)
+        assertTrue(inserted.isEmpty())
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(2_000))
+        event("speechComplete", progress = 300, text = "First sentence. Is this clear? Yes!")
+        event("speechStart", id = 2, progress = 300)
+        event("speaker", id = 2, progress = 300, label = "B")
+        event("speechEnd", id = 2, progress = 300)
+        event("speechComplete", id = 2, progress = 300, text = "Guest voice.")
+        event("speechStart", id = 3, progress = 300); event("speaker", id = 3, progress = 300)
+        event("speechEnd", id = 3, progress = 300)
+        event("speechComplete", id = 3, progress = 300, text = "Back again.")
+        stopAndClose()
+        assertEquals(listOf("First sentence. Is this clear? Yes!", "Back again."), inserted)
+        assertTrue(markers.isEmpty()); assertTrue(errors.isEmpty())
     }
     @Test fun wordlessNoiseRetiredBeforeStopStillSettlesAtVerifiedClose() {
         start(); event("speechStart"); event("speechEnd")

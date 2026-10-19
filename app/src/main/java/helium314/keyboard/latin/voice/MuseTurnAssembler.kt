@@ -4,7 +4,7 @@ package helium314.keyboard.latin.voice
 import org.json.JSONObject
 
 /** Session-scoped speaker selection. Partials are evidence, never editor text. */
-internal class MuseTurnAssembler(private val filterSpeakers: Boolean = true) {
+internal class MuseTurnAssembler {
     internal data class CompletedTurn(val id: Int, val text: String, val selected: Boolean)
     private data class Turn(
         var speaker: String? = null,
@@ -41,7 +41,6 @@ internal class MuseTurnAssembler(private val filterSpeakers: Boolean = true) {
                 if (text.isNotBlank()) turn!!.hasWords = true
             }
             "speaker" -> {
-                check(filterSpeakers) { "Unexpected speaker event in endpointing mode" }
                 val turn = turns[activeId] ?: error("Speaker without a speech turn")
                 // The label describes the preceding active span, not the next one.
                 check(!turn.ended) { "Speaker arrived outside an active speech span" }
@@ -77,9 +76,9 @@ internal class MuseTurnAssembler(private val filterSpeakers: Boolean = true) {
             val (id, turn) = turns.entries.first()
             val text = turn.text ?: break
             if (!turn.ended) break
-            if (filterSpeakers && (turn.conflictingSpeaker || (text.isNotBlank() && turn.speaker == null))) break
-            if (filterSpeakers && text.isNotBlank() && selectedSpeaker == null) selectedSpeaker = turn.speaker
-            results.add(CompletedTurn(id, text, text.isNotBlank() && (!filterSpeakers || turn.speaker == selectedSpeaker)))
+            if (turn.conflictingSpeaker || (text.isNotBlank() && turn.speaker == null)) break
+            if (text.isNotBlank() && selectedSpeaker == null) selectedSpeaker = turn.speaker
+            results.add(CompletedTurn(id, text, text.isNotBlank() && turn.speaker == selectedSpeaker))
             turns.remove(id)
             settled.add(id)
         }

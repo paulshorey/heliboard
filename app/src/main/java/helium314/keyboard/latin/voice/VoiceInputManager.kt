@@ -88,10 +88,7 @@ class VoiceInputManager internal constructor(
     private var isDispatchingTranscripts = false
     private var pendingAudioBytes = 0
     private val outbound = ArrayDeque<Outbound>()
-    private data class PendingTranscript(val segment: TranscriptSegment, val receivedAtMs: Long)
-    private val pendingTranscripts = ArrayDeque<PendingTranscript>()
-    private var lastAudioTimingAtMs: Long? = null
-    private var maxCaptureToSendMs = 0L
+    private val pendingTranscripts = ArrayDeque<TranscriptSegment>()
     private var pausedSilence: Runnable? = null
     private var audioRetry: Runnable? = null
     private var connectTimeout: Runnable? = null
@@ -182,9 +179,7 @@ class VoiceInputManager internal constructor(
         lastResponseAtMs = null
         lastInterimAtMs = null
         lastFinalAtMs = null
-        lastAudioTimingAtMs = null
-        maxCaptureToSendMs = 0
-        Log.i(TAG, "session=$sessionId start mode=${if (museConfig.responsiveDictation) "ENDPOINTING" else "DIARIZATION"} autoStopMs=$autoStopSilenceMs")
+        Log.i(TAG, "session=$sessionId start mode=DIARIZATION autoStopMs=$autoStopSilenceMs")
         acceptingAudio = true
         hasCapturedAudio = false
         unconfirmedSpeech = false
@@ -194,9 +189,6 @@ class VoiceInputManager internal constructor(
         voiceRecorder.setCallback(object : VoiceRecorder.RecordingCallback {
             override fun onRecordingStarted() { }
             override fun onAudioChunk(pcmData: ByteArray, containsSpeech: Boolean) {
-                onCapturedAudioChunk(pcmData, containsSpeech, SystemClock.elapsedRealtime())
-            }
-            override fun onCapturedAudioChunk(pcmData: ByteArray, containsSpeech: Boolean, capturedAtMs: Long) {
                 if (!isCurrent(sessionId) || !acceptingAudio) return
                 if (pcmData.isEmpty() || pcmData.size % 2 != 0) {
                     failSession("Invalid microphone audio")
@@ -213,7 +205,7 @@ class VoiceInputManager internal constructor(
                     failSession("Voice audio queue is full. Dictation stopped before skipping audio.")
                     return
                 }
-                outbound.addLast(Outbound.Audio(pcmData, capturedAtMs, containsSpeech))
+                outbound.addLast(Outbound.Audio(pcmData, SystemClock.elapsedRealtime(), containsSpeech))
                 pendingAudioBytes += pcmData.size
                 flushOutbound(sessionId)
             }
@@ -366,8 +358,6 @@ class VoiceInputManager internal constructor(
             userVocabulary = museConfig.customVocabulary,
             editorContext = editorContext,
             sampleRate = voiceRecorder.sampleRate.coerceAtLeast(16000),
-            responsiveDictation = museConfig.responsiveDictation,
-            timingDiagnostics = museConfig.timingDiagnostics,
         )
         isStreamingConnecting = true
         scheduleConnectTimeout(sessionId)
@@ -395,7 +385,7 @@ class VoiceInputManager internal constructor(
                     failSession("Voice text queue is full. Dictation stopped before skipping text.")
                     return
                 }
-                pendingTranscripts.addLast(PendingTranscript(segment, SystemClock.elapsedRealtime()))
+                pendingTranscripts.addLast(segment)
                 processTranscripts(sessionId)
                 if (!isCurrent(sessionId)) return
                 acknowledgeFinal(sessionId)
@@ -460,16 +450,6 @@ class VoiceInputManager internal constructor(
                             acceptedAudioBytes += next.pcm.size
                             outbound.removeFirst()
                             pendingAudioBytes -= next.pcm.size
-                            if (museConfig.timingDiagnostics) {
-                                val now = SystemClock.elapsedRealtime()
-                                maxCaptureToSendMs = maxOf(maxCaptureToSendMs, now - next.capturedAtMs)
-                                if (lastAudioTimingAtMs == null || now - lastAudioTimingAtMs!! >= 1000) {
-                                    lastAudioTimingAtMs = now
-                                    Log.i(TAG, "timing phase=audio session=$sessionId elapsedMs=${now - sessionStartedAtMs} " +
-                                        "maxCaptureToSendMs=$maxCaptureToSendMs pendingPcmBytes=$pendingAudioBytes " +
-                                        "socketBytes=${transcriptionClient.queuedFrameBytes()}")
-                                }
-                            }
                             if (acceptedAudioChunks == 1) Log.i(TAG, "first PCM accepted ${sessionDiagnostics()}")
                             armResponseTimeout(sessionId)
                         }
@@ -517,9 +497,7 @@ class VoiceInputManager internal constructor(
         isDispatchingTranscripts = true
         try {
             while (isCurrent(sessionId)) {
-                val pending = pendingTranscripts.firstOrNull() ?: break
-                val head = pending.segment
-                val dispatchAtMs = SystemClock.elapsedRealtime()
+                val head = pendingTranscripts.firstOrNull() ?: break
                 listener?.onProcessingStarted()
                 val accepted = try {
                     listener?.onTranscriptionResult(head.text, head.attachesToPrevious) == true
@@ -528,10 +506,6 @@ class VoiceInputManager internal constructor(
                     false
                 }
                 if (!isCurrent(sessionId)) return
-                if (museConfig.timingDiagnostics) Log.i(TAG,
-                    "timing phase=editor session=$sessionId accepted=$accepted " +
-                        "queueMs=${dispatchAtMs - pending.receivedAtMs} " +
-                        "dispatchMs=${SystemClock.elapsedRealtime() - dispatchAtMs}")
                 if (!accepted) {
                     // The editor may have partially applied the operation. Do not
                     // retry it, advance the FIFO, or attempt a marker in that editor.

@@ -41,7 +41,6 @@ class VoiceInputManagerTest {
     private var onInsert: (() -> Unit)? = null
     private var onRecorderStop: (() -> Unit)? = null
     private var onStateChange: ((VoiceInputManager.State) -> Unit)? = null
-    private lateinit var sessionConfig: MuseTranscriptionClient.SessionConfig
 
     @Before
     fun setUp() {
@@ -60,10 +59,7 @@ class VoiceInputManagerTest {
         }
         val client = Mockito.mock(MuseTranscriptionClient::class.java) { call ->
             when (call.method.name.substringBefore('$')) {
-                "startStreaming" -> {
-                    starts++; sessionConfig = call.arguments[1] as MuseTranscriptionClient.SessionConfig
-                    stream = call.arguments[2] as MuseTranscriptionClient.StreamingCallback; null
-                }
+                "startStreaming" -> { starts++; stream = call.arguments[2] as MuseTranscriptionClient.StreamingCallback; null }
                 "offerAudioChunk" -> {
                     if (sendResult == MuseTranscriptionClient.AudioSendResult.ACCEPTED) {
                         sent.add("audio:${(call.arguments[0] as ByteArray)[0]}")
@@ -104,29 +100,6 @@ class VoiceInputManagerTest {
         assertEquals(before, sent.size)
         audio(9); assertEquals("audio:9", sent.last())
         assertTrue(errors.isEmpty())
-    }
-    @Test fun modeAndDiagnosticsAreFixedUntilTheNextRecording() {
-        val prefs = ApplicationProvider.getApplicationContext<Context>().prefs()
-        start()
-        assertEquals(MuseTranscriptionClient.Mode.DIARIZATION, sessionConfig.mode)
-        TranscriptionPreferences.writeMuseResponsiveDictation(prefs, true)
-        TranscriptionPreferences.writeMuseTimingDiagnostics(prefs, true)
-        manager.pauseRecording(); manager.resumeRecording()
-        assertEquals(MuseTranscriptionClient.Mode.DIARIZATION, sessionConfig.mode)
-        manager.cancelRecording(); start()
-        assertEquals(MuseTranscriptionClient.Mode.ENDPOINTING, sessionConfig.mode)
-        assertTrue(sessionConfig.timingDiagnostics)
-    }
-    @Test fun recorderCaptureTimeIncludesTimeSpentWaitingForTheMainLooper() {
-        ApplicationProvider.getApplicationContext<Context>().prefs().edit().putInt(
-            helium314.keyboard.latin.settings.Settings.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS, 300).commit()
-        start()
-        val captured = android.os.SystemClock.elapsedRealtime()
-        advance(VoiceInputManager.PROGRESS_TIMEOUT_MS)
-        capture.onCapturedAudioChunk(ByteArray(4800), false, captured)
-        assertTrue(manager.isIdle)
-        assertTrue(errors.any { it.contains("upload stalled") })
-        assertTrue(sent.isEmpty())
     }
 
     @Test fun filteredSpeakerFinalSettlesPendingSpeechWithoutAnEditorWrite() {

@@ -79,12 +79,6 @@ and stored in app-private storage excluded from backup. Meta account billing and
 model access are required. Existing provider credentials remain untouched for
 comparison builds. No shared credential is embedded in the APK.
 
-Settings → Transcription also offers **Responsive dictation (all voices)**. It uses
-Muse endpointing and may complete turns sooner, while explicitly disabling speaker
-filtering. This is experimental; completed punctuation can be worse.
-**Measure transcription delays** adds local event/queue timing without
-text or credentials. Both are off by default and apply to the next recording.
-
 See [Muse transcription](docs/muse-transcription.md) for the protocol, lifecycle,
 privacy, live probe, and phone acceptance matrix. Live access and transcription
 quality require a user-supplied key and device testing.

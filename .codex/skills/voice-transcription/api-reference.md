@@ -3,7 +3,7 @@
 - Model: `muse-voice-transcribe-1.0`.
 - URL: `wss://api.meta.ai/v1/asr/realtime`.
 - First JSON frame: authorization.accessToken = `Bearer <key>`, model,
-  audioEncoding = `PCM_24KHZ` / `PCM_16KHZ`, mode = `DIARIZATION` by default / opt-in `ENDPOINTING` (all voices),
+  audioEncoding = `PCM_24KHZ` / `PCM_16KHZ`, mode = `DIARIZATION`,
   partialMode = `CUMULATIVE`, emitAudioProgress = true, optional keywords and
   languageBias (supported language names).
 - Server acknowledges with sessionId and no type; only then send binary raw mono

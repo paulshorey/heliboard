@@ -16,7 +16,6 @@ Preference keys, defaults, runtime snapshots, and transcription-specific prefere
 ## Non-obvious notes
 - This is not the settings UI package; Compose screens live in `helium314.keyboard.settings`.
 - Muse uses typed Kotlin preference access: auto-language off, editor keyword harvesting on, user vocabulary empty. The personal API key lives in app-private noBackupFilesDir via AtomicFile, not SharedPreferences. Existing provider keys are preserved for comparison builds.
-- Responsive dictation and timing diagnostics default off and apply at next mic start. Responsive mode explicitly disables first-speaker filtering and uses ENDPOINTING.
 - Muse vocabulary inherits Gemini/Soniox user terms once. App upgrade does not erase comparison-provider settings. No smart/verbatim or server endpoint-delay preference is exposed.
 - Local voice prefs configure RMS activity and silence auto-stop (default 30 s), never provider sentence boundaries. Pause generates silence after stopping the microphone. See docs/muse-transcription.md.
 - `PREF_EDIT_HISTORY_ENABLED` gates regular-keyboard edit-history capture in `LatinIME` (default on). Password, no-learning, and incognito fields are always excluded.

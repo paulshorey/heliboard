@@ -26,7 +26,6 @@ Feature-specific Compose screens for the settings app.
 - `VoiceDiagnosticsScreen.kt` - on-device viewer for recent voice/transcription diagnostic log lines.
 
 ## Non-obvious notes
-- Transcription offers explicit Responsive dictation (all voices) and metadata-only timing diagnostics, both off by default and applied to the next recording. The mode warning must remain visible.
 - Muse setup/transcription key fields are masked and use backup-excluded storage. Vocabulary/language hints apply at the next mic start; the first speaker is selected for that session.
 - These screens are UI only; the actual preference keys/defaults live in `latin/settings/`.
 - `TextCorrectionScreen` no longer exposes `PREF_ALWAYS_SHOW_SUGGESTIONS`; host `TYPE_TEXT_FLAG_NO_SUGGESTIONS` still shows candidates but does not autocorrect or learn.

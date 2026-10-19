@@ -2,8 +2,7 @@
 
 This branch uses Meta `muse-voice-transcribe-1.0`, with a first-speaker filter.
 Accuracy takes priority over latency. Only completed, attributed turns enter the
-host editor in default protected mode. Opt-in Responsive dictation inserts completed
-turns from all speakers using ENDPOINTING. An arbitrary two-second output deadline would commit speculation;
+host editor. An arbitrary two-second output deadline would commit speculation;
 there is no such deadline and no client sentence-finalization command.
 
 ## Setup and privacy
@@ -28,7 +27,7 @@ organizational enablement. Do not assume personal-key retention is zero.
 
 - Endpoint: `wss://api.meta.ai/v1/asr/realtime`.
 - First text frame: `authorization.accessToken = "Bearer <key>"`, model,
-  `audioEncoding`, `mode: DIARIZATION` by default or explicit `ENDPOINTING`, `partialMode: CUMULATIVE`,
+  `audioEncoding`, `mode: DIARIZATION`, `partialMode: CUMULATIVE`,
   `emitAudioProgress: true`, optional `keywords` and `languageBias`.
 - Wait for the bare `{sessionId: ...}` acknowledgement. Then send raw binary PCM16
   little-endian mono, not base64 or a WAV container.
@@ -43,9 +42,9 @@ organizational enablement. Do not assume personal-key retention is zero.
 - `speaker` labels the preceding active span and has no turnId. Associate it with
   the active speechStart. Keep completed state keyed by turnId, using observed
   start order, not numeric IDs or completion arrival order.
-- Require speechEnd as well as completed text and (in DIARIZATION) attribution before release; an
+- Require speechEnd as well as completed text and attribution before release; an
   early completion cannot overtake a later conflicting speaker label.
-- In DIARIZATION the earliest nonempty attributed turn selects the speaker. Other labels are
+- The earliest nonempty attributed turn selects the speaker. Other labels are
   discarded before insertion but still settle processing. Labels persist through
   pause/resume and reset at the next explicit recording.
 - Repeated same-label events are harmless. Different labels in one turn cannot be
@@ -168,47 +167,39 @@ frame on overflow; HeliBoard fails visibly instead. Prose describes one label pe
 turn, while an example repeats A; identical repeated labels are accepted, mixed
 labels are unresolved. These differences are explicit live-probe cases.
 
-## Responsive dictation and diagnosing delayed punctuation
+## Punctuation regression recovery
 
-Meta documents that DIARIZATION is not tuned for low-latency speech endpoints.
-Punctuation can improve in speechComplete after speechEnd. A grammatical sentence
-boundary does not necessarily end the model's turn. The app never commits an
-intermediate hypothesis, even if it already contains punctuation.
+The October 19 phone comparison reported reliable punctuation after long pauses
+with the original `05a37649` APK and unreliable punctuation with `ef081a49` on the
+same phone. The uploaded diagnostics confirmed DIARIZATION at 24 kHz. Six of nine
+completed responses contained no `.`, `!` or `?` before editor processing; three
+contained sentence marks. Local receipt-to-insertion acknowledgment was 4–9 ms.
+These counts are not a punctuation accuracy score and do not count commas.
+The phone result is stronger product evidence than a synthetic provider probe.
 
-Settings → Transcription:
+The responsive dictation/timing runtime experiment from #167 has been rolled
+back. The recorder callback, manager PCM queue timestamps, transcript FIFO,
+DIARIZATION handshake/configuration and settings UI use the original baseline.
+The obsolete `muse_responsive_dictation` / `muse_timing_diagnostics` preferences
+are ignored without erasing keys, vocabulary or other settings. The existing
+Voice diagnostics viewer remains, without experimental per-event timing hooks.
+No individual experimental change has been proven to cause the regression; this
+is a controlled rollback for phone validation, not a claimed isolated root cause.
 
-- **Responsive dictation (all voices)** is off by default. Enable it to try
-  experimental ENDPOINTING, which may finish turns sooner but can punctuate less
-  accurately. It inserts all completed turns,
-  including other people. It cannot retain the first-speaker filter without
-  speaker labels. Turn it off to restore protected DIARIZATION on the next mic
-  start. Existing settings and keys are preserved; pause/resume never changes mode.
-- **Measure transcription delays** is off by default. Enable it before starting
-  a recording, reproduce the delay, then open Voice diagnostics. It adds only
-  numeric event timing, counts and queue measurements. No audio, words, speaker
-  labels, API keys or provider session identifiers enter these diagnostics.
-  Disable it for subsequent recordings when finished. Existing logs are bounded.
+The later review fixes remain: ended wordless turns retire at their deadline or
+verified close; recognized missing finals still fail; submitted speech offsets
+must be processed; verified wordless closure settles local false positives;
+early completions do not start the final wait before speechEnd. Empty final
+transcript flushes at EOF are still tolerated. None changes PCM bytes, sender
+pacing, handshake options or completed transcript wording.
 
-The timing timeline uses local monotonic timestamps, not wall-clock time:
-
-| Field / phase | Meaning |
-| --- | --- |
-| audio maxCaptureToSendMs | Largest recorder-read-to-socket-accept delay so far, including main-looper waiting; paused silence has its own creation timestamp |
-| event elapsedMs | Receipt time on the socket thread, relative to opening the client |
-| event handlerQueueMs | Socket receipt to handling/measurement on the main looper |
-| progress processingLeadMs / socketBytes | Submitted audio minus reported processing, and local socket backlog; sampled once per second |
-| firstPartialMs / firstPunctuationMs | First nonempty hypothesis / first hypothesis containing `.`, `!` or `?`; punctuation counts are not verified sentence boundaries |
-| speechEndMs / completeMs / speakerMs | Local receipt times of provider boundary, completed text and last attribution event |
-| endToFinalMs | Completion receipt minus boundary receipt; can be negative for an early completion |
-| finalToReleaseMs | Completed-text receipt to ordered assembly release, including handler waiting and prior unresolved turns |
-| editor queueMs / dispatchMs | Release-to-local-insertion wait and insertion/cleanup duration; Android dispatch is not proof of host acceptance |
-
-A late speechEnd points to provider turn detection; a timely speechEnd followed
-by a late completion points to provider completion work. A timely completion but
-late release points to handler/ordering/attribution. Timely release but late
-insertion points to the local editor path. audioProcessedMs is processing progress,
-not an exact acoustic endpoint. Annotate actual speech/sentence endings in the WAV
-when measuring post-speech latency. First-final time includes time spent speaking.
+Before merging, compare this recovery APK with the original on the same phone:
+fast speech, long natural sentence pauses, questions and explicit Stop/drain.
+Also repeat guest-speaker filtering, noise-before-speech and lost-suffix checks.
+Do not restore the latency experiment until a phone comparison establishes that
+it preserves the original punctuation quality. More waiting after a received
+speechComplete, inserting provisional text or appending guessed periods is not
+an established fix for the observed unpunctuated completed responses.
 
 ### Identical-recording comparison
 
@@ -234,14 +225,11 @@ counts help separate partial availability from completed-text delivery. Compare
 word and punctuation accuracy alongside latency; one synthetic pass cannot prove
 human performance. ENDPOINTING deliberately has no guest-speaker rejection.
 
-An October 19, 2026 live probe replayed the same 17.324-second synthetic A/B/A
-recording in both modes. DIARIZATION delivered its first completed turn at
-6.561 seconds and selected two turns while filtering the guest turn. ENDPOINTING
-delivered its first completed turn at 5.739 seconds and selected all three. The
-three completed turns contained 2/1/2 sentence punctuation marks in DIARIZATION
-and 0/0/0 in ENDPOINTING. Both drained to normal closure (225/149 ms after EOF).
-This is protocol/comparison evidence, not a human accuracy benchmark. It supports
-keeping protected DIARIZATION as the default and labeling ENDPOINTING experimental.
+Earlier synthetic comparisons varied: one returned sentence marks only in
+DIARIZATION; a later replay returned them in both modes. Neither establishes
+human punctuation quality or explains the version-dependent phone regression.
+The developer probe retains mode/timing comparison for research, independently
+of the app's reverted runtime experiment.
 
 Keep all captured PCM and real-time pacing. Do not insert fake pauses, commit
 stable-looking partials, or reset sessions per sentence: these risk quiet-word
