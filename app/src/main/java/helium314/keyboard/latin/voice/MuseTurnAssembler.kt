@@ -16,7 +16,6 @@ internal class MuseTurnAssembler {
     // Insertion order is speechStart order; numeric IDs have no ordering contract.
     private val turns = linkedMapOf<Int, Turn>()
     private val settled = mutableSetOf<Int>()
-    private val retiredEmpty = mutableSetOf<Int>()
     private var activeId: Int? = null
     private var selectedSpeaker: String? = null
 
@@ -31,14 +30,8 @@ internal class MuseTurnAssembler {
                 activeId = id
             }
             "transcript" -> {
-                val text = event.getString("transcript")
-                val turn = turns[activeId]
-                // Muse may flush an empty final after the last completed turn at EOF.
-                // It carries no words; a nonempty or nonfinal orphan remains an error.
-                check(turn != null || (text.isBlank() && event.optBoolean("final"))) {
-                    "Transcript without a speech turn"
-                }
-                if (text.isNotBlank()) turn!!.hasWords = true
+                val turn = turns[activeId] ?: error("Transcript without a speech turn")
+                if (event.getString("transcript").isNotBlank()) turn.hasWords = true
             }
             "speaker" -> {
                 val turn = turns[activeId] ?: error("Speaker without a speech turn")
@@ -55,9 +48,6 @@ internal class MuseTurnAssembler {
             }
             "speechComplete" -> {
                 val id = event.getInt("turnId")
-                check(id !in retiredEmpty || event.getString("transcript").isBlank()) {
-                    "Words arrived after an empty turn expired"
-                }
                 if (id !in settled) {
                     val turn = turns[id] ?: error("Unknown completed turn")
                     val text = event.getString("transcript")
@@ -67,10 +57,6 @@ internal class MuseTurnAssembler {
                 }
             }
         }
-        return drain()
-    }
-
-    private fun drain(): List<CompletedTurn> {
         val results = mutableListOf<CompletedTurn>()
         while (turns.isNotEmpty()) {
             val (id, turn) = turns.entries.first()
@@ -85,24 +71,9 @@ internal class MuseTurnAssembler {
         return results
     }
 
-    // No-word turns also need a deadline: they must not block later text forever.
-    // Retain them until then to allow a late final with no preceding partials.
-    fun pendingFinalIds(): Set<Int> = turns.filterValues { it.ended }.keys.toSet()
-    fun expireEmptyTurn(id: Int): List<CompletedTurn> {
-        val turn = turns[id] ?: return emptyList()
-        check(turn.ended && !turn.hasWords) { "Muse did not finish a speech turn or identify its speaker" }
-        retireEmpty(id)
-        return drain()
-    }
-    fun settleEmptyEndedTurns(): List<CompletedTurn> {
-        turns.filterValues { it.ended && !it.hasWords }.keys.toList().forEach(::retireEmpty)
-        return drain()
-    }
-    private fun retireEmpty(id: Int) {
-        turns.remove(id)
-        settled.add(id)
-        retiredEmpty.add(id)
-    }
+    fun pendingFinalIds(): Set<Int> = turns.filterValues {
+        it.hasWords && (it.ended || it.text != null)
+    }.keys.toSet()
     fun hasPendingTurns(): Boolean = turns.values.any { it.hasWords }
     fun verifyFinished() {
         check(!hasPendingTurns()) { "Muse ended with unresolved text or speaker attribution. Tap the mic and speak first again." }

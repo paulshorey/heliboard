@@ -32,7 +32,7 @@ class MuseTranscriptionClientStreamTest {
                 override fun onStreamReady() { events.add("ready") }
                 override fun onTranscriptionResult(segment: TranscriptSegment) { events.add(segment.text) }
                 override fun onInterimTranscription() { events.add("interim") }
-                override fun onServerResponse(hasSettledSpeech: Boolean) { }
+                override fun onServerResponse(hasTranscriptText: Boolean) { }
                 override fun onStreamError(error: String) { events.add("error:$error") }
                 override fun onStreamClosed() { events.add("closed") }
             })

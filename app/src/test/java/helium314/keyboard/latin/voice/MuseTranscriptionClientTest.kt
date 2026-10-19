@@ -23,20 +23,14 @@ class MuseTranscriptionClientTest {
     private var closed = false
     private var ready = false
     private var settled = 0
-    private var onSettlement: (() -> Unit)? = null
     private val config = MuseTranscriptionClient.SessionConfig(24000, listOf("English"), listOf("Anaya"))
     @Before fun setup() {
-        start(config)
-    }
-    private fun start(sessionConfig: MuseTranscriptionClient.SessionConfig) {
         client.socketFactory = WebSocket.Factory { _, listener -> transport = listener; socket }
-        client.startStreaming("test-secret", sessionConfig, object : MuseTranscriptionClient.StreamingCallback {
+        client.startStreaming("test-secret", config, object : MuseTranscriptionClient.StreamingCallback {
             override fun onStreamReady() { ready = true }
             override fun onTranscriptionResult(segment: TranscriptSegment) { texts.add(segment.text) }
             override fun onInterimTranscription() { }
-            override fun onServerResponse(hasSettledSpeech: Boolean) {
-                if (hasSettledSpeech) { settled++; onSettlement?.invoke() }
-            }
+            override fun onServerResponse(hasTranscriptText: Boolean) { if (hasTranscriptText) settled++ }
             override fun onStreamError(error: String) { errors.add(error) }
             override fun onStreamClosed() { closed = true }
         })
@@ -76,71 +70,6 @@ class MuseTranscriptionClientTest {
         message("""{"type":"audioProgress","audioProcessedMs":2000}""")
         assertEquals(MuseTranscriptionClient.AudioSendResult.ACCEPTED, client.offerAudioChunk(ByteArray(4800)))
     }
-    @Test fun speechRemainsPendingAfterSocketDrainUntilItsPcmOffsetIsProcessed() {
-        ack()
-        assertEquals(MuseTranscriptionClient.AudioSendResult.ACCEPTED, client.offerAudioChunk(ByteArray(4800)))
-        assertEquals(0, socket.queueSize())
-        assertTrue(client.hasQueuedSpeechFrames())
-        message("""{"type":"audioProgress","audioProcessedMs":99}""")
-        assertTrue(client.hasQueuedSpeechFrames())
-        message("""{"type":"audioProgress","audioProcessedMs":100}""")
-        assertFalse(client.hasQueuedSpeechFrames())
-        advance(100)
-        client.offerAudioChunk(ByteArray(4800), containsSpeech = false)
-        assertFalse(client.hasQueuedSpeechFrames()) // Unprocessed quiet tail is harmless.
-        advance(100)
-        client.offerAudioChunk(ByteArray(4800))
-        assertTrue(client.hasQueuedSpeechFrames())
-        client.cancelAll()
-        assertFalse(client.hasQueuedSpeechFrames())
-    }
-    @Test fun anOlderFinalCannotHideAnUnprocessedSpeechSuffixAtNormalClose() {
-        ack(); client.offerAudioChunk(ByteArray(4800)); advance(100)
-        client.offerAudioChunk(ByteArray(4800))
-        event("speechStart"); event("speaker"); event("speechEnd")
-        message("""{"type":"speechComplete","turnId":1,"transcript":"Prefix.","audioProcessedMs":100}""")
-        assertTrue(client.hasQueuedSpeechFrames())
-        client.finishStreaming(); transport.onClosed(socket, 1000, "")
-        shadowOf(Looper.getMainLooper()).idle()
-        assertEquals(listOf("Prefix."), texts)
-        assertEquals(1, errors.size)
-        assertFalse(closed)
-    }
-    @Test fun noiseDeadlineReleasesLaterFinalBeforeItsOwnDeadline() {
-        ack(); event("speechStart", 7); event("speechEnd", 7); advance(1000)
-        event("speechStart", 2); event("speaker", 2); event("transcript", 2); event("speechEnd", 2)
-        event("speechComplete", 2, "After noise.")
-        assertTrue(texts.isEmpty())
-        advance(29_001)
-        assertEquals(listOf("After noise."), texts)
-        advance(1000)
-        assertTrue(errors.isEmpty())
-    }
-    @Test fun normalCloseReleasesFinalBehindNoiseWithoutWaitingForNoiseDeadline() {
-        ack(); event("speechStart", 7); event("speechEnd", 7)
-        event("speechStart", 2); event("speaker", 2); event("speechEnd", 2)
-        event("speechComplete", 2, "After noise."); client.finishStreaming()
-        transport.onClosed(socket, 1000, ""); shadowOf(Looper.getMainLooper()).idle()
-        assertEquals(listOf("After noise."), texts)
-        assertTrue(closed); assertTrue(errors.isEmpty())
-    }
-    @Test fun normalCloseSettlesFilteredGuestBehindNoiseWithoutAnotherEditorWrite() {
-        ack(); event("speechStart"); event("speaker"); event("speechEnd"); event("speechComplete")
-        event("speechStart", 7); event("speechEnd", 7)
-        event("speechStart", 2); event("speaker", 2, label = "B"); event("speechEnd", 2)
-        event("speechComplete", 2, "Guest."); client.finishStreaming()
-        transport.onClosed(socket, 1000, ""); shadowOf(Looper.getMainLooper()).idle()
-        assertEquals(listOf("Hello."), texts)
-        assertEquals(2, settled) // Discarded guest still acknowledges real completed work.
-        assertTrue(closed); assertTrue(errors.isEmpty())
-    }
-    @Test fun anEarlyCompletionDoesNotStartTheFinalWaitBeforeSpeechEnd() {
-        ack(); event("speechStart"); event("speaker"); event("speechComplete")
-        advance(30_001)
-        assertTrue(errors.isEmpty()); assertTrue(texts.isEmpty())
-        event("speechEnd")
-        assertEquals(listOf("Hello."), texts)
-    }
     @Test fun onlyCompletedSelectedSpeakerTextIsInsertedAndDiscardedTurnsSettle() {
         ack(); event("speechStart"); event("transcript"); assertTrue(texts.isEmpty())
         event("speaker"); event("speechEnd"); event("speechComplete")
@@ -155,7 +84,6 @@ class MuseTranscriptionClientTest {
         assertEquals("{\"type\":\"endStream\"}", socket.controls.last())
         assertEquals(MuseTranscriptionClient.AudioSendResult.FAILED, client.offerAudioChunk(ByteArray(4800)))
         event("speechEnd"); event("speechComplete")
-        event("transcript", text = "") // Empty final flush observed on live Muse EOF.
         transport.onClosed(socket, 1000, ""); shadowOf(Looper.getMainLooper()).idle()
         assertTrue(closed); assertEquals(listOf("Hello."), texts); assertTrue(errors.isEmpty())
     }
@@ -173,14 +101,6 @@ class MuseTranscriptionClientTest {
     @Test fun cancelInvalidatesPreviouslyPostedFramesAndLaterErrors() {
         ack(); transport.onMessage(socket, "not json"); client.cancelAll()
         shadowOf(Looper.getMainLooper()).idle(); assertTrue(errors.isEmpty())
-    }
-    @Test fun verifiedClosureSettlementCannotCloseAReentrantlyStartedSession() {
-        ack(); event("speechStart"); event("speechEnd"); client.finishStreaming()
-        onSettlement = { onSettlement = null; start(config) }
-        transport.onClosed(socket, 1000, ""); shadowOf(Looper.getMainLooper()).idle()
-        assertFalse(closed); assertTrue(errors.isEmpty())
-        ack()
-        assertEquals(MuseTranscriptionClient.AudioSendResult.ACCEPTED, client.offerAudioChunk(ByteArray(4800)))
     }
     @Test fun invalidServicePayloadAndErrorsNeverExposeTranscriptOrKey() {
         ack(); message("""{"type":"error","message":"Bearer test-secret raw private transcript"}""")

@@ -36,9 +36,6 @@ organizational enablement. Do not assume personal-key retention is zero.
 - `speechStart` creates a turn. `transcript` updates provisional evidence only,
   even with `final: true`. `speechEnd` is a boundary. `speechComplete` contains the
   entire completed turn, including provider punctuation/capitalization.
-- A live session can flush an empty final `transcript` after its last completed
-  turn at EOF. Ignore that wordless flush; nonempty or nonfinal transcripts without
-  an unsettled active turn remain protocol errors.
 - `speaker` labels the preceding active span and has no turnId. Associate it with
   the active speechStart. Keep completed state keyed by turnId, using observed
   start order, not numeric IDs or completion arrival order.
@@ -52,11 +49,6 @@ organizational enablement. Do not assume personal-key retention is zero.
   Missing attribution blocks later text until resolved; close/timeout reports it.
 - Deduplicate by session/turn identity, not transcript contents. Repeating a whole
   sentence in a new turn must type it again.
-- Ended turns without words retain their place for the same 30-second final wait,
-  since a completed transcript can arrive without partials. At that deadline, or
-  on normal server closure when no more results can arrive, retire wordless turns
-  without choosing a speaker and release later ready text. Unexpected nonempty
-  text after such expiry fails visibly rather than being dropped or reordered.
 
 Diarization covers non-overlapping speech. Radio/TV or another person speaking
 first may be selected, and overlapping/similar voices can be misclassified. These
@@ -71,14 +63,6 @@ reordering data. The sender paces against a monotonic clock with one capture fra
 of headroom. Submitted audio leads reported processing by at most two seconds,
 below Meta's five-second policy limit; the socket queue is also bounded. Progress
 is evidence of processing, not a receipt for editor insertion or individual words.
-Track the last submitted speech-frame byte offset against provider processing as
-well as socket backlog. An empty socket queue alone cannot acknowledge a newer
-speech suffix; normal closure with unprocessed submitted speech is an interruption.
-After verifying normal closure has no pending recognized words or unprocessed
-speech, the client acknowledges settlement even if no completed text was emitted.
-This clears local RMS false positives for wordless noise, including turns retired
-before Stop, without inserting an interruption marker. Missing recognized finals,
-missing attribution and unprocessed speech still fail visibly.
 
 Pause stops native microphone capture. A main-looper barrier orders its posted
 tail before generated zero PCM, emitted on an absolute 100 ms schedule. Resume
@@ -87,11 +71,10 @@ time can be billed. No captured audio is synthesized over a missing network span
 
 Local RMS VAD only controls activity and the configurable silence auto-stop
 (default 30 seconds). It does not finalize turns or discard quiet audio. Each
-provider-ended recognized turn has a fixed 30-second final/attribution deadline;
+recognized turn has a 30-second final/attribution deadline once it ends or has
+completed text (the baseline also starts this wait for early completions);
 interims/progress cannot postpone it. Long speech without an endpoint can continue
 while the response watchdog sees progress. Raw noise alone requires no final.
-Empty-ended turns expire harmlessly at the final deadline; recognized unresolved
-turns still fail. A completion received before speechEnd does not start that wait.
 
 One recording owns one connection. At 55 minutes stop capture and drain before the
 60-minute service cap. Explicit stop joins capture, accepts its already-posted
@@ -167,82 +150,114 @@ frame on overflow; HeliBoard fails visibly instead. Prose describes one label pe
 turn, while an example repeats A; identical repeated labels are accepted, mixed
 labels are unresolved. These differences are explicit live-probe cases.
 
-## Punctuation regression recovery
 
-The October 19 phone comparison reported reliable punctuation after long pauses
-with the original `05a37649` APK and unreliable punctuation with `ef081a49` on the
-same phone. The uploaded diagnostics confirmed DIARIZATION at 24 kHz. Six of nine
-completed responses contained no `.`, `!` or `?` before editor processing; three
-contained sentence marks. Local receipt-to-insertion acknowledgment was 4–9 ms.
-These counts are not a punctuation accuracy score and do not count commas.
-The phone result is stronger product evidence than a synthetic provider probe.
+## Full baseline restoration and acceptance hold (October 19, 2026)
 
-The responsive dictation/timing runtime experiment from #167 has been rolled
-back. The recorder callback, manager PCM queue timestamps, transcript FIFO,
-DIARIZATION handshake/configuration and settings UI use the original baseline.
-The obsolete `muse_responsive_dictation` / `muse_timing_diagnostics` preferences
-are ignored without erasing keys, vocabulary or other settings. The existing
-Voice diagnostics viewer remains, without experimental per-event timing hooks.
-No individual experimental change has been proven to cause the regression; this
-is a controlled rollback for phone validation, not a claimed isolated root cause.
+The author twice compared the original `05a37649` APK with later builds on the
+same phone. The original reliably punctuated after a sufficiently long pause;
+`ef081a49` and the partial rollback `45620443` consistently omitted punctuation.
+The partial rollback retained reviewed fixes in turn assembly, speech tracking
+and normal closure. Those are now reverted too. All application code, resources,
+build configuration and JVM tests are restored to `05a37649`; later developer
+probe changes are also reverted. Only explanatory documentation differs from
+the baseline. The individual causal change remains unisolated.
 
-The later review fixes remain: ended wordless turns retire at their deadline or
-verified close; recognized missing finals still fail; submitted speech offsets
-must be processed; verified wordless closure settles local false positives;
-early completions do not start the final wait before speechEnd. Empty final
-transcript flushes at EOF are still tolerated. None changes PCM bytes, sender
-pacing, handshake options or completed transcript wording.
+A freshly built APK must be checked against the original packaged runtime, not
+only source fingerprints. Passing offline tests do not establish phone quality.
+Keep the original immutable APK available as the already-tested reference and
+keep this PR draft. Do not reapply reviewed fixes automatically while the
+version-dependent punctuation regression is unresolved.
 
-Before merging, compare this recovery APK with the original on the same phone:
-fast speech, long natural sentence pauses, questions and explicit Stop/drain.
-Also repeat guest-speaker filtering, noise-before-speech and lost-suffix checks.
-Do not restore the latency experiment until a phone comparison establishes that
-it preserves the original punctuation quality. More waiting after a received
-speechComplete, inserting provisional text or appending guessed periods is not
-an established fix for the observed unpunctuated completed responses.
+The rollback deliberately restores these known baseline defects, which remain
+open review findings:
 
-### Identical-recording comparison
+- An ended no-word turn can remain at the ordering queue head and block later
+  completed speech. There is no empty-turn retirement deadline.
+- An empty outgoing socket queue can let an older final acknowledge a newer
+  speech suffix that has not yet been reported processed by the provider.
+- Local RMS noise with no completed words can leave an interruption pending at
+  normal closure. There is no separate verified wordless-settlement callback.
+- Early completed text starts the final wait even before speechEnd, and an empty
+  final transcript flush without an unsettled turn can be rejected.
 
-Use short, non-sensitive human recordings that reproduce fast continuous speech,
-natural sentence breaks, questions, thinking pauses, and quiet speech. Include
-quiet and ordinary room noise, plus a separate A/B/A recording to validate the
-protected filter. Replay identical PCM so microphone differences do not confound
-mode comparisons. The desktop tool tests provider behavior; the phone tests the
-Android capture/handler/editor path.
+These findings are deferred during recovery, not fixed or disproven. Reintroduce
+any change only in an isolated, reversible contribution with a same-phone
+comparison to the accepted baseline. Do not merge this draft merely because the
+baseline tests or an automated review pass.
 
-```sh
-python3 tools/muse-streaming-smoke-test.py --audio /private/fast-speech.wav \
-  --env-file .env --language English --compare-modes --timings
-```
+## Proposed punctuation restoration (research only)
 
-This sends the same audio twice (two billable sessions). `--mode DIARIZATION` or
-`--mode ENDPOINTING` runs one mode. Environment keys override literal env-file
-assignments; files are never executed or expanded. Default output is metadata
-only. `--show-transcripts` explicitly prints private text for manual accuracy
-review. No recordings/reports are saved by the tool; redirect metadata output to
-a private local file if desired. Event receipt/release timestamps and punctuation
-counts help separate partial availability from completed-text delivery. Compare
-word and punctuation accuracy alongside latency; one synthetic pass cannot prove
-human performance. ENDPOINTING deliberately has no guest-speaker rejection.
+Meta's [cookbook](https://dev.meta.ai/docs/cookbook/muse-voice-transcribe) explicitly
+says Muse handles punctuation. The [voice schema](https://dev.meta.ai/docs/api-reference/voice/schemas)
+exposes no punctuation toggle, aggressiveness control or endpoint pause setting.
+The author's playground observation and app results establish inconsistent
+punctuation for this use, not the absence of a native punctuation capability.
 
-Earlier synthetic comparisons varied: one returned sentence marks only in
-DIARIZATION; a later replay returned them in both modes. Neither establishes
-human punctuation quality or explains the version-dependent phone regression.
-The developer probe retains mode/timing comparison for research, independently
-of the app's reverted runtime experiment.
+Recommendation: evaluate a separate punctuation/capitalization stage on saved,
+non-sensitive human dictation before touching capture or transport again. No
+second model, model download, cloud account or extra text upload is added in the
+baseline recovery. The following is a proposed follow-up, not shipping behavior.
 
-Keep all captured PCM and real-time pacing. Do not insert fake pauses, commit
-stable-looking partials, or reset sessions per sentence: these risk quiet-word
-loss, revisions, guest insertion and loss of speaker identity. A provisional
-preview is deferred because attribution may arrive late and it would not make
-final punctuation arrive sooner. No additional rewriting model is introduced.
+### Candidates and limits
 
-### Provider support packet (prepare locally; submit separately)
+- **First local English candidate:** Edge-Punct-Casing, distributed as
+  `sherpa-onnx-online-punct-en-2024-08-06`. The [maintainer's model documentation](https://k2-fsa.github.io/sherpa/onnx/punctuation/pretrained_models.html)
+  lists a 7.1 MB INT8 ONNX model and a 146 KB BPE vocabulary. Its
+  [paper](https://arxiv.org/abs/2407.13142) targets on-device streaming punctuation
+  and casing. Small size makes it worth evaluating; it does not establish better
+  accuracy or Android integration/performance in HeliBoard. Check exact model
+  licensing, punctuation labels, supported Android ABIs/API levels, tokenizer,
+  RAM, startup, battery and inference latency before adding a dependency.
+- **Larger classification reference:** [kredor/punctuate-all](https://huggingface.co/kredor/punctuate-all)
+  uses XLM-RoBERTa-base and supports twelve languages. Its model card names
+  Europarl training data. Evaluate spontaneous dictation and domain-specific
+  names separately; its published score is not a phone-dictation guarantee.
+- **Cloud text model comparison:** allow a model to propose punctuation labels at
+  fixed input-word boundaries, rather than freely rewrite the transcript. Score
+  it against the local candidates before choosing. Network latency, cost,
+  availability and a further text recipient are tradeoffs; no such service is
+  selected or called in this work.
 
-Record app build/model/mode, sample rate, relevant numeric timeline, actual pause
-lengths, reproduction steps and the quiet/noisy comparison. Include a private
-recording/transcript or session identifier only if you choose to share it with
-Meta through its support channel. Ask whether DIARIZATION supports earlier
-speechComplete, an endpoint sensitivity control, or stable attributed partials.
-Do not include keys or general editor contents. The app and probe do not send
-support reports automatically.
+[NVIDIA's archived punctuation model documentation](https://docs.nvidia.com/nemo-framework/user-guide/24.12/nemotoolkit/nlp/punctuation_and_capitalization.html)
+illustrates word-level punctuation/case labels and overlap for long text. Its
+[lexical/audio model discussion](https://docs.nvidia.com/nemo-framework/user-guide/24.12/nemotoolkit/nlp/punctuation_and_capitalization_lexical_audio.html)
+explains why text alone can be ambiguous without prosody. These are architectural
+references, not a claim that an old NeMo API is the selected current runtime.
+
+### Proposed integration and evaluation
+
+1. Keep the accepted Muse connection, PCM pacing, turn completion and speaker
+   filter unchanged. Accept only completed selected-speaker text as input to the
+   restoration stage. This does not make Muse's final words arrive sooner.
+2. Evaluate untouched Muse output, the small English model, a larger classifier
+   and an optional cloud candidate on the same human-labeled text. Include fast
+   paragraphs, long pauses, questions, fragments, self-corrections, names,
+   acronyms, numbers/decimals, URLs, code-switching and spoken commands.
+3. Prefer labels at original word offsets. Reconstruct from original word
+   substrings, never accept inserted/deleted/substituted/reordered words. Protect
+   internal apostrophes, hyphens, decimals, URLs, acronyms and mixed-case names.
+   Any candidate returning text must pass strict word/order validation; reject
+   invalid output and retain the untouched Muse result. Do not treat whitespace
+   splitting or removing all punctuation as sufficient validation.
+4. Give a bounded amount of session-owned preceding text as context; apply labels
+   only to the new pending segment. Do not expose general host-editor content,
+   rewrite prior committed text or mix another speaker's words into the context.
+   Preserve explicit spoken paragraph/punctuation commands and already-correct
+   provider punctuation in the initial conservative experiment.
+5. Run inference off the main looper with a bounded queue, generation/target
+   checks, ordered insertion, timeout and original-text fallback. Keyboard hide,
+   host clear or target loss cancels pending results. Keep restoration opt-in and
+   disabled by default until actual phone acceptance.
+6. Measure sentence-boundary precision/recall, commas, question marks, casing,
+   wrong extra punctuation, zero lexical changes, fallback rate and additional
+   latency. Accuracy is the selection criterion; small size alone is not.
+7. Only after offline comparison, add one selected model on a separate feature
+   branch, then repeat same-phone comparisons with restoration on/off. Verify
+   long-session memory and editor/lifecycle behavior as well as punctuation.
+
+Text-only restoration can infer grammatical boundaries without a long acoustic
+pause, but cannot recover every intonational distinction or correct a misheard
+word under a word-preservation contract. It cannot remove the existing wait for
+Muse's completed attributed turn. Any later goal of earlier streaming insertion
+requires a separate provider/attribution design; do not relax final-only or
+first-speaker guarantees to conceal that limitation.

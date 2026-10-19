@@ -11,9 +11,7 @@
 - speechStart / speechEnd / speechComplete correlate by turnId. Speaker and
   cumulative transcript events belong to the active span and have no turnId.
 - speechComplete is full final text including punctuation; transcript.final does
-  not complete a DIARIZATION or ENDPOINTING turn. Speaker labels are retrospective/per-session.
-- Empty final transcript flushes can arrive at EOF after a settled turn. Ignore
-  these wordless events only; unattributed nonempty text remains an error.
+  not complete a DIARIZATION turn. Speaker labels are retrospective/per-session.
 - End input with `{"type":"endStream"}` after all audio. Read until close 1000.
   There is no turn-commit command or resume token.
 - Close 1008: configuration/pacing failure; 1011: backend/session limit;

@@ -40,13 +40,4 @@ class TranscriptionPreferencesTest {
         assertEquals(listOf("Anaya", "API"), TranscriptionPreferences.parseCustomVocabulary(" Anaya\nanaya\nAPI\n\n"))
         assertEquals(100, TranscriptionPreferences.parseCustomVocabulary((1..150).joinToString("\n") { "Name$it" }).size)
     }
-    @Test fun retiredExperimentalFlagsDoNotChangeConfigOrCredentials() {
-        TranscriptionPreferences.writeMuseApiKey(context, "key")
-        val original = TranscriptionPreferences.readMuseConfig(prefs)
-        prefs.edit().putBoolean("muse_responsive_dictation", true)
-            .putBoolean("muse_timing_diagnostics", true).commit()
-        assertEquals(original, TranscriptionPreferences.readMuseConfig(prefs))
-        assertEquals("key", TranscriptionPreferences.readMuseApiKey(context))
-    }
-
 }

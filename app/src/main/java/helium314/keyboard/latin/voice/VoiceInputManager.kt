@@ -400,14 +400,14 @@ class VoiceInputManager internal constructor(
                 }
                 noteUnconfirmedSpeech(sessionId, "interim")
             }
-            override fun onServerResponse(hasSettledSpeech: Boolean) {
+            override fun onServerResponse(hasTranscriptText: Boolean) {
                 if (!isCurrent(sessionId)) return
                 lastResponseAtMs = SystemClock.elapsedRealtime()
                 responseTimeout?.let(mainHandler::removeCallbacks)
                 responseTimeout = null
-                // Completed turns and verified closure settle speech even when
-                // no editor write is needed (filtered guests or wordless noise).
-                if (hasSettledSpeech) acknowledgeFinal(sessionId, logProgress = false)
+                // Repeated authoritative finals still prove transcript progress
+                // even when the client has suppressed a duplicate editor write.
+                if (hasTranscriptText) acknowledgeFinal(sessionId, logProgress = false)
                 // Audio progress proves processing, not completed words.
             }
             override fun onStreamError(error: String) {
@@ -533,7 +533,7 @@ class VoiceInputManager internal constructor(
     private fun acknowledgeFinal(sessionId: Long, logProgress: Boolean = true) {
         lastFinalAtMs = SystemClock.elapsedRealtime()
         // This final may describe an earlier utterance. Never let it acknowledge
-        // a suffix still queued locally, unprocessed by Muse, or in a pending turn.
+        // a suffix that has not even left our local queues.
         val queuedPcmSpeech = outbound.any { it is Outbound.Audio && it.containsSpeech }
         val queuedSocketSpeech = transcriptionClient.hasQueuedSpeechFrames() || transcriptionClient.hasPendingTurns()
         if (!queuedPcmSpeech && !queuedSocketSpeech) {

@@ -16,10 +16,6 @@ VoiceInputManager FIFO → MuseTranscriptionClient (paced binary WebSocket) →
 MuseTurnAssembler → completed selected-speaker TranscriptSegment → acknowledged
 manager FIFO → LatinIME/InputConnection.
 
-- DIARIZATION with first-speaker filtering is the only app mode. Keep the original
-  recorder callback, PCM queue and request configuration from the working Muse
-  baseline; the responsive/timing runtime experiment was rolled back after a
-  same-phone punctuation regression. Old experimental preference keys are ignored.
 - Accuracy over latency. Partials never become editor text. In DIARIZATION use
   speechComplete, not transcript.final or speechEnd, for completed text.
 - First JSON frame authenticates with authorization.accessToken = Bearer <key>.
@@ -40,17 +36,8 @@ manager FIFO → LatinIME/InputConnection.
   capture-tail barrier. Resume/stop/cancel removes its timer. Silence may be billed.
 - One recording owns one socket; no automatic reconnect/replay/rotation. Stop at
   55 minutes before the service cap. Stop budget is 60 seconds overall. Per-turn
-  recognized finals wait 30 seconds after provider speechEnd; progress cannot
+  recognized finals wait 30 seconds once ended or completed text is present; progress cannot
   extend a missing final. Long uninterrupted speech can continue.
-- Ended no-word turns retain their ordering slot until the 30-second final wait
-  expires or normal server closure, then retire without selecting a speaker.
-  Late nonempty text after retirement fails visibly. An early completion alone
-  does not start the wait. Track submitted speech offsets against processed audio
-  as well as socket backlog; normal close cannot accept unprocessed speech.
-- After verifying normal close, acknowledge settlement even without completed
-  words so local RMS noise cannot leave a false interruption pending. This does
-  not waive pending recognized finals, attribution or unprocessed speech checks;
-  keep the generation fence across callbacks.
 - Preserve main-looper fencing, transcript acknowledgment, verified replacements,
   actual host-clear checks, target/hide cancellation and recorder callback/phase
   ownership. Never retry a possibly partial editor operation.
@@ -69,7 +56,16 @@ manager FIFO → LatinIME/InputConnection.
 Use `./tools/android-dev.sh smoke`, relevant editor/log tests, and the canonical
 APK handoff skill. Run the real-provider probe only with a user-supplied key:
 `python3 tools/muse-streaming-smoke-test.py --audio /private/speech.wav`.
-Use --compare-modes --timings for two sequential billable sessions on identical audio. Its key comes from MUSE_API_KEY / MODEL_API_KEY or an explicit --env-file. No transcripts print by default.
+Its key comes from MUSE_API_KEY / MODEL_API_KEY. No transcripts print by default.
 No live access or phone-quality claims follow from mocks or an APK build.
 
 See [data-flow.md](data-flow.md) and [api-reference.md](api-reference.md).
+
+## Full baseline recovery hold
+
+Application runtime and tests are restored exactly to `05a37649`. All later fixes
+are reverted after repeated phone A/B tests, including the partial rollback
+that retained review fixes. The known queue/settlement/processing findings remain
+open and are documented in `docs/muse-transcription.md`. Do not automatically
+reintroduce these patches before isolated phone acceptance. Punctuation model
+research is a separate proposed follow-up; no model or extra upload is enabled.
