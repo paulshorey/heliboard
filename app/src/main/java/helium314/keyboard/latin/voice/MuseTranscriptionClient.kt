@@ -61,8 +61,8 @@ class MuseTranscriptionClient {
         fun onStreamReady()
         fun onTranscriptionResult(segment: TranscriptSegment)
         fun onInterimTranscription()
-        /** True for settled turns, including intentionally filtered speakers. */
-        fun onServerResponse(hasTranscriptText: Boolean)
+        /** True for settled work, including filtered turns and verified final closure without words. */
+        fun onServerResponse(hasSettledSpeech: Boolean)
         fun onStreamError(error: String)
         fun onStreamClosed()
     }
@@ -118,8 +118,6 @@ class MuseTranscriptionClient {
                     // turns must not hide later completed text at the FIFO head.
                     val completed = turns.settleEmptyEndedTurns()
                     if (!deliver(completed)) return@post
-                    if (completed.isNotEmpty()) callback?.onServerResponse(true)
-                    if (token != generation) return@post
                     try {
                         turns.verifyFinished()
                         check(!hasQueuedSpeechFrames())
@@ -127,6 +125,10 @@ class MuseTranscriptionClient {
                         fail("Muse ended with unprocessed speech or unresolved text/speaker attribution. Tap the mic and speak first again.")
                         return@post
                     }
+                    // A verified close also settles RMS false positives with no
+                    // completed words, including turns retired before Stop.
+                    callback?.onServerResponse(true)
+                    if (token != generation) return@post
                     val sink = this@MuseTranscriptionClient.callback
                     cancelAll()
                     sink?.onStreamClosed()

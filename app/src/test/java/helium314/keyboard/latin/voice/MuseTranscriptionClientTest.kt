@@ -23,6 +23,7 @@ class MuseTranscriptionClientTest {
     private var closed = false
     private var ready = false
     private var settled = 0
+    private var onSettlement: (() -> Unit)? = null
     private val config = MuseTranscriptionClient.SessionConfig(24000, listOf("English"), listOf("Anaya"))
     @Before fun setup() {
         start(config)
@@ -33,7 +34,9 @@ class MuseTranscriptionClientTest {
             override fun onStreamReady() { ready = true }
             override fun onTranscriptionResult(segment: TranscriptSegment) { texts.add(segment.text) }
             override fun onInterimTranscription() { }
-            override fun onServerResponse(hasTranscriptText: Boolean) { if (hasTranscriptText) settled++ }
+            override fun onServerResponse(hasSettledSpeech: Boolean) {
+                if (hasSettledSpeech) { settled++; onSettlement?.invoke() }
+            }
             override fun onStreamError(error: String) { errors.add(error) }
             override fun onStreamClosed() { closed = true }
         })
@@ -193,6 +196,14 @@ class MuseTranscriptionClientTest {
     @Test fun cancelInvalidatesPreviouslyPostedFramesAndLaterErrors() {
         ack(); transport.onMessage(socket, "not json"); client.cancelAll()
         shadowOf(Looper.getMainLooper()).idle(); assertTrue(errors.isEmpty())
+    }
+    @Test fun verifiedClosureSettlementCannotCloseAReentrantlyStartedSession() {
+        ack(); event("speechStart"); event("speechEnd"); client.finishStreaming()
+        onSettlement = { onSettlement = null; start(config) }
+        transport.onClosed(socket, 1000, ""); shadowOf(Looper.getMainLooper()).idle()
+        assertFalse(closed); assertTrue(errors.isEmpty())
+        ack()
+        assertEquals(MuseTranscriptionClient.AudioSendResult.ACCEPTED, client.offerAudioChunk(ByteArray(4800)))
     }
     @Test fun invalidServicePayloadAndErrorsNeverExposeTranscriptOrKey() {
         ack(); message("""{"type":"error","message":"Bearer test-secret raw private transcript"}""")

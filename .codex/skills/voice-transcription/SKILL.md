@@ -45,6 +45,10 @@ manager FIFO → LatinIME/InputConnection.
   Late nonempty text after retirement fails visibly. An early completion alone
   does not start the wait. Track submitted speech offsets against processed audio
   as well as socket backlog; normal close cannot accept unprocessed speech.
+- After verifying normal close, acknowledge settlement even without completed
+  words so local RMS noise cannot leave a false interruption pending. This does
+  not waive pending recognized finals, attribution or unprocessed speech checks;
+  keep the generation fence across callbacks.
 - Preserve main-looper fencing, transcript acknowledgment, verified replacements,
   actual host-clear checks, target/hide cancellation and recorder callback/phase
   ownership. Never retry a possibly partial editor operation.

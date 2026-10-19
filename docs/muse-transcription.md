@@ -75,6 +75,11 @@ is evidence of processing, not a receipt for editor insertion or individual word
 Track the last submitted speech-frame byte offset against provider processing as
 well as socket backlog. An empty socket queue alone cannot acknowledge a newer
 speech suffix; normal closure with unprocessed submitted speech is an interruption.
+After verifying normal closure has no pending recognized words or unprocessed
+speech, the client acknowledges settlement even if no completed text was emitted.
+This clears local RMS false positives for wordless noise, including turns retired
+before Stop, without inserting an interruption marker. Missing recognized finals,
+missing attribution and unprocessed speech still fail visibly.
 
 Pause stops native microphone capture. A main-looper barrier orders its posted
 tail before generated zero PCM, emitted on an absolute 100 ms schedule. Resume

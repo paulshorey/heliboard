@@ -410,14 +410,14 @@ class VoiceInputManager internal constructor(
                 }
                 noteUnconfirmedSpeech(sessionId, "interim")
             }
-            override fun onServerResponse(hasTranscriptText: Boolean) {
+            override fun onServerResponse(hasSettledSpeech: Boolean) {
                 if (!isCurrent(sessionId)) return
                 lastResponseAtMs = SystemClock.elapsedRealtime()
                 responseTimeout?.let(mainHandler::removeCallbacks)
                 responseTimeout = null
-                // Repeated authoritative finals still prove transcript progress
-                // even when the client has suppressed a duplicate editor write.
-                if (hasTranscriptText) acknowledgeFinal(sessionId, logProgress = false)
+                // Completed turns and verified closure settle speech even when
+                // no editor write is needed (filtered guests or wordless noise).
+                if (hasSettledSpeech) acknowledgeFinal(sessionId, logProgress = false)
                 // Audio progress proves processing, not completed words.
             }
             override fun onStreamError(error: String) {

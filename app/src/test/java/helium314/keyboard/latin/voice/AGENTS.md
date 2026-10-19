@@ -5,6 +5,7 @@
 - `MuseTranscriptionClientTest.kt`: mode-specific handshake/assembly and safe restart defaults, raw sender pacing, processing lead and unprocessed speech suffixes, authoritative selected-speaker delivery, empty-turn deadline/close drainage, EOF/close, stale callbacks and invalid payloads.
 - `MuseTranscriptionClientStreamTest.kt`: real local WebSocket transport, body authentication, binary audio and late final drainage.
 - `VoiceInputManagerTest.kt`: capture/transcript FIFOs, editor acknowledgment/rejection, generation fencing, network loss, pause silence ordering, stop budgets and cancellation.
+- `VoiceInputManagerMuseTest.kt`: real client/manager coordination with a fake microphone/socket; verified wordless closure in both modes, retired noise, unresolved recognized words, unprocessed suffixes and interruption markers.
 - `VoiceRecorderLifecycleTest.kt`: stuck capture joins, original callback ownership and rapid pause/resume read phases.
 - `TranscriptionPreferencesTest.kt`: backup-excluded credential lifecycle, conservative mode/diagnostic defaults and non-destructive vocabulary migration.
 - `TranscriptPostProcessorTest.kt`: explicit Muse commands/preservation, plus legacy pure helper behavior. The shipping path uses processMuseParagraph.
