@@ -65,6 +65,8 @@ fun TranscriptionScreen(
     var museAutoDetectLanguage by remember {
         mutableStateOf(TranscriptionPreferences.readMuseAutoDetectLanguage(prefs))
     }
+    var responsiveDictation by remember { mutableStateOf(TranscriptionPreferences.readMuseResponsiveDictation(prefs)) }
+    var timingDiagnostics by remember { mutableStateOf(TranscriptionPreferences.readMuseTimingDiagnostics(prefs)) }
     var chunkSilenceSeconds by remember {
         mutableStateOf(
             prefs.getInt(
@@ -113,7 +115,26 @@ fun TranscriptionScreen(
                     maxLines = 1,
                     secret = true
                 )
-                Text(stringResource(R.string.muse_speaker_summary), modifier = Modifier.padding(12.dp))
+                BooleanSettingRow(
+                    label = stringResource(R.string.muse_responsive_title),
+                    summary = stringResource(R.string.muse_responsive_summary),
+                    checked = responsiveDictation,
+                    onCheckedChange = {
+                        responsiveDictation = it
+                        TranscriptionPreferences.writeMuseResponsiveDictation(prefs, it)
+                    }
+                )
+                Text(stringResource(if (responsiveDictation) R.string.muse_all_voices_summary
+                    else R.string.muse_speaker_summary), modifier = Modifier.padding(12.dp))
+                BooleanSettingRow(
+                    label = stringResource(R.string.muse_timing_title),
+                    summary = stringResource(R.string.muse_timing_summary),
+                    checked = timingDiagnostics,
+                    onCheckedChange = {
+                        timingDiagnostics = it
+                        TranscriptionPreferences.writeMuseTimingDiagnostics(prefs, it)
+                    }
+                )
                 BooleanSettingRow(
                     label = stringResource(R.string.muse_use_editor_context_title),
                     summary = stringResource(R.string.muse_use_editor_context_summary),

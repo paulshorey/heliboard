@@ -25,8 +25,11 @@ class MuseTranscriptionClientTest {
     private var settled = 0
     private val config = MuseTranscriptionClient.SessionConfig(24000, listOf("English"), listOf("Anaya"))
     @Before fun setup() {
+        start(config)
+    }
+    private fun start(sessionConfig: MuseTranscriptionClient.SessionConfig) {
         client.socketFactory = WebSocket.Factory { _, listener -> transport = listener; socket }
-        client.startStreaming("test-secret", config, object : MuseTranscriptionClient.StreamingCallback {
+        client.startStreaming("test-secret", sessionConfig, object : MuseTranscriptionClient.StreamingCallback {
             override fun onStreamReady() { ready = true }
             override fun onTranscriptionResult(segment: TranscriptSegment) { texts.add(segment.text) }
             override fun onInterimTranscription() { }
@@ -42,6 +45,29 @@ class MuseTranscriptionClientTest {
     private fun event(type: String, id: Int = 1, text: String = "Hello.", label: String = "A") = message(
         JSONObject().put("type", type).put("turnId", id).put("transcript", text).put("label", label)
             .put("final", true).put("audioProcessedMs", 0).toString())
+    @Test fun endpointingNeedsNoSpeakerButStillWaitsForCompletedTurnAndBoundary() {
+        start(config.copy(mode = MuseTranscriptionClient.Mode.ENDPOINTING))
+        transport.onOpen(socket, Response.Builder().request(socket.request()).protocol(Protocol.HTTP_1_1).code(101).message("Switching").build())
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals("ENDPOINTING", JSONObject(socket.controls.single()).getString("mode"))
+        ack(); event("speechStart"); event("transcript")
+        assertTrue(texts.isEmpty())
+        event("speechComplete"); assertTrue(texts.isEmpty())
+        event("speechEnd")
+        event("speechStart", 2); event("speechEnd", 2); event("speechComplete", 2, "Another voice.")
+        assertEquals(listOf("Hello.", "Another voice."), texts)
+        assertTrue(client.finishStreaming())
+        transport.onClosed(socket, 1000, ""); shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(closed); assertTrue(errors.isEmpty())
+    }
+    @Test fun restartingProtectedModeCannotInheritEndpointingAttributionRules() {
+        start(config.copy(mode = MuseTranscriptionClient.Mode.ENDPOINTING))
+        ack(); event("speechStart"); event("speechEnd"); event("speechComplete")
+        start(config); ack(); event("speechStart"); event("speechEnd"); event("speechComplete")
+        advance(30_001)
+        assertEquals(listOf("Hello."), texts)
+        assertEquals(1, errors.size)
+    }
     @Test fun handshakeUsesBodyCredentialDiarizationAndNamedLanguageHints() {
         transport.onOpen(socket, Response.Builder().request(socket.request()).protocol(Protocol.HTTP_1_1).code(101).message("Switching").build())
         shadowOf(Looper.getMainLooper()).idle()
@@ -84,6 +110,7 @@ class MuseTranscriptionClientTest {
         assertEquals("{\"type\":\"endStream\"}", socket.controls.last())
         assertEquals(MuseTranscriptionClient.AudioSendResult.FAILED, client.offerAudioChunk(ByteArray(4800)))
         event("speechEnd"); event("speechComplete")
+        event("transcript", text = "") // Empty final flush observed on live Muse EOF.
         transport.onClosed(socket, 1000, ""); shadowOf(Looper.getMainLooper()).idle()
         assertTrue(closed); assertEquals(listOf("Hello."), texts); assertTrue(errors.isEmpty())
     }

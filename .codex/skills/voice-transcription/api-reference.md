@@ -3,7 +3,7 @@
 - Model: `muse-voice-transcribe-1.0`.
 - URL: `wss://api.meta.ai/v1/asr/realtime`.
 - First JSON frame: authorization.accessToken = `Bearer <key>`, model,
-  audioEncoding = `PCM_24KHZ` / `PCM_16KHZ`, mode = `DIARIZATION`,
+  audioEncoding = `PCM_24KHZ` / `PCM_16KHZ`, mode = `DIARIZATION` by default / opt-in `ENDPOINTING` (all voices),
   partialMode = `CUMULATIVE`, emitAudioProgress = true, optional keywords and
   languageBias (supported language names).
 - Server acknowledges with sessionId and no type; only then send binary raw mono
@@ -11,7 +11,9 @@
 - speechStart / speechEnd / speechComplete correlate by turnId. Speaker and
   cumulative transcript events belong to the active span and have no turnId.
 - speechComplete is full final text including punctuation; transcript.final does
-  not complete a DIARIZATION turn. Speaker labels are retrospective/per-session.
+  not complete a DIARIZATION or ENDPOINTING turn. Speaker labels are retrospective/per-session.
+- Empty final transcript flushes can arrive at EOF after a settled turn. Ignore
+  these wordless events only; unattributed nonempty text remains an error.
 - End input with `{"type":"endStream"}` after all audio. Read until close 1000.
   There is no turn-commit command or resume token.
 - Close 1008: configuration/pacing failure; 1011: backend/session limit;

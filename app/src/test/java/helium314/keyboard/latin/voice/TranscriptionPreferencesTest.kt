@@ -36,8 +36,18 @@ class TranscriptionPreferencesTest {
     @Test fun defaultsBiasLanguageAndEditorWordsAndVocabularyIsBounded() {
         val config = TranscriptionPreferences.readMuseConfig(prefs)
         assertFalse(config.autoDetectLanguage)
+        assertFalse(config.responsiveDictation)
+        assertFalse(config.timingDiagnostics)
         assertTrue(config.useEditorContext)
         assertEquals(listOf("Anaya", "API"), TranscriptionPreferences.parseCustomVocabulary(" Anaya\nanaya\nAPI\n\n"))
         assertEquals(100, TranscriptionPreferences.parseCustomVocabulary((1..150).joinToString("\n") { "Name$it" }).size)
+    }
+    @Test fun explicitResponsiveAndTimingChoicesPersistWithoutChangingCredentials() {
+        TranscriptionPreferences.writeMuseApiKey(context, "key")
+        TranscriptionPreferences.writeMuseResponsiveDictation(prefs, true)
+        TranscriptionPreferences.writeMuseTimingDiagnostics(prefs, true)
+        val config = TranscriptionPreferences.readMuseConfig(prefs)
+        assertTrue(config.responsiveDictation); assertTrue(config.timingDiagnostics)
+        assertEquals("key", TranscriptionPreferences.readMuseApiKey(context))
     }
 }

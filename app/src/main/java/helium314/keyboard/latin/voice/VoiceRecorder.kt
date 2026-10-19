@@ -18,7 +18,7 @@ import kotlin.math.sqrt
  * Records audio from the device microphone with client-side silence detection.
  *
  * Starts recording instantly on the device (no network dependency).
- * Streams raw PCM chunks via [RecordingCallback.onAudioChunk] and emits speech
+ * Streams timestamped PCM via [RecordingCallback.onCapturedAudioChunk] and emits speech
  * boundary callbacks ([RecordingCallback.onSpeechStarted] / [RecordingCallback.onSpeechStopped])
  * based on adaptive silence detection.
  *
@@ -94,6 +94,10 @@ class VoiceRecorder(private val context: Context) {
          * excludes the speech-stop silence window and never gates PCM delivery.
          */
         fun onAudioChunk(pcmData: ByteArray, containsSpeech: Boolean)
+        /** Read-completion time, before posting to the main looper. */
+        fun onCapturedAudioChunk(pcmData: ByteArray, containsSpeech: Boolean, capturedAtMs: Long) {
+            onAudioChunk(pcmData, containsSpeech)
+        }
 
         /** Called when speech is detected (silence ended). */
         fun onSpeechStarted()
@@ -376,6 +380,7 @@ class VoiceRecorder(private val context: Context) {
 
                 val chunk = if (bytesRead == readBuffer.size) readBuffer.copyOf()
                             else readBuffer.copyOf(bytesRead)
+                val capturedAtMs = android.os.SystemClock.elapsedRealtime()
 
                 val energy = rmsEnergy(chunk)
                 smoothedEnergy = (ENERGY_SMOOTHING_ALPHA * energy) +
@@ -397,7 +402,7 @@ class VoiceRecorder(private val context: Context) {
                 // This annotation never gates PCM delivery to Muse.
                 val containsSpeech = energy >= silenceThreshold
                 val callbackSnapshot = recordingCallback
-                mainHandler.post { callbackSnapshot?.onAudioChunk(chunk, containsSpeech) }
+                mainHandler.post { callbackSnapshot?.onCapturedAudioChunk(chunk, containsSpeech, capturedAtMs) }
 
                 // Percentile-based noise floor: track raw RMS energy (not EMA-smoothed)
                 // to avoid speech->silence lag contaminating the low-percentile baseline.

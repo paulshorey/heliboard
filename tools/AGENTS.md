@@ -10,7 +10,7 @@ Repository automation scripts for builds, SDK setup, releases, and asset mainten
 - `check-agent-infrastructure.py` - discovery links, skill metadata, MCP adapters and provider fixups.
 - `build-dist-apk.sh` - canonical signed debug APK plus `dist/apk-metadata.json`.
 - `bake_number_row.py` - one-off layout migration helper; not a routine regeneration step.
-- `muse-streaming-smoke-test.py` - opt-in real-provider diarization/PCM/EOF probe with an environment key and private WAV. No transcript logging by default.
+- `muse-streaming-smoke-test.py` - opt-in real-provider mode comparison and latency/PCM/EOF probe with an environment or literal env-file key and private WAV. Two billable sessions for --compare-modes; no transcript logging by default.
 - `diacritics.py` - offline diacritics-analysis helper for external wordlist data.
 - `gemini-skills-fixups.py` - declarative local corrections for the vendored Gemini skills; `--check` reports drift, `--apply` writes them.
 - `release.py` - maintainer script for translation import, dictionary index refresh, Khipro mapping refresh, and changelog checks.
@@ -18,7 +18,7 @@ Repository automation scripts for builds, SDK setup, releases, and asset mainten
 - `sync-gemini-skills.sh` - refreshes the two retained provider skills from an isolated temporary installer directory and re-applies fixups.
 
 ## Subfolders
-- `tests/` - stdlib Python regression tests for APK handoff and tooling mechanics.
+- `tests/` - stdlib Python regression tests for APK handoff, tooling mechanics and offline Muse protocol/latency/privacy cases.
 - `make-emoji-keys/` - standalone tool for regenerating bundled emoji data/resources.
 
 ## Non-obvious notes
