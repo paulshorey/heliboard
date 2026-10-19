@@ -72,13 +72,13 @@ fun SetupAppScreen(
     var isImeEnabled by remember { mutableStateOf(false) }
     var isImeCurrent by remember { mutableStateOf(false) }
     var microphoneGranted by remember { mutableStateOf(false) }
-    var geminiApiKey by remember { mutableStateOf("") }
+    var museApiKey by remember { mutableStateOf("") }
 
     fun refreshStatus() {
         isImeEnabled = UncachedInputMethodManagerUtils.isThisImeEnabled(context, imm)
         isImeCurrent = UncachedInputMethodManagerUtils.isThisImeCurrent(context, imm)
         microphoneGranted = PermissionsUtil.checkAllPermissionsGranted(context, Manifest.permission.RECORD_AUDIO)
-        geminiApiKey = TranscriptionPreferences.readGeminiApiKey(prefs)
+        museApiKey = TranscriptionPreferences.readMuseApiKey(context)
     }
 
     LaunchedEffect(prefChanged?.value) {
@@ -157,15 +157,15 @@ fun SetupAppScreen(
                     }
                 )
                 SetupRequirementItem(
-                    title = stringResource(R.string.gemini_api_key_title),
-                    summary = stringResource(R.string.gemini_api_key_summary),
-                    isComplete = geminiApiKey.isNotBlank(),
+                    title = stringResource(R.string.muse_api_key_title),
+                    summary = stringResource(R.string.muse_api_key_summary),
+                    isComplete = museApiKey.isNotBlank(),
                 ) {
                     SetupKeyField(
-                        value = geminiApiKey,
+                        value = museApiKey,
                         onValueChange = { newValue ->
-                            geminiApiKey = newValue.trim()
-                            TranscriptionPreferences.writeGeminiApiKey(prefs, newValue)
+                            museApiKey = newValue.trim()
+                            TranscriptionPreferences.writeMuseApiKey(context, newValue)
                         }
                     )
                 }
@@ -257,7 +257,10 @@ private fun SetupKeyField(
         onValueChange = onValueChange,
         modifier = Modifier.fillMaxWidth(),
         minLines = 1,
-        maxLines = 2,
+        maxLines = 1,
+        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+            keyboardType = androidx.compose.ui.text.input.KeyboardType.Password),
         textStyle = MaterialTheme.typography.bodySmall,
         shape = MaterialTheme.shapes.small,
     )

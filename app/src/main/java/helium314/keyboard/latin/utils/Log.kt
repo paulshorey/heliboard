@@ -93,7 +93,7 @@ object Log {
     private val VOICE_DIAGNOSTIC_TAGS = setOf(
         "VoiceInputManager",
         "VoiceRecorder",
-        "GeminiTranscription",
+        "MuseTranscription",
         "VoiceNetwork",
     )
 
@@ -118,7 +118,8 @@ object Log {
     private val RAW_TRANSCRIPT_PATTERN = Regex("""VOICE raw transcript=\[(.*)]""", RegexOption.DOT_MATCHES_ALL)
     private val API_KEY_PATTERN = Regex("""api_key\s*[:=]\s*"?[^\s,"}\]]+"?""", RegexOption.IGNORE_CASE)
 
-    /** Gemini passes the API key in the WebSocket query string (`?key=...`). */
+    /** Also scrub historical query credentials in retained/exported diagnostics. */
+    private val BEARER_PATTERN = Regex("""Bearer\s+[^\s,"}\]]+""", RegexOption.IGNORE_CASE)
     private val URL_KEY_QUERY_PATTERN = Regex("""([?&])key=[^\s&"]+""", RegexOption.IGNORE_CASE)
 
     @JvmStatic
@@ -138,6 +139,7 @@ object Log {
             "VOICE raw transcript=[${content.length} chars]"
         }
         result = API_KEY_PATTERN.replace(result, "api_key=[redacted]")
+        result = BEARER_PATTERN.replace(result, "Bearer [redacted]")
         result = URL_KEY_QUERY_PATTERN.replace(result, "$1key=[redacted]")
         return result
     }

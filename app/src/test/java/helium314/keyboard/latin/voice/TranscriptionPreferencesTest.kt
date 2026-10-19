@@ -2,200 +2,42 @@ package helium314.keyboard.latin.voice
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import helium314.keyboard.latin.settings.Defaults
-import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.settings.TranscriptionPreferences
-import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertTrue
+import helium314.keyboard.latin.utils.prefs
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import kotlin.test.*
 
 @RunWith(RobolectricTestRunner::class)
 class TranscriptionPreferencesTest {
-
-    @Test
-    fun readGeminiApiKey_clearsPreviousProviderKeysWithoutCopyingThem() {
-        val prefs = newPrefs()
-        prefs.edit()
-            .putString("speechmatics_api_key", "speechmatics-key")
-            .putString("deepgram_api_key", "deepgram-key")
-            .putString("soniox_api_key", "soniox-key")
-            .commit()
-
-        assertEquals("", TranscriptionPreferences.readGeminiApiKey(prefs))
-        assertFalse(prefs.contains("speechmatics_api_key"))
-        assertFalse(prefs.contains("deepgram_api_key"))
-        assertFalse(prefs.contains("soniox_api_key"))
+    private val context = ApplicationProvider.getApplicationContext<Context>()
+    private val prefs = context.prefs()
+    @Before fun reset() { prefs.edit().clear().commit(); TranscriptionPreferences.writeMuseApiKey(context, "") }
+    @Test fun personalKeyLivesOutsideBackedUpPreferencesAndCanBeCleared() {
+        TranscriptionPreferences.writeMuseApiKey(context, " Bearer personal-test-key ")
+        assertEquals("personal-test-key", TranscriptionPreferences.readMuseApiKey(context))
+        assertTrue(prefs.all.isEmpty())
+        assertTrue(java.io.File(context.noBackupFilesDir, "muse-api-key").isFile)
+        TranscriptionPreferences.writeMuseApiKey(context, "")
+        assertEquals("", TranscriptionPreferences.readMuseApiKey(context))
     }
-
-    @Test
-    fun readGeminiApiKey_preservesGeminiKeyWhenClearingPreviousProviderKeys() {
-        val prefs = newPrefs()
-        prefs.edit()
-            .putString(Settings.PREF_GEMINI_API_KEY, "gemini-key")
-            .putString("soniox_api_key", "soniox-key")
-            .commit()
-
-        assertEquals("gemini-key", TranscriptionPreferences.readGeminiApiKey(prefs))
-        assertFalse(prefs.contains("soniox_api_key"))
+    @Test fun comparisonKeysSurviveVocabularyMigrationAndMuseKeyUpdates() {
+        prefs.edit().putString("gemini_api_key", "old-key").putString("mai_api_key", "azure-key")
+            .putString("gemini_custom_vocabulary", "Anaya\nGitHub").commit()
+        assertEquals(listOf("Anaya", "GitHub"), TranscriptionPreferences.readMuseConfig(prefs).customVocabulary)
+        TranscriptionPreferences.writeMuseApiKey(context, "new-key")
+        assertEquals("old-key", prefs.getString("gemini_api_key", ""))
+        assertEquals("azure-key", prefs.getString("mai_api_key", ""))
+        TranscriptionPreferences.writeMuseCustomVocabulary(prefs, "")
+        assertEquals(emptyList(), TranscriptionPreferences.readMuseConfig(prefs).customVocabulary)
     }
-
-    @Test
-    fun migrateLegacyProviderPrefs_movesPreviousCustomTermsIntoGeminiVocabulary() {
-        val prefs = newPrefs()
-        prefs.edit().putString("soniox_custom_terms", "Acme\nBudapest\n").commit()
-
-        TranscriptionPreferences.migrateLegacyProviderPrefs(prefs)
-
-        assertEquals(
-            listOf("Acme", "Budapest"),
-            TranscriptionPreferences.readGeminiCustomVocabulary(prefs)
-        )
-        assertFalse(prefs.contains("soniox_custom_terms"))
-    }
-
-    @Test
-    fun migrateLegacyProviderPrefs_keepsExistingGeminiVocabulary() {
-        val prefs = newPrefs()
-        prefs.edit()
-            .putString("soniox_custom_terms", "Acme")
-            .putString(Settings.PREF_GEMINI_CUSTOM_VOCABULARY, "Zeppelin")
-            .commit()
-
-        TranscriptionPreferences.migrateLegacyProviderPrefs(prefs)
-
-        assertEquals(
-            listOf("Zeppelin"),
-            TranscriptionPreferences.readGeminiCustomVocabulary(prefs)
-        )
-    }
-
-    @Test
-    fun defaults_preferAccuracyOverLatency() {
-        val prefs = newPrefs()
-        val config = TranscriptionPreferences.readGeminiConfig(prefs)
-
-        // Smart mode is what applies punctuation, casing and self-correction cleanup.
-        assertEquals(
-            GeminiTranscriptionClient.TRANSCRIPTION_MODE_SMART,
-            config.transcriptionMode
-        )
-        // An explicit language hint beats auto-detection on short dictations.
+    @Test fun defaultsBiasLanguageAndEditorWordsAndVocabularyIsBounded() {
+        val config = TranscriptionPreferences.readMuseConfig(prefs)
         assertFalse(config.autoDetectLanguage)
         assertTrue(config.useEditorContext)
-        assertEquals(
-            Defaults.PREF_GEMINI_END_OF_SPEECH_SILENCE_MS,
-            config.endOfSpeechSilenceMs
-        )
-        // The local finalize backstop must not fire before the server's own
-        // end-of-speech window, or utterances get chopped in half.
-        assertTrue(
-            Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS * 1000 >
-                Defaults.PREF_GEMINI_END_OF_SPEECH_SILENCE_MS
-        )
+        assertEquals(listOf("Anaya", "API"), TranscriptionPreferences.parseCustomVocabulary(" Anaya\nanaya\nAPI\n\n"))
+        assertEquals(100, TranscriptionPreferences.parseCustomVocabulary((1..150).joinToString("\n") { "Name$it" }).size)
     }
-
-    @Test
-    fun sanitizeEndOfSpeechSilenceMs_clampsToAccuracySafeBounds() {
-        assertEquals(
-            GeminiTranscriptionClient.MIN_END_OF_SPEECH_SILENCE_MS,
-            TranscriptionPreferences.sanitizeEndOfSpeechSilenceMs(50)
-        )
-        assertEquals(
-            GeminiTranscriptionClient.MAX_END_OF_SPEECH_SILENCE_MS,
-            TranscriptionPreferences.sanitizeEndOfSpeechSilenceMs(99_999)
-        )
-    }
-
-    @Test
-    fun transcriptionMode_roundTripsAndRejectsUnknownValues() {
-        val prefs = newPrefs()
-        TranscriptionPreferences.writeGeminiSmartMode(prefs, false)
-        assertEquals(
-            GeminiTranscriptionClient.TRANSCRIPTION_MODE_VERBATIM,
-            TranscriptionPreferences.readGeminiTranscriptionMode(prefs)
-        )
-        assertFalse(TranscriptionPreferences.readGeminiSmartMode(prefs))
-
-        TranscriptionPreferences.writeGeminiTranscriptionMode(prefs, "nonsense")
-        assertEquals(
-            GeminiTranscriptionClient.TRANSCRIPTION_MODE_SMART,
-            TranscriptionPreferences.readGeminiTranscriptionMode(prefs)
-        )
-    }
-
-    @Test
-    fun readGeminiCustomVocabulary_returnsEmptyByDefault() {
-        val prefs = newPrefs()
-        assertEquals(emptyList(), TranscriptionPreferences.readGeminiCustomVocabulary(prefs))
-    }
-
-    @Test
-    fun parseCustomVocabulary_trimsBlankAndDuplicateEntries() {
-        val raw = """
-            Kubernetes
-            
-            kubernetes
-            MyProject
-              MyProject  
-            
-        """.trimIndent()
-        val parsed = TranscriptionPreferences.parseCustomVocabulary(raw)
-        // Dedup is case-sensitive on purpose — Gemini uses casing as a hint.
-        assertEquals(listOf("Kubernetes", "kubernetes", "MyProject"), parsed)
-    }
-
-    @Test
-    fun writeAndReadCustomVocabulary_roundTripsRawAndParsed() {
-        val prefs = newPrefs()
-        TranscriptionPreferences.writeGeminiCustomVocabulary(prefs, "Foo\nBar\nFoo\n")
-        assertEquals("Foo\nBar\nFoo\n", TranscriptionPreferences.readGeminiCustomVocabularyRaw(prefs))
-        assertEquals(listOf("Foo", "Bar"), TranscriptionPreferences.readGeminiCustomVocabulary(prefs))
-        assertEquals(
-            listOf("Foo", "Bar"),
-            TranscriptionPreferences.readGeminiConfig(prefs).customVocabulary
-        )
-    }
-
-    @Test
-    fun migrateGeminiVoiceDefaults_bumpsLegacyOneSecondChunkSilence() {
-        val prefs = newPrefs()
-        prefs.edit().putInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, 1).commit()
-
-        TranscriptionPreferences.migrateGeminiVoiceDefaults(prefs)
-
-        assertEquals(
-            Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS,
-            prefs.getInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, -1)
-        )
-    }
-
-    @Test
-    fun migrateGeminiVoiceDefaults_leavesALaterUserChoiceOfOneSecond() {
-        val prefs = newPrefs()
-        TranscriptionPreferences.migrateGeminiVoiceDefaults(prefs)
-        prefs.edit().putInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, 1).commit()
-
-        TranscriptionPreferences.migrateGeminiVoiceDefaults(prefs)
-
-        assertEquals(1, prefs.getInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, -1))
-    }
-
-    @Test
-    fun migrateGeminiVoiceDefaults_keepsACustomChunkSilenceAboveTheOldDefault() {
-        val prefs = newPrefs()
-        prefs.edit().putInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, 4).commit()
-
-        TranscriptionPreferences.migrateGeminiVoiceDefaults(prefs)
-
-        assertEquals(4, prefs.getInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, -1))
-    }
-
-    private fun newPrefs() = ApplicationProvider.getApplicationContext<Context>()
-        .getSharedPreferences(
-            "transcription_preferences_test_${System.nanoTime()}",
-            Context.MODE_PRIVATE
-        )
 }

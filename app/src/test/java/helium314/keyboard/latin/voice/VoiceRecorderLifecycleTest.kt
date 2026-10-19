@@ -18,6 +18,43 @@ import org.robolectric.Shadows.shadowOf
 
 @RunWith(RobolectricTestRunner::class)
 class VoiceRecorderLifecycleTest {
+    @Test fun unsupported24kCaptureFallsBackTo16kBeforeTheSessionHandshake() {
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        shadowOf(app).grantPermissions(android.Manifest.permission.RECORD_AUDIO)
+        val released = CountDownLatch(1)
+        Mockito.mockStatic(AudioRecord::class.java).use { statics ->
+            statics.`when`<Int> { AudioRecord.getMinBufferSize(24000, 16, 2) }.thenReturn(AudioRecord.ERROR_BAD_VALUE)
+            statics.`when`<Int> { AudioRecord.getMinBufferSize(16000, 16, 2) }.thenReturn(3200)
+            Mockito.mockConstruction(AudioRecord::class.java) { audio, _ ->
+                Mockito.`when`(audio.state).thenReturn(AudioRecord.STATE_INITIALIZED)
+                Mockito.`when`(audio.read(Mockito.any(ByteArray::class.java), Mockito.anyInt(), Mockito.anyInt())).thenAnswer {
+                    released.await(2, TimeUnit.SECONDS); 0
+                }
+                Mockito.doAnswer { released.countDown(); null }.`when`(audio).stop()
+            }.use { construction ->
+                val recorder = VoiceRecorder(app)
+                try {
+                    assertTrue(recorder.startRecording())
+                    assertEquals(16000, recorder.sampleRate)
+                    assertEquals(1, construction.constructed().size)
+                } finally { released.countDown(); recorder.stopRecording() }
+            }
+        }
+    }
+
+    @Test fun pauseStopFailureReportsAnErrorInsteadOfSilentlyKeepingTheMicActive() {
+        val recorder = VoiceRecorder(ApplicationProvider.getApplicationContext<Context>())
+        val events = Events(); recorder.setCallback(events)
+        val audio = Mockito.mock(AudioRecord::class.java)
+        Mockito.doThrow(IllegalStateException("stop failed")).`when`(audio).stop()
+        setField(recorder, "isRecording", true)
+        setField(recorder, "audioRecord", audio)
+        recorder.pauseRecording()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(listOf("Microphone could not pause; dictation stopped"), events.errors)
+        recorder.stopRecording()
+    }
+
     @Test fun missedCaptureJoinReportsFailureAndBlocksReuseOfTheLiveThread() {
         val recorder = VoiceRecorder(ApplicationProvider.getApplicationContext<Context>())
         val events = Events()

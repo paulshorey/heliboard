@@ -10,7 +10,7 @@ Repository automation scripts for builds, SDK setup, releases, and asset mainten
 - `check-agent-infrastructure.py` - discovery links, skill metadata, MCP adapters and provider fixups.
 - `build-dist-apk.sh` - canonical signed debug APK plus `dist/apk-metadata.json`.
 - `bake_number_row.py` - one-off layout migration helper; not a routine regeneration step.
-- `gemini-live-smoke-test.py` - opt-in real-provider protocol probes with a user-supplied key; not part of local smoke tests.
+- `muse-streaming-smoke-test.py` - opt-in real-provider diarization/PCM/EOF probe with an environment key and private WAV. No transcript logging by default.
 - `diacritics.py` - offline diacritics-analysis helper for external wordlist data.
 - `gemini-skills-fixups.py` - declarative local corrections for the vendored Gemini skills; `--check` reports drift, `--apply` writes them.
 - `release.py` - maintainer script for translation import, dictionary index refresh, Khipro mapping refresh, and changelog checks.

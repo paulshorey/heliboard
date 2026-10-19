@@ -6,7 +6,8 @@ Longer-form architecture notes that complement the shorter folder-local AGENTS f
 - `agent-development.md` - current agent tooling audit, APK/PR contract, local validation, manual acceptance and prioritized follow-up implementation plan.
 - `input-simplified.md` - explains the mirror-based current-word architecture and why the host editor is treated as a committed-text sink.
 - `recent-number-row-changes.md` - number-row bake migration notes and layout/parser troubleshooting.
-- `gemini-transcription.md` - end-to-end Gemini Live voice pipeline, setup-tier degradation, accuracy levers, local pre/post-processing, IME insertion guards, configuration notes, terminal dictation integrity design, protocol limits, and device acceptance checks.
+- `muse-transcription.md` - current Muse protocol, full baseline rollback/known defects, proposed punctuation restoration research and live/device acceptance.
+- `archive/gemini-transcription.md` - historical provider architecture; not the current branch behavior.
 - `general-edit-history-plan.md` - implementation plan for generalizing the fullapp edit history into a bounded, general-purpose edit history that also captures regular-keyboard typing, without breaking fullapp draft sync.
 
 ## Subfolders
