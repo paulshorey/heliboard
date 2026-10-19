@@ -16,6 +16,8 @@ VoiceInputManager FIFO → MuseTranscriptionClient (paced binary WebSocket) →
 MuseTurnAssembler → completed selected-speaker TranscriptSegment → acknowledged
 manager FIFO → LatinIME/InputConnection.
 
+- Default mode is DIARIZATION with first-speaker filtering. Explicit Responsive dictation selects ENDPOINTING with all voices and no attribution gate. Both modes still require speechEnd and speechComplete. Mode is fixed for a recording.
+- Timing diagnostics are opt-in metadata only. Capture and socket receipt timestamps precede main-handler dispatch. Audio/progress logs are sampled; transcripts, labels, keys and session IDs are never logged.
 - Accuracy over latency. Partials never become editor text. In DIARIZATION use
   speechComplete, not transcript.final or speechEnd, for completed text.
 - First JSON frame authenticates with authorization.accessToken = Bearer <key>.
@@ -56,7 +58,7 @@ manager FIFO → LatinIME/InputConnection.
 Use `./tools/android-dev.sh smoke`, relevant editor/log tests, and the canonical
 APK handoff skill. Run the real-provider probe only with a user-supplied key:
 `python3 tools/muse-streaming-smoke-test.py --audio /private/speech.wav`.
-Its key comes from MUSE_API_KEY / MODEL_API_KEY. No transcripts print by default.
+Use --compare-modes --timings for two sequential billable sessions on identical audio. Its key comes from MUSE_API_KEY / MODEL_API_KEY or an explicit --env-file. No transcripts print by default.
 No live access or phone-quality claims follow from mocks or an APK build.
 
 See [data-flow.md](data-flow.md) and [api-reference.md](api-reference.md).

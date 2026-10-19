@@ -4,7 +4,7 @@ package helium314.keyboard.latin.voice
 import org.json.JSONObject
 
 /** Session-scoped speaker selection. Partials are evidence, never editor text. */
-internal class MuseTurnAssembler {
+internal class MuseTurnAssembler(private val filterSpeakers: Boolean = true) {
     internal data class CompletedTurn(val id: Int, val text: String, val selected: Boolean)
     private data class Turn(
         var speaker: String? = null,
@@ -30,10 +30,17 @@ internal class MuseTurnAssembler {
                 activeId = id
             }
             "transcript" -> {
-                val turn = turns[activeId] ?: error("Transcript without a speech turn")
-                if (event.getString("transcript").isNotBlank()) turn.hasWords = true
+                val text = event.getString("transcript")
+                val turn = turns[activeId]
+                // Muse may flush an empty final after the last completed turn at EOF.
+                // It carries no words; a nonempty or nonfinal orphan remains an error.
+                check(turn != null || (text.isBlank() && event.optBoolean("final"))) {
+                    "Transcript without a speech turn"
+                }
+                if (text.isNotBlank()) turn!!.hasWords = true
             }
             "speaker" -> {
+                check(filterSpeakers) { "Unexpected speaker event in endpointing mode" }
                 val turn = turns[activeId] ?: error("Speaker without a speech turn")
                 // The label describes the preceding active span, not the next one.
                 check(!turn.ended) { "Speaker arrived outside an active speech span" }
@@ -62,9 +69,9 @@ internal class MuseTurnAssembler {
             val (id, turn) = turns.entries.first()
             val text = turn.text ?: break
             if (!turn.ended) break
-            if (turn.conflictingSpeaker || (text.isNotBlank() && turn.speaker == null)) break
-            if (text.isNotBlank() && selectedSpeaker == null) selectedSpeaker = turn.speaker
-            results.add(CompletedTurn(id, text, text.isNotBlank() && turn.speaker == selectedSpeaker))
+            if (filterSpeakers && (turn.conflictingSpeaker || (text.isNotBlank() && turn.speaker == null))) break
+            if (filterSpeakers && text.isNotBlank() && selectedSpeaker == null) selectedSpeaker = turn.speaker
+            results.add(CompletedTurn(id, text, text.isNotBlank() && (!filterSpeakers || turn.speaker == selectedSpeaker)))
             turns.remove(id)
             settled.add(id)
         }

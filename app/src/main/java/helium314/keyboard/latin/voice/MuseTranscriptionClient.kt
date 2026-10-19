@@ -37,22 +37,26 @@ class MuseTranscriptionClient {
                 "th" to "Thai", "tr" to "Turkish", "vi" to "Vietnamese")[code]
         }
         internal fun buildSessionConfig(languageTag: String?, autoDetectLanguage: Boolean,
-            userVocabulary: List<String>, editorContext: String?, sampleRate: Int = 24000) = SessionConfig(
+            userVocabulary: List<String>, editorContext: String?, sampleRate: Int = 24000,
+            responsiveDictation: Boolean = false, timingDiagnostics: Boolean = false) = SessionConfig(
             sampleRate, if (autoDetectLanguage) emptyList() else listOfNotNull(resolveLanguageCode(languageTag)),
-            VoiceContextVocabulary.build(userVocabulary, defaultVocabulary(), editorContext, MAX_USER_VOCABULARY_TERMS))
+            VoiceContextVocabulary.build(userVocabulary, defaultVocabulary(), editorContext, MAX_USER_VOCABULARY_TERMS),
+            if (responsiveDictation) Mode.ENDPOINTING else Mode.DIARIZATION, timingDiagnostics)
         internal fun handshake(key: String, config: SessionConfig): String = JSONObject().apply {
             require(config.sampleRate == 16000 || config.sampleRate == 24000)
             put("authorization", JSONObject().put("accessToken", "Bearer ${key.trim().removePrefix("Bearer ")}"))
             put("model", MODEL)
             put("audioEncoding", if (config.sampleRate == 24000) "PCM_24KHZ" else "PCM_16KHZ")
-            put("mode", "DIARIZATION")
+            put("mode", config.mode.name)
             put("partialMode", "CUMULATIVE")
             put("emitAudioProgress", true)
             if (config.languageBias.isNotEmpty()) put("languageBias", JSONArray(config.languageBias))
             if (config.keywords.isNotEmpty()) put("keywords", JSONArray(config.keywords))
         }.toString()
     }
-    internal data class SessionConfig(val sampleRate: Int, val languageBias: List<String>, val keywords: List<String>)
+    internal enum class Mode { DIARIZATION, ENDPOINTING }
+    internal data class SessionConfig(val sampleRate: Int, val languageBias: List<String>, val keywords: List<String>,
+        val mode: Mode = Mode.DIARIZATION, val timingDiagnostics: Boolean = false)
     interface StreamingCallback {
         fun onStreamReady()
         fun onTranscriptionResult(segment: TranscriptSegment)
@@ -81,6 +85,7 @@ class MuseTranscriptionClient {
     private var hasSpeech = false
     private var key = ""
     private var turns = MuseTurnAssembler()
+    private var timing: MuseLatencyDiagnostics? = null
     private val deadlines = mutableMapOf<Int, Runnable>()
 
     internal fun startStreaming(apiKey: String, sessionConfig: SessionConfig, callback: StreamingCallback) {
@@ -88,13 +93,18 @@ class MuseTranscriptionClient {
         this.callback = callback
         key = apiKey.trim().removePrefix("Bearer ")
         bytesPerSecond = sessionConfig.sampleRate * 2L
+        turns = MuseTurnAssembler(filterSpeakers = sessionConfig.mode == Mode.DIARIZATION)
+        timing = if (sessionConfig.timingDiagnostics) MuseLatencyDiagnostics() else null
         val token = generation
-        Log.i(TAG, "opening mode=DIARIZATION sampleRate=${sessionConfig.sampleRate}")
+        Log.i(TAG, "opening mode=${sessionConfig.mode} sampleRate=${sessionConfig.sampleRate}")
         socket = socketFactory.newWebSocket(Request.Builder().url(streamingEndpoint).build(), object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) = post(token) {
                 if (!webSocket.send(handshake(key, sessionConfig))) fail("Muse session could not start")
             }
-            override fun onMessage(webSocket: WebSocket, text: String) = post(token) { receive(text) }
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                val receivedAtMs = SystemClock.elapsedRealtime()
+                post(token) { receive(text, receivedAtMs) }
+            }
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) = post(token) { fail("Muse sent an unexpected binary response") }
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(code, null) }
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = post(token) {
@@ -124,7 +134,7 @@ class MuseTranscriptionClient {
         })
     }
     private fun post(token: Long, work: () -> Unit) { handler.post { if (token == generation) work() } }
-    private fun receive(raw: String) {
+    private fun receive(raw: String, receivedAtMs: Long) {
         val token = generation
         try {
             val event = JSONObject(raw)
@@ -145,11 +155,13 @@ class MuseTranscriptionClient {
             val progress = event.getLong("audioProcessedMs")
             // Asynchronous completed turns may carry an older progress value.
             processedMs = maxOf(processedMs, progress)
+            timing?.event(event, sentBytes * 1000 / bytesPerSecond - processedMs, queuedFrameBytes(), receivedAtMs)
             val completed = turns.accept(event)
             syncDeadlines()
             if (type == "transcript" && event.getString("transcript").isNotBlank()) callback?.onInterimTranscription()
             if (token != generation) return
             for (turn in completed) {
+                timing?.released(turn.id, turn.selected)
                 if (turn.selected) callback?.onTranscriptionResult(TranscriptSegment(turn.text, turn.text.first() in ".,!?:;)]}%"))
                 if (token != generation) return
             }
@@ -208,6 +220,7 @@ class MuseTranscriptionClient {
         speechSuffixBytes = 0
         hasSpeech = false
         turns = MuseTurnAssembler()
+        timing = null
     }
     private fun fail(message: String) {
         val sink = callback ?: return

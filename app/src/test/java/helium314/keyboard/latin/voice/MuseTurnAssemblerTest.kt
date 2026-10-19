@@ -8,6 +8,19 @@ import kotlin.test.*
 
 @RunWith(RobolectricTestRunner::class)
 class MuseTurnAssemblerTest {
+    @Test fun endpointingRetainsStartOrderAndDeduplicatesWithoutSpeakerLabels() {
+        val unfiltered = MuseTurnAssembler(filterSpeakers = false)
+        fun send(type: String, id: Int, text: String = "") = unfiltered.accept(
+            JSONObject().put("type", type).put("turnId", id).put("transcript", text))
+        send("speechStart", 7); send("speechEnd", 7)
+        send("speechStart", 2); send("speechEnd", 2)
+        assertTrue(send("speechComplete", 2, "Second voice.").isEmpty())
+        val ready = send("speechComplete", 7, "First voice.")
+        assertEquals(listOf(7, 2), ready.map { it.id })
+        assertTrue(ready.all { it.selected })
+        assertTrue(send("speechComplete", 7, "First voice.").isEmpty())
+        unfiltered.verifyFinished()
+    }
     private val assembler = MuseTurnAssembler()
     private fun event(type: String, id: Int? = null, text: String? = null, label: String? = null) =
         assembler.accept(JSONObject().put("type", type).apply {
@@ -78,6 +91,23 @@ class MuseTurnAssemblerTest {
     @Test fun speakerAndPartialWithoutAnActiveTurnAreProtocolErrors() {
         assertFailsWith<IllegalStateException> { event("speaker", label = "A") }
         assertFailsWith<IllegalStateException> { event("transcript", text = "No turn") }
+    }
+    @Test fun onlyEmptyFinalFlushCanArriveWithoutAnUnsettledTurn() {
+        for (filter in listOf(true, false)) {
+            val turns = MuseTurnAssembler(filter)
+            fun send(type: String, text: String = "", final: Boolean = false) = turns.accept(
+                JSONObject().put("type", type).put("turnId", 1).put("label", "A")
+                    .put("transcript", text).put("final", final))
+            assertTrue(send("transcript", final = true).isEmpty())
+            send("speechStart")
+            if (filter) send("speaker")
+            send("speechEnd")
+            assertEquals("Finished.", send("speechComplete", "Finished.").single().text)
+            assertTrue(send("transcript", final = true).isEmpty())
+            assertFailsWith<IllegalStateException> { send("transcript", "Unattributed.", true) }
+            assertFailsWith<IllegalStateException> { send("transcript") }
+            turns.verifyFinished()
+        }
     }
     @Test fun unresolvedTurnQueueIsBounded() {
         repeat(64) { event("speechStart", it); end(it) }

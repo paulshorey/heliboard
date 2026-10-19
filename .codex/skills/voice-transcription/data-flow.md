@@ -1,12 +1,14 @@
 # Muse dictation data flow
 
-1. A fixed-strip mic tap validates permissions, personal key and network route.
+1. A fixed-strip mic tap snapshots mode/diagnostic preferences and validates permissions, personal key and network route.
 2. Capture starts locally, selecting initialized 24 kHz / fallback 16 kHz audio.
 3. Manager starts one Muse WebSocket and buffers every PCM chunk, including quiet.
 4. Send JSON handshake, wait for sessionId acknowledgment, then pace binary audio.
 5. Partials update internal evidence only. Turn assembler holds complete text until
-   attributed, then releases in observed speech-start order. First speaker wins;
-   other-speaker turns settle without insertion.
+   attributed in default DIARIZATION, then releases in observed speech-start order.
+   First speaker wins; other-speaker turns settle without insertion. Explicit
+   Responsive dictation uses ENDPOINTING and releases all completed ended turns
+   without attribution. Timing diagnostics observe receipt/release, never payloads.
 6. Manager keeps each selected TranscriptSegment until LatinIME reports local
    dispatch/cleanup success. LatinIME clears typed composing state and uses
    InputConnection; explicit spoken commands use verified single replacements.

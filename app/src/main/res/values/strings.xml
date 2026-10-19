@@ -283,6 +283,11 @@
     <!-- Private IME options label in the fullapp drafts screen -->
     <string name="fullapp_drafts_private_ime_options">Private IME options: %s</string>
     <string name="muse_speaker_summary">Speak first after starting the mic. Only completed turns assigned to that speaker are inserted. Other voices may still be recognized when speech overlaps. Pause stops the microphone and sends silence to keep your speaker selection; paused time can be billed. Audio is processed by Meta.</string>
+    <string name="muse_responsive_title">Responsive dictation (all voices)</string>
+    <string name="muse_responsive_summary">Experimental. May return text sooner, but punctuation can be worse. All voices are transcribed; first-speaker filtering is off. Applies to the next recording.</string>
+    <string name="muse_all_voices_summary">Every completed speech turn is inserted, including other people’s voices. Final punctuation may be less accurate. Pause stops the microphone and sends silence; paused time can be billed. Audio is processed by Meta.</string>
+    <string name="muse_timing_title">Measure transcription delays</string>
+    <string name="muse_timing_summary">Add event timing and queue delays to Voice diagnostics. Audio, transcript text, and API keys are excluded. Applies to the next recording.</string>
     <string name="muse_api_key_title">Muse Voice Transcribe API key</string>
     <string name="muse_api_key_summary">Enter your own Meta Model API key from dev.meta.ai. Billing and Muse Voice Transcribe access are required. The key stays in private device storage, excluded from backup.</string>
     <string name="muse_use_editor_context_title">Learn names from the text field</string>

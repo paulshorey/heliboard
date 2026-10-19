@@ -1,11 +1,12 @@
 # Voice pipeline tests
 
+- `MuseLatencyDiagnosticsTest.kt`: event/final/release timing, sampled progress and exclusion of payloads/credentials.
 - `MuseTurnAssemblerTest.kt`: start-order selection, out-of-order completion, cumulative partial exclusion, repeated utterances, missing/mixed labels, bounded pending turns and speech-end final waits.
-- `MuseTranscriptionClientTest.kt`: actual handshake, raw sender pacing, processing lead, authoritative selected-speaker delivery, EOF/close, stale callbacks and invalid payloads.
+- `MuseTranscriptionClientTest.kt`: mode-specific handshake/assembly and safe restart defaults, raw sender pacing, processing lead, authoritative selected-speaker delivery, EOF/close, stale callbacks and invalid payloads.
 - `MuseTranscriptionClientStreamTest.kt`: real local WebSocket transport, body authentication, binary audio and late final drainage.
 - `VoiceInputManagerTest.kt`: capture/transcript FIFOs, editor acknowledgment/rejection, generation fencing, network loss, pause silence ordering, stop budgets and cancellation.
 - `VoiceRecorderLifecycleTest.kt`: stuck capture joins, original callback ownership and rapid pause/resume read phases.
-- `TranscriptionPreferencesTest.kt`: backup-excluded credential lifecycle and non-destructive vocabulary migration.
+- `TranscriptionPreferencesTest.kt`: backup-excluded credential lifecycle, conservative mode/diagnostic defaults and non-destructive vocabulary migration.
 - `TranscriptPostProcessorTest.kt`: explicit Muse commands/preservation, plus legacy pure helper behavior. The shipping path uses processMuseParagraph.
 - `VoiceContextVocabularyTest.kt` and `VoiceNetworkMonitorTest.kt`: keyword harvesting and Android network semantics.
 

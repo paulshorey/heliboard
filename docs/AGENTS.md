@@ -6,7 +6,7 @@ Longer-form architecture notes that complement the shorter folder-local AGENTS f
 - `agent-development.md` - current agent tooling audit, APK/PR contract, local validation, manual acceptance and prioritized follow-up implementation plan.
 - `input-simplified.md` - explains the mirror-based current-word architecture and why the host editor is treated as a committed-text sink.
 - `recent-number-row-changes.md` - number-row bake migration notes and layout/parser troubleshooting.
-- `muse-transcription.md` - current Muse protocol, first-speaker filter, pacing, pause silence, settings/privacy, integrity safeguards and live/device acceptance.
+- `muse-transcription.md` - current Muse protocol, default first-speaker filter, responsive all-voices mode, delay diagnosis/comparison, pacing, pause silence, settings/privacy, integrity safeguards and live/device acceptance.
 - `archive/gemini-transcription.md` - historical provider architecture; not the current branch behavior.
 - `general-edit-history-plan.md` - implementation plan for generalizing the fullapp edit history into a bounded, general-purpose edit history that also captures regular-keyboard typing, without breaking fullapp draft sync.
 
