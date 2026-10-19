@@ -102,6 +102,30 @@ class TurnAuditTest(unittest.TestCase):
         audit.accept(event("speechEnd", progress=100), 2)
         self.assertEqual(audit.processed_ms, 500)
 
+    def test_noise_deadline_or_close_releases_later_words_without_selecting_noise(self):
+        for closing in (False, True):
+            audit = probe.TurnAudit("DIARIZATION")
+            for item in [event("speechStart", 7), event("speechEnd", 7), event("speechStart", 2),
+                         event("speaker", label="B"), event("speechEnd", 2), event("speechComplete", 2)]:
+                audit.accept(item, 0)
+            self.assertFalse(audit.expire_empty(29_999))
+            ready = audit.expire_empty(30_000 if not closing else 100, closing=closing)
+            self.assertTrue(ready[0][1]["selected"])
+            self.assertEqual(audit.selected, "B")
+            audit.verify_finished()
+            self.assertFalse(audit.accept(event("speechComplete", 7, ""), 30_001)[0])
+            with self.assertRaisesRegex(ValueError, "empty turn expired"):
+                audit.accept(event("speechComplete", 7, "Unexpected late words."), 30_001)
+
+    def test_late_completion_with_no_partial_preserves_original_order(self):
+        audit = probe.TurnAudit("ENDPOINTING")
+        for i in (7, 2):
+            audit.accept(event("speechStart", i), 0)
+            audit.accept(event("speechEnd", i), 1)
+        self.assertFalse(audit.accept(event("speechComplete", 2, "Second."), 2)[0])
+        ready, _ = audit.accept(event("speechComplete", 7, "First."), 3)
+        self.assertEqual([text for text, _ in ready], ["First.", "Second."])
+
 
 class ProbeInputTest(unittest.TestCase):
     def test_env_file_is_literal_and_environment_takes_priority(self):
@@ -171,6 +195,25 @@ class FakeSocket:
 
 
 class ProbeSessionTest(unittest.IsolatedAsyncioTestCase):
+    async def test_noise_timeout_keeps_the_same_pending_socket_read_alive(self):
+        class NoiseSocket(FakeSocket):
+            async def send(self, data):
+                if isinstance(data, str) and json.loads(data).get("type") == "endStream":
+                    for item in [event("speechStart", 7), event("speechEnd", 7), event("speechStart", 2),
+                                 event("speechEnd", 2), event("speechComplete", 2)]:
+                        await self.messages.put(item)
+                    asyncio.get_running_loop().call_later(0.04, self.messages.put_nowait, None)
+                else:
+                    await super().send(data)
+        socket = NoiseSocket()
+        fake = SimpleNamespace(connect=lambda *a, **kw: socket)
+        args = SimpleNamespace(language=None, keyword=None, timings=False, show_transcripts=False)
+        with patch.dict("sys.modules", {"websockets": fake}), patch.object(probe, "FINAL_TIMEOUT_MS", 10), \
+                contextlib.redirect_stdout(io.StringIO()):
+            summary = await probe.run_session(args, "ENDPOINTING", "private-key", 24000, bytes(4800))
+        self.assertEqual(summary["selected_turns"], 1)
+        self.assertEqual(socket.close_code, 1000)
+
     async def test_both_modes_drain_after_eof_with_safe_default_output(self):
         args = SimpleNamespace(language=["English"], keyword=None, timings=True, show_transcripts=False)
         for mode, expected in (("DIARIZATION", 1), ("ENDPOINTING", 2)):

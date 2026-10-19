@@ -81,8 +81,7 @@ class MuseTranscriptionClient {
     private var sentBytes = 0L
     private var processedMs = 0L
     private var firstAudioAt: Long? = null
-    private var speechSuffixBytes = 0L
-    private var hasSpeech = false
+    private var lastSpeechEndByte = 0L
     private var key = ""
     private var turns = MuseTurnAssembler()
     private var timing: MuseLatencyDiagnostics? = null
@@ -115,8 +114,17 @@ class MuseTranscriptionClient {
                         else -> "Muse connection ended before dictation finished (code $code). Tap the mic to restart."
                     })
                 } else {
-                    try { turns.verifyFinished() } catch (_: Exception) {
-                        fail("Muse ended with unresolved text or speaker attribution. Tap the mic and speak first again.")
+                    // No further finals can arrive after close. Wordless ended
+                    // turns must not hide later completed text at the FIFO head.
+                    val completed = turns.settleEmptyEndedTurns()
+                    if (!deliver(completed)) return@post
+                    if (completed.isNotEmpty()) callback?.onServerResponse(true)
+                    if (token != generation) return@post
+                    try {
+                        turns.verifyFinished()
+                        check(!hasQueuedSpeechFrames())
+                    } catch (_: Exception) {
+                        fail("Muse ended with unprocessed speech or unresolved text/speaker attribution. Tap the mic and speak first again.")
                         return@post
                     }
                     val sink = this@MuseTranscriptionClient.callback
@@ -160,22 +168,35 @@ class MuseTranscriptionClient {
             syncDeadlines()
             if (type == "transcript" && event.getString("transcript").isNotBlank()) callback?.onInterimTranscription()
             if (token != generation) return
-            for (turn in completed) {
-                timing?.released(turn.id, turn.selected)
-                if (turn.selected) callback?.onTranscriptionResult(TranscriptSegment(turn.text, turn.text.first() in ".,!?:;)]}%"))
-                if (token != generation) return
-            }
+            if (!deliver(completed)) return
             callback?.onServerResponse(completed.isNotEmpty())
         } catch (_: Exception) {
             if (token == generation) fail("Muse returned invalid or ambiguous transcription events. Tap the mic to restart.")
         }
+    }
+    private fun deliver(completed: List<MuseTurnAssembler.CompletedTurn>): Boolean {
+        val token = generation
+        for (turn in completed) {
+            timing?.released(turn.id, turn.selected)
+            if (turn.selected) callback?.onTranscriptionResult(TranscriptSegment(turn.text, turn.text.first() in ".,!?:;)]}%"))
+            if (token != generation) return false
+        }
+        return true
     }
     private fun syncDeadlines() {
         val pending = turns.pendingFinalIds()
         for (id in deadlines.keys.toList()) if (id !in pending) handler.removeCallbacks(deadlines.remove(id)!!)
         val token = generation
         for (id in pending) if (id !in deadlines) {
-            deadlines[id] = Runnable { if (generation == token) fail("Muse did not finish a speech turn or identify its speaker") }
+            deadlines[id] = Runnable {
+                if (generation != token) return@Runnable
+                val completed = try { turns.expireEmptyTurn(id) } catch (_: Exception) {
+                    fail("Muse did not finish a speech turn or identify its speaker")
+                    return@Runnable
+                }
+                syncDeadlines()
+                if (deliver(completed) && completed.isNotEmpty()) callback?.onServerResponse(true)
+            }
                 .also { handler.postDelayed(it, FINAL_TIMEOUT_MS) }
         }
     }
@@ -191,12 +212,16 @@ class MuseTranscriptionClient {
         if (!ws.send(pcmData.toByteString())) return AudioSendResult.FAILED
         firstAudioAt = start
         sentBytes += pcmData.size
-        if (containsSpeech) { hasSpeech = true; speechSuffixBytes = 0 } else speechSuffixBytes += pcmData.size
+        if (containsSpeech) lastSpeechEndByte = sentBytes
         return AudioSendResult.ACCEPTED
     }
     internal fun queuedFrameBytes(): Long = socket?.queueSize() ?: 0
     internal fun hasQueuedFrames() = queuedFrameBytes() > 0
-    internal fun hasQueuedSpeechFrames() = hasSpeech && queuedFrameBytes() > speechSuffixBytes
+    // queueSize covers only unsent bytes. Keep a speech suffix pending until
+    // provider progress reaches its PCM offset, even after the socket drains.
+    internal fun hasQueuedSpeechFrames() = lastSpeechEndByte > 0 &&
+        (lastSpeechEndByte > processedMs * bytesPerSecond / 1000 ||
+            queuedFrameBytes() > sentBytes - lastSpeechEndByte)
     internal fun hasPendingTurns() = turns.hasPendingTurns()
     fun finishStreaming(): Boolean {
         if (!ready || finishing) return false
@@ -217,8 +242,7 @@ class MuseTranscriptionClient {
         sentBytes = 0
         processedMs = 0
         firstAudioAt = null
-        speechSuffixBytes = 0
-        hasSpeech = false
+        lastSpeechEndByte = 0
         turns = MuseTurnAssembler()
         timing = null
     }

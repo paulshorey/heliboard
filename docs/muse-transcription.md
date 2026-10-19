@@ -53,6 +53,11 @@ organizational enablement. Do not assume personal-key retention is zero.
   Missing attribution blocks later text until resolved; close/timeout reports it.
 - Deduplicate by session/turn identity, not transcript contents. Repeating a whole
   sentence in a new turn must type it again.
+- Ended turns without words retain their place for the same 30-second final wait,
+  since a completed transcript can arrive without partials. At that deadline, or
+  on normal server closure when no more results can arrive, retire wordless turns
+  without choosing a speaker and release later ready text. Unexpected nonempty
+  text after such expiry fails visibly rather than being dropped or reordered.
 
 Diarization covers non-overlapping speech. Radio/TV or another person speaking
 first may be selected, and overlapping/similar voices can be misclassified. These
@@ -67,6 +72,9 @@ reordering data. The sender paces against a monotonic clock with one capture fra
 of headroom. Submitted audio leads reported processing by at most two seconds,
 below Meta's five-second policy limit; the socket queue is also bounded. Progress
 is evidence of processing, not a receipt for editor insertion or individual words.
+Track the last submitted speech-frame byte offset against provider processing as
+well as socket backlog. An empty socket queue alone cannot acknowledge a newer
+speech suffix; normal closure with unprocessed submitted speech is an interruption.
 
 Pause stops native microphone capture. A main-looper barrier orders its posted
 tail before generated zero PCM, emitted on an absolute 100 ms schedule. Resume
@@ -78,6 +86,8 @@ Local RMS VAD only controls activity and the configurable silence auto-stop
 provider-ended recognized turn has a fixed 30-second final/attribution deadline;
 interims/progress cannot postpone it. Long speech without an endpoint can continue
 while the response watchdog sees progress. Raw noise alone requires no final.
+Empty-ended turns expire harmlessly at the final deadline; recognized unresolved
+turns still fail. A completion received before speechEnd does not start that wait.
 
 One recording owns one connection. At 55 minutes stop capture and drain before the
 60-minute service cap. Explicit stop joins capture, accepts its already-posted

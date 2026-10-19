@@ -40,6 +40,11 @@ manager FIFO → LatinIME/InputConnection.
   55 minutes before the service cap. Stop budget is 60 seconds overall. Per-turn
   recognized finals wait 30 seconds after provider speechEnd; progress cannot
   extend a missing final. Long uninterrupted speech can continue.
+- Ended no-word turns retain their ordering slot until the 30-second final wait
+  expires or normal server closure, then retire without selecting a speaker.
+  Late nonempty text after retirement fails visibly. An early completion alone
+  does not start the wait. Track submitted speech offsets against processed audio
+  as well as socket backlog; normal close cannot accept unprocessed speech.
 - Preserve main-looper fencing, transcript acknowledgment, verified replacements,
   actual host-clear checks, target/hide cancellation and recorder callback/phase
   ownership. Never retry a possibly partial editor operation.

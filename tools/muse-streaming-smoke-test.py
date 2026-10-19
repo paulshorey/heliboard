@@ -10,6 +10,7 @@ import wave
 
 MODES = ("DIARIZATION", "ENDPOINTING")
 ENDPOINT = "wss://api.meta.ai/v1/asr/realtime"
+FINAL_TIMEOUT_MS = 30_000
 
 
 def read_audio(path):
@@ -51,6 +52,7 @@ class TurnAudit:
         self.mode = mode
         self.turns = {}
         self.settled = set()
+        self.retired_empty = set()
         self.active = None
         self.selected = None
         self.processed_ms = 0
@@ -83,6 +85,9 @@ class TurnAudit:
         if kind in ("transcript", "speechComplete"):
             text = event.get("transcript")
             require(isinstance(text, str), "Invalid transcript payload")
+            if kind == "speechComplete":
+                require(turn_id not in self.retired_empty or not text.strip(),
+                        "Words arrived after an empty turn expired")
         if kind in ("transcript", "speaker"):
             # A live Muse session can flush an empty final after its last turn.
             empty_flush = kind == "transcript" and not text.strip() and event.get("final") is True
@@ -120,6 +125,9 @@ class TurnAudit:
         metadata = dict(type=kind, turn=turn_id, elapsed_ms=elapsed_ms, audio_processed_ms=progress)
         if text is not None:
             metadata.update(chars=len(text), sentence_marks=sum(c in ".!?" for c in text))
+        return self.drain(elapsed_ms), metadata
+
+    def drain(self, elapsed_ms):
         ready = []
         while self.turns:
             identity, current = next(iter(self.turns.items()))
@@ -146,11 +154,20 @@ class TurnAudit:
             ready.append((current["text"], metrics))
             del self.turns[identity]
             self.settled.add(identity)
-        return ready, metadata
+        return ready
+
+    def expire_empty(self, elapsed_ms, closing=False):
+        for identity, turn in list(self.turns.items()):
+            if turn["end_ms"] is not None and not turn["words"] and (
+                    closing or elapsed_ms - turn["end_ms"] >= FINAL_TIMEOUT_MS):
+                del self.turns[identity]
+                self.settled.add(identity)
+                self.retired_empty.add(identity)
+        return self.drain(elapsed_ms)
 
     def receive_timeout(self, elapsed_ms):
-        deadlines = [t["end_ms"] + 30_000 for t in self.turns.values()
-                     if t["words"] and t["end_ms"] is not None]
+        deadlines = [t["end_ms"] + FINAL_TIMEOUT_MS for t in self.turns.values()
+                     if t["end_ms"] is not None]
         remaining = min([30_000] + [deadline - elapsed_ms for deadline in deadlines])
         require(remaining > 0, "Muse did not complete or attribute a speech turn within 30 seconds")
         return remaining / 1000
@@ -182,27 +199,50 @@ async def run_session(args, mode, key, rate, pcm):
 
         async def receive():
             nonlocal last_progress_log
-            iterator = ws.__aiter__()
-            while True:
-                try:
-                    raw = await asyncio.wait_for(iterator.__anext__(), audit.receive_timeout(elapsed()))
-                except StopAsyncIteration:
-                    break
-                event = json.loads(raw)
-                if event.get("type") == "error":
-                    raise ValueError("Muse returned a service error; verify account/configuration")
-                ready, metadata = audit.accept(event, elapsed())
-                progress_changed.set()
-                if args.timings and metadata:
-                    if metadata["type"] != "audioProgress" or elapsed() - last_progress_log >= 1000:
-                        if metadata["type"] == "audioProgress":
-                            last_progress_log = elapsed()
-                        print(json.dumps(dict(mode=mode, phase="event", **metadata)))
+            def publish(ready):
                 for text, metrics in ready:
                     print(json.dumps(dict(mode=mode, phase="turn", **metrics)))
                     if args.show_transcripts:
                         print(text)
-            audit.verify_finished()
+            iterator = ws.__aiter__()
+            pending_read = None
+            try:
+                while True:
+                    publish(audit.expire_empty(elapsed()))
+                    if pending_read is None:
+                        pending_read = asyncio.create_task(iterator.__anext__())
+                    # A turn deadline must not cancel the async event iterator.
+                    done, _ = await asyncio.wait({pending_read}, timeout=audit.receive_timeout(elapsed()))
+                    if not done:
+                        now = elapsed()
+                        require(any(t["end_ms"] is not None and now - t["end_ms"] >= FINAL_TIMEOUT_MS
+                                    for t in audit.turns.values()), "Muse did not respond within 30 seconds")
+                        publish(audit.expire_empty(now))
+                        audit.receive_timeout(now)  # Recognized missing finals still fail.
+                        continue
+                    try:
+                        raw = pending_read.result()
+                    except StopAsyncIteration:
+                        break
+                    finally:
+                        pending_read = None
+                    event = json.loads(raw)
+                    if event.get("type") == "error":
+                        raise ValueError("Muse returned a service error; verify account/configuration")
+                    ready, metadata = audit.accept(event, elapsed())
+                    progress_changed.set()
+                    if args.timings and metadata:
+                        if metadata["type"] != "audioProgress" or elapsed() - last_progress_log >= 1000:
+                            if metadata["type"] == "audioProgress":
+                                last_progress_log = elapsed()
+                            print(json.dumps(dict(mode=mode, phase="event", **metadata)))
+                    publish(ready)
+                publish(audit.expire_empty(elapsed(), closing=True))
+                audit.verify_finished()
+            finally:
+                if pending_read is not None:
+                    pending_read.cancel()
+                    await asyncio.gather(pending_read, return_exceptions=True)
 
         receiver = asyncio.create_task(receive())
         receiver.add_done_callback(lambda _: progress_changed.set())

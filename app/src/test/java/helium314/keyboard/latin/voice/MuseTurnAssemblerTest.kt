@@ -120,4 +120,33 @@ class MuseTurnAssemblerTest {
         event("speechComplete", 1, "Still speaking.")
         assertTrue(assembler.pendingFinalIds().isEmpty())
     }
+    @Test fun endedNoiseExpiresWithoutChoosingASpeakerOrBlockingLaterText() {
+        event("speechStart", 7); end(7)
+        assertEquals(setOf(7), assembler.pendingFinalIds())
+        start(2, "B"); end(2)
+        assertTrue(event("speechComplete", 2, "My words.").isEmpty())
+        val ready = assembler.expireEmptyTurn(7)
+        assertEquals(listOf("My words."), ready.map { it.text })
+        assertTrue(ready.single().selected)
+        assertTrue(event("speechComplete", 7, "").isEmpty())
+        assertFailsWith<IllegalStateException> { event("speechComplete", 7, "Unexpected late words.") }
+        assembler.verifyFinished()
+    }
+    @Test fun streamClosureSettlesNoiseButRetainsMissingRecognizedFinals() {
+        event("speechStart", 1); end(1)
+        start(2, "A"); end(2); event("speechComplete", 2, "Complete.")
+        start(3, "A"); event("transcript", text = "Unfinished"); end(3)
+        assertEquals("Complete.", assembler.settleEmptyEndedTurns().single().text)
+        assertFailsWith<IllegalStateException> { assembler.expireEmptyTurn(3) }
+        assertFailsWith<IllegalStateException> { assembler.verifyFinished() }
+    }
+    @Test fun noPartialLateCompletionStillPreservesStartOrderBeforeDeadline() {
+        val turns = MuseTurnAssembler(filterSpeakers = false)
+        fun send(type: String, id: Int, text: String = "") = turns.accept(
+            JSONObject().put("type", type).put("turnId", id).put("transcript", text))
+        send("speechStart", 8); send("speechEnd", 8)
+        send("speechStart", 4); send("speechEnd", 4)
+        assertTrue(send("speechComplete", 4, "Second.").isEmpty())
+        assertEquals(listOf("First.", "Second."), send("speechComplete", 8, "First.").map { it.text })
+    }
 }

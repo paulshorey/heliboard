@@ -559,7 +559,7 @@ class VoiceInputManager internal constructor(
     private fun acknowledgeFinal(sessionId: Long, logProgress: Boolean = true) {
         lastFinalAtMs = SystemClock.elapsedRealtime()
         // This final may describe an earlier utterance. Never let it acknowledge
-        // a suffix that has not even left our local queues.
+        // a suffix still queued locally, unprocessed by Muse, or in a pending turn.
         val queuedPcmSpeech = outbound.any { it is Outbound.Audio && it.containsSpeech }
         val queuedSocketSpeech = transcriptionClient.hasQueuedSpeechFrames() || transcriptionClient.hasPendingTurns()
         if (!queuedPcmSpeech && !queuedSocketSpeech) {

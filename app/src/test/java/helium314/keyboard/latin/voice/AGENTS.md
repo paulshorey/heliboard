@@ -1,8 +1,8 @@
 # Voice pipeline tests
 
 - `MuseLatencyDiagnosticsTest.kt`: event/final/release timing, sampled progress and exclusion of payloads/credentials.
-- `MuseTurnAssemblerTest.kt`: start-order selection, out-of-order completion, cumulative partial exclusion, repeated utterances, missing/mixed labels, bounded pending turns and speech-end final waits.
-- `MuseTranscriptionClientTest.kt`: mode-specific handshake/assembly and safe restart defaults, raw sender pacing, processing lead, authoritative selected-speaker delivery, EOF/close, stale callbacks and invalid payloads.
+- `MuseTurnAssemblerTest.kt`: start-order selection, out-of-order completion, cumulative partial exclusion, repeated utterances, missing/mixed labels, bounded pending turns, empty-turn retirement and speech-end final waits.
+- `MuseTranscriptionClientTest.kt`: mode-specific handshake/assembly and safe restart defaults, raw sender pacing, processing lead and unprocessed speech suffixes, authoritative selected-speaker delivery, empty-turn deadline/close drainage, EOF/close, stale callbacks and invalid payloads.
 - `MuseTranscriptionClientStreamTest.kt`: real local WebSocket transport, body authentication, binary audio and late final drainage.
 - `VoiceInputManagerTest.kt`: capture/transcript FIFOs, editor acknowledgment/rejection, generation fencing, network loss, pause silence ordering, stop budgets and cancellation.
 - `VoiceRecorderLifecycleTest.kt`: stuck capture joins, original callback ownership and rapid pause/resume read phases.
