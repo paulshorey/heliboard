@@ -36,131 +36,36 @@ for Android Studio, Codex actions, manual phone checks and the tooling roadmap.
 Use `debugNoMinify` in Android Studio for faster debugger iteration. The canonical
 PR APK uses `debug` and the shared debug key, so updates preserve app data.
 
-## Remove disfluencies
+## Grok Voice Transcribe 2.0
 
-app/src/main/java/helium314/keyboard/latin/voice/TranscriptPostProcessor.kt
-line 14
+This comparison branch uses Grok for streaming keyboard dictation. Install its
+APK as an update, create an account/API key with credits at
+[console.x.ai](https://console.x.ai), then enter the key in Settings → Transcription
+or Setup this app. Use the fixed microphone in the suggestion strip.
 
-```
-object TranscriptPostProcessor {
+Speak first after tapping the mic. Only the first detected speaker is inserted;
+other voices are filtered using finalized word-level attribution. Speaker labels
+are anonymous and may be wrong with overlapping voices. All captured audio,
+including background voices, goes to xAI. There is no voice enrollment feature.
 
-    data class Rule(val find: String, val replace: String)
+Accuracy takes priority over latency: completed utterances may take several
+seconds to appear. Start with thought-completion confidence 0.7 and maximum
+thinking pause 5000 ms; try 0.9 for more patient detection. Native provider wording,
+casing and punctuation are preserved, with explicit spoken punctuation commands.
 
-    val rules: List<Rule> = buildRules()
+The personal key is masked and stored privately outside backups; it is never
+embedded in the APK. Existing provider keys are preserved for comparison builds.
+Network loss or a stalled service stops the recording and its pending queue.
+Only temporary startup rejections retry automatically; active sessions never
+reconnect or replay. A new recording requires a deliberate mic tap.
 
-    private val disfluencyReplacements = listOf(
-        Rule("—", ""),
-        Rule(", hmm.", ""),
-        Rule(" hmm.", ""),
-        Rule("hmm.", ""),
-        Rule(", um.", "."),
-        Rule(" um.", "."),
-        Rule(", uh.", "."),
-        Rule(" uh.", "."),
-        Rule(", and.", "."),
-        Rule(" and.", "."),
-    )
-```
-
----
-
-## Gemini Live voice transcription
-
-HeliBoard uses [Gemini Live Transcribe](https://ai.google.dev/gemini-api/docs/live-api/live-transcribe)
-(`gemini-3.5-transcribe-live`) for voice-to-text, over the Live API's bidirectional
-WebSocket. The session configuration is assembled in `GeminiTranscriptionClient.kt`
-and sent as a single `setup` JSON text frame; the API key travels in the WebSocket
-query string.
-
-The pipeline is tuned for **accuracy over latency**. Dictated text is committed
-straight into the user's editor, so a wrong word or a misplaced period costs more
-than a second of waiting.
-
-### Where the integration lives
-
-`app/src/main/java/helium314/keyboard/latin/voice/GeminiTranscriptionClient.kt`
-
-The client:
-
-- connects to `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=…`
-  with `model = "models/gemini-3.5-transcribe-live"` and `responseModalities = ["TEXT"]`
-- sends `inputAudioTranscription` as a **sibling** of `generationConfig` (nesting it
-  closes the socket with 1007) carrying `mode`, `languageCodes` and `customVocabulary`
-- requests `mode: "SMART"` so Gemini removes filler words, resolves spoken
-  self-corrections, and applies punctuation, casing and list formatting
-- tunes server VAD for patience: `endOfSpeechSensitivity: END_SENSITIVITY_LOW` with a
-  1500 ms `silenceDurationMs`, plus `START_SENSITIVITY_HIGH` and `prefixPaddingMs: 300`
-  so the first syllable is never clipped
-- maps the active keyboard subtype onto a documented BCP-47 `languageCodes` entry, or
-  sends `[]` so Gemini auto-detects when nothing matches
-- sends `customVocabulary` (≤100 terms) built from the user's list, a small built-in
-  list, and proper nouns harvested from editor text near the caret
-- waits for `{"setupComplete":{}}` before releasing buffered audio, then streams
-  100 ms chunks of base64 PCM16 as JSON text frames (`audio/pcm;rate=16000`)
-- commits only `serverContent.inputTranscription`; `interimInputTranscription` is
-  discarded and `modelTurn` is ignored so no generated response can reach the editor
-- sends `{"realtimeInput":{"audioStreamEnd":true}}` after local silence, on mic pause,
-  and on stop — then keeps reading for 8 s so the trailing phrase still arrives
-- stops capture and drains the existing session on `goAway` or the nine-minute limit;
-  the user deliberately starts the next recording
-
-### Setup-tier degradation
-
-The transcribe model's documented feature list is narrower than the shared `setup`
-proto it accepts, and an unsupported field is rejected with close code 1007 — which
-would leave voice input permanently dead. So `setup` is rendered at one of four tiers
-and the client retries one lower on 1007:
-
-`FULL` → `NO_SYSTEM_INSTRUCTION` → `NO_REALTIME_CONFIG` → `MINIMAL`
-
-The working tier is cached for the rest of the process, so a schema mismatch costs one
-reconnect per app run. Run `tools/gemini-live-smoke-test.py --probe-setup` with a real
-key to see which tiers the server accepts today.
-
-### Custom voice vocabulary
-
-Settings → Transcription → **Custom voice vocabulary** (`VoiceVocabularyScreen.kt`)
-lets users add `customVocabulary` terms (one per line, pref
-`PREF_GEMINI_CUSTOM_VOCABULARY`). These merge with the built-in list and with
-editor-harvested proper nouns at every session start.
-
-### What HeliBoard does not send
-
-Verbatim editor text is deliberately never sent to the model. Neither
-`systemInstruction` nor a seeded `clientContent` history is a documented input for this
-model, and feeding an already-typed paragraph to a generative model risks it echoing
-that text back as transcription. `customVocabulary` is the documented channel for
-conveying what the user has written, and local pre/post-processing in `LatinIME`
-handles casing and punctuation continuity with surrounding text.
-
-Speaker diarization and word-level timestamps are not supported by the Live API.
-
-### Getting an API key
-
-Create one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and
-paste it into Settings → Transcription (or Settings → Setup this app). The key stays on
-the device and is sent only to Google.
-
-### User-facing settings (Settings → Transcription)
-
-| Setting                        | Pref key                                | Default  | Description                                                                                     |
-| ------------------------------ | --------------------------------------- | -------- | ----------------------------------------------------------------------------------------------- |
-| Google Gemini API Key          | `PREF_GEMINI_API_KEY`                   | `""`     | Gemini API key with Live API access                                                             |
-| Smart transcription            | `PREF_GEMINI_TRANSCRIPTION_MODE`        | `SMART`  | `SMART` cleans disfluencies and formats; `VERBATIM` is literal                                  |
-| Learn names from the text field| `PREF_GEMINI_USE_EDITOR_CONTEXT`        | `true`   | Harvest proper nouns near the caret into `customVocabulary`                                     |
-| Custom voice vocabulary        | `PREF_GEMINI_CUSTOM_VOCABULARY`         | `""`     | User-defined `customVocabulary`, one term per line                                              |
-| Detect spoken language         | `PREF_GEMINI_AUTO_DETECT_LANGUAGE`      | `false`  | Send `languageCodes: []` instead of the keyboard language                                       |
-| End-of-speech pause (ms)       | `PREF_GEMINI_END_OF_SPEECH_SILENCE_MS`  | `1500`   | `silenceDurationMs`, 400–5000. Higher is more accurate; short values fragment sentences         |
-| Chunk silence duration (s)     | `PREF_VOICE_CHUNK_SILENCE_SECONDS`      | `2`      | Local pause that sends `audioStreamEnd` as a backstop. Keep longer than the end-of-speech pause |
-
-Preference keys are in `Settings.java`, defaults in `Defaults.kt`, read/write logic in
-`TranscriptionPreferences.kt`. `TranscriptionPreferences.migrateLegacyProviderPrefs`
-erases the preference keys of the providers used before Gemini, carrying only the
-user's own vocabulary list across.
+See [Grok implementation and phone acceptance](docs/grok-transcription.md) for
+protocol, settings, failure limits and diagnostic instructions. Local tests cannot
+establish streaming speech accuracy, speaker isolation or punctuation quality.
 
 ## Related docs
 
 - Fullapp architecture: `.codex/skills/full-app-mode/SKILL.md`
-- Gemini transcription pipeline: `docs/gemini-transcription.md`
+- Active voice pipeline: `docs/grok-transcription.md`
 - Agent instructions: `AGENTS.md`
-- Gemini Live API reference for this app: `.codex/skills/voice-transcription/api-reference.md`
+- Historical Gemini comparison: `docs/gemini-transcription.md`

@@ -231,7 +231,7 @@
     <string name="backup_restored">Backup restored</string>
     <!-- Preferences item for format for timestamp keycode -->
     <string name="timestamp_format_title">Format for timestamp key</string>
-    <!-- Voice Input (Gemini Live transcription) settings -->
+    <!-- Voice Input settings settings -->
     <string name="settings_screen_setup_app">Setup this app</string>
     <string name="settings_screen_transcription">Transcription</string>
     <!-- Settings screen showing saved edits from regular keyboard and fullapp mode -->
@@ -298,9 +298,9 @@
     <!-- Title for the per-user custom vocabulary screen, used both as the row in the transcription screen and as the screen title. -->
     <string name="voice_vocabulary_title">Custom voice vocabulary</string>
     <!-- Summary shown for the row that opens the custom voice vocabulary screen. -->
-    <string name="voice_vocabulary_summary">Add product names, jargon and proper nouns so Gemini spells them correctly during dictation.</string>
+    <string name="voice_vocabulary_summary">Add names and technical terms as Grok spelling hints (up to 100 terms, 50 characters each).</string>
     <!-- Intro paragraph at the top of the custom voice vocabulary screen explaining what the list is used for. -->
-    <string name="voice_vocabulary_intro">Terms here are sent to Gemini as speech-recognition hints (`customVocabulary`) at the start of every voice session. They bias the model toward the correct spelling and casing for words it might otherwise mis-hear. Around 100 terms works best.</string>
+    <string name="voice_vocabulary_intro">These terms are sent to Grok as spelling hints at the start of each recording. Up to 100 terms are used, with a maximum of 50 characters per term.</string>
     <!-- Section header for the read-only built-in terms list. -->
     <string name="voice_vocabulary_builtin_section">Built-in terms</string>
     <!-- Caption under the built-in terms list. -->
@@ -1035,4 +1035,18 @@ New dictionary:
     <string name="custom_subtype">Custom subtype</string>
     <!-- Name for landscape orientation, used in various settings -->
     <string name="landscape">Landscape</string>
+    <string name="grok_api_key_title" translatable="false">Grok API key</string>
+    <string name="grok_api_key_summary" translatable="false">Create an API key and add credits at console.x.ai. Stored privately on this phone, outside backups. No key is included in the app.</string>
+    <string name="grok_key_save_error" translatable="false">Could not save the API key. Check available storage and try again.</string>
+    <string name="grok_speaker_summary" translatable="false">Grok Voice Transcribe 2.0 • Speak first after tapping the mic. Only the first detected speaker is inserted. Other voices and overlapping speech may be misidentified. All recorded audio is sent to xAI. Completed thoughts may take several seconds to appear.</string>
+    <string name="grok_use_editor_context_title" translatable="false">Learn names from the text field</string>
+    <string name="grok_use_editor_context_summary" translatable="false">Send individual names, brands and acronyms near the cursor as spelling hints. Full editor paragraphs are never sent.</string>
+    <string name="grok_auto_detect_language_title" translatable="false">Detect spoken language</string>
+    <string name="grok_auto_detect_language_summary" translatable="false">Let Grok detect the language. When off, use a supported hint from the current keyboard language. Number formatting needs an explicit language hint.</string>
+    <string name="grok_format_title" translatable="false">Format numbers and currency</string>
+    <string name="grok_format_summary" translatable="false">Use written forms such as $25 instead of twenty-five dollars when supported by the selected language. This does not control sentence punctuation.</string>
+    <string name="grok_smart_turn_title" translatable="false">Thought completion confidence (0.0–1.0)</string>
+    <string name="grok_smart_turn_summary" translatable="false">Default 0.7. Higher values, such as 0.9, wait for stronger evidence that a thought has ended. Try this if thinking pauses split your sentences.</string>
+    <string name="grok_turn_timeout_title" translatable="false">Maximum thinking pause (ms, 1–5000)</string>
+    <string name="grok_turn_timeout_summary" translatable="false">Default 5000. Complete the utterance after this much silence even if the thought may continue. This is separate from the silence auto-stop below.</string>
 </resources>

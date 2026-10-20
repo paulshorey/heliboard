@@ -7,24 +7,24 @@ import android.os.Looper
 import android.os.SystemClock
 import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
-import helium314.keyboard.latin.settings.TranscriptionPreferences
-import helium314.keyboard.latin.settings.TranscriptionPreferences.GeminiConfig
+import helium314.keyboard.latin.settings.GrokPreferences
+import helium314.keyboard.latin.settings.GrokPreferences.Config
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.prefs
 
 /**
- * One recording owns one Live connection. All capture, control, transcript and
+ * One recording owns one Grok connection. All capture, control, transcript and
  * local insertion results are serialized on the main looper. A failed
- * connection is never resumed: Live has no per-audio delivery acknowledgment.
+ * connection is never resumed: Grok STT has no documented resumable audio acknowledgment.
  */
 class VoiceInputManager internal constructor(
     private val context: Context,
     private val voiceRecorder: VoiceRecorder,
-    private val transcriptionClient: GeminiTranscriptionClient,
+    private val transcriptionClient: GrokTranscriptionClient,
     private val networkMonitor: VoiceNetworkMonitor,
 ) {
     constructor(context: Context) : this(
-        context, VoiceRecorder(context), GeminiTranscriptionClient(), AndroidVoiceNetworkMonitor(context)
+        context, VoiceRecorder(context), GrokTranscriptionClient(), AndroidVoiceNetworkMonitor(context)
     )
 
     companion object {
@@ -66,7 +66,7 @@ class VoiceInputManager internal constructor(
 
     private sealed interface Outbound {
         data class Audio(val pcm: ByteArray, val capturedAtMs: Long, val containsSpeech: Boolean) : Outbound
-        data class End(val finish: Boolean, val speechEpoch: Long) : Outbound
+        data class End(val finish: Boolean, val speechEpoch: Long, val explicit: Boolean) : Outbound
     }
 
     private var listener: VoiceInputListener? = null
@@ -103,6 +103,7 @@ class VoiceInputManager internal constructor(
     private var capturedChunks = 0
     private var capturedSpeechChunks = 0
     private var capturedBytes = 0L
+    private var capturedSpeechEndBytes = 0L
     private var acceptedAudioChunks = 0
     private var acceptedAudioBytes = 0L
     private var acceptedFinals = 0
@@ -116,7 +117,7 @@ class VoiceInputManager internal constructor(
     private var chunkSilenceDurationMs = Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS * 1000L
     private var chunkSilenceThreshold = Defaults.PREF_VOICE_SILENCE_THRESHOLD.toDouble()
     private var autoStopSilenceMs = Defaults.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS * 1000L
-    private var geminiConfig: GeminiConfig = TranscriptionPreferences.readGeminiConfig(context.prefs())
+    private var grokConfig: Config = GrokPreferences.readConfig(context.prefs())
     private val autoStopSilenceRunnable = Runnable {
         if (currentState == State.RECORDING) stopRecording(StopReason.SILENCE_TIMEOUT)
     }
@@ -155,8 +156,8 @@ class VoiceInputManager internal constructor(
         }
         val apiKey = getApiKey()
         if (apiKey.isBlank()) {
-            Log.w(TAG, "start rejected: Gemini API key is not configured")
-            listener?.onError("Gemini API key not configured. Please set it in Settings.")
+            Log.w(TAG, "start rejected: Grok API key is not configured")
+            listener?.onError("Grok API key not configured. Please set it in Settings.")
             return false
         }
         reloadRuntimeConfig()
@@ -175,6 +176,7 @@ class VoiceInputManager internal constructor(
         capturedChunks = 0
         capturedSpeechChunks = 0
         capturedBytes = 0L
+        capturedSpeechEndBytes = 0L
         acceptedAudioChunks = 0
         acceptedAudioBytes = 0L
         acceptedFinals = 0
@@ -184,10 +186,10 @@ class VoiceInputManager internal constructor(
         lastInterimAtMs = null
         lastFinalAtMs = null
         finalizedAtMs = null
-        Log.i(TAG, "session=$sessionId start mode=${geminiConfig.transcriptionMode} " +
+        Log.i(TAG, "session=$sessionId start smartTurn=${grokConfig.smartTurn} " +
             "localSilenceMs=$chunkSilenceDurationMs threshold=$chunkSilenceThreshold " +
-            "autoStopMs=$autoStopSilenceMs serverSilenceMs=${geminiConfig.endOfSpeechSilenceMs} " +
-            "autoLanguage=${geminiConfig.autoDetectLanguage} editorVocabulary=${geminiConfig.useEditorContext}")
+            "autoStopMs=$autoStopSilenceMs serverSilenceMs=${grokConfig.turnTimeoutMs} " +
+            "autoLanguage=${grokConfig.autoDetectLanguage} editorVocabulary=${grokConfig.useEditorContext}")
         acceptingAudio = true
         hasCapturedAudio = false
         unconfirmedSpeech = false
@@ -209,6 +211,7 @@ class VoiceInputManager internal constructor(
                 capturedBytes += pcmData.size
                 if (containsSpeech) {
                     capturedSpeechChunks++
+                    capturedSpeechEndBytes = capturedBytes
                     noteUnconfirmedSpeech(sessionId, "pcm")
                 }
                 if (pcmData.size > MAX_PENDING_AUDIO_BYTES - pendingAudioBytes) {
@@ -319,7 +322,7 @@ class VoiceInputManager internal constructor(
         updateState(State.PAUSED)
         mainHandler.post {
             if (isCurrent(sessionId) && !isSessionStopping) {
-                enqueueEnd(sessionId, finish = false, boundaryEpoch = boundaryEpoch)
+                enqueueEnd(sessionId, finish = false, boundaryEpoch = boundaryEpoch, explicit = true)
             }
         }
     }
@@ -345,20 +348,21 @@ class VoiceInputManager internal constructor(
     private fun isCurrent(sessionId: Long) = sessionOpen && sessionId == activeSessionId
 
     private fun startStreamingSession(sessionId: Long, apiKey: String) {
-        val editorContext = if (geminiConfig.useEditorContext) {
+        val editorContext = if (grokConfig.useEditorContext) {
             try { priorTextProvider?.getPriorText() } catch (_: Exception) { null }
         } else null
-        val config = GeminiTranscriptionClient.buildSessionConfig(
+        val config = GrokTranscriptionClient.buildSessionConfig(
             languageTag = getCurrentLanguageTag(),
-            autoDetectLanguage = geminiConfig.autoDetectLanguage,
-            transcriptionMode = geminiConfig.transcriptionMode,
-            endOfSpeechSilenceMs = geminiConfig.endOfSpeechSilenceMs,
-            userVocabulary = geminiConfig.customVocabulary,
+            autoDetectLanguage = grokConfig.autoDetectLanguage,
+            smartTurn = grokConfig.smartTurn,
+            turnTimeoutMs = grokConfig.turnTimeoutMs,
+            format = grokConfig.format,
+            userVocabulary = grokConfig.customVocabulary,
             editorContext = editorContext,
         )
         isStreamingConnecting = true
         scheduleConnectTimeout(sessionId)
-        transcriptionClient.startStreaming(apiKey, config, object : GeminiTranscriptionClient.StreamingCallback {
+        transcriptionClient.startStreaming(apiKey, config, object : GrokTranscriptionClient.StreamingCallback {
             override fun onStreamReady() {
                 if (!isCurrent(sessionId)) return
                 connectTimeout?.let(mainHandler::removeCallbacks)
@@ -373,11 +377,11 @@ class VoiceInputManager internal constructor(
                         listener?.onError("Dictation session limit reached. Tap the mic after processing finishes.")
                         stopRecording(StopReason.SESSION_LIMIT)
                     }
-                }.also { mainHandler.postDelayed(it, GeminiTranscriptionClient.SESSION_CAPTURE_LIMIT_MS) }
+                }.also { mainHandler.postDelayed(it, GrokTranscriptionClient.SESSION_CAPTURE_LIMIT_MS) }
                 flushOutbound(sessionId)
             }
             override fun onHandshakeRestarted() {
-                // Only schema negotiation before setupComplete can retry. No
+                // Only explicit temporary HTTP rejection before transcript.created can retry. No
                 // audio has crossed the connection yet. Keep the original deadline.
             }
             override fun onTranscriptionResult(segment: TranscriptSegment) {
@@ -432,13 +436,13 @@ class VoiceInputManager internal constructor(
         })
     }
 
-    private fun enqueueEnd(sessionId: Long, finish: Boolean, boundaryEpoch: Long = speechEpoch) {
+    private fun enqueueEnd(sessionId: Long, finish: Boolean, boundaryEpoch: Long = speechEpoch, explicit: Boolean = false) {
         if (!isCurrent(sessionId)) return
         if (outbound.count { it is Outbound.End } >= MAX_PENDING_CONTROLS) {
             failSession("Voice control queue is full. Dictation stopped before skipping a speech boundary.")
             return
         }
-        outbound.addLast(Outbound.End(finish, boundaryEpoch))
+        outbound.addLast(Outbound.End(finish, boundaryEpoch, explicit))
         flushOutbound(sessionId)
     }
 
@@ -455,7 +459,7 @@ class VoiceInputManager internal constructor(
                         return
                     }
                     when (transcriptionClient.offerAudioChunk(next.pcm, next.containsSpeech)) {
-                        GeminiTranscriptionClient.AudioSendResult.ACCEPTED -> {
+                        GrokTranscriptionClient.AudioSendResult.ACCEPTED -> {
                             acceptedAudioChunks++
                             acceptedAudioBytes += next.pcm.size
                             outbound.removeFirst()
@@ -463,7 +467,7 @@ class VoiceInputManager internal constructor(
                             if (acceptedAudioChunks == 1) Log.i(TAG, "first PCM accepted ${sessionDiagnostics()}")
                             armResponseTimeout(sessionId)
                         }
-                        GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE -> {
+                        GrokTranscriptionClient.AudioSendResult.BACKPRESSURE -> {
                             if (!backpressureSeen) {
                                 backpressureSeen = true
                                 Log.i(TAG, "backpressure; retaining audio FIFO head ${sessionDiagnostics()}")
@@ -475,7 +479,7 @@ class VoiceInputManager internal constructor(
                             }
                             return
                         }
-                        GeminiTranscriptionClient.AudioSendResult.FAILED -> {
+                        GrokTranscriptionClient.AudioSendResult.FAILED -> {
                             failSession("Voice audio could not be sent")
                             return
                         }
@@ -483,7 +487,8 @@ class VoiceInputManager internal constructor(
                 }
                 is Outbound.End -> {
                     val sent = if (next.finish) transcriptionClient.finishStreaming()
-                        else transcriptionClient.finalizeTurn()
+                        else if (next.explicit) transcriptionClient.finalizeTurn()
+                        else transcriptionClient.noteLocalSilence()
                     if (!sent) {
                         failSession("Voice turn could not be finalized")
                         return
@@ -561,7 +566,7 @@ class VoiceInputManager internal constructor(
         // a suffix that has not even left our local queues.
         val queuedPcmSpeech = outbound.any { it is Outbound.Audio && it.containsSpeech }
         val queuedSocketSpeech = transcriptionClient.hasQueuedSpeechFrames()
-        if (!queuedPcmSpeech && !queuedSocketSpeech) {
+        if (!queuedPcmSpeech && !queuedSocketSpeech && !transcriptionClient.hasPendingSpeech(capturedSpeechEndBytes)) {
             unconfirmedSpeech = false
             unconfirmedTranscript = false
             clearFinalTimeout()
@@ -622,7 +627,7 @@ class VoiceInputManager internal constructor(
 
     private fun failSession(error: String, mark: Boolean = true) {
         if (!sessionOpen) return
-        // No audio crosses the socket before setupComplete. Startup rejection
+        // No audio crosses the socket before transcript.created. Startup rejection
         // leaves the editor untouched and reports why dictation could not start.
         val startupFailure = !isStreamingReady
         val insertMarker = mark && hasCapturedAudio && !startupFailure
@@ -727,7 +732,7 @@ class VoiceInputManager internal constructor(
         chunkSilenceDurationMs = chunkSilenceSeconds * 1000L
         autoStopSilenceMs = autoStopSilenceSeconds * 1000L
         chunkSilenceThreshold = silenceThreshold.toDouble()
-        geminiConfig = TranscriptionPreferences.readGeminiConfig(prefs)
+        grokConfig = GrokPreferences.readConfig(prefs)
 
         voiceRecorder.updateSilenceConfig(
             silenceDurationMs = chunkSilenceDurationMs,
@@ -771,7 +776,7 @@ class VoiceInputManager internal constructor(
 
     private fun getApiKey(): String {
         return try {
-            TranscriptionPreferences.readGeminiApiKey(context.prefs())
+            GrokPreferences.readApiKey(context)
         } catch (e: Exception) {
             Log.e(TAG, "Error getting API key: ${e.message}")
             ""
@@ -780,7 +785,7 @@ class VoiceInputManager internal constructor(
 
     /**
      * Full language tag of the active keyboard subtype (for example `en_US`), so
-     * the client can pick the matching BCP-47 regional variant Gemini expects
+     * the client can pick the supported language hint Grok accepts
      * rather than a bare language code.
      */
     private fun getCurrentLanguageTag(): String? {

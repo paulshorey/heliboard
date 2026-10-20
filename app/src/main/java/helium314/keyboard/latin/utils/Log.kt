@@ -94,6 +94,7 @@ object Log {
         "VoiceInputManager",
         "VoiceRecorder",
         "GeminiTranscription",
+        "GrokTranscription",
         "VoiceNetwork",
     )
 

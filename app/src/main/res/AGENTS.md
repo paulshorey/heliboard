@@ -68,3 +68,5 @@ Android resources: strings, themes, layouts, drawables, IME metadata, and densit
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.
 - If a change here affects neighboring folders or a cross-folder contract, update those AGENTS.md files in the same PR.
 - Treat stale agent documentation as a bug.
+
+Grok comparison-build settings are English-only (`translatable=false`) until translations exist. The active credential/turn settings must not show former provider instructions.

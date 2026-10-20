@@ -4,21 +4,9 @@ package helium314.keyboard.latin.voice
 import java.util.Locale
 
 /**
- * Builds the `inputAudioTranscription.customVocabulary` list sent to Gemini at
- * the start of every transcription session.
- *
- * Custom vocabulary is the documented speech-biasing channel for
- * `gemini-3.5-transcribe-live`, and it is how HeliBoard makes dictated text
- * agree with what the user has already typed. Names, product names and jargon
- * sitting in the editor right before the caret are exactly the words a speech
- * model is most likely to get wrong, and exactly the words the user expects to
- * come back spelled and capitalized the way they wrote them.
- *
- * Priority order, because Google notes accuracy is best at roughly 100 terms
- * even though 1,000 are accepted:
- * 1. the user's own list — explicit intent,
- * 2. the built-in product/technical terms,
- * 3. terms harvested from the editor, nearest the caret first.
+ * Harvests individual proper nouns and merges user/built-in/context vocabulary.
+ * The active Grok client sends these as keyterms, never editor paragraphs.
+ * Provider-specific count/length constraints are applied by its client.
  */
 object VoiceContextVocabulary {
 

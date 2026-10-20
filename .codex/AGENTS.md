@@ -21,11 +21,11 @@
 | `development` | Local Gradle, Android Studio, device/emulator validation |
 | `full-app-mode` | Current standalone editor, drafts and InputConnection sync |
 | `key-hint-sizing` | Current keyboard drawing/resource sizing rules |
-| `voice-transcription` | Shipping Gemini voice behavior; API/data-flow references are local |
+| `voice-transcription` | Active Grok voice behavior; historical Gemini references retained; API/data-flow references are local |
 | `gemini-api-dev`, `gemini-live-api-dev` | Vendored provider documentation, source hashes in `skills-lock.json` |
 
 The Interactions skill was removed because HeliBoard has no Interactions integration.
-Read the appropriate retained Gemini skill before changing API code. Use Gemini
+For Grok API work read current official STT docs linked from `docs/grok-transcription.md`. Read the appropriate retained Gemini skill before changing Gemini API code. Use Gemini
 Docs MCP search and document retrieval when available; tool names may vary by
 server version. If absent, fetch `https://ai.google.dev/gemini-api/docs/llms.txt`.
 A configured URL does not prove that tools are connected in this session.

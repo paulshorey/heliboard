@@ -10,6 +10,8 @@ import android.view.inputmethod.InputMethodManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -42,10 +44,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.core.content.edit
 import helium314.keyboard.latin.R
 import helium314.keyboard.latin.permissions.PermissionsUtil
-import helium314.keyboard.latin.settings.TranscriptionPreferences
+import helium314.keyboard.latin.settings.GrokPreferences
 import helium314.keyboard.latin.utils.UncachedInputMethodManagerUtils
 import helium314.keyboard.latin.utils.getActivity
 import helium314.keyboard.latin.utils.prefs
@@ -72,13 +75,14 @@ fun SetupAppScreen(
     var isImeEnabled by remember { mutableStateOf(false) }
     var isImeCurrent by remember { mutableStateOf(false) }
     var microphoneGranted by remember { mutableStateOf(false) }
-    var geminiApiKey by remember { mutableStateOf("") }
+    var grokApiKey by remember { mutableStateOf("") }
+    var keySaveError by remember { mutableStateOf(false) }
 
     fun refreshStatus() {
         isImeEnabled = UncachedInputMethodManagerUtils.isThisImeEnabled(context, imm)
         isImeCurrent = UncachedInputMethodManagerUtils.isThisImeCurrent(context, imm)
         microphoneGranted = PermissionsUtil.checkAllPermissionsGranted(context, Manifest.permission.RECORD_AUDIO)
-        geminiApiKey = TranscriptionPreferences.readGeminiApiKey(prefs)
+        grokApiKey = GrokPreferences.readApiKey(context)
     }
 
     LaunchedEffect(prefChanged?.value) {
@@ -157,17 +161,18 @@ fun SetupAppScreen(
                     }
                 )
                 SetupRequirementItem(
-                    title = stringResource(R.string.gemini_api_key_title),
-                    summary = stringResource(R.string.gemini_api_key_summary),
-                    isComplete = geminiApiKey.isNotBlank(),
+                    title = stringResource(R.string.grok_api_key_title),
+                    summary = stringResource(R.string.grok_api_key_summary),
+                    isComplete = grokApiKey.isNotBlank(),
                 ) {
                     SetupKeyField(
-                        value = geminiApiKey,
+                        value = grokApiKey,
                         onValueChange = { newValue ->
-                            geminiApiKey = newValue.trim()
-                            TranscriptionPreferences.writeGeminiApiKey(prefs, newValue)
+                            grokApiKey = newValue.filterNot { it.isISOControl() }.trim()
+                            keySaveError = runCatching { GrokPreferences.writeApiKey(context, grokApiKey) }.isFailure
                         }
                     )
+                    if (keySaveError) Text(stringResource(R.string.grok_key_save_error), color = MaterialTheme.colorScheme.error)
                 }
                 Text(
                     text = stringResource(R.string.setup_app_return_later),
@@ -257,7 +262,10 @@ private fun SetupKeyField(
         onValueChange = onValueChange,
         modifier = Modifier.fillMaxWidth(),
         minLines = 1,
-        maxLines = 2,
+        maxLines = 1,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+        visualTransformation = PasswordVisualTransformation(),
         textStyle = MaterialTheme.typography.bodySmall,
         shape = MaterialTheme.shapes.small,
     )

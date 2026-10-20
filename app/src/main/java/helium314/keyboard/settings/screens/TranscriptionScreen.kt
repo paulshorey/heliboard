@@ -2,6 +2,8 @@
 package helium314.keyboard.settings.screens
 
 import android.content.Context
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -27,11 +29,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.core.content.edit
 import helium314.keyboard.latin.R
 import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
-import helium314.keyboard.latin.settings.TranscriptionPreferences
+import helium314.keyboard.latin.settings.GrokPreferences
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.getActivity
 import helium314.keyboard.latin.utils.prefs
@@ -56,31 +60,14 @@ fun TranscriptionScreen(
     if ((b?.value ?: 0) < 0)
         Log.v("irrelevant", "stupid way to trigger recomposition on preference change")
 
-    var geminiApiKey by remember {
-        mutableStateOf(TranscriptionPreferences.readGeminiApiKey(prefs))
-    }
-    var geminiSmartMode by remember {
-        mutableStateOf(TranscriptionPreferences.readGeminiSmartMode(prefs))
-    }
-    var geminiUseEditorContext by remember {
-        mutableStateOf(TranscriptionPreferences.readGeminiUseEditorContext(prefs))
-    }
-    var geminiAutoDetectLanguage by remember {
-        mutableStateOf(TranscriptionPreferences.readGeminiAutoDetectLanguage(prefs))
-    }
-    var geminiEndOfSpeechSilenceMs by remember {
-        mutableStateOf(
-            TranscriptionPreferences.readGeminiEndOfSpeechSilenceMs(prefs).toString()
-        )
-    }
-    var chunkSilenceSeconds by remember {
-        mutableStateOf(
-            prefs.getInt(
-                Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS,
-                Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS
-            ).toString()
-        )
-    }
+    var apiKey by remember { mutableStateOf(GrokPreferences.readApiKey(context)) }
+    var keySaveError by remember { mutableStateOf(false) }
+    val initial = remember { GrokPreferences.readConfig(prefs) }
+    var smartTurn by remember { mutableStateOf(initial.smartTurn.toString()) }
+    var turnTimeout by remember { mutableStateOf(initial.turnTimeoutMs.toString()) }
+    var useEditorContext by remember { mutableStateOf(initial.useEditorContext) }
+    var autoDetectLanguage by remember { mutableStateOf(initial.autoDetectLanguage) }
+    var formatNumbers by remember { mutableStateOf(initial.format) }
     var silenceThreshold by remember {
         mutableStateOf(
             prefs.getInt(
@@ -109,34 +96,24 @@ fun TranscriptionScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(innerPadding)
             ) {
+                Text(stringResource(R.string.grok_speaker_summary),
+                    style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 12.dp))
                 InlineTextField(
-                    label = stringResource(R.string.gemini_api_key_title),
-                    summary = stringResource(R.string.gemini_api_key_summary),
-                    value = geminiApiKey,
-                    onValueChange = { newValue ->
-                        geminiApiKey = newValue.trim()
-                        TranscriptionPreferences.writeGeminiApiKey(prefs, newValue)
+                    label = stringResource(R.string.grok_api_key_title),
+                    summary = stringResource(R.string.grok_api_key_summary),
+                    value = apiKey,
+                    onValueChange = { value ->
+                        apiKey = value.filterNot { it.isISOControl() }.trim()
+                        keySaveError = runCatching { GrokPreferences.writeApiKey(context, apiKey) }.isFailure
                     },
-                    minLines = 1,
-                    maxLines = 2
+                    maxLines = 1, secret = true
                 )
+                if (keySaveError) Text(stringResource(R.string.grok_key_save_error), color = MaterialTheme.colorScheme.error)
                 BooleanSettingRow(
-                    label = stringResource(R.string.gemini_smart_mode_title),
-                    summary = stringResource(R.string.gemini_smart_mode_summary),
-                    checked = geminiSmartMode,
-                    onCheckedChange = { checked ->
-                        geminiSmartMode = checked
-                        TranscriptionPreferences.writeGeminiSmartMode(prefs, checked)
-                    }
-                )
-                BooleanSettingRow(
-                    label = stringResource(R.string.gemini_use_editor_context_title),
-                    summary = stringResource(R.string.gemini_use_editor_context_summary),
-                    checked = geminiUseEditorContext,
-                    onCheckedChange = { checked ->
-                        geminiUseEditorContext = checked
-                        TranscriptionPreferences.writeGeminiUseEditorContext(prefs, checked)
-                    }
+                    label = stringResource(R.string.grok_use_editor_context_title),
+                    summary = stringResource(R.string.grok_use_editor_context_summary),
+                    checked = useEditorContext,
+                    onCheckedChange = { useEditorContext = it; prefs.edit { putBoolean(GrokPreferences.EDITOR_CONTEXT, it) } }
                 )
                 Preference(
                     name = stringResource(R.string.voice_vocabulary_title),
@@ -153,46 +130,37 @@ fun TranscriptionScreen(
                     },
                 ) { NextScreenIcon() }
                 BooleanSettingRow(
-                    label = stringResource(R.string.gemini_auto_detect_language_title),
-                    summary = stringResource(R.string.gemini_auto_detect_language_summary),
-                    checked = geminiAutoDetectLanguage,
-                    onCheckedChange = { checked ->
-                        geminiAutoDetectLanguage = checked
-                        TranscriptionPreferences.writeGeminiAutoDetectLanguage(prefs, checked)
-                    }
+                    label = stringResource(R.string.grok_auto_detect_language_title),
+                    summary = stringResource(R.string.grok_auto_detect_language_summary),
+                    checked = autoDetectLanguage,
+                    onCheckedChange = { autoDetectLanguage = it; prefs.edit { putBoolean(GrokPreferences.AUTO_LANGUAGE, it) } }
+                )
+                BooleanSettingRow(
+                    label = stringResource(R.string.grok_format_title),
+                    summary = stringResource(R.string.grok_format_summary),
+                    checked = formatNumbers,
+                    onCheckedChange = { formatNumbers = it; prefs.edit { putBoolean(GrokPreferences.FORMAT, it) } }
                 )
                 InlineTextField(
-                    label = stringResource(R.string.gemini_end_of_speech_silence_ms_title),
-                    summary = stringResource(R.string.gemini_end_of_speech_silence_ms_summary),
-                    value = geminiEndOfSpeechSilenceMs,
-                    onValueChange = { newValue ->
-                        geminiEndOfSpeechSilenceMs = newValue
-                        newValue.toIntOrNull()?.let { parsed ->
-                            TranscriptionPreferences.writeGeminiEndOfSpeechSilenceMs(prefs, parsed)
+                    label = stringResource(R.string.grok_smart_turn_title),
+                    summary = stringResource(R.string.grok_smart_turn_summary),
+                    value = smartTurn,
+                    onValueChange = { value ->
+                        smartTurn = value
+                        value.toDoubleOrNull()?.takeIf { it.isFinite() }?.let { parsed ->
+                            prefs.edit { putString(GrokPreferences.SMART_TURN, parsed.coerceIn(0.0, 1.0).toString()) }
                         }
-                    },
-                    minLines = 1,
-                    maxLines = 1
+                    }, maxLines = 1
                 )
                 InlineTextField(
-                    label = stringResource(R.string.voice_chunk_silence_seconds_title),
-                    summary = stringResource(R.string.voice_chunk_silence_seconds_summary),
-                    value = chunkSilenceSeconds,
-                    onValueChange = { newValue ->
-                        chunkSilenceSeconds = newValue
-                        newValue.toIntOrNull()?.let { parsed ->
-                            prefs.edit {
-                                putInt(
-                                    Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS,
-                                    parsed.coerceIn(1, 30)
-                                )
-                            }
-                        }
-                    },
-                    minLines = 1,
-                    maxLines = 1
+                    label = stringResource(R.string.grok_turn_timeout_title),
+                    summary = stringResource(R.string.grok_turn_timeout_summary),
+                    value = turnTimeout,
+                    onValueChange = { value ->
+                        turnTimeout = value
+                        value.toIntOrNull()?.let { parsed -> prefs.edit { putInt(GrokPreferences.TURN_TIMEOUT, parsed.coerceIn(1, 5000)) } }
+                    }, maxLines = 1
                 )
-
                 InlineTextField(
                     label = stringResource(R.string.voice_silence_threshold_title),
                     value = silenceThreshold,
@@ -284,7 +252,8 @@ private fun InlineTextField(
     onValueChange: (String) -> Unit,
     summary: String? = null,
     minLines: Int = 1,
-    maxLines: Int = 3
+    maxLines: Int = 3,
+    secret: Boolean = false
 ) {
     Column(
         modifier = Modifier
@@ -311,6 +280,9 @@ private fun InlineTextField(
             modifier = Modifier.fillMaxWidth(),
             minLines = minLines,
             maxLines = maxLines,
+            singleLine = secret,
+            keyboardOptions = if (secret) KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false) else KeyboardOptions.Default,
+            visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
             textStyle = MaterialTheme.typography.bodySmall,
             shape = MaterialTheme.shapes.small,
         )

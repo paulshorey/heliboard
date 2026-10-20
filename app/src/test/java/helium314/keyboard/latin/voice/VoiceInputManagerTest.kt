@@ -4,7 +4,7 @@ package helium314.keyboard.latin.voice
 import android.content.Context
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
-import helium314.keyboard.latin.settings.TranscriptionPreferences
+import helium314.keyboard.latin.settings.GrokPreferences
 import helium314.keyboard.latin.utils.prefs
 import java.time.Duration
 import kotlin.test.assertEquals
@@ -22,16 +22,17 @@ import org.robolectric.Shadows.shadowOf
 class VoiceInputManagerTest {
     private lateinit var manager: VoiceInputManager
     private lateinit var capture: VoiceRecorder.RecordingCallback
-    private lateinit var stream: GeminiTranscriptionClient.StreamingCallback
+    private lateinit var stream: GrokTranscriptionClient.StreamingCallback
     private var network = FakeNetwork()
     private val sent = mutableListOf<String>()
     private val inserted = mutableListOf<String>()
     private val markers = mutableListOf<String>()
     private val errors = mutableListOf<String>()
     private var speaking = false
-    private var sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
+    private var sendResult = GrokTranscriptionClient.AudioSendResult.ACCEPTED
     private var transportQueued = false
     private var transportQueuedSilence = false
+    private var providerPendingSpeech = false
     private var editorAccepts = true
     private var editorThrows = false
     private var finalizeAccepts = true
@@ -46,7 +47,7 @@ class VoiceInputManagerTest {
     fun setUp() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.prefs().edit().clear().commit()
-        TranscriptionPreferences.writeGeminiApiKey(context.prefs(), "test-key")
+        GrokPreferences.writeApiKey(context, "test-key")
         val recorder = Mockito.mock(VoiceRecorder::class.java) { call ->
             when (call.method.name.substringBefore('$')) {
                 "hasRecordPermission", "startRecording" -> true
@@ -56,19 +57,20 @@ class VoiceInputManagerTest {
                 else -> Mockito.RETURNS_DEFAULTS.answer(call)
             }
         }
-        val client = Mockito.mock(GeminiTranscriptionClient::class.java) { call ->
+        val client = Mockito.mock(GrokTranscriptionClient::class.java) { call ->
             when (call.method.name.substringBefore('$')) {
-                "startStreaming" -> { starts++; stream = call.arguments[2] as GeminiTranscriptionClient.StreamingCallback; null }
+                "startStreaming" -> { starts++; stream = call.arguments[2] as GrokTranscriptionClient.StreamingCallback; null }
                 "offerAudioChunk" -> {
-                    if (sendResult == GeminiTranscriptionClient.AudioSendResult.ACCEPTED) {
+                    if (sendResult == GrokTranscriptionClient.AudioSendResult.ACCEPTED) {
                         sent.add("audio:${(call.arguments[0] as ByteArray)[0]}")
                     }
                     sendResult
                 }
-                "finalizeTurn" -> { sent.add("end"); finalizeAccepts }
+                "noteLocalSilence", "finalizeTurn" -> { sent.add("end"); finalizeAccepts }
                 "finishStreaming" -> { sent.add("finish"); finalizeAccepts }
                 "hasQueuedFrames" -> transportQueued || transportQueuedSilence
                 "hasQueuedSpeechFrames" -> transportQueued
+                "hasPendingSpeech" -> providerPendingSpeech
                 else -> Mockito.RETURNS_DEFAULTS.answer(call)
             }
         }
@@ -147,14 +149,14 @@ class VoiceInputManagerTest {
     }
 
     @Test fun backpressureRetainsEveryAudioChunkAndStopCannotOvertakeIt() {
-        start(); sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE
+        start(); sendResult = GrokTranscriptionClient.AudioSendResult.BACKPRESSURE
         repeat(300) { audio(it % 100) }
         manager.stopRecording()
         shadowOf(Looper.getMainLooper()).idle()
         assertTrue(sent.isEmpty())
         assertFalse(manager.startRecording())
         assertTrue(manager.hasPendingProcessing())
-        sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
+        sendResult = GrokTranscriptionClient.AudioSendResult.ACCEPTED
         advance(30)
         assertEquals((0 until 300).map { "audio:${it % 100}" } + "finish", sent)
         stream.onStreamClosed()
@@ -163,21 +165,21 @@ class VoiceInputManagerTest {
     }
 
     @Test fun silencePauseAndStopControlsKeepTheirPositionInTheAudioQueue() {
-        start(); sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE
+        start(); sendResult = GrokTranscriptionClient.AudioSendResult.BACKPRESSURE
         audio(1); capture.onSpeechStopped(); audio(2)
         manager.pauseRecording(); shadowOf(Looper.getMainLooper()).idle()
         manager.resumeRecording(); audio(3); manager.stopRecording()
         shadowOf(Looper.getMainLooper()).idle()
-        sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
+        sendResult = GrokTranscriptionClient.AudioSendResult.ACCEPTED
         advance(30)
         assertEquals(listOf("audio:1", "end", "audio:2", "end", "audio:3", "finish"), sent)
     }
 
     @Test fun overflowStopsInsteadOfDroppingTheOldestAudio() {
-        start(); sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE
+        start(); sendResult = GrokTranscriptionClient.AudioSendResult.BACKPRESSURE
         repeat(301) { audio() }
         assertTrue(manager.isIdle)
-        sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
+        sendResult = GrokTranscriptionClient.AudioSendResult.ACCEPTED
         advance(40_000)
         assertTrue(sent.isEmpty())
         assertEquals(1, markers.size)
@@ -185,7 +187,7 @@ class VoiceInputManagerTest {
     }
 
     @Test fun oldestUploadDeadlineCannotBePostponedByMoreAudio() {
-        start(); sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE
+        start(); sendResult = GrokTranscriptionClient.AudioSendResult.BACKPRESSURE
         audio(); advance(15_000); audio(); advance(15_100)
         assertTrue(manager.isIdle)
         assertEquals(1, markers.size)
@@ -281,10 +283,10 @@ class VoiceInputManagerTest {
 
     @Test fun earlierFinalCannotAcknowledgeAudioStillWaitingInTheManager() {
         start(); speaking = true; audio(1)
-        sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE
+        sendResult = GrokTranscriptionClient.AudioSendResult.BACKPRESSURE
         audio(2); final("confirmed prefix")
         manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
-        sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
+        sendResult = GrokTranscriptionClient.AudioSendResult.ACCEPTED
         advance(30); stream.onStreamClosed()
         assertTrue(manager.isIdle)
         assertEquals(listOf("confirmed prefix"), inserted)
@@ -301,6 +303,27 @@ class VoiceInputManagerTest {
         assertTrue(manager.isIdle)
         assertEquals(listOf("confirmed prefix"), inserted)
         assertEquals(1, markers.size)
+    }
+
+    @Test fun earlierFinalCannotAcknowledgeNewerAudioAlreadyProcessedByTheSocketButNotProvider() {
+        start(); speaking = true; audio()
+        providerPendingSpeech = true
+        final("Older confirmed words.")
+        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
+        stream.onStreamClosed()
+        assertEquals(listOf("Older confirmed words."), inserted)
+        assertEquals(1, markers.size)
+    }
+
+    @Test fun filteredGuestFinalCanSettleProcessingWithoutInsertingGuestWords() {
+        start(); speaking = true; audio()
+        providerPendingSpeech = false
+        stream.onServerResponse(true)
+        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
+        stream.onStreamClosed()
+        assertTrue(inserted.isEmpty())
+        assertTrue(markers.isEmpty())
+        assertTrue(errors.isEmpty())
     }
 
     @Test fun queuedAudioKeepsTheOriginalFinalProgressDeadlineAfterAnEarlierFinal() {
@@ -378,7 +401,7 @@ class VoiceInputManagerTest {
     }
 
     @Test fun failedSendAndFailedFinalizeDoNotReconnect() {
-        start(); sendResult = GeminiTranscriptionClient.AudioSendResult.FAILED; audio()
+        start(); sendResult = GrokTranscriptionClient.AudioSendResult.FAILED; audio()
         advance(40_000)
         assertTrue(manager.isIdle)
         assertEquals(1, starts)
@@ -424,14 +447,14 @@ class VoiceInputManagerTest {
     @Test fun startupRejectionStopsCaptureAndLeavesTheExistingEditorTextUntouched() {
         inserted.add("existing editor text")
         start(ready = false); audio()
-        stream.onStreamError(GeminiTranscriptionClient.CREDITS_DEPLETED_ERROR)
+        stream.onStreamError(GrokTranscriptionClient.CREDITS_DEPLETED_ERROR)
         stream.onStreamReady(); audio(2); final("late words")
         assertTrue(manager.isIdle)
         assertTrue(stopped > 0)
         assertEquals(listOf("existing editor text"), inserted)
         assertTrue(markers.isEmpty())
         assertTrue(sent.isEmpty())
-        assertEquals(listOf("Could not start dictation. ${GeminiTranscriptionClient.CREDITS_DEPLETED_ERROR}"), errors)
+        assertEquals(listOf("Could not start dictation. ${GrokTranscriptionClient.CREDITS_DEPLETED_ERROR}"), errors)
     }
 
     @Test fun quietPcmIsNotDiscardedWhileWaitingForSpeech() {
@@ -496,7 +519,7 @@ class VoiceInputManagerTest {
     }
 
     @Test fun stopDeadlineIncludesBlockedUploadAndReleasesProcessingForExplicitRestart() {
-        start(); sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE
+        start(); sendResult = GrokTranscriptionClient.AudioSendResult.BACKPRESSURE
         audio(containsSpeech = true)
         val oldStream = stream
         manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
@@ -510,7 +533,7 @@ class VoiceInputManagerTest {
         assertTrue(sent.isEmpty()) // EOF never overtakes blocked audio.
         assertEquals(1, markers.size)
         assertTrue(errors.single().contains("too long to finish"))
-        sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
+        sendResult = GrokTranscriptionClient.AudioSendResult.ACCEPTED
         start()
         oldStream.onStreamReady()
         oldStream.onTranscriptionResult(TranscriptSegment("late words", false))
@@ -525,10 +548,10 @@ class VoiceInputManagerTest {
         start(ready = false); audio(containsSpeech = true)
         manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
         advance(11_000)
-        sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE
+        sendResult = GrokTranscriptionClient.AudioSendResult.BACKPRESSURE
         stream.onStreamReady()
         advance(4_000)
-        sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
+        sendResult = GrokTranscriptionClient.AudioSendResult.ACCEPTED
         advance(25)
         assertEquals(listOf("audio:1", "finish"), sent)
         final("confirmed words")
@@ -622,10 +645,10 @@ class VoiceInputManagerTest {
     @Test fun onlyQueuedManagerSilenceDoesNotPreventAcceptingACompleteFinal() {
         start(); speaking = true; audio()
         speaking = false; capture.onSpeechStopped()
-        sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE; audio(0)
+        sendResult = GrokTranscriptionClient.AudioSendResult.BACKPRESSURE; audio(0)
         final("All spoken words.")
         manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
-        sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED
+        sendResult = GrokTranscriptionClient.AudioSendResult.ACCEPTED
         advance(30); stream.onStreamClosed()
         assertEquals(listOf("audio:1", "end", "audio:0", "finish"), sent)
         assertTrue(markers.isEmpty())
@@ -747,7 +770,7 @@ class VoiceInputManagerTest {
     }
 
     @Test fun controlQueueOverflowStopsWithoutLettingControlsOvertakeBlockedAudio() {
-        start(); sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE; audio()
+        start(); sendResult = GrokTranscriptionClient.AudioSendResult.BACKPRESSURE; audio()
         repeat(VoiceInputManager.MAX_PENDING_CONTROLS + 1) {
             manager.pauseRecording(); shadowOf(Looper.getMainLooper()).idle(); manager.resumeRecording()
         }
@@ -760,10 +783,10 @@ class VoiceInputManagerTest {
     @Test fun aBackpressuredOlderBoundaryDoesNotStartAFinalWaitDuringTheNextUtterance() {
         start(); audio(containsSpeech = true); capture.onSpeechStarted()
         stream.onInterimTranscription(); stream.onServerResponse(false)
-        sendResult = GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE
+        sendResult = GrokTranscriptionClient.AudioSendResult.BACKPRESSURE
         audio(); capture.onSpeechStopped()
         advance(1000); audio(containsSpeech = true); capture.onSpeechStarted()
-        sendResult = GeminiTranscriptionClient.AudioSendResult.ACCEPTED; advance(30)
+        sendResult = GrokTranscriptionClient.AudioSendResult.ACCEPTED; advance(30)
         repeat(35) {
             advance(1000); audio(containsSpeech = true)
             stream.onInterimTranscription(); stream.onServerResponse(false)

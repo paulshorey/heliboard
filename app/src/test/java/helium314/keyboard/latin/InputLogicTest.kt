@@ -234,7 +234,7 @@ class InputLogicTest {
         checkConnectionConsistency()
     }
 
-    @Test fun voiceCommaCorrectionKeepsFillerCleanup() {
+    @Test fun voiceCommaCorrectionPreservesProviderWords() {
         for (filler in listOf("Um", "Uh")) {
             for (splitAtComma in listOf(false, true)) {
                 reset()
@@ -243,7 +243,7 @@ class InputLogicTest {
                 val segment = if (splitAtComma) "! Yes" else " $filler,! Yes"
                 assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(latinIME, segment))
 
-                assertEquals("Confirmed! Yes", getText())
+                assertEquals(if (splitAtComma) "Confirmed, $filler! Yes" else "Confirmed $filler! Yes", getText())
                 checkConnectionConsistency()
             }
         }

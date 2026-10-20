@@ -78,6 +78,22 @@ object TranscriptPostProcessor {
         return if (result != paragraph) result else null
     }
 
+    /** Grok owns wording, casing and filler removal. Only explicit commands are rewritten. */
+    fun processGrokParagraph(paragraph: String): String? {
+        var result = paragraph
+        for (rule in rules) result = result.replace(rule.find, rule.replace)
+        result = removeGrokRedundantPunctuation(result)
+        return result.takeIf { it != paragraph }
+    }
+
+    fun removeGrokRedundantPunctuation(text: String): String = redundantPunctuation.replace(text, "")
+
+    fun shouldReplaceGrokPunctuation(previous: CharSequence, text: String): Boolean {
+        if (previous.isEmpty() || text.isEmpty()) return false
+        return removeGrokRedundantPunctuation(previous.toString() + text[0]) ==
+            previous.subSequence(0, previous.length - 1).toString() + text[0]
+    }
+
     /**
      * Remove common dictated filler fragments the transcription model returns
      * as text.

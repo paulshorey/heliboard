@@ -197,7 +197,7 @@ public class LatinIME extends InputMethodService implements
 
     private final ClipboardHistoryManager mClipboardHistoryManager = new ClipboardHistoryManager(this);
 
-    // Voice input manager (local recording + Gemini Live transcription)
+    // Voice input manager (local recording + Grok streaming transcription)
     private VoiceInputManager mVoiceInputManager;
     // Use a separate token from InputMethodService's fullscreen extractor.
     private int mVoiceEditorMonitorToken = 0x56000000;
@@ -2289,14 +2289,14 @@ public class LatinIME extends InputMethodService implements
             // when a final contains line breaks. The paragraph pass also cleans
             // existing editor context and punctuation produced by spoken commands.
             String insertion = processTranscript
-                    ? TranscriptPostProcessor.INSTANCE.removeRedundantPunctuation(text) : text;
+                    ? TranscriptPostProcessor.INSTANCE.removeGrokRedundantPunctuation(text) : text;
             boolean replacePreviousPunctuation = false;
             if (processTranscript && !mInputLogic.mConnection.hasSelection()) {
-                // Include a two-letter filler (um/uh), its comma, and the word boundary.
+                // Include enough context to verify one adjacent punctuation replacement.
                 final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(4, 0);
                 if (before != null && before.length() > 0) {
                     replacePreviousPunctuation = TranscriptPostProcessor.INSTANCE
-                            .shouldReplacePreviousPunctuation(before, insertion);
+                            .shouldReplaceGrokPunctuation(before, insertion);
                 }
             }
             if (!processTranscript && !mInputLogic.mConnection.hasSelection()) {
@@ -2351,7 +2351,7 @@ public class LatinIME extends InputMethodService implements
         }
 
         final String corrected =
-                TranscriptPostProcessor.INSTANCE.processCurrentParagraph(paragraph);
+                TranscriptPostProcessor.INSTANCE.processGrokParagraph(paragraph);
         if (corrected == null) {
             return true;
         }
@@ -2385,13 +2385,8 @@ public class LatinIME extends InputMethodService implements
         final CharSequence rawBefore =
                 mInputLogic.mConnection.getTextBeforeCursor(VOICE_CASING_LOOKBACK, 0);
         final CharSequence beforeCursor = (rawBefore != null) ? rawBefore : "";
-        String cased =
-                TranscriptPostProcessor.INSTANCE.adjustLeadingCasing(text, beforeCursor);
-        final CharSequence rawAfter =
-                mInputLogic.mConnection.getTextAfterCursor(VOICE_PUNCTUATION_LOOKAHEAD, 0);
-        final CharSequence afterCursor = (rawAfter != null) ? rawAfter : "";
-        cased = TranscriptPostProcessor.INSTANCE
-                .stripTrailingPunctuationIfMidSentence(cased, afterCursor);
+        // Preserve completed Grok wording/casing/punctuation. Caret spacing alone is local.
+        final String cased = text;
         if (beforeCursor.length() == 0) {
             return cased;
         }
@@ -2430,7 +2425,7 @@ public class LatinIME extends InputMethodService implements
     }
 
     /**
-     * Maximum chars of editor text scanned to seed Gemini's speech-biasing
+     * Maximum chars of editor text scanned to seed Grok spelling hints from
      * vocabulary. Only harvested terms are sent, never this text itself, so the
      * window can be generous.
      */

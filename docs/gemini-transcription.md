@@ -1,3 +1,5 @@
+> Historical Gemini reference. The active provider on this branch is Grok; see [grok-transcription.md](grok-transcription.md).
+
 # Gemini Live Transcription Architecture
 
 HeliBoard uses Google Gemini's Live API for voice input, with the dedicated
