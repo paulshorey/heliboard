@@ -78,7 +78,7 @@ object TranscriptPostProcessor {
         return if (result != paragraph) result else null
     }
 
-    /** Grok owns wording, casing and filler removal. Only explicit commands are rewritten. */
+    /** Optional legacy command/cleanup mode. Native-punctuation mode bypasses this whole pass. */
     fun processGrokParagraph(paragraph: String): String? {
         var result = paragraph
         for (rule in rules) result = result.replace(rule.find, rule.replace)

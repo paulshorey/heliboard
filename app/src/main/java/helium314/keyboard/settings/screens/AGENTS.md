@@ -38,4 +38,4 @@ Feature-specific Compose screens for the settings app.
 - If a change here affects neighboring folders or a cross-folder contract, update those AGENTS.md files in the same PR.
 - Treat stale agent documentation as a bug.
 
-Transcription/Setup key fields use GrokPreferences, masked password input and backup-excluded storage. Transcription exposes Smart Turn threshold, maximum silence, number formatting, language hints, vocabulary and diagnostics. First-speaker/all-audio-upload limitations are visible there.
+Transcription/Setup key fields use GrokPreferences, masked password input and backup-excluded storage. Transcription exposes a patient preset, semantic/fixed-pause completion, optional forced timeout, native punctuation, provider VAD, number formatting, language hints, vocabulary and diagnostics. Values are captured at recording start; native mode bypasses spoken commands and paragraph cleanup. First-speaker/all-audio-upload limitations are visible there.

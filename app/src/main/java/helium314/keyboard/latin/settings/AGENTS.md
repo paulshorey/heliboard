@@ -16,7 +16,7 @@ Preference keys, defaults, runtime snapshots, and transcription-specific prefere
 
 ## Non-obvious notes
 - This is not the settings UI package; Compose screens live in `helium314.keyboard.settings`.
-- `GrokPreferences.kt` owns active provider configuration: smart-turn threshold 0.7, maximum silence 5000 ms, number formatting on, auto-language off, editor vocabulary on, and up to 100 terms of 50 characters. Personal keys use AtomicFile in noBackupFilesDir, never shared preferences or backups.
+- `GrokPreferences.kt` owns active provider configuration: smart-turn threshold 0.9, optional forced maximum silence 5000 ms, semantic/fixed-pause mode (2000 ms), native punctuation on, provider VAD 0.08, number formatting on, auto-language off, editor vocabulary on, and up to 100 terms of 50 characters. Saved comparison settings are preserved; the UI patient preset applies 0.9/5000/native explicitly. Personal keys use AtomicFile in noBackupFilesDir, never shared preferences or backups.
 - Read keys through `AtomicFile.openRead()` before treating them as absent; API 21 can retain only the committed recovery file after an interrupted replacement. Explicit clearing must delete recovery files too.
 - Only vocabulary is copied once from prior providers. App upgrade no longer invokes credential-deleting legacy migrations. `TranscriptionPreferences.kt`, its Gemini constants and focused tests remain inactive comparison reference.
 - Local voice activity and auto-stop preferences still feed VoiceRecorder. Local silence only advises final waiting; it does not force Grok semantic turns. Explicit Pause finalizes and Stop ends audio on the same connection.

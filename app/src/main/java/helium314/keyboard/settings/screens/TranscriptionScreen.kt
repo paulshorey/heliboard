@@ -68,6 +68,11 @@ fun TranscriptionScreen(
     var useEditorContext by remember { mutableStateOf(initial.useEditorContext) }
     var autoDetectLanguage by remember { mutableStateOf(initial.autoDetectLanguage) }
     var formatNumbers by remember { mutableStateOf(initial.format) }
+    var semanticCompletion by remember { mutableStateOf(initial.smartTurnEnabled) }
+    var forceTurnTimeout by remember { mutableStateOf(initial.forceTurnTimeout) }
+    var endpointing by remember { mutableStateOf(initial.endpointingMs.toString()) }
+    var nativePunctuation by remember { mutableStateOf(initial.nativePunctuation) }
+    var vadThreshold by remember { mutableStateOf(initial.vadThreshold.toString()) }
     var silenceThreshold by remember {
         mutableStateOf(
             prefs.getInt(
@@ -141,24 +146,82 @@ fun TranscriptionScreen(
                     checked = formatNumbers,
                     onCheckedChange = { formatNumbers = it; prefs.edit { putBoolean(GrokPreferences.FORMAT, it) } }
                 )
-                InlineTextField(
-                    label = stringResource(R.string.grok_smart_turn_title),
-                    summary = stringResource(R.string.grok_smart_turn_summary),
-                    value = smartTurn,
-                    onValueChange = { value ->
-                        smartTurn = value
-                        value.toDoubleOrNull()?.takeIf { it.isFinite() }?.let { parsed ->
-                            prefs.edit { putString(GrokPreferences.SMART_TURN, parsed.coerceIn(0.0, 1.0).toString()) }
+                Preference(
+                    name = stringResource(R.string.grok_patient_preset_title),
+                    description = stringResource(R.string.grok_patient_preset_summary),
+                    onClick = {
+                        semanticCompletion = true; forceTurnTimeout = true
+                        smartTurn = "0.9"; turnTimeout = "5000"; nativePunctuation = true
+                        prefs.edit {
+                            putBoolean(GrokPreferences.SMART_TURN_ENABLED, true)
+                            putBoolean(GrokPreferences.FORCE_TURN_TIMEOUT, true)
+                            putString(GrokPreferences.SMART_TURN, "0.9")
+                            putInt(GrokPreferences.TURN_TIMEOUT, 5000)
+                            putBoolean(GrokPreferences.NATIVE_PUNCTUATION, true)
                         }
-                    }, maxLines = 1
+                    },
                 )
+                BooleanSettingRow(
+                    label = stringResource(R.string.grok_native_punctuation_title),
+                    summary = stringResource(R.string.grok_native_punctuation_summary),
+                    checked = nativePunctuation,
+                    onCheckedChange = { nativePunctuation = it; prefs.edit { putBoolean(GrokPreferences.NATIVE_PUNCTUATION, it) } }
+                )
+                BooleanSettingRow(
+                    label = stringResource(R.string.grok_semantic_completion_title),
+                    summary = stringResource(R.string.grok_semantic_completion_summary),
+                    checked = semanticCompletion,
+                    onCheckedChange = { semanticCompletion = it; prefs.edit { putBoolean(GrokPreferences.SMART_TURN_ENABLED, it) } }
+                )
+                if (semanticCompletion) {
+                    InlineTextField(
+                        label = stringResource(R.string.grok_smart_turn_title),
+                        summary = stringResource(R.string.grok_smart_turn_summary),
+                        value = smartTurn,
+                        onValueChange = { value ->
+                            smartTurn = value
+                            value.toDoubleOrNull()?.takeIf { it.isFinite() }?.let { parsed ->
+                                prefs.edit { putString(GrokPreferences.SMART_TURN, parsed.coerceIn(0.0, 1.0).toString()) }
+                            }
+                        }, maxLines = 1
+                    )
+                    BooleanSettingRow(
+                        label = stringResource(R.string.grok_force_timeout_title),
+                        summary = stringResource(R.string.grok_force_timeout_summary),
+                        checked = forceTurnTimeout,
+                        onCheckedChange = { forceTurnTimeout = it; prefs.edit { putBoolean(GrokPreferences.FORCE_TURN_TIMEOUT, it) } }
+                    )
+                    if (forceTurnTimeout) {
+                        InlineTextField(
+                            label = stringResource(R.string.grok_turn_timeout_title),
+                            summary = stringResource(R.string.grok_turn_timeout_summary),
+                            value = turnTimeout,
+                            onValueChange = { value ->
+                                turnTimeout = value
+                                value.toIntOrNull()?.let { parsed -> prefs.edit { putInt(GrokPreferences.TURN_TIMEOUT, parsed.coerceIn(1, 5000)) } }
+                            }, maxLines = 1
+                        )
+                    }
+                } else {
+                    InlineTextField(
+                        label = stringResource(R.string.grok_endpointing_title),
+                        summary = stringResource(R.string.grok_endpointing_summary),
+                        value = endpointing,
+                        onValueChange = { value ->
+                            endpointing = value
+                            value.toIntOrNull()?.let { prefs.edit { putInt(GrokPreferences.ENDPOINTING, it.coerceIn(0, 5000)) } }
+                        }, maxLines = 1
+                    )
+                }
                 InlineTextField(
-                    label = stringResource(R.string.grok_turn_timeout_title),
-                    summary = stringResource(R.string.grok_turn_timeout_summary),
-                    value = turnTimeout,
+                    label = stringResource(R.string.grok_vad_title),
+                    summary = stringResource(R.string.grok_vad_summary),
+                    value = vadThreshold,
                     onValueChange = { value ->
-                        turnTimeout = value
-                        value.toIntOrNull()?.let { parsed -> prefs.edit { putInt(GrokPreferences.TURN_TIMEOUT, parsed.coerceIn(1, 5000)) } }
+                        vadThreshold = value
+                        value.toDoubleOrNull()?.takeIf { it.isFinite() }?.let { parsed ->
+                            prefs.edit { putString(GrokPreferences.VAD_THRESHOLD, parsed.coerceIn(0.0, 1.0).toString()) }
+                        }
                     }, maxLines = 1
                 )
                 InlineTextField(

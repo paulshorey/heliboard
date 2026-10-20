@@ -35,13 +35,16 @@ class GrokTranscriptionClientTest {
         override fun onStreamError(error: String) { events.add("error:$error") }
         override fun onStreamClosed() { events.add("closed") }
     }
-    private fun start(language: String? = "en-US") {
+    private fun start(language: String? = "en-US", semantic: Boolean = true, force: Boolean = true,
+        endpointing: Int = 2000, vad: Double = 0.08) {
         client.socketFactory = WebSocket.Factory { request, listener ->
             requests.add(request); listeners.add(listener)
             FakeSocket(request).also { sockets.add(it) }
         }
         client.startStreaming("personal-test-key", GrokTranscriptionClient.buildSessionConfig(
-            language, false, 0.7, 5000, true, listOf("McDonald"), "Already typed private paragraph."), callback)
+            language, false, 0.7, 5000, true, listOf("McDonald"), "Already typed private paragraph.",
+            smartTurnEnabled = semantic, forceTurnTimeout = force, endpointingMs = endpointing,
+            vadThreshold = vad), callback)
     }
     private fun advance(ms: Long = 0) = shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(ms))
     private fun message(payload: String, index: Int = listeners.lastIndex) {
@@ -173,6 +176,36 @@ class GrokTranscriptionClientTest {
         start("unknown")
         assertNull(requests.single().url.queryParameter("language"))
         assertNull(requests.single().url.queryParameter("format"))
+    }
+
+    @Test fun semanticOnlyOmitsForcedTimeoutAndFixedEndpointing() {
+        start(force = false)
+        val url = requests.single().url
+        assertEquals("0.7", url.queryParameter("smart_turn"))
+        assertNull(url.queryParameter("smart_turn_timeout"))
+        assertNull(url.queryParameter("endpointing"))
+        assertEquals("0.08", url.queryParameter("vad_threshold"))
+    }
+
+    @Test fun fixedPauseOmitsSmartTurnEntirelyRatherThanSettingThresholdZero() {
+        start(semantic = false, endpointing = 2000, vad = 0.15)
+        val url = requests.single().url
+        assertNull(url.queryParameter("smart_turn"))
+        assertNull(url.queryParameter("smart_turn_timeout"))
+        assertEquals("2000", url.queryParameter("endpointing"))
+        assertEquals("0.15", url.queryParameter("vad_threshold"))
+    }
+
+    @Test fun rejectedAttributionStillLogsSafeIntervalAndPunctuationMetadata() {
+        start(); ready(); audio()
+        message("""{"type":"transcript.partial","text":"PrivateName.","words":[{"text":"PrivateName.","start":0,"end":0.1}],"start":0,"duration":0.1,"is_final":true,"speech_final":true,"end_of_turn_confidence":0.91}""")
+        val logs = helium314.keyboard.latin.utils.Log.getVoiceDiagnosticsLog().joinToString("\n") { it.message }
+        assertTrue(logs.contains("kind=utterance"))
+        assertTrue(logs.contains("missingLabels=1 missingLexical=1"))
+        assertTrue(logs.contains("pendingMissingLexical=1"))
+        assertTrue(logs.contains("endConfidence=0.910"))
+        assertFalse(logs.contains("PrivateName"))
+        assertFalse(logs.contains("personal-test-key"))
     }
 
     private class FakeSocket(private val request: Request) : WebSocket {

@@ -97,6 +97,18 @@ class VoiceInputManagerTest {
         assertTrue(manager.startRecording())
         if (ready) stream.onStreamReady()
     }
+
+    @Test fun punctuationModeIsFixedForTheRecordingAndItsDrain() {
+        val prefs = ApplicationProvider.getApplicationContext<Context>().prefs()
+        prefs.edit().putBoolean(GrokPreferences.NATIVE_PUNCTUATION, true).commit()
+        start()
+        prefs.edit().putBoolean(GrokPreferences.NATIVE_PUNCTUATION, false).commit()
+        assertTrue(manager.shouldPreserveNativePunctuation())
+        manager.stopRecording()
+        assertTrue(manager.shouldPreserveNativePunctuation())
+        manager.cancelRecording()
+        assertFalse(manager.shouldPreserveNativePunctuation())
+    }
     private fun audio(value: Int = 1, size: Int = 3200, containsSpeech: Boolean = speaking) =
         capture.onAudioChunk(ByteArray(size) { value.toByte() }, containsSpeech)
     private fun final(text: String) {

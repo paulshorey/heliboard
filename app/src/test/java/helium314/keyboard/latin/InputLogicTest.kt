@@ -30,6 +30,7 @@ import helium314.keyboard.latin.common.StringUtils
 import helium314.keyboard.latin.inputlogic.InputLogic
 import helium314.keyboard.latin.inputlogic.SpaceState
 import helium314.keyboard.latin.settings.Settings
+import helium314.keyboard.latin.settings.GrokPreferences
 import helium314.keyboard.latin.utils.ScriptUtils
 import helium314.keyboard.latin.utils.SubtypeSettings
 import helium314.keyboard.latin.utils.getTimestampFormatter
@@ -95,6 +96,33 @@ class InputLogicTest {
         assertEquals("", composingText)
         latinIME.mHandler.onFinishInput()
         assertEquals("", composingText)
+    }
+
+    @Test fun nativeVoicePunctuationPreservesEllipsesAndLiteralCommandWords() {
+        reset()
+        latinIME.prefs().edit { putBoolean(GrokPreferences.NATIVE_PUNCTUATION, true) }
+        assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(latinIME, "Wait...? The label is Comma."))
+        assertEquals("Wait...? The label is Comma.", getText())
+        val diagnostics = helium314.keyboard.latin.utils.Log.getVoiceDiagnosticsLog().joinToString("\n") { it.message }
+        kotlin.test.assertTrue(diagnostics.contains("VOICE_TEXT stage=editor_received"))
+        kotlin.test.assertTrue(diagnostics.contains("VOICE_TEXT stage=editor_inserted"))
+        kotlin.test.assertFalse(diagnostics.contains("The label is Comma"))
+    }
+
+    @Test fun nativeVoicePunctuationDoesNotRewriteTheExistingParagraph() {
+        reset()
+        latinIME.prefs().edit { putBoolean(GrokPreferences.NATIVE_PUNCTUATION, true) }
+        setText("The label is Comma. ")
+        assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(latinIME, "More words...!"))
+        assertEquals("The label is Comma. More words...!", getText())
+    }
+
+    @Test fun nativeVoicePunctuationDoesNotInventSentenceMarksOrCapitalizeContinuations() {
+        reset()
+        latinIME.prefs().edit { putBoolean(GrokPreferences.NATIVE_PUNCTUATION, true) }
+        assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(latinIME, "I was thinking"))
+        assertEquals(true, commitVoiceTranscriptionTextMethod.invoke(latinIME, " about the next step."))
+        assertEquals("I was thinking about the next step.", getText())
     }
 
     @Test fun delete() {
@@ -1540,7 +1568,9 @@ class InputLogicTest {
         deferredEdits.clear()
 
         // reset settings
-        latinIME.prefs().edit { clear() }
+        // Existing cleanup/editor-safety cases deliberately exercise optional
+        // command conversion. Native punctuation has separate regressions.
+        latinIME.prefs().edit { clear(); putBoolean(GrokPreferences.NATIVE_PUNCTUATION, false) }
 
         setText("") // (re)sets selection and composing word
     }

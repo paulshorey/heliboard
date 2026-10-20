@@ -93,6 +93,8 @@ import helium314.keyboard.latin.utils.SubtypeSettings;
 import helium314.keyboard.latin.utils.SubtypeState;
 import helium314.keyboard.latin.utils.ToolbarMode;
 import helium314.keyboard.latin.voice.TranscriptPostProcessor;
+import helium314.keyboard.latin.voice.TranscriptDiagnostics;
+import helium314.keyboard.latin.settings.GrokPreferences;
 import helium314.keyboard.latin.voice.VoiceInputManager;
 import helium314.keyboard.latin.suggestions.SuggestionStripView.VoiceState;
 import helium314.keyboard.settings.FullappEditorActivity;
@@ -2272,6 +2274,12 @@ public class LatinIME extends InputMethodService implements
         if (mVoiceEditorMonitorActive && cancelVoiceIfEditorCleared()) return false;
         if (!processTranscript && wasVoiceEditorCleared()) return false;
         boolean batchStarted = false;
+        final boolean nativePunctuation = processTranscript && (mVoiceInputManager != null
+                ? mVoiceInputManager.shouldPreserveNativePunctuation()
+                : helium314.keyboard.latin.utils.KtxKt.prefs(this)
+                    .getBoolean(GrokPreferences.NATIVE_PUNCTUATION, true));
+        if (processTranscript) Log.i(TAG, "VOICE_TEXT stage=editor_received nativePunctuation="
+                + nativePunctuation + " shape={" + TranscriptDiagnostics.shape(text) + "}");
         try {
             // beginBatchEdit increments the wrapper's nesting before calling the
             // host, so finally must balance it even if the host throws there.
@@ -2288,10 +2296,10 @@ public class LatinIME extends InputMethodService implements
             // Normalize the entire segment here, including earlier paragraphs
             // when a final contains line breaks. The paragraph pass also cleans
             // existing editor context and punctuation produced by spoken commands.
-            String insertion = processTranscript
+            String insertion = processTranscript && !nativePunctuation
                     ? TranscriptPostProcessor.INSTANCE.removeGrokRedundantPunctuation(text) : text;
             boolean replacePreviousPunctuation = false;
-            if (processTranscript && !mInputLogic.mConnection.hasSelection()) {
+            if (processTranscript && !nativePunctuation && !mInputLogic.mConnection.hasSelection()) {
                 // Include enough context to verify one adjacent punctuation replacement.
                 final CharSequence before = mInputLogic.mConnection.getTextBeforeCursor(4, 0);
                 if (before != null && before.length() > 0) {
@@ -2309,7 +2317,10 @@ public class LatinIME extends InputMethodService implements
                     ? mInputLogic.mConnection.replaceTextBeforeCursor(1, insertion)
                     : mInputLogic.mConnection.commitText(insertion, 1);
             if (!accepted) return false;
-            final boolean completed = !processTranscript || runTranscriptPostProcessing();
+            if (processTranscript) Log.i(TAG, "VOICE_TEXT stage=editor_inserted cleanup="
+                    + !nativePunctuation + " previousPunctuationReplaced=" + replacePreviousPunctuation
+                    + " shape={" + TranscriptDiagnostics.shape(insertion) + "}");
+            final boolean completed = !processTranscript || nativePunctuation || runTranscriptPostProcessing();
             // Some editors never send text-change notifications. Remember a
             // successful insertion too, so the next final cannot refill a field
             // that started empty, received dictation, then was cleared silently.
@@ -2358,6 +2369,8 @@ public class LatinIME extends InputMethodService implements
 
         Log.i(TAG, "VOICE post-processing: replacing paragraph ("
                 + paragraph.length() + " → " + corrected.length() + " chars)");
+        Log.i(TAG, "VOICE_TEXT stage=paragraph_cleanup before={" + TranscriptDiagnostics.shape(paragraph)
+                + "} after={" + TranscriptDiagnostics.shape(corrected) + "}");
 
         return mInputLogic.mConnection.replaceTextBeforeCursor(paragraph.length(), corrected);
     }

@@ -23,11 +23,19 @@ GrokTranscriptAssembler → VoiceInputManager FIFO → LatinIME/InputConnection.
   twice inside 12 seconds. Active transport/provider failures are terminal.
 - `GrokTranscriptAssembler.kt` waits for completed attributed utterances/EOF,
   filters the first finalized speaker by words, and reconciles audio positions.
+  `GrokFormattedTranscript` aligns full lexical content to native formatted spans,
+  including mixed speakers. Unalignable text falls back to attributed tokens; never
+  insert extra unattributed words. Bound formatting to 131,072 characters.
   Never insert interims, guess missing labels, select numeric speaker zero, or
   deduplicate distinct utterances by text. Diarization is not enrolled identity.
-- Preserve native wording/casing/punctuation. Only explicit spoken commands,
-  redundant punctuation and caret spacing are local transforms. Historical
+- Preserve native wording/casing/punctuation. Default native-punctuation mode applies only caret spacing and bypasses command
+  conversion/paragraph cleanup. Turning it off explicitly enables legacy commands
+  and redundant-punctuation cleanup. Historical
   Gemini heuristics must not run against Grok output.
+- Default to semantic confidence 0.9 / forced timeout 5000 ms, with an explicit
+  patient preset that preserves separately saved comparison values until applied.
+  Semantic-only mode omits timeout; fixed-pause mode omits both Smart Turn params
+  and sends endpointing (default 2000 ms). Pin provider VAD to 0.08 by default.
 - Forward quiet PCM. Local silence is advisory, never a forced semantic turn.
   Explicit Pause finalizes; Stop drains captured tail/PCM before EOF. A normal
   peer close can race the local acknowledgement. Do not treat close(false) alone
@@ -40,7 +48,11 @@ GrokTranscriptAssembler → VoiceInputManager FIFO → LatinIME/InputConnection.
   selection/replacement and never retry a possibly partial editor edit.
 - `GrokPreferences.kt` stores the user's key with AtomicFile outside backups;
   preserve other providers' settings/keys and inherit only vocabulary. No shared
-  credential belongs in the APK. No raw transcript/audio/provider payloads in logs.
+  credential belongs in the APK. Diagnostics v2 may log event kinds/confidence/intervals, anonymous labels/counts,
+  missing lexical versus punctuation labels, rendering and punctuation/casing
+  shapes at provider/filter/editor stages. Never raw transcript words/numbers,
+  audio, provider payloads or transcript hashes. Local silence logs must say no
+  command; wire finalize is explicit Pause only.
 - Run relevant checks through `./tools/android-dev.sh`. Every PR requires the
   final canonical APK and immutable download per `android-build-apk`.
 

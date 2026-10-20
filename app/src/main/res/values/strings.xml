@@ -1046,7 +1046,19 @@ New dictionary:
     <string name="grok_format_title" translatable="false">Format numbers and currency</string>
     <string name="grok_format_summary" translatable="false">Use written forms such as $25 instead of twenty-five dollars when supported by the selected language. This does not control sentence punctuation.</string>
     <string name="grok_smart_turn_title" translatable="false">Thought completion confidence (0.0–1.0)</string>
-    <string name="grok_smart_turn_summary" translatable="false">Default 0.7. Higher values, such as 0.9, wait for stronger evidence that a thought has ended. Try this if thinking pauses split your sentences.</string>
+    <string name="grok_smart_turn_summary" translatable="false">Default 0.9. Higher values require stronger evidence that a thought ended. This controls completion, not every punctuation decision.</string>
     <string name="grok_turn_timeout_title" translatable="false">Maximum thinking pause (ms, 1–5000)</string>
-    <string name="grok_turn_timeout_summary" translatable="false">Default 5000. Complete the utterance after this much silence even if the thought may continue. This is separate from the silence auto-stop below.</string>
+    <string name="grok_turn_timeout_summary" translatable="false">Default 5000. This is a maximum wait, not a minimum: a thought can complete earlier. Separate from recording auto-stop below.</string>
+    <string name="grok_patient_preset_title" translatable="false">Use patient dictation settings</string>
+    <string name="grok_patient_preset_summary" translatable="false">Apply confidence 0.9, a 5-second maximum thinking pause, and native punctuation. Start a new recording after changing settings.</string>
+    <string name="grok_native_punctuation_title" translatable="false">Preserve native punctuation</string>
+    <string name="grok_native_punctuation_summary" translatable="false">Recommended. Keep Grok’s punctuation and casing; only caret spacing is local. Turn off to enable spoken punctuation commands and local cleanup.</string>
+    <string name="grok_semantic_completion_title" translatable="false">Detect completed thoughts</string>
+    <string name="grok_semantic_completion_summary" translatable="false">Recommended. Use Smart Turn to distinguish thinking pauses from completed thoughts. Turn off to compare a fixed silence duration.</string>
+    <string name="grok_force_timeout_title" translatable="false">Force completion after a long thinking pause</string>
+    <string name="grok_force_timeout_summary" translatable="false">Turn off to let Smart Turn decide without a forced silence timeout. Text may wait longer; recording auto-stop and stalled-service limits still apply.</string>
+    <string name="grok_endpointing_title" translatable="false">Fixed completion pause (ms, 0–5000)</string>
+    <string name="grok_endpointing_summary" translatable="false">Used only with completed-thought detection off. Default 2000. Any pause this long can end an utterance, even mid-sentence. Zero completes at any detected silence boundary.</string>
+    <string name="grok_vad_title" translatable="false">Speech-versus-noise threshold (0.0–1.0)</string>
+    <string name="grok_vad_summary" translatable="false">Default 0.08. Higher values may reduce words invented from noise but can miss quiet speech. This does not control punctuation or select your voice. Zero disables the provider’s speech gate.</string>
 </resources>

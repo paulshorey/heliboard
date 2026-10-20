@@ -118,6 +118,9 @@ class VoiceInputManager internal constructor(
     private var chunkSilenceThreshold = Defaults.PREF_VOICE_SILENCE_THRESHOLD.toDouble()
     private var autoStopSilenceMs = Defaults.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS * 1000L
     private var grokConfig: Config = GrokPreferences.readConfig(context.prefs())
+    /** Snapshot belongs to the recording, including its graceful drain. */
+    fun shouldPreserveNativePunctuation(): Boolean = if (sessionOpen) grokConfig.nativePunctuation
+        else context.prefs().getBoolean(GrokPreferences.NATIVE_PUNCTUATION, true)
     private val autoStopSilenceRunnable = Runnable {
         if (currentState == State.RECORDING) stopRecording(StopReason.SILENCE_TIMEOUT)
     }
@@ -186,7 +189,9 @@ class VoiceInputManager internal constructor(
         lastInterimAtMs = null
         lastFinalAtMs = null
         finalizedAtMs = null
-        Log.i(TAG, "session=$sessionId start smartTurn=${grokConfig.smartTurn} " +
+        Log.i(TAG, "session=$sessionId start diagnostics=${TranscriptDiagnostics.VERSION} smartTurn=${grokConfig.smartTurn} " +
+            "semantic=${grokConfig.smartTurnEnabled} forcedTimeout=${grokConfig.forceTurnTimeout} " +
+            "endpointingMs=${grokConfig.endpointingMs} nativePunctuation=${grokConfig.nativePunctuation} vad=${grokConfig.vadThreshold} " +
             "localSilenceMs=$chunkSilenceDurationMs threshold=$chunkSilenceThreshold " +
             "autoStopMs=$autoStopSilenceMs serverSilenceMs=${grokConfig.turnTimeoutMs} " +
             "autoLanguage=${grokConfig.autoDetectLanguage} editorVocabulary=${grokConfig.useEditorContext}")
@@ -359,6 +364,10 @@ class VoiceInputManager internal constructor(
             format = grokConfig.format,
             userVocabulary = grokConfig.customVocabulary,
             editorContext = editorContext,
+            smartTurnEnabled = grokConfig.smartTurnEnabled,
+            forceTurnTimeout = grokConfig.forceTurnTimeout,
+            endpointingMs = grokConfig.endpointingMs,
+            vadThreshold = grokConfig.vadThreshold,
         )
         isStreamingConnecting = true
         scheduleConnectTimeout(sessionId)
@@ -502,7 +511,8 @@ class VoiceInputManager internal constructor(
                     }
                     armResponseTimeout(sessionId)
                     armFinalTimeout(sessionId)
-                    Log.i(TAG, "session=$sessionId finalize finish=${next.finish} " +
+                    val action = if (next.finish) "audio.done" else if (next.explicit) "finalize" else "local_silence_no_command"
+                    Log.i(TAG, "session=$sessionId boundary action=$action " +
                         "pendingSpeech=$unconfirmedSpeech finalWait=${finalTimeout != null}")
                     if (next.finish) {
                         waitingForClose = true

@@ -11,6 +11,9 @@ internal class GrokTranscriptAssembler {
     private data class Word(val start: Long, val end: Long, val text: String, val speaker: Int?)
     private val pending = mutableListOf<Word>()
     private val released = mutableSetOf<Word>()
+    private data class Formatted(val source: Long, val text: String)
+    private val formatting = mutableMapOf<Word, Formatted>()
+    private var source = 0L
     private var selectedSpeaker: Int? = null
     private var releasedEnd = 0L
     private var interimEnd = -1L
@@ -18,7 +21,14 @@ internal class GrokTranscriptAssembler {
     var settledBytes: Long = 0; private set
     val hasPendingWords: Boolean get() = pending.isNotEmpty() || interimEnd >= 0
 
-    data class Update(val segments: List<TranscriptSegment>, val progressed: Boolean, val filteredWords: Int)
+    data class Update(val segments: List<TranscriptSegment>, val progressed: Boolean, val filteredWords: Int,
+        val rendering: String = "held")
+
+    fun diagnosticState(): String = "selectedSpeaker=${selectedSpeaker ?: "none"} pending=${pending.size} " +
+        "pendingMissingLabels=${pending.count { it.speaker == null }} " +
+        "pendingMissingLexical=${pending.count { it.speaker == null && it.text.any(Char::isLetterOrDigit) }} " +
+        "pendingMissingPunctuation=${pending.count { it.speaker == null && it.text.none(Char::isLetterOrDigit) }} " +
+        "released=${released.size} settledBytes=$settledBytes"
 
     fun accept(event: JSONObject, submittedBytes: Long): Update {
         val done = event.getString("type") == "transcript.done"
@@ -58,16 +68,24 @@ internal class GrokTranscriptAssembler {
         for (word in incoming.filter { it.start < releasedEnd }) {
             wire(word in released) { "Provider revised already inserted speech" }
         }
-        val newWords = incoming.filter { it.start >= releasedEnd }
+        val newWords = incoming.filter { it.start >= releasedEnd && it !in released }
+        val newWordSet = newWords.toSet()
+        val aligned = GrokFormattedTranscript.align(text, incoming.map { it.text })
+        val thisSource = ++source
         // Replace overlapping uninserted chunks using the provider's authoritative final.
         if (newWords.isNotEmpty()) {
             val first = newWords.first().start
             val last = newWords.maxOf { it.end }
             pending.removeAll { old -> first < old.end && old.start < last || old.start == first }
+            formatting.keys.retainAll(pending.toSet())
             pending.addAll(newWords)
             pending.sortWith(compareBy({ it.start }, { it.end }))
+            if (aligned != null) incoming.forEachIndexed { index, word ->
+                if (word in newWordSet) formatting[word] = Formatted(thisSource, aligned[index])
+            }
         }
         wire(pending.size <= 10000 && pending.sumOf { it.text.length } <= 131072) { "Utterance buffer is full" }
+        wire(formatting.values.sumOf { it.text.length } <= 131072) { "Formatted utterance buffer is full" }
         val oldSettled = settledBytes
         // EOF's duration certifies processing of quiet/noise tails too.
         settledBytes = maxOf(settledBytes, end * 320)
@@ -83,31 +101,57 @@ internal class GrokTranscriptAssembler {
         wire(!done || interimEnd < 0) { "Speech ended without a final transcript" }
         if (selectedSpeaker == null) selectedSpeaker = complete.firstOrNull()?.speaker
         val segments = mutableListOf<TranscriptSegment>()
-        val run = mutableListOf<String>()
+        val run = mutableListOf<Word>()
+        var alignedRuns = 0
+        var fallbackRuns = 0
         fun flush() {
             if (run.isEmpty()) return
-            val joined = joinWords(run)
-            segments.add(TranscriptSegment(joined, joined.first() in ".,!?;:%)]}"))
+            val joined = if (run.all { it in formatting }) {
+                alignedRuns++
+                val parts = mutableListOf<String>()
+                var previousSource: Long? = null
+                val part = StringBuilder()
+                for (word in run) {
+                    val formatted = formatting.getValue(word)
+                    if (previousSource != null && previousSource != formatted.source) {
+                        parts.add(part.toString().trim()); part.clear()
+                    }
+                    part.append(formatted.text)
+                    previousSource = formatted.source
+                }
+                parts.add(part.toString().trim())
+                joinWords(parts)
+            } else {
+                fallbackRuns++
+                joinWords(run.map { it.text })
+            }
+            if (joined.isNotBlank()) segments.add(TranscriptSegment(joined, joined.first() in ".,!?;:%)]}"))
             run.clear()
         }
         var filtered = 0
         for (word in complete) {
-            if (word.speaker == selectedSpeaker) run.add(word.text)
+            if (word.speaker == selectedSpeaker) run.add(word)
             else { flush(); filtered++ }
         }
         flush()
         // With a fully attributed single-speaker utterance, retain the provider's
         // exact spacing/quotes/casing instead of rebuilding it from word tokens.
-        if (filtered == 0 && complete.isNotEmpty() && complete == incoming && text.isNotBlank()) {
+        if (aligned != null && filtered == 0 && complete.isNotEmpty() && complete == incoming && text.isNotBlank()) {
             val native = text.trim()
             segments.clear()
             segments.add(TranscriptSegment(native, native.first() in ".,!?;:%)]}"))
         }
         wire(released.size + complete.size <= 50000) { "Recording transcript ledger is full" }
         pending.removeAll(complete.toSet())
+        formatting.keys.retainAll(pending.toSet())
         released.addAll(complete)
         releasedEnd = maxOf(releasedEnd, complete.maxOfOrNull { it.end } ?: releasedEnd)
-        return Update(segments, settledBytes > oldSettled || complete.isNotEmpty(), filtered)
+        val rendering = when {
+            fallbackRuns > 0 -> "token_fallback"
+            alignedRuns > 0 -> "formatted_alignment"
+            else -> "empty"
+        }
+        return Update(segments, settledBytes > oldSettled || complete.isNotEmpty(), filtered, rendering)
     }
 
     private inline fun wire(condition: Boolean, reason: () -> String) {

@@ -103,4 +103,54 @@ class GrokTranscriptAssemblerTest {
         assertEquals(listOf("He said, “Yes!”"), texts(event(word("He", 0, 0.0, 0.1),
             word("said,", 0, 0.1, 0.2), word("“Yes!”", 0, 0.2, 0.5)).put("text", "He said, “Yes!”")))
     }
+
+    @Test fun speakerFilteringUsesFormattedPunctuationInsteadOfStaleWordPeriods() {
+        val result = accept(event(word("I", 0, 0.0, 0.1), word("was", 0, 0.1, 0.2),
+            word("thinking.", 0, 0.2, 0.4), word("about", 0, 0.4, 0.5), word("it.", 0, 0.5, 0.7),
+            word("Yes.", 1, 0.7, 0.9)).put("text", "I was thinking about it. Yes."))
+        assertEquals(listOf("I was thinking about it."), result.segments.map { it.text })
+        assertEquals("formatted_alignment", result.rendering)
+        assertEquals(1, result.filteredWords)
+    }
+
+    @Test fun speakerFilteringPreservesAsciiQuotesWithoutAddingInternalSpaces() {
+        assertEquals(listOf("He said, \"Yes!\""), texts(event(word("He", 0, 0.0, 0.1),
+            word("said,", 0, 0.1, 0.2), word("\"", 0, 0.2, 0.2), word("Yes!", 0, 0.2, 0.5),
+            word("\"", 0, 0.5, 0.5), word("Guest.", 1, 0.6, 0.9)).put("text", "He said, \"Yes!\" Guest.")))
+    }
+
+    @Test fun repeatedWordsAreAlignedByPositionWithoutBorrowingGuestWords() {
+        assertEquals(listOf("Go,", "go!"), texts(event(word("go", 4, 0.0, 0.2),
+            word("go", 7, 0.2, 0.4), word("go", 4, 0.4, 0.6)).put("text", "Go, go? go!")))
+    }
+
+    @Test fun eofRetainsFormattingFromHeldChunksWhenItHasNoRepeatedText() {
+        accept(event(word("He", 0, 0.0, 0.1), word("said", 0, 0.1, 0.2), word("yes", 0, 0.2, 0.4),
+            utterance = false).put("text", "He said, \"yes!\""))
+        assertEquals(listOf("He said, \"yes!\""), texts(event(done = true)))
+    }
+
+    @Test fun formattingCannotIntroduceWordsWithoutAttribution() {
+        val result = accept(event(word("Mine.", 0, 0.0, 0.4)).put("text", "Mine. Unattributed guest words."))
+        assertEquals(listOf("Mine."), result.segments.map { it.text })
+        assertEquals("token_fallback", result.rendering)
+    }
+
+    @Test fun repeatedZeroLengthPunctuationAtEofIsNotInsertedAgain() {
+        val hello = word("Hello", 0, 0.0, 0.5)
+        val period = word(".", 0, 0.5, 0.5)
+        assertEquals(listOf("Hello."), texts(event(hello, period).put("text", "Hello.")))
+        assertTrue(texts(event(hello, period, done = true).put("text", "Hello.")).isEmpty())
+    }
+
+    @Test fun formattedMixedSpeakerTextPreservesCjkAndCurrencyPrefixes() {
+        assertEquals(listOf("价格是￥25。"), texts(event(word("价格是", 0, 0.0, 0.2),
+            word("25", 0, 0.2, 0.4), word("不要", 1, 0.4, 0.6)).put("text", "价格是￥25。不要！")))
+    }
+
+    @Test fun formattingDoesNotBorrowAGuestsEmojiOrMathSymbols() {
+        assertEquals(listOf("Mine.", "Again."), texts(event(word("Mine.", 0, 0.0, 0.2),
+            word("🙂", 1, 0.2, 0.3), word("Again.", 0, 0.3, 0.6)).put("text", "Mine. 🙂 Again.")))
+        assertNull(GrokFormattedTranscript.align("C#", listOf("C++")))
+    }
 }

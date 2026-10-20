@@ -27,11 +27,25 @@ fails instead of silently rewriting the editor. The ledger is bounded to 50,000
 released words, 10,000 pending words and 131,072 pending characters. Server messages
 are limited to 1 MiB. These are app safeguards, not advertised provider limits.
 
-Provider wording, casing and punctuation are preserved, apart from redundant
-punctuation cleanup and explicit sentence-form spoken punctuation/paragraph
-commands. Grok does its own filler removal. Former provider disfluency deletion,
+Native punctuation is on by default: provider wording, casing and punctuation
+are preserved with only caret spacing applied. Turning it off enables the optional
+redundant-punctuation and explicit spoken-command cleanup; that pass can alter the
+existing paragraph too, so keep native mode on for baseline punctuation tests. Grok does its own filler removal. Former provider disfluency deletion,
 leading-case lowering and trailing sentence punctuation stripping are bypassed.
 No separate text model or punctuation model receives the transcript.
+
+`GrokFormattedTranscript` aligns every lexical character of the attributed word
+sequence to the formatted transcript. Retained speaker runs use those formatted
+spans, preserving native periods, casing, currency and quotes even when raw word
+tokens have different punctuation. Repeated words map by position, not substring
+search. Missing or extra lexical content makes alignment fail; attributed tokens
+are retained instead of inserting unattributed formatted words. Per-chunk spans
+survive a wordless EOF. Formatting has its own 131,072-character bound. Repeated
+zero-duration punctuation at a released boundary is not inserted again.
+
+This does not repair punctuation already fragmented in the provider's formatted
+text. A lowercase continuation alone is not grounds to remove a preceding period.
+Existing committed speech is never rewritten to merge sentences.
 
 ## Wire protocol and configuration
 
@@ -44,9 +58,19 @@ No separate text model or punctuation model receives the transcript.
 - Stream approximately 100 ms / 3,200-byte frames in real time. A monotonic pacing
   budget allows at most one frame of headroom and does not accumulate credit
   through long pauses. Local startup backlog drains at the same bounded pace.
-- `smart_turn=0.7` and `smart_turn_timeout=5000` are the starting defaults.
-  Settings allow threshold 0–1 and timeout 1–5000 ms. Try 0.9 for more patient
-  detection. The timeout can still split a thought after a five-second pause.
+- Defaults are `smart_turn=0.9`, `smart_turn_timeout=5000` and native punctuation.
+  Saved comparison values are preserved. **Use patient dictation settings** applies
+  these three settings explicitly; recording snapshots take effect on the next start.
+  The timeout is a maximum, not a minimum. Shorter pauses can still complete a turn.
+- **Force completion after a long thinking pause** off omits `smart_turn_timeout`
+  entirely. Smart Turn then controls completion; app auto-stop/watchdogs still apply.
+- **Detect completed thoughts** off omits both Smart Turn parameters and instead
+  sends `endpointing` (default 2000 ms, range 0–5000). Zero means any VAD silence
+  boundary. Threshold zero does not disable Smart Turn; omission does.
+- `vad_threshold` is explicitly pinned to 0.08 by default. The UI allows 0–1 for
+  separate speech/noise tests (for example 0.15 then 0.25). This is not a punctuation
+  or speaker-identity setting; stronger rejection can lose quiet speech. Zero
+  disables the gate. Local RMS remains advisory and quiet PCM is always forwarded.
 - The supported keyboard language supplies a language hint. Auto-detect omits it.
   `format=true` is optional, defaults on, and is sent only with an explicit
   supported language. It controls number/currency normalization, not grammar.
@@ -110,8 +134,21 @@ encrypted beyond device storage. Both entry fields are masked password inputs.
 Clearing the field deletes the file. A shared production credential needs a backend
 proxy; Speech-to-Speech ephemeral tokens are not assumed to authenticate STT.
 
-Diagnostics retain phase, byte counts, filtered-word counts, settings, timing and
-local protocol failure reasons, never audio, keyterms, keys or provider payloads.
+Diagnostics version 2 records effective language/format/endpoint/VAD settings,
+stream/event IDs, interim/chunk/utterance/EOF classification, audio intervals,
+end-of-turn confidence, per-speaker counts and selection, missing lexical versus
+punctuation labels (up to eight index/time intervals), held time and rendering mode.
+Interim metadata is throttled to every two seconds except semantic confidence
+updates; finals are always recorded. Local silence is named
+`boundary action=local_silence_no_command`; actual controls have queued/sent logs.
+
+Content-free shapes compare provider formatted text, word tokens, selected output,
+editor insertion and optional paragraph cleanup. They include punctuation counts,
+start/end casing classes, lowercase-after-stop counts and one-word/short span
+counts. These counts are diagnostic heuristics, not grammar judgments (decimals
+and abbreviations also contain periods). They never log raw words, numbers, audio,
+keyterms, keys, full provider messages or hashes of transcript content. Missing-label
+metadata is logged before rejection, including the buffered ledger state.
 Settings → Transcription → Voice diagnostics is useful after a failed session.
 The general xAI API policy describes 30-day audit retention and no training without
 explicit permission; this personal-key build does not claim zero retention.
@@ -136,7 +173,22 @@ network loss, keyboard hiding, host clears and different editors. Record unwante
 speaker words, missing target words, punctuation/casing, duplication, latency and
 failure behavior separately. Keep the PR draft until human phone acceptance.
 
-## Official references (checked 2026-10-19)
+## Configuration comparison for the next phone test
+
+1. Apply **Use patient dictation settings**, leave VAD at 0.08, then start a new
+   recording. Dictate naturally with short/long thinking pauses and guest speech.
+2. If premature completions remain, disable the forced thinking-pause timeout;
+   keep confidence 0.9. Compare the same speech without changing other controls.
+3. For a fixed-pause reference, disable completed-thought detection and use
+   2000 ms. Keep native punctuation on; send the diagnostics after the recording.
+4. Local command/cleanup mode and VAD are separate comparisons. Do not combine
+   several changes and attribute the result to one setting.
+
+Tests prove local wire configuration, formatting/filtering and privacy contracts;
+only phone/provider testing can establish punctuation, diarization or silence quality.
+No additional punctuation-restoration model or acoustic VAD is included in this update.
+
+## Official references (checked 2026-10-20)
 
 - [Speech to Text](https://docs.x.ai/developers/model-capabilities/audio/speech-to-text)
 - [Streaming event schemas](https://docs.x.ai/stt-streaming.ws.json)

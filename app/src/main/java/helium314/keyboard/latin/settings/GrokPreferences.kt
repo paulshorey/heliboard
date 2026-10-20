@@ -13,6 +13,11 @@ object GrokPreferences {
     private const val KEY_FILE = "grok-transcription-key"
     const val SMART_TURN = "grok_smart_turn"
     const val TURN_TIMEOUT = "grok_turn_timeout_ms"
+    const val SMART_TURN_ENABLED = "grok_smart_turn_enabled"
+    const val FORCE_TURN_TIMEOUT = "grok_force_turn_timeout"
+    const val ENDPOINTING = "grok_endpointing_ms"
+    const val NATIVE_PUNCTUATION = "grok_native_punctuation"
+    const val VAD_THRESHOLD = "grok_vad_threshold"
     const val AUTO_LANGUAGE = "grok_auto_language"
     const val EDITOR_CONTEXT = "grok_editor_context"
     const val FORMAT = "grok_format"
@@ -25,6 +30,11 @@ object GrokPreferences {
         val useEditorContext: Boolean,
         val format: Boolean,
         val customVocabulary: List<String>,
+        val smartTurnEnabled: Boolean = true,
+        val forceTurnTimeout: Boolean = true,
+        val endpointingMs: Int = 2000,
+        val nativePunctuation: Boolean = true,
+        val vadThreshold: Double = 0.08,
     )
 
     @Synchronized fun readApiKey(context: Context): String {
@@ -56,14 +66,20 @@ object GrokPreferences {
 
     fun readConfig(prefs: SharedPreferences): Config {
         migrateVocabulary(prefs)
-        val threshold = prefs.getString(SMART_TURN, "0.7")?.toDoubleOrNull()
+        val threshold = prefs.getString(SMART_TURN, "0.9")?.toDoubleOrNull()
+        val vad = prefs.getString(VAD_THRESHOLD, "0.08")?.toDoubleOrNull()
         return Config(
-            threshold?.takeIf { it.isFinite() }?.coerceIn(0.0, 1.0) ?: 0.7,
+            threshold?.takeIf { it.isFinite() }?.coerceIn(0.0, 1.0) ?: 0.9,
             prefs.getInt(TURN_TIMEOUT, 5000).coerceIn(1, 5000),
             prefs.getBoolean(AUTO_LANGUAGE, false),
             prefs.getBoolean(EDITOR_CONTEXT, true),
             prefs.getBoolean(FORMAT, true),
             parseVocabulary(readVocabulary(prefs)),
+            prefs.getBoolean(SMART_TURN_ENABLED, true),
+            prefs.getBoolean(FORCE_TURN_TIMEOUT, true),
+            prefs.getInt(ENDPOINTING, 2000).coerceIn(0, 5000),
+            prefs.getBoolean(NATIVE_PUNCTUATION, true),
+            vad?.takeIf { it.isFinite() }?.coerceIn(0.0, 1.0) ?: 0.08,
         )
     }
 

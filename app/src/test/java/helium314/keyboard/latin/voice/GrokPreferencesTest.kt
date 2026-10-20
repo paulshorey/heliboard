@@ -70,11 +70,43 @@ class GrokPreferencesTest {
     @Test fun settingsAndVocabularyAreBoundedToProviderLimits() {
         val prefs = context.prefs()
         prefs.edit().putString(GrokPreferences.SMART_TURN, "NaN").putInt(GrokPreferences.TURN_TIMEOUT, 9000).commit()
-        assertEquals(0.7, GrokPreferences.readConfig(prefs).smartTurn)
+        assertEquals(0.9, GrokPreferences.readConfig(prefs).smartTurn)
         assertEquals(5000, GrokPreferences.readConfig(prefs).turnTimeoutMs)
         val terms = GrokPreferences.parseVocabulary((0..110).joinToString("\n") { "$it".padEnd(80, 'a') })
         assertEquals(100, terms.size)
         assertTrue(terms.all { it.length == 50 })
         assertFailsWith<IllegalArgumentException> { GrokPreferences.writeApiKey(context, "key\nInjected: header") }
+    }
+
+    @Test fun patientDefaultsDoNotOverwriteSavedComparisonSettings() {
+        val prefs = context.prefs()
+        val defaults = GrokPreferences.readConfig(prefs)
+        assertEquals(0.9, defaults.smartTurn)
+        assertTrue(defaults.smartTurnEnabled)
+        assertTrue(defaults.forceTurnTimeout)
+        assertTrue(defaults.nativePunctuation)
+        assertEquals(2000, defaults.endpointingMs)
+        assertEquals(0.08, defaults.vadThreshold)
+        prefs.edit().putString(GrokPreferences.SMART_TURN, "0.7")
+            .putBoolean(GrokPreferences.SMART_TURN_ENABLED, false)
+            .putBoolean(GrokPreferences.FORCE_TURN_TIMEOUT, false)
+            .putBoolean(GrokPreferences.NATIVE_PUNCTUATION, false).commit()
+        val saved = GrokPreferences.readConfig(prefs)
+        assertEquals(0.7, saved.smartTurn)
+        assertFalse(saved.smartTurnEnabled)
+        assertFalse(saved.forceTurnTimeout)
+        assertFalse(saved.nativePunctuation)
+    }
+
+    @Test fun newControlsRejectNonfiniteValuesAndClampProviderRanges() {
+        val prefs = context.prefs()
+        prefs.edit().putInt(GrokPreferences.ENDPOINTING, 9000)
+            .putString(GrokPreferences.VAD_THRESHOLD, "Infinity").commit()
+        assertEquals(5000, GrokPreferences.readConfig(prefs).endpointingMs)
+        assertEquals(0.08, GrokPreferences.readConfig(prefs).vadThreshold)
+        prefs.edit().putInt(GrokPreferences.ENDPOINTING, -1)
+            .putString(GrokPreferences.VAD_THRESHOLD, "2.0").commit()
+        assertEquals(0, GrokPreferences.readConfig(prefs).endpointingMs)
+        assertEquals(1.0, GrokPreferences.readConfig(prefs).vadThreshold)
     }
 }

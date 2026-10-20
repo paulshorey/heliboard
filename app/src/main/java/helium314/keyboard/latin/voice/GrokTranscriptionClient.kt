@@ -41,17 +41,22 @@ class GrokTranscriptionClient {
         }
         internal fun buildSessionConfig(languageTag: String?, autoDetectLanguage: Boolean,
             smartTurn: Double, turnTimeoutMs: Int, format: Boolean,
-            userVocabulary: List<String>, editorContext: String?) = SessionConfig(
+            userVocabulary: List<String>, editorContext: String?, smartTurnEnabled: Boolean = true,
+            forceTurnTimeout: Boolean = true, endpointingMs: Int = 2000, vadThreshold: Double = 0.08) = SessionConfig(
             if (autoDetectLanguage) null else resolveLanguageCode(languageTag),
-            smartTurn.takeIf { it.isFinite() }?.coerceIn(0.0, 1.0) ?: 0.7,
+            smartTurn.takeIf { it.isFinite() }?.coerceIn(0.0, 1.0) ?: 0.9,
             turnTimeoutMs.coerceIn(1, 5000), format,
             VoiceContextVocabulary.build(userVocabulary, defaultVocabulary(), editorContext, 100)
                 .map { it.take(50) }.distinct(),
+            smartTurnEnabled, forceTurnTimeout, endpointingMs.coerceIn(0, 5000),
+            vadThreshold.takeIf { it.isFinite() }?.coerceIn(0.0, 1.0) ?: 0.08,
         )
     }
 
     internal data class SessionConfig(val language: String?, val smartTurn: Double,
-        val turnTimeoutMs: Int, val format: Boolean, val keyterms: List<String>)
+        val turnTimeoutMs: Int, val format: Boolean, val keyterms: List<String>,
+        val smartTurnEnabled: Boolean = true, val forceTurnTimeout: Boolean = true,
+        val endpointingMs: Int = 2000, val vadThreshold: Double = 0.08)
     interface StreamingCallback {
         fun onStreamReady()
         fun onHandshakeRestarted()
@@ -82,6 +87,9 @@ class GrokTranscriptionClient {
     private var nextAudioAt = 0L
     private var bytesAfterSpeech = 0L
     private var speechSent = false
+    private var eventIndex = 0L
+    private var lastInterimLogAt = -1L
+    private var pendingSince: Long? = null
     private var assembler = GrokTranscriptAssembler()
     private data class Control(val text: String, val queuedAt: Long)
     private val controls = ArrayDeque<Control>()
@@ -110,16 +118,24 @@ class GrokTranscriptionClient {
             .toHttpUrl().newBuilder().addQueryParameter("model", MODEL)
             .addQueryParameter("encoding", "pcm").addQueryParameter("sample_rate", "16000")
             .addQueryParameter("diarize", "true").addQueryParameter("interim_results", "true")
-            .addQueryParameter("smart_turn", config.smartTurn.toString())
-            .addQueryParameter("smart_turn_timeout", config.turnTimeoutMs.toString())
-            .addQueryParameter("filler_words", "false").apply {
+            .addQueryParameter("filler_words", "false")
+            .addQueryParameter("vad_threshold", config.vadThreshold.toString()).apply {
+                if (config.smartTurnEnabled) {
+                    addQueryParameter("smart_turn", config.smartTurn.toString())
+                    if (config.forceTurnTimeout) addQueryParameter("smart_turn_timeout", config.turnTimeoutMs.toString())
+                } else addQueryParameter("endpointing", config.endpointingMs.toString())
                 config.language?.let {
                     addQueryParameter("language", it)
                     addQueryParameter("format", config.format.toString())
                 }
                 config.keyterms.take(100).forEach { addQueryParameter("keyterm", it.take(50)) }
             }.build()
-        Log.i(TAG, "opening model=$MODEL attempt=$retries smartTurn=${config.smartTurn} timeoutMs=${config.turnTimeoutMs}")
+        Log.i(TAG, "opening model=$MODEL stream=$token attempt=$retries " +
+            "smartTurn=${if (config.smartTurnEnabled) config.smartTurn else "off"} " +
+            "timeoutMs=${if (config.smartTurnEnabled && config.forceTurnTimeout) config.turnTimeoutMs else "omitted"} " +
+            "endpointingMs=${if (config.smartTurnEnabled) "semantic" else config.endpointingMs} " +
+            "vad=${config.vadThreshold} language=${config.language ?: "auto"} " +
+            "format=${config.language != null && config.format} keytermCount=${config.keyterms.size}")
         socket = socketFactory.newWebSocket(Request.Builder().url(url)
             .header("Authorization", "Bearer $key").build(), object : WebSocketListener() {
             override fun onMessage(webSocket: WebSocket, text: String) = post(token, connection) {
@@ -128,7 +144,8 @@ class GrokTranscriptionClient {
                     receive(JSONObject(text))
                 } catch (error: Exception) {
                     val reason = if (error is GrokTranscriptException) error.message else "invalid server message schema"
-                    Log.w(TAG, "protocol failure reason=$reason submittedBytes=$submittedBytes")
+                    Log.w(TAG, "protocol failure reason=$reason stream=$generation event=$eventIndex " +
+                        "submittedBytes=$submittedBytes ${assembler.diagnosticState()}")
                     // Never expose payloads, provider error echoes, keys, or dictated words.
                     fail("Grok returned invalid or unresolved transcription data. Restart and speak first.")
                 }
@@ -184,7 +201,21 @@ class GrokTranscriptionClient {
                 require(ready && !done) { "Unexpected transcript" }
                 val isDone = event.getString("type") == "transcript.done"
                 require(!isDone || finishing && controls.isEmpty()) { "Unexpected EOF" }
+                eventIndex++
+                val now = SystemClock.elapsedRealtime()
+                val logEvent = isDone || event.optBoolean("is_final") || lastInterimLogAt < 0 ||
+                    now - lastInterimLogAt >= 2000 || event.optDouble("end_of_turn_confidence", 0.0) > 0
+                if (logEvent) {
+                    if (!event.optBoolean("is_final") && !isDone) lastInterimLogAt = now
+                    Log.i(TAG, "stream=$generation event=$eventIndex " + GrokEventDiagnostics.describe(event, submittedBytes))
+                }
+                if (pendingSince == null && event.optString("text").isNotBlank()) pendingSince = now
                 val update = assembler.accept(event, submittedBytes)
+                if (logEvent) Log.i(TAG, "stream=$generation event=$eventIndex assembled " +
+                    "rendering=${update.rendering} filteredWords=${update.filteredWords} " +
+                    "heldMs=${pendingSince?.let { now - it } ?: 0} ${assembler.diagnosticState()} " +
+                    "selectedShape={${TranscriptDiagnostics.shape(update.segments.joinToString(" ") { it.text })}}")
+                if (!assembler.hasPendingWords) pendingSince = null
                 val token = generation
                 if (!isDone && !event.getBoolean("is_final") && update.progressed) callback?.onInterimTranscription()
                 for (segment in update.segments) {
@@ -244,6 +275,7 @@ class GrokTranscriptionClient {
     private fun enqueueControl(type: String): Boolean {
         if (!ready || done || controls.size >= 64) return false
         controls.addLast(Control(JSONObject().put("type", type).toString(), SystemClock.elapsedRealtime()))
+        Log.i(TAG, "stream=$generation control queued type=$type")
         pumpControls()
         return callback != null
     }
@@ -263,6 +295,7 @@ class GrokTranscriptionClient {
                 return
             }
             if (!target.send(text)) { fail("Grok could not finalize the queued audio."); return }
+            Log.i(TAG, "stream=$generation control sent type=${JSONObject(text).getString("type")}")
             if (speechSent) bytesAfterSpeech += bytes
             controls.removeFirst()
         }
@@ -282,6 +315,7 @@ class GrokTranscriptionClient {
         val old = socket; socket = null; old?.cancel()
         ready = false; finishing = false; done = false; retries = 0
         submittedBytes = 0; nextAudioAt = 0; bytesAfterSpeech = 0; speechSent = false
+        eventIndex = 0; lastInterimLogAt = -1; pendingSince = null
         controls.clear(); assembler = GrokTranscriptAssembler()
     }
     private fun fail(message: String) {
