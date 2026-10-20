@@ -18,7 +18,7 @@ Feature-specific Compose screens for the settings app.
 - `PreferencesScreen.kt` - general preference settings screen.
 - `SecondaryLayoutScreen.kt` - secondary layout settings screen.
 - `SetupAppScreen.kt` - app setup/onboarding utility screen.
-- `VoiceVocabularyScreen.kt` - voice transcription custom vocabulary screen (built-in `customVocabulary` view + user-editable list).
+- `VoiceVocabularyScreen.kt` - voice transcription custom vocabulary screen (built-in Grok spelling hints + user-editable list).
 - `SubtypeScreen.kt` - subtype detail/configuration screen. Contains `LayoutSlotEditor`, a reusable composable that provides add/edit/delete/fork controls for any `LayoutType` slot. All layout types (MAIN, SYMBOLS, FUNCTIONAL, etc.) use this unified component with identical affordances.
 - `TextCorrectionScreen.kt` - text correction/autocorrect settings screen.
 - `ToolbarScreen.kt` - toolbar customization screen.
@@ -37,3 +37,5 @@ Feature-specific Compose screens for the settings app.
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.
 - If a change here affects neighboring folders or a cross-folder contract, update those AGENTS.md files in the same PR.
 - Treat stale agent documentation as a bug.
+
+Transcription/Setup key fields use GrokPreferences, masked password input and backup-excluded storage. Transcription exposes a patient preset, semantic/fixed-pause completion, optional forced timeout, native punctuation, provider VAD, number formatting, language hints, vocabulary and diagnostics. Values are captured at recording start; native mode bypasses spoken commands and paragraph cleanup. First-speaker/all-audio-upload limitations are visible there.

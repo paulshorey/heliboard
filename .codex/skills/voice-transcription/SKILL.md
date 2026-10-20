@@ -1,341 +1,60 @@
 ---
 name: voice-transcription
-description: Voice-to-text pipeline using the Google Gemini Live API (gemini-3.5-transcribe-live) with local audio capture and direct finalized-text insertion. Use when working on microphone recording, audio streaming, transcription results, silence detection, or voice input UI.
+description: HeliBoard Grok Voice Transcribe 2.0 streaming dictation, first-speaker filtering, native punctuation, recording lifecycle, queues, credentials and editor insertion. Use for microphone capture, streaming, transcription results, silence or voice UI.
 ---
 
-# Voice Transcription
+# Voice transcription
 
-Local recording + Gemini Live real-time transcription + immediate caret insertion.
+The active provider on this branch is Grok Voice Transcribe 2.0. Read
+`docs/grok-transcription.md` and `latin/voice/AGENTS.md` before changes. Accuracy
+and speaker filtering take priority over latency. No protocol probe or working
+key is required to implement the app; real streaming speech acceptance is on the
+owner's phone after installing the PR APK and entering their key.
 
-For raw Gemini Live API details (models, endpoints, SDK patterns), read the
-`gemini-live-api-dev` skill and query the Gemini Docs MCP. This skill covers how
-HeliBoard uses that API.
+Microphone → VoiceRecorder (PCM16/16 kHz mono) → bounded paced WebSocket →
+GrokTranscriptAssembler → VoiceInputManager FIFO → LatinIME/InputConnection.
 
-## Architecture
+- Use current official [STT docs](https://docs.x.ai/developers/model-capabilities/audio/speech-to-text)
+  and [streaming schemas](https://docs.x.ai/stt-streaming.ws.json). Do not reuse
+  Speech-to-Speech session/auth assumptions for STT.
+- `GrokTranscriptionClient.kt` owns header auth, `transcript.created` readiness,
+  raw binary PCM, paced bounded sender, ordered `finalize`/`audio.done`, startup
+  retries and generation fencing. Only explicit pre-audio HTTP 429/503 may retry,
+  twice inside 12 seconds. Active transport/provider failures are terminal.
+- `GrokTranscriptAssembler.kt` waits for completed attributed utterances/EOF,
+  filters the first finalized speaker by words, and reconciles audio positions.
+  `GrokFormattedTranscript` aligns full lexical content to native formatted spans,
+  including mixed speakers. Unalignable text falls back to attributed tokens; never
+  insert extra unattributed words. Bound formatting to 131,072 characters.
+  Never insert interims, guess missing labels, select numeric speaker zero, or
+  deduplicate distinct utterances by text. Diarization is not enrolled identity.
+- Preserve native wording/casing/punctuation. Default native-punctuation mode applies only caret spacing and bypasses command
+  conversion/paragraph cleanup. Turning it off explicitly enables legacy commands
+  and redundant-punctuation cleanup. Historical
+  Gemini heuristics must not run against Grok output.
+- Default to semantic confidence 0.9 / forced timeout 5000 ms, with an explicit
+  patient preset that preserves separately saved comparison values until applied.
+  Semantic-only mode omits timeout; fixed-pause mode omits both Smart Turn params
+  and sends endpointing (default 2000 ms). Pin provider VAD to 0.08 by default.
+- Forward quiet PCM. Local silence is advisory, never a forced semantic turn.
+  Explicit Pause finalizes; Stop drains captured tail/PCM before EOF. A normal
+  peer close can race the local acknowledgement. Do not treat close(false) alone
+  as failure after a valid EOF.
+- Keep 960 KB PCM, 256 KiB socket, 64 control/transcript FIFO bounds, 30-second
+  upload/response/final limits, and the absolute 20-second Stop budget. Final
+  progress must cover speech audio positions, not just drained socket bytes.
+- Invalidate recording/connection generations before cancellation. Keyboard hide,
+  host clear/loss and input finish cancel immediately. Preserve verified editor
+  selection/replacement and never retry a possibly partial editor edit.
+- `GrokPreferences.kt` stores the user's key with AtomicFile outside backups;
+  preserve other providers' settings/keys and inherit only vocabulary. No shared
+  credential belongs in the APK. Diagnostics v2 may log event kinds/confidence/intervals, anonymous labels/counts,
+  missing lexical versus punctuation labels, rendering and punctuation/casing
+  shapes at provider/filter/editor stages. Never raw transcript words/numbers,
+  audio, provider payloads or transcript hashes. Local silence logs must say no
+  command; wire finalize is explicit Pause only.
+- Run relevant checks through `./tools/android-dev.sh`. Every PR requires the
+  final canonical APK and immutable download per `android-build-apk`.
 
-```
-Microphone → VoiceRecorder (PCM16 16kHz) → Gemini Live WebSocket → inputTranscription
-                                                                        ↓
-Text Field ← LatinIME (commitText) ← VoiceInputManager (local insertion FIFO + terminal failure + graceful stop)
-```
-
-A local network preflight precedes mic capture. The service handshake runs in parallel
-with capture; audio waits in a bounded FIFO until `setupComplete`.
-
-## Accuracy over latency
-
-This pipeline is deliberately tuned for correctness, not responsiveness. Dictated
-text goes straight into the user's editor, so a wrong word or a period in the
-wrong place costs more than a second of waiting. When changing anything here, do
-not "optimize" latency at the expense of transcript quality.
-
-## Key Files
-
-| File | Role |
-|------|------|
-| `VoiceRecorder.kt` | PCM16 capture, adaptive RMS silence detection |
-| `GeminiTranscriptionClient.kt` | WebSocket client for `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=…`. Builds the `setup` payload at a negotiated [setup tier](#setup-tier-degradation), streams base64 PCM as JSON text frames, parses `inputTranscription` / `interimInputTranscription` / `turnComplete` / `goAway`, sends `audioStreamEnd` for Hybrid VAD, and reassembles editor segments |
-| `VoiceContextVocabulary.kt` | Harvests proper nouns and acronyms from editor text and merges them with user + built-in terms into `customVocabulary` |
-| `TranscriptSegment.kt` | Finalized chunk passed from the client to the IME pipeline |
-| `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO retained until local insertion succeeds, terminal failure, capture stop on `goAway`, auto-stop timers, session config assembly |
-| `TranscriptionPreferences.kt` | Reads/writes Gemini preferences and erases the preference keys of previously used providers |
-| `TranscriptPostProcessor.kt` | Local transcript shaping: pre-commit casing/trailing-punctuation adjustment plus paragraph-level spoken-command replacement after commit |
-| `LatinIME.java` | Orchestrator — finalizes composing state, commits transcript text at the caret, supplies editor text for vocabulary harvesting via `buildVoiceContextText`, triggers post-processing |
-| `TranscriptionScreen.kt` | Settings UI for API key, smart mode, editor-context biasing, language detection, end-of-speech pause, and local silence thresholds |
-| `VoiceVocabularyScreen.kt` | Settings UI for editing user `customVocabulary` (one per line). Merged with the built-in list at session start. |
-
-All source files live under `app/src/main/java/helium314/keyboard/latin/voice/`
-except `LatinIME.java` (parent package) and the settings UI/preferences helpers in
-`latin/settings` and `settings/screens`.
-
-## Chunked Audio Flow
-
-1. Mic chunks are captured locally in `VoiceRecorder` (~100 ms each).
-2. `VoiceInputManager` builds a session config from preferences, the current
-   subtype locale, and the editor text before the caret.
-3. `GeminiTranscriptionClient` opens the socket and sends one `setup` frame, then
-   **waits for `{"setupComplete":{}}`** before releasing audio. Buffered chunks
-   flush on `onStreamReady`.
-4. Audio goes out as JSON text frames:
-   `{"realtimeInput":{"audio":{"data":"<base64>","mimeType":"audio/pcm;rate=16000"}}}`.
-5. Only `serverContent.inputTranscription` creates editor segments. Interims are
-   provisional and never committed; `turnComplete` is a boundary, not an audio ACK.
-6. `TranscriptAccumulator` converts finals into segments with `attachesToPrevious`.
-7. Deliver FIFO segments on the main looper. Retain the head until the listener
-   returns local dispatch/cleanup success. Rejection/exception is terminal; never
-   retry a potentially partial editor edit.
-8. On failure, invalidate callback generations first, stop capture, clear uncertain
-   work, preserve inserted text, and insert `[Dictation interrupted]` literally
-   once if audio was captured and the stream reached readiness. Preserve selected
-   content by collapsing to a verified caret at its end; skip the marker if the
-   host cannot confirm the caret (even when the cached selection is collapsed).
-   Startup rejection leaves the editor untouched
-   and reports the service reason. Do not attempt a marker after editor failure.
-9. Stop joins the recorder and queues EOF after its posted tail. Block restart
-   until the existing connection closes. No automatic reconnect or rotation.
-
-The PCM FIFO is bounded to 960,000 bytes; the socket audio queue to 256 KiB of
-encoded JSON. Backpressure retains the head and retries locally every 25 ms;
-controls never overtake audio; at most 64 controls may wait locally. Overflow stops
-instead of dropping/coalescing data. Oldest queued PCM has 30 seconds to enter the
-socket queue. Active local speech or pending recognized words has 30 seconds
-without a server response. The missing-final wait applies to recognized words,
-not raw volume spikes, and starts when a speech
-boundary's `audioStreamEnd` enters the socket queue, not when speech first becomes
-pending. Repeated controls/interims cannot extend that wait; a new speech onset
-clears it until the next boundary. Long utterances with live interims continue.
-Controls retain their captured speech epoch so backpressure cannot apply an older
-boundary's final deadline to a newer utterance.
-The setup deadline is 12 seconds across every schema tier. Stop reads finals for
-eight seconds before initiating close, with a 15-second EOF/close deadline and a
-20-second overall deadline from the stop request, including capture shutdown,
-remaining setup and upload. Readiness, retries, EOF and finals cannot reset the
-overall budget. Completion/cancellation removes both stop timers. A restart tap
-during drain reports that processing must finish without hiding the spinner while
-work remains pending. Recheck session ownership after
-capture shutdown and the IDLE state listener so reentrant failure/cancellation
-cannot restore processing UI.
-Clear older response/final watchdogs as soon as graceful stop begins. Silence
-auto-stop is intentional: accept late finals, never promote interims, and close
-normally without a marker for unconfirmed noise/hypotheses. Actual transport,
-microphone, queue, and drain failures still report interruptions. Equal-deadline
-silence and speech timers favor the normal silence stop. Repeated authoritative
-finals acknowledge progress without another editor write; queued speech still
-prevents acknowledgment. Pause/resume capture phases discard results/errors from
-a native read interrupted by the earlier phase.
-
-## Setup payload
-
-```json
-{"setup":{
-  "model":"models/gemini-3.5-transcribe-live",
-  "generationConfig":{"responseModalities":["TEXT"]},
-  "inputAudioTranscription":{"languageCodes":["en-US"],"mode":"SMART","customVocabulary":["…"]},
-  "realtimeInputConfig":{"automaticActivityDetection":{
-    "disabled":false,
-    "startOfSpeechSensitivity":"START_SENSITIVITY_HIGH","prefixPaddingMs":300,
-    "endOfSpeechSensitivity":"END_SENSITIVITY_LOW","silenceDurationMs":1500}},
-  "systemInstruction":{"parts":[{"text":"…"}]}
-}}
-```
-
-Two placement rules, both covered by tests in `GeminiTranscriptionClientTest`:
-
-- **`inputAudioTranscription` is a sibling of `generationConfig`, not a child.**
-  Nesting it closes the socket with 1007. Google's Live Translate guide documents
-  the broken shape, so this is easy to regress.
-- **`responseModalities` must be `["TEXT"]`** and belongs inside
-  `generationConfig`. `AUDIO` is for the conversational Live Agent models; only one
-  modality per session is allowed.
-
-## Setup-tier degradation
-
-The transcribe model's documented feature list is narrower than the shared `setup`
-proto it accepts, and an unsupported field is rejected with close code 1007 —
-which would leave voice input permanently dead. So `setup` is rendered at one of
-four `SetupTier` values and the client reconnects one tier lower on 1007:
-
-`FULL` → `NO_SYSTEM_INSTRUCTION` → `NO_REALTIME_CONFIG` → `MINIMAL`
-
-The working tier is cached in `negotiatedSetupTier` for the process. A 1007 whose
-reason names an auth status is **not** retried. When adding a new `setup` field,
-put it in the tier that matches how well-documented it is for this model.
-
-## Config levers, in order of impact
-
-- **`mode: SMART`** — disfluency removal, inline self-correction resolution,
-  list/number/date formatting, grammar and casing polish. `VERBATIM` is the
-  literal alternative.
-- **`silenceDurationMs`** (default **1500 ms**, range 400–5000) with
-  **`endOfSpeechSensitivity: END_SENSITIVITY_LOW`**. Google documents that short
-  windows split one utterance into fragments and that the model then loses
-  cross-fragment context, lowering quality. Do not reduce this for latency.
-- **`customVocabulary`** — user terms, then built-in terms, then editor-harvested
-  terms, capped at 100 (Google notes best results around 100 even though 1 000 are
-  accepted).
-- **`languageCodes`** — explicit BCP-47 hint from the subtype, mapped through
-  `resolveLanguageCode` onto the codes Gemini documents. Unknown subtypes send `[]`
-  rather than a code Gemini might reject. Auto-detect is opt-in because it misfires
-  on short utterances.
-- **`startOfSpeechSensitivity: START_SENSITIVITY_HIGH` + `prefixPaddingMs: 300`** —
-  keeps prefix audio so the first syllable is not clipped.
-- **`systemInstruction`** — static dictation guidance, no editor text. Tells the
-  model to emit unfinished trailing speech when the turn ends rather than wait
-  for the next word. Live Transcription does not advertise system-instruction
-  support, so it may be ignored; that is why it sits in the top tier.
-
-## Editor context → vocabulary, not prompt
-
-`LatinIME.buildVoiceContextText` supplies up to 4 000 chars before the caret;
-`VoiceContextVocabulary` harvests words worth biasing and sends **only those
-words**. Harvested: internal capitals (`iPhone`), all-caps ≤10 chars (`API`), and
-capitalized words not at a sentence start. Rejected: common English words, words
-containing digits, and tokens glued by `@ / \ : _` (URLs, paths, emails,
-identifiers).
-
-**Verbatim editor text is deliberately never sent.** Neither `systemInstruction`
-nor a seeded `clientContent` history is a documented input for this model, and
-feeding an already-typed paragraph to a generative model risks it echoing that
-text back as transcription. Casing and punctuation continuity with surrounding
-text is handled locally instead (see below).
-
-## Turn finalization (Hybrid VAD)
-
-Server VAD stays enabled with patient end detection. Local silence, pause, and stop
-enqueue `audioStreamEnd` behind all preceding PCM. Forward all captured audio,
-including silence; local RMS VAD must not decide which samples are discarded. PCM
-callbacks carry raw-energy speech evidence captured with that chunk, not the
-mutable speaking flag or its silence/smoothing tail. Only queued speech blocks
-final progress; a queued quiet/control suffix does not require another final.
-Audio after `audioStreamEnd` reopens the turn. Only authoritative finals reach the
-editor; an unfinished tail that fails to finalize is visibly interrupted.
-
-The 800 ms interim fallback, held-silence prefix buffer, and stale-interim finalize
-timer were removed because they could insert provisional words or omit soft audio.
-
-## Transcript assembly
-
-The Live API has emitted finalized transcripts both as per-utterance deltas and as
-text that grows on each message, and the semantics changed between model
-generations. `TranscriptAccumulator` compares each transcript against the previous
-one, so text extending the previous message contributes only its suffix, unrelated
-text contributes all of itself, and an identical repeat within the same turn
-contributes nothing. `turnComplete` resets the comparison.
-
-`attachesToPrevious` is set for segments starting with attaching punctuation
-(`. , ! ? : ; ) ] } %`) or resuming mid-word (`head` then `heading` yields `ing`,
-not `head ing`).
-
-## Session lifecycle
-
-One recording owns one Live connection. Transport/network failure is terminal,
-including failure during pause or drain. Reconnect and rotation are disabled;
-`goAway` or the nine-minute limit stops capture and drains the existing session.
-The user starts the next recording deliberately. Schema-tier fallback is allowed
-only before readiness, when no audio has been submitted, within the original
-connection deadline.
-
-Android remote `InputConnection` booleans confirm dispatch, not the host editor's
-commit result. Local selection checks protect replacement placement but cannot
-certify complete insertion in every editor.
-
-Interactive keyboard hiding, finished input/view callbacks, and target changes
-cancel all voice work immediately, including an IDLE microphone whose connection
-is still draining. Remove the spinner and invalidate old callbacks so a new mic
-tap starts immediately. Screen-off hiding alone preserves recording. Explicit mic
-stop still drains the current socket.
-
-Monitor host text through a dedicated `getExtractedText(...,
-GET_EXTRACTED_TEXT_MONITOR)` token unless the framework's fullscreen extract view
-is visible; retain its existing monitor in that case. Check actual host text on
-notifications, selection updates (even unchanged), restarts, and before insertion.
-A verified nonempty-to-empty
-transition cancels dictation without a marker. Null queries are unavailable, not
-empty, and an all-text highlight is not a clear. Editors that omit monitoring
-callbacks are checked again before a late final can refill their cleared field.
-Remember successful insertions as nonempty-field evidence even when a host never
-sends change notifications. A clear alone does not prove submission, so it does
-not automatically hide the keyboard.
-
-`send(true)` only means local queue acceptance. Input transcription has no
-per-chunk acknowledgment, and `turnComplete` is not a delivery watermark. See
-`docs/gemini-transcription.md` for sourced rationale, conservative deadline
-tradeoffs, and device acceptance checks. These guards cannot detect a service that
-silently omits words while still returning plausible finals.
-
-## Post-Processing (TranscriptPostProcessor)
-
-Before commit, `LatinIME.prepareVoiceTranscriptionText()` uses
-`TranscriptPostProcessor.adjustLeadingCasing()` and
-`stripTrailingPunctuationIfMidSentence()` to fit the chunk into surrounding text.
-
-After each chunk is committed, `LatinIME.runTranscriptPostProcessing()` reads the
-current paragraph (from the last newline to the cursor, up to 1024 chars) and runs
-`TranscriptPostProcessor.processCurrentParagraph()`. If any rule matches, the
-paragraph is selected and replaced in one commit through `replaceTextBeforeCursor`,
-without first deleting confirmed text. Verify actual host selection positions and
-selected text before the replacement commit. Temporarily close/reopen the host
-batch before readback so deferred editors apply pending edits. Prepare the
-correction from our cache and verify matching original host text after flushing.
-Delayed intermediate selection callbacks are ignored only when the host's current
-caret matches the expected voice caret. Unavailable/mismatched selection or
-a rejected operation stops dictation and restores the caret best-effort; never
-retry a possibly partial replacement.
-
-Current processing removes comma-attached filler fragments ("um,", "uh,") and
-handles **spelled-out punctuation** ("exclamation point.", "comma", "question
-mark.", "period.", "colon.", "semicolon."). Rules are case-insensitive and sorted
-longest-first so patterns with surrounding punctuation context are consumed before
-shorter ambiguous ones. The processor only fires when a rule actually modifies the
-paragraph.
-
-To add rules, edit `TranscriptPostProcessor.buildRules()`. Unit tests are in
-`TranscriptPostProcessorTest.kt`.
-
-## Leading-Casing Correction
-
-Real-time STT models capitalize the first letter of a new utterance. When the user
-dictates mid-sentence — caret inside existing text, or resumed after deleting a
-trailing period — that capitalization is wrong.
-
-`TranscriptPostProcessor.adjustLeadingCasing(chunk, previousContext)` handles this
-**before commit**, called from `LatinIME.prepareVoiceTranscriptionText` with
-`VOICE_CASING_LOOKBACK` (16) characters of preceding text.
-
-The first character is lowercased only when all of these hold:
-- the chunk is not `attachesToPrevious`
-- the first character is an uppercase letter
-- the previous visible character (ignoring trailing whitespace and closing `"`,
-  `'`, `“”`, `‘’`, `)`, `]`, `}`, `»`) is **not** `.`, `!`, `?`, or a newline — and
-  the context is not empty/whitespace
-- the first word is **not** `I`/`I'm`/`I'll`/`I've`/`I'd`, an all-uppercase acronym
-  (`NASA`), or a camel/Pascal-case word with internal uppercase (`iPhone`,
-  `McDonald's`)
-
-Known tradeoff: a proper noun dictated as the first word of a mid-sentence chunk
-(`Amazon`, `Paris`) is lowercased. Editor-harvested `customVocabulary` reduces how
-often this matters, because such words are more likely to be transcribed as part
-of a longer phrase.
-
-## Paragraph Breaks
-
-Silence-driven automatic paragraph insertion is disabled because inserting `"\n\n"`
-into arbitrary host fields caused form submissions and other unintended side
-effects. Explicit spoken commands such as "New paragraph." are still handled by
-`TranscriptPostProcessor`.
-
-## Thread Safety
-
-- Audio recording: background thread
-- Gemini callbacks: forwarded to main thread
-- Timer callbacks: main thread
-- Text insertion: always sequential on main thread
-
-## Verifying against the real API
-
-`GeminiTranscriptionClientTest`, `GeminiTranscriptionClientStreamTest` (local
-WebSocket server, including the 1007 tier fallback) and `VoiceContextVocabularyTest`
-cover the wire format and client state machine. They cannot confirm what Google's
-server does with each field.
-
-For that, `tools/gemini-live-smoke-test.py` sends the app's exact payloads to the
-real endpoint:
-
-```bash
-export GEMINI_API_KEY=...
-tools/gemini-live-smoke-test.py --probe-setup        # which setup tiers are accepted
-tools/gemini-live-smoke-test.py --audio speech.wav   # real transcripts (16 kHz mono PCM16)
-```
-
-## Additional Resources
-
-- Detailed data flow: [data-flow.md](data-flow.md)
-- Gemini Live API reference and settings keys: [api-reference.md](api-reference.md)
-- Long-form design notes: `docs/gemini-transcription.md`
-- Raw Gemini Live API: the `gemini-live-api-dev` skill + the Gemini Docs MCP
-
-## Update documentation
-
-IMPORTANT: When you change something, or discover that the code or functionality
-differs from what's described, update this skill and its supporting docs
-immediately.
+Retained Gemini code, tests, vendored skills and MCP are inactive comparison
+reference. For work specifically on that provider, use its own skills and docs.

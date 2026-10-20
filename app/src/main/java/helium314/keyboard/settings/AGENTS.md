@@ -28,3 +28,5 @@ Standalone settings and fullapp UI built mostly with Compose.
 - Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.
 - If a change here affects neighboring folders or a cross-folder contract, update those AGENTS.md files in the same PR.
 - Treat stale agent documentation as a bug.
+
+Grok credentials are an exception to ordinary preference storage: both settings and setup entry use GrokPreferences with masked input and backup-excluded AtomicFile storage. Only vocabulary is inherited between comparison providers.

@@ -6,7 +6,8 @@ Longer-form architecture notes that complement the shorter folder-local AGENTS f
 - `agent-development.md` - current agent tooling audit, APK/PR contract, local validation, manual acceptance and prioritized follow-up implementation plan.
 - `input-simplified.md` - explains the mirror-based current-word architecture and why the host editor is treated as a committed-text sink.
 - `recent-number-row-changes.md` - number-row bake migration notes and layout/parser troubleshooting.
-- `gemini-transcription.md` - end-to-end Gemini Live voice pipeline, setup-tier degradation, accuracy levers, local pre/post-processing, IME insertion guards, configuration notes, terminal dictation integrity design, protocol limits, and device acceptance checks.
+- `grok-transcription.md` - active Grok wire protocol, first-speaker filtering, native text, retry/queue/lifecycle contracts, credential storage and phone acceptance.
+- `gemini-transcription.md` - historical comparison reference; end-to-end Gemini Live voice pipeline, setup-tier degradation, accuracy levers, local pre/post-processing, IME insertion guards, configuration notes, terminal dictation integrity design, protocol limits, and device acceptance checks.
 - `general-edit-history-plan.md` - implementation plan for generalizing the fullapp edit history into a bounded, general-purpose edit history that also captures regular-keyboard typing, without breaking fullapp draft sync.
 
 ## Subfolders

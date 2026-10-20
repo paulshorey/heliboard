@@ -18,7 +18,7 @@ import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.settings.SettingsSubtype
 import helium314.keyboard.latin.settings.SettingsSubtype.Companion.toSettingsSubtype
-import helium314.keyboard.latin.settings.TranscriptionPreferences
+import helium314.keyboard.latin.settings.GrokPreferences
 import helium314.keyboard.latin.settings.createPrefKeyForBooleanSettings
 import helium314.keyboard.latin.utils.DeviceProtectedUtils
 import helium314.keyboard.latin.utils.DictionaryInfoUtils
@@ -600,8 +600,7 @@ object AppUpgrade {
                 }
             }
         }
-        TranscriptionPreferences.migrateLegacyProviderPrefs(prefs)
-        TranscriptionPreferences.migrateGeminiVoiceDefaults(prefs)
+        GrokPreferences.migrateVocabulary(prefs)
         upgradeToolbarPrefs(prefs)
         LayoutUtilsCustom.onLayoutFileChanged() // just to be sure
         prefs.edit { putInt(Settings.PREF_VERSION_CODE, BuildConfig.VERSION_CODE) }

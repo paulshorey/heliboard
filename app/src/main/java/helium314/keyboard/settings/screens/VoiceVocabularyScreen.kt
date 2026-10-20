@@ -27,11 +27,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import helium314.keyboard.latin.R
-import helium314.keyboard.latin.settings.TranscriptionPreferences
+import helium314.keyboard.latin.settings.GrokPreferences
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.getActivity
 import helium314.keyboard.latin.utils.prefs
-import helium314.keyboard.latin.voice.GeminiTranscriptionClient
+import helium314.keyboard.latin.voice.GrokTranscriptionClient
 import helium314.keyboard.settings.SearchSettingsScreen
 import helium314.keyboard.settings.SettingsActivity
 import helium314.keyboard.settings.SettingsContainer
@@ -39,12 +39,12 @@ import helium314.keyboard.settings.Theme
 import helium314.keyboard.settings.previewDark
 
 /**
- * Settings screen for editing the user's custom Gemini `customVocabulary` list.
+ * Settings screen for editing the user's custom Grok `customVocabulary` list.
  *
  * The screen shows the built-in product/technical terms (read-only — they always
  * ship with the app) and a free-form editor where the user can add their own
- * terms, one per line. Both lists are merged, deduplicated, and sent to Gemini at
- * session start as `inputAudioTranscription.customVocabulary`, which biases
+ * terms, one per line. Both lists are merged, deduplicated, and sent to Grok at
+ * session start as repeated `keyterm` parameters, which biases
  * recognition toward the correct spelling and casing for those words.
  */
 @Composable
@@ -58,10 +58,10 @@ fun VoiceVocabularyScreen(
         Log.v("irrelevant", "stupid way to trigger recomposition on preference change")
 
     var customVocabularyRaw by remember {
-        mutableStateOf(TranscriptionPreferences.readGeminiCustomVocabularyRaw(prefs))
+        mutableStateOf(GrokPreferences.readVocabulary(prefs))
     }
     val parsedCount = remember(customVocabularyRaw) {
-        TranscriptionPreferences.parseCustomVocabulary(customVocabularyRaw).size
+        GrokPreferences.parseVocabulary(customVocabularyRaw).size
     }
 
     SearchSettingsScreen(
@@ -90,7 +90,7 @@ fun VoiceVocabularyScreen(
                     modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
                 )
                 Text(
-                    text = GeminiTranscriptionClient.defaultVocabulary()
+                    text = GrokTranscriptionClient.defaultVocabulary()
                         .joinToString(separator = "\n"),
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
@@ -119,7 +119,7 @@ fun VoiceVocabularyScreen(
                     value = customVocabularyRaw,
                     onValueChange = { newValue ->
                         customVocabularyRaw = newValue
-                        TranscriptionPreferences.writeGeminiCustomVocabulary(prefs, newValue)
+                        prefs.edit().putString(GrokPreferences.VOCABULARY, newValue).apply()
                     },
                     label = { Text(stringResource(R.string.voice_vocabulary_user_field_label)) },
                     placeholder = { Text(stringResource(R.string.voice_vocabulary_user_placeholder)) },

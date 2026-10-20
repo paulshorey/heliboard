@@ -1,6 +1,6 @@
 # HeliBoard
 
-HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds a Gemini Live voice pipeline, smart auto-capitalization work, and a standalone full-app editing mode.
+HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds a Grok streaming voice pipeline, smart auto-capitalization work, and a standalone full-app editing mode.
 
 ## Repo map
 - `app/` - Android application module and the main Gradle project to build for product work.
@@ -12,7 +12,7 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
 - `app/src/main/res/` and `app/src/main/assets/` - Android resources, IME metadata, layout definitions, popup text, emoji data, and bundled dictionaries.
 - `app/src/main/jni/` - native dictionary/suggestion/proximity code used through JNI.
 - `app/src/test/` - JVM and Robolectric tests.
-- `docs/` - deeper design notes such as `input-simplified.md` and `gemini-transcription.md`.
+- `docs/` - deeper design notes such as `input-simplified.md` and `grok-transcription.md`.
 - `tools/` - SDK setup, portable cloud-agent startup, canonical APK build, release scripts, and the `tools:make-emoji-keys` helper module.
 - `.codex/` - canonical agent skills and Codex Gemini Docs MCP (`config.toml`); `.agents/skills` links here for discovery and `.cursor` is a compatibility symlink.
 - `skills-lock.json` - lockfile for the vendored `google-gemini/gemini-skills` packages; refresh them with `./tools/sync-gemini-skills.sh`.
@@ -24,9 +24,9 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
 - `app/src/main/java/helium314/keyboard/latin/inputlogic/EditorWordMirror.java` - mirrors the keyboard-owned current word into the host app.
 - `app/src/main/java/helium314/keyboard/latin/Suggest.kt` - suggestion request pipeline entry point.
 - `app/src/main/java/helium314/keyboard/latin/suggestions/SuggestionStripView.kt` + `app/src/main/java/helium314/keyboard/latin/utils/ToolbarUtils.kt` - suggestion strip, toolbar buttons, pinned keys, and voice/fullapp strip controls.
-- `app/src/main/java/helium314/keyboard/latin/voice/VoiceInputManager.kt` + `app/src/main/java/helium314/keyboard/latin/voice/GeminiTranscriptionClient.kt` - voice recording and realtime transcription.
+- `app/src/main/java/helium314/keyboard/latin/voice/VoiceInputManager.kt` + `app/src/main/java/helium314/keyboard/latin/voice/GrokTranscriptionClient.kt` - voice recording and realtime transcription.
 - `app/src/main/java/helium314/keyboard/settings/FullappEditorActivity.kt` - standalone full-screen editor mode.
-- `app/src/main/java/helium314/keyboard/latin/settings/Settings.java` + `Settings.kt` + `Defaults.kt` + `TranscriptionPreferences.kt` - runtime preference keys, defaults, and typed access.
+- `app/src/main/java/helium314/keyboard/latin/settings/Settings.java` + `Settings.kt` + `Defaults.kt` + `GrokPreferences.kt` - runtime preference keys, defaults, and typed access.
 - `app/src/main/java/helium314/keyboard/keyboard/internal/keyboard_parser/KeyboardParser.kt` + `app/src/main/assets/layouts/` - keyboard layout parsing and source layout data.
 - `.codex/config.toml` + `.codex/skills/gemini-api-dev/` + `.codex/skills/gemini-live-api-dev/` - Gemini Docs MCP and API skills for current models (including `gemini-3.5-transcribe` / `gemini-3.5-transcribe-live`).
 
@@ -34,9 +34,9 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
 - There are two settings trees: `latin/settings` holds runtime preference keys, defaults, and snapshots; `settings/` holds the Compose UI and fullapp screens.
 - Ordinary typing, voice insertion, and fullapp sync should flow through `InputConnection`; do not write directly into the extract/fullapp text widgets.
 - `WordComposer` is the source of truth for the current word; `inputlogic/EditorWordMirror.java` is the bridge that mirrors it into the host editor.
-- Gemini dictation uses one connection per recording, bounded audio/control and transcript FIFOs that advance after local insertion checks, terminal failure with a literal interruption marker after readiness, and explicit restart. Intentional silence auto-stop drains and closes without a marker for unconfirmed noise/hypotheses; actual failures still report interruptions. Startup rejection leaves the editor untouched and reports the service reason. Interims never become editor text; no reconnect or automatic rotation. See `docs/gemini-transcription.md`.
-- Missing-final waits begin at a submitted speech boundary, allowing long utterances with live interims. Interactive keyboard hiding, editor disconnection, and verified host clears cancel all voice work immediately; explicit mic stop still drains. Host clears use extracted-text monitoring plus actual host reads, including unchanged selection, and do not alone prove form submission.
-- Voice text intentionally bypasses `EditorWordMirror`: `LatinIME` first clears the typed-word state with `finishInput()`, then commits each finalized Gemini transcript segment directly. Fullapp replay is another bypass, using raw `InputConnection` replacement when the IME reconnects to the original field.
+- Grok dictation uses one binary PCM WebSocket per recording, finalized word-level first-speaker filtering, patient Smart Turn endpointing, bounded FIFOs and verified local editor insertion. Native formatting is aligned through speaker filtering; native-punctuation mode defaults on. Semantic/forced-timeout/fixed-pause comparisons and content-free diagnostics are documented in the voice guide. Only temporary HTTP startup rejection before audio can retry; active network/provider failure is terminal, clears pending work and requires explicit restart. See `docs/grok-transcription.md`.
+- Missing-final waits are boundary-anchored and allow long speech with live progress. Ordinary local silence never forces a Grok turn. Interactive hiding, editor disconnection and verified host clears cancel immediately; explicit Stop drains. Final audio coverage and held words, not socket drain alone, determine progress.
+- Voice text intentionally bypasses `EditorWordMirror`: `LatinIME` first clears the typed-word state with `finishInput()`, then commits each finalized Grok transcript segment directly. Fullapp replay is another bypass, using raw `InputConnection` replacement when the IME reconnects to the original field.
 - The manifest points the IME service at `res/xml/method_dummy.xml`, while real subtype/layout metadata lives in `res/xml/method.xml`; changes to subtypes or layout names usually also touch `assets/layouts/`.
 - Keyboard layout work often spans `keyboard/internal/keyboard_parser/`, `assets/layouts/`, and XML keyboard templates under `res/xml/`.
 - Native dictionary behavior is split between `latin/dictionary`, `latin/utils/JniUtils.java`, and `app/src/main/jni/`.
@@ -44,7 +44,7 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
 - The closest folder-local `AGENTS.md` is usually more detailed than this root file; follow it once you know which subtree you are in.
 - Build the canonical installable artifact with `./tools/build-dist-apk.sh`, which writes `dist/HeliBoard.apk`.
 - For a fresh Linux agent machine, run `./tools/agent-environment-startup.sh` (then `source ./.android-env`). Clipboard history is on-device SQLite (`heliboard.db`); there is no server database or long-running app process to start.
-- Gemini API work (models, SDKs, Live API, `gemini-3.5-transcribe-live`) must use the skills under `.codex/skills/gemini-*` and the Docs MCP in `.codex/config.toml`. Do not invent endpoints from training data. If MCP search is unavailable, fetch `https://ai.google.dev/gemini-api/docs/llms.txt`.
+- Active Grok API work must use current official xAI STT documentation and streaming schemas linked in `docs/grok-transcription.md`. Retained Gemini comparison work must use the vendored `.codex/skills/gemini-*` and Gemini Docs MCP; do not invent provider endpoints.
 - The `.codex/skills/gemini-*` files are vendored upstream copies. Refresh them only with `./tools/sync-gemini-skills.sh`, and put any local correction in `tools/gemini-skills-fixups.py` so a refresh cannot silently revert it. Use the isolated refresh script; direct installer runs can overwrite discovery links. See `.codex/AGENTS.md`.
 
 ## Required PR handoff
