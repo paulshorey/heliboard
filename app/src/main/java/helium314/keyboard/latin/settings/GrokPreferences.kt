@@ -6,6 +6,7 @@ import android.content.SharedPreferences
 import android.util.AtomicFile
 import androidx.core.content.edit
 import java.io.File
+import java.io.FileNotFoundException
 
 /** Personal comparison-build credentials never enter preferences or Android backups. */
 object GrokPreferences {
@@ -28,8 +29,12 @@ object GrokPreferences {
 
     @Synchronized fun readApiKey(context: Context): String {
         val file = keyFile(context)
-        if (!file.baseFile.exists()) return ""
-        return file.openRead().bufferedReader().use { it.readText() }.trim()
+        return try {
+            // openRead restores a committed backup even when the base file is missing.
+            file.openRead().bufferedReader().use { it.readText() }.trim()
+        } catch (_: FileNotFoundException) {
+            ""
+        }
     }
 
     @Synchronized fun writeApiKey(context: Context, value: String) {
