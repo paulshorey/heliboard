@@ -37,5 +37,5 @@ Tests for the active Grok pipeline and inactive Gemini comparison implementation
 - `GrokTranscriptAssemblerTest.kt`: first-speaker filtering, provisional/complete distinctions, overlapping finals/EOF, repeated phrases, missing/revised attribution, timing and native text.
 - `GrokTranscriptionClientTest.kt`: production header/URL configuration, readiness, binary/paced/bounded sender, controls, retry budgets, stale attempt fencing and terminal failure.
 - `GrokTranscriptionStreamTest.kt`: real local WebSocket binary audio through filtered final/EOF/normal close. No live provider credentials.
-- `GrokPreferencesTest.kt`: backup-excluded atomic key storage, clearing, preserved comparison credentials, vocabulary inheritance and limits.
+- `GrokPreferencesTest.kt`: backup-excluded atomic key storage, interrupted-write recovery and clearing on API 21/35 (including API 21 backup-only recovery), preserved comparison credentials, vocabulary inheritance and limits.
 - `VoiceInputManagerTest.kt` now injects Grok. Its advisory local-silence markers are logical boundaries, not wire finalization commands. Keep editor/network/lifecycle regression coverage. Human phone speech quality remains unverified.
