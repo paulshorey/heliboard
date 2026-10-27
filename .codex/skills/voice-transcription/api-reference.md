@@ -32,7 +32,7 @@ speech-to-text model `gemini-3.5-transcribe-live`. Documentation:
     },
     "inputAudioTranscription": {
       "languageCodes": ["en-US"],
-      "mode": "SMART",
+      "mode": "VERBATIM",
       "customVocabulary": ["HeliBoard", "Gemini", "Kubernetes", "API", "gnocchi", "MyProject"]
     },
     "realtimeInputConfig": {
@@ -68,9 +68,10 @@ speech-to-text model `gemini-3.5-transcribe-live`. Documentation:
     `GeminiTranscriptionClient.resolveLanguageCode`, or `[]` for auto-detection
     (when the user opts in, or when no supported code matches the subtype). Google
     recommends an explicit hint because auto-detection misfires on short prompts.
-  - **`mode`**: `"VERBATIM"` (API default) or `"SMART"`. HeliBoard defaults to
-    `SMART`: disfluency removal, inline self-correction resolution, list/number/date
-    formatting, grammar and casing polish.
+  - **`mode`**: `"VERBATIM"` (API and HeliBoard default) or `"SMART"` (opt-in).
+    Verbatim preserves fillers, repetitions, false starts and spoken corrections.
+    Smart mode removes disfluencies, resolves corrections, and applies formatting,
+    grammar and casing polish. HeliBoard's local cleanup still applies in either mode.
   - **`customVocabulary`**: up to 1 000 phrases, best results around 100. HeliBoard
     sends at most **100**: the user's terms from `PREF_GEMINI_CUSTOM_VOCABULARY`
     (one per line, UI-limited to 200 terms and 100 chars each), then the built-in
@@ -271,7 +272,7 @@ ephemeral tokens would require a server component.
 | Key | Type | Description |
 |-----|------|-------------|
 | `PREF_GEMINI_API_KEY` | String | Google Gemini API key for transcription |
-| `PREF_GEMINI_TRANSCRIPTION_MODE` | String | `SMART` (default) or `VERBATIM` |
+| `PREF_GEMINI_TRANSCRIPTION_MODE` | String | `VERBATIM` (default) or `SMART` (opt-in) |
 | `PREF_GEMINI_END_OF_SPEECH_SILENCE_MS` | Int | `silenceDurationMs`, clamped 400–5000, default 1500 |
 | `PREF_GEMINI_AUTO_DETECT_LANGUAGE` | Boolean | Send `languageCodes: []` instead of the subtype's language (default `false`) |
 | `PREF_GEMINI_USE_EDITOR_CONTEXT` | Boolean | Harvest proper nouns near the caret into `customVocabulary` (default `true`) |
@@ -294,3 +295,7 @@ Preference keys from the providers used before Gemini (`soniox_*`,
 `speechmatics_api_key`, `deepgram_api_key`) are erased by
 `TranscriptionPreferences.migrateLegacyProviderPrefs`, which carries only the
 user's own vocabulary list across.
+
+`TranscriptionPreferences.migrateGeminiVoiceDefaults` also turns off previously
+saved smart mode once, independently of the older chunk-silence migration. Later
+explicit choices are preserved; missing or invalid mode values use `VERBATIM`.

@@ -161,10 +161,9 @@ object Defaults {
     const val PREF_SPACE_BAR_TEXT = ""
     const val PREF_TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss"
     const val PREF_GEMINI_API_KEY = ""
-    // Smart transcription: Gemini removes filler words, resolves spoken
-    // self-corrections, and applies punctuation, casing and list formatting.
-    // Verbatim is available for users who want the literal words instead.
-    const val PREF_GEMINI_TRANSCRIPTION_MODE = "SMART"
+    // Preserve spoken fillers, repetitions, false starts and corrections.
+    // Smart cleanup remains available as an explicit opt-in.
+    const val PREF_GEMINI_TRANSCRIPTION_MODE = "VERBATIM"
     // Server-side end-of-speech window. Google documents that short windows split
     // one utterance into fragments and cost accuracy because the model loses
     // cross-fragment context, so this defaults well above the API's own default

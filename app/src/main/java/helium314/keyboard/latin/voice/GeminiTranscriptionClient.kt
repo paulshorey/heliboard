@@ -43,8 +43,8 @@ import java.util.concurrent.TimeUnit
  * This client is deliberately tuned for transcription quality rather than
  * responsiveness, because dictated text goes straight into the user's editor
  * and a wrong word costs more than a slow one:
- *  - `mode: SMART` so Gemini removes disfluencies, resolves spoken
- *    self-corrections, and applies grammar/casing/punctuation polish.
+ *  - `mode: VERBATIM` by default so Gemini preserves spoken fillers,
+ *    repetitions, false starts and corrections. Smart cleanup is opt-in.
  *  - `endOfSpeechSensitivity: END_SENSITIVITY_LOW` plus a long
  *    `silenceDurationMs` so mid-sentence thinking pauses do not split one
  *    utterance into fragments. Google documents that short silence windows
@@ -180,7 +180,7 @@ class GeminiTranscriptionClient {
             /** Drop `systemInstruction` (not in the transcribe model's documented feature list). */
             NO_SYSTEM_INSTRUCTION,
 
-            /** Also drop `realtimeInputConfig` VAD tuning; keep smart mode and vocabulary. */
+            /** Also drop `realtimeInputConfig` VAD tuning; keep the chosen mode and vocabulary. */
             NO_REALTIME_CONFIG,
 
             /** Documented minimum: model + TEXT modality + language codes only. */
@@ -240,10 +240,10 @@ class GeminiTranscriptionClient {
         }
 
         internal fun sanitizeTranscriptionMode(mode: String?): String =
-            if (mode?.uppercase(Locale.US) == TRANSCRIPTION_MODE_VERBATIM) {
-                TRANSCRIPTION_MODE_VERBATIM
-            } else {
+            if (mode?.uppercase(Locale.US) == TRANSCRIPTION_MODE_SMART) {
                 TRANSCRIPTION_MODE_SMART
+            } else {
+                TRANSCRIPTION_MODE_VERBATIM
             }
 
         /**

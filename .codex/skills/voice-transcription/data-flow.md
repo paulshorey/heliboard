@@ -154,7 +154,7 @@ PAUSED     → User taps pause  → RECORDING (resume)
 
 ### Settings (TranscriptionScreen.kt)
 - **Google Gemini API Key**: required for transcription
-- **Smart transcription**: `mode: SMART` — disfluency removal, self-correction resolution, punctuation/casing/list formatting. Off gives `VERBATIM`.
+- **Smart transcription**: off by default (`mode: VERBATIM`) to preserve spoken words. Opting into `SMART` enables disfluency removal, self-correction resolution and formatting. Existing installs switch off once; later explicit choices are preserved.
 - **Learn names from the text field**: harvests proper nouns near the caret into `customVocabulary`
 - **Custom voice vocabulary**: opens `VoiceVocabularyScreen` to view built-in terms and edit the user's own (one per line, merged at session start)
 - **Detect spoken language**: sends `languageCodes: []` instead of the subtype's language. Off by default because auto-detection misfires on short utterances.

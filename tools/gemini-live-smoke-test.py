@@ -66,7 +66,7 @@ def build_setup(tier: str, language_codes, vocabulary, silence_ms: int) -> dict:
     """Mirror GeminiTranscriptionClient.buildSetupMessage for the given tier."""
     transcription = {"languageCodes": list(language_codes)}
     if tier != "MINIMAL":
-        transcription["mode"] = "SMART"
+        transcription["mode"] = "VERBATIM"
         if vocabulary:
             transcription["customVocabulary"] = list(vocabulary)
 

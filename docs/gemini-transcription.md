@@ -73,7 +73,7 @@ costs the user more than a second of waiting.
     "generationConfig": { "responseModalities": ["TEXT"] },
     "inputAudioTranscription": {
       "languageCodes": ["en-US"],
-      "mode": "SMART",
+      "mode": "VERBATIM",
       "customVocabulary": ["HeliBoard", "Roentgen"]
     },
     "realtimeInputConfig": {
@@ -111,7 +111,7 @@ one tier lower on 1007:
 
 | Tier | Payload |
 |---|---|
-| `FULL` | dictation `systemInstruction` + tuned VAD + smart mode + vocabulary |
+| `FULL` | dictation `systemInstruction` + tuned VAD + chosen transcription mode + vocabulary |
 | `NO_SYSTEM_INSTRUCTION` | drops `systemInstruction` |
 | `NO_REALTIME_CONFIG` | also drops `realtimeInputConfig` VAD tuning |
 | `MINIMAL` | `model` + `responseModalities` + `languageCodes` only |
@@ -126,10 +126,12 @@ which tiers the server actually accepts today.
 
 ## Accuracy levers
 
-- **`mode: SMART`** (`PREF_GEMINI_TRANSCRIPTION_MODE`, default `SMART`) — Gemini
-  removes filler words, resolves inline self-corrections ("Tuesday — actually
-  Wednesday"), formats lists/numbers/dates, and polishes grammar and casing.
-  `VERBATIM` gives the literal words instead.
+- **`mode: VERBATIM`** (`PREF_GEMINI_TRANSCRIPTION_MODE`, default `VERBATIM`) —
+  asks Gemini to preserve spoken fillers, repetitions, false starts and corrections.
+  Smart transcription is off by default. Opting into `SMART` removes disfluencies,
+  resolves inline self-corrections ("Tuesday — actually Wednesday"), formats
+  lists/numbers/dates, and polishes grammar and casing. Local paragraph cleanup
+  still removes comma-attached `um,`/`uh,` fragments and handles spoken commands.
 - **`endOfSpeechSensitivity: END_SENSITIVITY_LOW`** plus
   **`silenceDurationMs`** (`PREF_GEMINI_END_OF_SPEECH_SILENCE_MS`, default
   **1500 ms**, range 400–5000). Google documents that short windows split one
@@ -375,11 +377,15 @@ can still fail independently, which remains terminal.
   `TranscriptionPreferences.migrateLegacyProviderPrefs`, which carries only the
   user's own vocabulary list across.
 - Gemini session settings:
-  - `PREF_GEMINI_TRANSCRIPTION_MODE` (`SMART` / `VERBATIM`, default `SMART`)
+  - `PREF_GEMINI_TRANSCRIPTION_MODE` (`SMART` / `VERBATIM`, default `VERBATIM`)
   - `PREF_GEMINI_END_OF_SPEECH_SILENCE_MS` (int, 400–5000, default 1500)
   - `PREF_GEMINI_AUTO_DETECT_LANGUAGE` (boolean, default `false`)
   - `PREF_GEMINI_USE_EDITOR_CONTEXT` (boolean, default `true`)
   - `PREF_GEMINI_CUSTOM_VOCABULARY` (string, one term per line)
+- `TranscriptionPreferences.migrateGeminiVoiceDefaults` resets previously saved
+  transcription mode to `VERBATIM` once, including installs that already completed
+  the earlier chunk-silence migration. A later choice of Smart transcription in
+  Settings is retained. Missing or invalid modes fall back to `VERBATIM`.
 - Local silence settings:
   - `PREF_VOICE_CHUNK_SILENCE_SECONDS` — local pause that triggers
     `audioStreamEnd`

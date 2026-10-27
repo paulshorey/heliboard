@@ -110,7 +110,7 @@ a native read interrupted by the earlier phase.
 {"setup":{
   "model":"models/gemini-3.5-transcribe-live",
   "generationConfig":{"responseModalities":["TEXT"]},
-  "inputAudioTranscription":{"languageCodes":["en-US"],"mode":"SMART","customVocabulary":["…"]},
+  "inputAudioTranscription":{"languageCodes":["en-US"],"mode":"VERBATIM","customVocabulary":["…"]},
   "realtimeInputConfig":{"automaticActivityDetection":{
     "disabled":false,
     "startOfSpeechSensitivity":"START_SENSITIVITY_HIGH","prefixPaddingMs":300,
@@ -143,9 +143,12 @@ put it in the tier that matches how well-documented it is for this model.
 
 ## Config levers, in order of impact
 
-- **`mode: SMART`** — disfluency removal, inline self-correction resolution,
-  list/number/date formatting, grammar and casing polish. `VERBATIM` is the
-  literal alternative.
+- **`mode: VERBATIM`** (default) — preserves spoken fillers, repetitions, false
+  starts and corrections. `SMART` is an explicit opt-in for disfluency removal,
+  self-correction resolution and formatting. Existing installs switch to
+  `VERBATIM` once through `migrateGeminiVoiceDefaults`; later settings choices are
+  preserved. Invalid/missing modes fall back to `VERBATIM`. Local comma-attached
+  `um,`/`uh,` removal and spoken-command processing still apply.
 - **`silenceDurationMs`** (default **1500 ms**, range 400–5000) with
   **`endOfSpeechSensitivity: END_SENSITIVITY_LOW`**. Google documents that short
   windows split one utterance into fragments and that the model then loses

@@ -73,15 +73,16 @@ class TranscriptionPreferencesTest {
     }
 
     @Test
-    fun defaults_preferAccuracyOverLatency() {
+    fun defaults_preserveSpokenWordsAndPatientEndpointing() {
         val prefs = newPrefs()
         val config = TranscriptionPreferences.readGeminiConfig(prefs)
 
-        // Smart mode is what applies punctuation, casing and self-correction cleanup.
+        // Verbatim avoids Gemini removing words it considers disfluencies.
         assertEquals(
-            GeminiTranscriptionClient.TRANSCRIPTION_MODE_SMART,
+            GeminiTranscriptionClient.TRANSCRIPTION_MODE_VERBATIM,
             config.transcriptionMode
         )
+        assertFalse(TranscriptionPreferences.readGeminiSmartMode(prefs))
         // An explicit language hint beats auto-detection on short dictations.
         assertFalse(config.autoDetectLanguage)
         assertTrue(config.useEditorContext)
@@ -119,11 +120,40 @@ class TranscriptionPreferencesTest {
         )
         assertFalse(TranscriptionPreferences.readGeminiSmartMode(prefs))
 
+        TranscriptionPreferences.writeGeminiSmartMode(prefs, true)
+        assertTrue(TranscriptionPreferences.readGeminiSmartMode(prefs))
+
         TranscriptionPreferences.writeGeminiTranscriptionMode(prefs, "nonsense")
         assertEquals(
-            GeminiTranscriptionClient.TRANSCRIPTION_MODE_SMART,
+            GeminiTranscriptionClient.TRANSCRIPTION_MODE_VERBATIM,
             TranscriptionPreferences.readGeminiTranscriptionMode(prefs)
         )
+    }
+
+    @Test
+    fun readGeminiTranscriptionMode_turnsOffPreviouslySavedSmartMode() {
+        val prefs = newPrefs()
+        prefs.edit()
+            .putString(Settings.PREF_GEMINI_TRANSCRIPTION_MODE, "SMART")
+            // Existing installs may already have completed the earlier migration.
+            .putBoolean("gemini_migrated_chunk_silence_seconds", true)
+            .putInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, 4)
+            .commit()
+
+        assertFalse(TranscriptionPreferences.readGeminiSmartMode(prefs))
+        assertEquals("VERBATIM", prefs.getString(Settings.PREF_GEMINI_TRANSCRIPTION_MODE, null))
+        assertEquals(4, prefs.getInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, -1))
+    }
+
+    @Test
+    fun writeGeminiSmartMode_preservesExplicitOptInAcrossLaterReadsAndMigrations() {
+        val prefs = newPrefs()
+        // A user can choose smart mode before any other preference is read.
+        TranscriptionPreferences.writeGeminiSmartMode(prefs, true)
+
+        TranscriptionPreferences.migrateGeminiVoiceDefaults(prefs)
+        assertEquals("SMART", TranscriptionPreferences.readGeminiConfig(prefs).transcriptionMode)
+        assertTrue(TranscriptionPreferences.readGeminiSmartMode(prefs))
     }
 
     @Test

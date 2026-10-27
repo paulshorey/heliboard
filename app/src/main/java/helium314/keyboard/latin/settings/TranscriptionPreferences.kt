@@ -24,6 +24,9 @@ object TranscriptionPreferences {
      */
     private const val PREF_MIGRATED_CHUNK_SILENCE_SECONDS = "gemini_migrated_chunk_silence_seconds"
 
+    /** Turn off previously saved smart cleanup once; later user choices remain intact. */
+    private const val PREF_MIGRATED_VERBATIM_DEFAULT = "gemini_migrated_verbatim_default"
+
     private const val LEGACY_DEFAULT_CHUNK_SILENCE_SECONDS = 1
 
     private val LEGACY_PROVIDER_PREFS = listOf(
@@ -84,6 +87,7 @@ object TranscriptionPreferences {
     }
 
     fun readGeminiTranscriptionMode(prefs: SharedPreferences): String {
+        migrateGeminiVoiceDefaults(prefs)
         return GeminiTranscriptionClient.sanitizeTranscriptionMode(
             prefs.getString(
                 Settings.PREF_GEMINI_TRANSCRIPTION_MODE,
@@ -93,6 +97,8 @@ object TranscriptionPreferences {
     }
 
     fun writeGeminiTranscriptionMode(prefs: SharedPreferences, value: String) {
+        // Finish the one-time reset before recording a new explicit choice.
+        migrateGeminiVoiceDefaults(prefs)
         prefs.edit {
             putString(
                 Settings.PREF_GEMINI_TRANSCRIPTION_MODE,
@@ -228,15 +234,25 @@ object TranscriptionPreferences {
     }
 
     /**
-     * Bump a persisted local-silence default of 1 s (the old Soniox-era value)
-     * to 2 s so Hybrid VAD does not finalize 500 ms before Gemini's own
-     * end-of-speech window. Runs once per install. A user who later sets 1 s
-     * in Settings keeps that choice.
+     * Apply each default migration once per install: turn smart transcription
+     * off for existing users, and bump the old 1 s local-silence default to 2 s
+     * so Hybrid VAD does not finalize before Gemini's end-of-speech window.
+     * Independent flags allow both older and newer installs to migrate while
+     * preserving any choices made afterwards in Settings.
      */
     fun migrateGeminiVoiceDefaults(prefs: SharedPreferences) {
-        if (prefs.getBoolean(PREF_MIGRATED_CHUNK_SILENCE_SECONDS, false)) return
+        val migrateMode = !prefs.getBoolean(PREF_MIGRATED_VERBATIM_DEFAULT, false)
+        val migrateSilence = !prefs.getBoolean(PREF_MIGRATED_CHUNK_SILENCE_SECONDS, false)
+        if (!migrateMode && !migrateSilence) return
         prefs.edit {
-            if (prefs.getInt(
+            if (migrateMode) {
+                putString(
+                    Settings.PREF_GEMINI_TRANSCRIPTION_MODE,
+                    Defaults.PREF_GEMINI_TRANSCRIPTION_MODE
+                )
+                putBoolean(PREF_MIGRATED_VERBATIM_DEFAULT, true)
+            }
+            if (migrateSilence && prefs.getInt(
                     Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS,
                     Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS
                 ) == LEGACY_DEFAULT_CHUNK_SILENCE_SECONDS
@@ -246,7 +262,7 @@ object TranscriptionPreferences {
                     Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS
                 )
             }
-            putBoolean(PREF_MIGRATED_CHUNK_SILENCE_SECONDS, true)
+            if (migrateSilence) putBoolean(PREF_MIGRATED_CHUNK_SILENCE_SECONDS, true)
         }
     }
 }

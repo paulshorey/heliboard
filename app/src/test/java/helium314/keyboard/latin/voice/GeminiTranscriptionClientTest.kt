@@ -1,5 +1,6 @@
 package helium314.keyboard.latin.voice
 
+import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.voice.GeminiTranscriptionClient.Companion.SetupTier
 import helium314.keyboard.latin.voice.GeminiTranscriptionClient.Companion.TranscriptAccumulator
 import kotlin.test.assertContains
@@ -61,7 +62,7 @@ class GeminiTranscriptionClientTest {
         )
         val transcription = setup.getJSONObject("inputAudioTranscription")
 
-        assertEquals("SMART", transcription.getString("mode"))
+        assertEquals("VERBATIM", transcription.getString("mode"))
         assertEquals("en-US", transcription.getJSONArray("languageCodes").getString(0))
         assertEquals("Roentgen", transcription.getJSONArray("customVocabulary").getString(0))
 
@@ -74,6 +75,26 @@ class GeminiTranscriptionClientTest {
         assertEquals("END_SENSITIVITY_LOW", vad.getString("endOfSpeechSensitivity"))
         assertEquals(1800, vad.getInt("silenceDurationMs"))
         assertEquals(300, vad.getInt("prefixPaddingMs"))
+    }
+
+    @Test
+    fun setupMessage_preservesExplicitSmartOptIn() {
+        for (tier in SetupTier.entries.filter { it != SetupTier.MINIMAL }) {
+            val setup = setupObject(tier, sessionConfig(transcriptionMode = "smart"))
+            assertEquals("SMART", setup.getJSONObject("inputAudioTranscription").getString("mode"))
+        }
+    }
+
+    @Test
+    fun sanitizeTranscriptionMode_usesVerbatimForMissingOrInvalidValues() {
+        for (mode in listOf(null, "", "nonsense", "verbatim")) {
+            val sanitized = GeminiTranscriptionClient.sanitizeTranscriptionMode(mode)
+            assertEquals("VERBATIM", sanitized)
+            for (tier in SetupTier.entries.filter { it != SetupTier.MINIMAL }) {
+                val setup = setupObject(tier, sessionConfig(transcriptionMode = sanitized))
+                assertEquals("VERBATIM", setup.getJSONObject("inputAudioTranscription").getString("mode"))
+            }
+        }
     }
 
     @Test
@@ -399,7 +420,7 @@ class GeminiTranscriptionClientTest {
     private fun sessionConfig(
         languageTag: String? = "en_US",
         autoDetectLanguage: Boolean = false,
-        transcriptionMode: String = "SMART",
+        transcriptionMode: String = Defaults.PREF_GEMINI_TRANSCRIPTION_MODE,
         endOfSpeechSilenceMs: Int = 1500,
         userVocabulary: List<String> = emptyList(),
         editorContext: String? = null
