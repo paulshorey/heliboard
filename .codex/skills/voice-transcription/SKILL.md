@@ -35,14 +35,14 @@ not "optimize" latency at the expense of transcript quality.
 |------|------|
 | `VoiceRecorder.kt` | PCM16 capture, adaptive RMS silence detection |
 | `GeminiTranscriptionClient.kt` | WebSocket client for `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=…`. Builds the `setup` payload at a negotiated [setup tier](#setup-tier-degradation), streams base64 PCM as JSON text frames, parses `inputTranscription` / `interimInputTranscription` / `turnComplete` / `goAway`, sends `audioStreamEnd` for Hybrid VAD, and reassembles editor segments |
-| `VoiceContextVocabulary.kt` | Harvests proper nouns and acronyms from editor text and merges them with user + built-in terms into `customVocabulary` |
+| `VoiceContextVocabulary.kt` | Harvests proper nouns and acronyms from editor text and merges them with user terms into `customVocabulary`; no bundled terms |
 | `TranscriptSegment.kt` | Finalized chunk passed from the client to the IME pipeline |
 | `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO retained until local insertion succeeds, terminal failure, capture stop on `goAway`, auto-stop timers, session config assembly |
 | `TranscriptionPreferences.kt` | Reads/writes Gemini preferences and erases the preference keys of previously used providers |
 | `TranscriptPostProcessor.kt` | Local transcript shaping: pre-commit casing/trailing-punctuation adjustment plus paragraph-level spoken-command replacement after commit |
 | `LatinIME.java` | Orchestrator — finalizes composing state, commits transcript text at the caret, supplies editor text for vocabulary harvesting via `buildVoiceContextText`, triggers post-processing |
 | `TranscriptionScreen.kt` | Settings UI for API key, smart mode, editor-context biasing, language detection, end-of-speech pause, and local silence thresholds |
-| `VoiceVocabularyScreen.kt` | Settings UI for editing user `customVocabulary` (one per line). Merged with the built-in list at session start. |
+| `VoiceVocabularyScreen.kt` | Settings UI for editing user `customVocabulary`, with a note above the text box explaining one word or phrase per line. |
 
 All source files live under `app/src/main/java/helium314/keyboard/latin/voice/`
 except `LatinIME.java` (parent package) and the settings UI/preferences helpers in
@@ -150,9 +150,9 @@ put it in the tier that matches how well-documented it is for this model.
   **`endOfSpeechSensitivity: END_SENSITIVITY_LOW`**. Google documents that short
   windows split one utterance into fragments and that the model then loses
   cross-fragment context, lowering quality. Do not reduce this for latency.
-- **`customVocabulary`** — user terms, then built-in terms, then editor-harvested
-  terms, capped at 100 (Google notes best results around 100 even though 1 000 are
-  accepted).
+- **`customVocabulary`** — user terms, then editor-harvested terms, capped at 100
+  (Google notes best results around 100 even though 1 000 are accepted). No terms
+  ship with the app; the field is omitted when both sources are empty.
 - **`languageCodes`** — explicit BCP-47 hint from the subtype, mapped through
   `resolveLanguageCode` onto the codes Gemini documents. Unknown subtypes send `[]`
   rather than a code Gemini might reject. Auto-detect is opt-in because it misfires

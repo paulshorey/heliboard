@@ -178,7 +178,7 @@ object Defaults {
     // dictated names match the spelling and casing the user typed.
     const val PREF_GEMINI_USE_EDITOR_CONTEXT = true
     // User-editable Gemini `customVocabulary`, stored as a single string with one
-    // term per line. The built-in term list is added on top of this in the client.
+    // term per line. No vocabulary terms are bundled with the app.
     const val PREF_GEMINI_CUSTOM_VOCABULARY = ""
     // Local pause that triggers an early turn finalize (Gemini `audioStreamEnd`).
     // Two seconds keeps the server's own semantic end-of-speech detection in

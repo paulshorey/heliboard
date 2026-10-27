@@ -300,15 +300,11 @@
     <!-- Summary shown for the row that opens the custom voice vocabulary screen. -->
     <string name="voice_vocabulary_summary">Add product names, jargon and proper nouns so Gemini spells them correctly during dictation.</string>
     <!-- Intro paragraph at the top of the custom voice vocabulary screen explaining what the list is used for. -->
-    <string name="voice_vocabulary_intro">Terms here are sent to Gemini as speech-recognition hints (`customVocabulary`) at the start of every voice session. They bias the model toward the correct spelling and casing for words it might otherwise mis-hear. Around 100 terms works best.</string>
-    <!-- Section header for the read-only built-in terms list. -->
-    <string name="voice_vocabulary_builtin_section">Built-in terms</string>
-    <!-- Caption under the built-in terms list. -->
-    <string name="voice_vocabulary_builtin_summary">These ship with HeliBoard and are always sent.</string>
+    <string name="voice_vocabulary_intro">Your terms are sent to Gemini as speech-recognition hints at the start of each voice session to help it recognize their spelling and casing. Around 100 terms works best.</string>
     <!-- Section header for the user-editable terms list. -->
     <string name="voice_vocabulary_user_section">Your terms</string>
     <!-- Caption under the user-editable terms list explaining the format. -->
-    <string name="voice_vocabulary_user_summary">One term per line. Examples: a coworker\'s last name, a project codename, a medication name.</string>
+    <string name="voice_vocabulary_user_summary">Enter one word or phrase per line. Do not separate entries with commas.</string>
     <!-- Label inside the user-terms text field. -->
     <string name="voice_vocabulary_user_field_label">Custom terms</string>
     <!-- Placeholder for an empty user-terms text field. -->
