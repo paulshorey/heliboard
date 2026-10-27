@@ -46,7 +46,7 @@ WebSocket client for the Gemini Live API.
 
 ### VoiceContextVocabulary.kt
 Builds `inputAudioTranscription.customVocabulary`.
-- Merges user terms, built-in terms, and proper nouns harvested from editor text, nearest the caret first
+- Merges user terms and proper nouns harvested from editor text, nearest the caret first; no bundled terms
 - Capped at 100 terms; only individual words are sent, never the editor text
 
 ### VoiceInputManager.kt
@@ -102,7 +102,7 @@ Active subtype locale + transcription preferences + editor text
     → GeminiTranscriptionClient.buildSessionConfig()
     → languageCodes  = one documented BCP-47 code, or [] to auto-detect
     → mode           = SMART | VERBATIM
-    → customVocabulary = user terms ∪ built-in terms ∪ editor-harvested terms (≤ 100)
+    → customVocabulary = user terms ∪ editor-harvested terms (≤ 100; omitted when empty)
     → silenceDurationMs = PREF_GEMINI_END_OF_SPEECH_SILENCE_MS (400–5000, default 1500)
     → endOfSpeechSensitivity = END_SENSITIVITY_LOW
     → startOfSpeechSensitivity = START_SENSITIVITY_HIGH, prefixPaddingMs = 300
@@ -156,7 +156,7 @@ PAUSED     → User taps pause  → RECORDING (resume)
 - **Google Gemini API Key**: required for transcription
 - **Smart transcription**: `mode: SMART` — disfluency removal, self-correction resolution, punctuation/casing/list formatting. Off gives `VERBATIM`.
 - **Learn names from the text field**: harvests proper nouns near the caret into `customVocabulary`
-- **Custom voice vocabulary**: opens `VoiceVocabularyScreen` to view built-in terms and edit the user's own (one per line, merged at session start)
+- **Custom voice vocabulary**: opens `VoiceVocabularyScreen` to edit the user's own terms, with a format note above the text box (one word or phrase per line; no bundled terms)
 - **Detect spoken language**: sends `languageCodes: []` instead of the subtype's language. Off by default because auto-detection misfires on short utterances.
 - **End-of-speech pause (ms)**: `silenceDurationMs`, 400–5000, default 1500. Higher is more accurate.
 - **Chunk Silence Duration**: local pause that triggers `audioStreamEnd` as a backstop; keep it longer than the end-of-speech pause
