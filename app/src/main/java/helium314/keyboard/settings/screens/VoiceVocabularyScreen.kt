@@ -31,7 +31,6 @@ import helium314.keyboard.latin.settings.TranscriptionPreferences
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.getActivity
 import helium314.keyboard.latin.utils.prefs
-import helium314.keyboard.latin.voice.GeminiTranscriptionClient
 import helium314.keyboard.settings.SearchSettingsScreen
 import helium314.keyboard.settings.SettingsActivity
 import helium314.keyboard.settings.SettingsContainer
@@ -41,11 +40,10 @@ import helium314.keyboard.settings.previewDark
 /**
  * Settings screen for editing the user's custom Gemini `customVocabulary` list.
  *
- * The screen shows the built-in product/technical terms (read-only — they always
- * ship with the app) and a free-form editor where the user can add their own
- * terms, one per line. Both lists are merged, deduplicated, and sent to Gemini at
- * session start as `inputAudioTranscription.customVocabulary`, which biases
- * recognition toward the correct spelling and casing for those words.
+ * Users can add their own words or phrases, one per line. These are deduplicated
+ * and sent to Gemini at session start as `inputAudioTranscription.customVocabulary`,
+ * which biases recognition toward the spelling and casing they enter.
+ * No vocabulary terms ship with the app.
  */
 @Composable
 fun VoiceVocabularyScreen(
@@ -81,25 +79,6 @@ fun VoiceVocabularyScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 12.dp, bottom = 8.dp)
-                )
-
-                Text(
-                    text = stringResource(R.string.voice_vocabulary_builtin_section),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
-                )
-                Text(
-                    text = GeminiTranscriptionClient.defaultVocabulary()
-                        .joinToString(separator = "\n"),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
-                )
-                Text(
-                    text = stringResource(R.string.voice_vocabulary_builtin_summary),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 4.dp, bottom = 16.dp)
                 )
 
                 Text(

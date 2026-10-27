@@ -33,7 +33,7 @@ speech-to-text model `gemini-3.5-transcribe-live`. Documentation:
     "inputAudioTranscription": {
       "languageCodes": ["en-US"],
       "mode": "SMART",
-      "customVocabulary": ["HeliBoard", "Gemini", "Kubernetes", "API", "gnocchi", "MyProject"]
+      "customVocabulary": ["MyProject"]
     },
     "realtimeInputConfig": {
       "automaticActivityDetection": {
@@ -73,9 +73,10 @@ speech-to-text model `gemini-3.5-transcribe-live`. Documentation:
     formatting, grammar and casing polish.
   - **`customVocabulary`**: up to 1 000 phrases, best results around 100. HeliBoard
     sends at most **100**: the user's terms from `PREF_GEMINI_CUSTOM_VOCABULARY`
-    (one per line, UI-limited to 200 terms and 100 chars each), then the built-in
-    list (`HeliBoard`, `Gemini`, `Kubernetes`, `API`, `gnocchi`), then proper nouns
-    harvested from editor text by `VoiceContextVocabulary`.
+    (one word or phrase per line, UI-limited to 200 terms and 100 chars each), then
+    proper nouns harvested from editor text by `VoiceContextVocabulary`. No terms
+    ship with the app; this field is omitted when both sources are empty. The
+    example above assumes the user entered `MyProject`.
 - **`realtimeInputConfig.automaticActivityDetection`**: server VAD. HeliBoard keeps
   it **enabled** (`disabled: false`) so speech onset keeps its prefix padding, and
   tunes only the end of speech.
@@ -275,7 +276,7 @@ ephemeral tokens would require a server component.
 | `PREF_GEMINI_END_OF_SPEECH_SILENCE_MS` | Int | `silenceDurationMs`, clamped 400–5000, default 1500 |
 | `PREF_GEMINI_AUTO_DETECT_LANGUAGE` | Boolean | Send `languageCodes: []` instead of the subtype's language (default `false`) |
 | `PREF_GEMINI_USE_EDITOR_CONTEXT` | Boolean | Harvest proper nouns near the caret into `customVocabulary` (default `true`) |
-| `PREF_GEMINI_CUSTOM_VOCABULARY` | String | User-defined `customVocabulary`, one per line. Merged with the built-in list at session start. |
+| `PREF_GEMINI_CUSTOM_VOCABULARY` | String | User-defined `customVocabulary`, one word or phrase per line. Empty by default; no bundled terms. |
 | `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Local silence window before sending `audioStreamEnd` (default 2) |
 | `PREF_VOICE_SILENCE_THRESHOLD` | Int | RMS threshold used for silence detection |
 | `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` | Int | Silence duration before auto-stopping recording |

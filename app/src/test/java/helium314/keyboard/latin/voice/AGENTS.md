@@ -7,7 +7,7 @@ Tests for the Gemini Live voice pipeline.
 - `GeminiTranscriptionClientStreamTest.kt` - end-to-end WebSocket lifecycle against a local `MockWebServer`, including the close-code-1007 setup-tier fallback, authoritative-only insertion, malformed response handling, and failure during drain.
 - `TranscriptPostProcessorTest.kt` - finalized-text cleanup tests.
 - `TranscriptionPreferencesTest.kt` - Gemini preference defaults, sanitization, and cleanup of previous providers' keys.
-- `VoiceContextVocabularyTest.kt` - editor-derived speech-biasing vocabulary.
+- `VoiceContextVocabularyTest.kt` - editor-derived speech-biasing vocabulary, user-term priority, deduplication, and limits.
 
 - `GeminiAudioQueueTest.kt` - production bounded sender, queue acceptance/backpressure/failure, speech versus trailing quiet/control frames, stale frames, and EOF queue deadline.
 - `VoiceInputManagerTest.kt` - acknowledged transcript FIFO, bounded audio/control FIFO, terminal failures, immediate cancellation/restart during drain, and anchored deadlines using injected recorder/client/network dependencies. Finals wait from the current speech epoch's submitted boundary; delayed older boundaries and live interims must allow long utterances. Covers intentional silence auto-stop, noisy PCM after a final, equal-deadline timer ordering, watchdog cancellation at stop, late drain finals, and duplicate final progress with queued-speech safeguards. Whole-stop tests bound setup/upload/EOF/close to one 20-second budget, release processing on expiry, reject late callbacks, preserve newer recordings, and prevent reentrant stop failure/cancellation from restoring the spinner.
@@ -18,6 +18,7 @@ Tests for the Gemini Live voice pipeline.
 - Voice bugs split cleanly between transport/session setup and local post-processing; keep that distinction clear in new tests.
 - `GeminiTranscriptionClientTest.kt` needs Robolectric even though it tests pure functions: the client builds payloads with `org.json`, which is an unimplemented stub on the plain JVM test classpath.
 - `GeminiTranscriptionClientTest.kt` should keep asserting the two `setup` placement rules that fail catastrophically at runtime — `inputAudioTranscription` beside `generationConfig`, and `responseModalities: ["TEXT"]` inside it — plus that each `SetupTier` drops exactly one feature.
+- Setup tests also check that empty user vocabulary/context omits `customVocabulary`, while user-supplied terms are sent without bundled additions.
 - `GeminiTranscriptionClientStreamTest.kt` points `GeminiTranscriptionClient.streamingEndpoint` at `MockWebServer` and restores it in `@After`. It also resets `negotiatedSetupTier`, which is process-wide state that would otherwise leak between tests.
 - Robolectric's main looper is paused, and the client posts callbacks there from OkHttp's reader thread, so the stream tests pump with `awaitUntil { }` (idle the looper, check, sleep) instead of a bare latch.
 - `VoiceContextVocabularyTest.kt` covers what must *not* be biased as much as what must: common words, sentence-initial capitals, digits, and URL/path/email/identifier fragments.
