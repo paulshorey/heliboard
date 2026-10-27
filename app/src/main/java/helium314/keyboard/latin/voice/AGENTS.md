@@ -6,7 +6,7 @@ Gemini Live realtime transcription pipeline (`gemini-3.5-transcribe-live`).
 - `GeminiTranscriptionClient.kt` - Live API WebSocket client, tiered `setup` payload, base64 audio framing, transcript reassembly from `serverContent.inputTranscription`.
 - `TranscriptSegment.kt` - finalized transcript chunk shared between the client and the IME pipeline.
 - `TranscriptPostProcessor.kt` - local cleanup/formatting for finalized transcript text.
-- `VoiceContextVocabulary.kt` - builds `inputAudioTranscription.customVocabulary` from user terms, built-in terms, and proper nouns harvested from editor text.
+- `VoiceContextVocabulary.kt` - builds `inputAudioTranscription.customVocabulary` from user terms and proper nouns harvested from editor text; no vocabulary terms ship with the app.
 - `VoiceInputManager.kt` - record/stream/orchestrate voice sessions and deliver finalized text.
 - `VoiceRecorder.kt` - microphone capture of PCM audio.
 - `VoiceAudioDiagnostics.kt` - bounded numeric PCM level summaries; shares the recorder's RMS calculation and never gates audio.

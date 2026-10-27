@@ -170,10 +170,11 @@ Final list order, capped at 100 terms because Google notes accuracy is best
 around 100 even though 1 000 are accepted:
 
 1. the user's list (`PREF_GEMINI_CUSTOM_VOCABULARY`, one term per line)
-2. the built-in product/technical terms
-3. editor-harvested terms
+2. editor-harvested terms
 
-Toggle the third source with `PREF_GEMINI_USE_EDITOR_CONTEXT` (default on).
+No vocabulary terms ship with the app. Toggle editor-derived terms with
+`PREF_GEMINI_USE_EDITOR_CONTEXT` (default on). If both sources are empty, the
+setup payload omits `customVocabulary`.
 
 **Verbatim editor text is deliberately not sent to the model.** Neither
 `systemInstruction` nor a seeded `clientContent` history is a documented input for

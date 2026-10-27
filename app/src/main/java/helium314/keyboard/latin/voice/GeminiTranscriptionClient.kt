@@ -50,7 +50,7 @@ import java.util.concurrent.TimeUnit
  *    `silenceDurationMs` so mid-sentence thinking pauses do not split one
  *    utterance into fragments. Google documents that short silence windows
  *    make the model lose cross-fragment context and lower quality.
- *  - `customVocabulary` seeded from built-in terms, the user's list, and proper
+ *  - `customVocabulary` seeded from the user's list and proper
  *    nouns already present in the editor, so dictated names match what the user
  *    has typed before.
  *
@@ -220,8 +220,7 @@ class GeminiTranscriptionClient {
             transcriptionMode: String,
             endOfSpeechSilenceMs: Int,
             userVocabulary: List<String> = emptyList(),
-            editorContext: String? = null,
-            builtInVocabulary: List<String> = defaultVocabulary()
+            editorContext: String? = null
         ): SessionConfig {
             val resolvedLanguage = if (autoDetectLanguage) null else resolveLanguageCode(languageTag)
             return SessionConfig(
@@ -233,7 +232,6 @@ class GeminiTranscriptionClient {
                 ),
                 customVocabulary = VoiceContextVocabulary.build(
                     userTerms = userVocabulary,
-                    builtInTerms = builtInVocabulary,
                     editorContext = editorContext,
                     limit = MAX_CUSTOM_VOCABULARY_TERMS
                 )
@@ -246,18 +244,6 @@ class GeminiTranscriptionClient {
             } else {
                 TRANSCRIPTION_MODE_SMART
             }
-
-        /**
-         * Product and technical terms that ship with the app. Merged with the
-         * user's list and with proper nouns found in the editor.
-         */
-        internal fun defaultVocabulary(): List<String> = listOf(
-            "HeliBoard",
-            "Gemini",
-            "Kubernetes",
-            "API",
-            "gnocchi"
-        )
 
         internal fun buildStreamingUrl(apiKey: String): String =
             "$streamingEndpoint?key=$apiKey"

@@ -47,6 +47,8 @@ class GeminiTranscriptionClientTest {
         val modalities = setup.getJSONObject("generationConfig").getJSONArray("responseModalities")
         assertEquals(1, modalities.length())
         assertEquals("TEXT", modalities.getString(0))
+        // An empty user list and editor context must not send bundled hints.
+        assertFalse(setup.getJSONObject("inputAudioTranscription").has("customVocabulary"))
     }
 
     @Test
@@ -63,6 +65,7 @@ class GeminiTranscriptionClientTest {
 
         assertEquals("SMART", transcription.getString("mode"))
         assertEquals("en-US", transcription.getJSONArray("languageCodes").getString(0))
+        assertEquals(1, transcription.getJSONArray("customVocabulary").length())
         assertEquals("Roentgen", transcription.getJSONArray("customVocabulary").getString(0))
 
         val vad = setup.getJSONObject("realtimeInputConfig")
@@ -409,8 +412,7 @@ class GeminiTranscriptionClientTest {
         transcriptionMode = transcriptionMode,
         endOfSpeechSilenceMs = endOfSpeechSilenceMs,
         userVocabulary = userVocabulary,
-        editorContext = editorContext,
-        builtInVocabulary = emptyList()
+        editorContext = editorContext
     )
 
     private fun setupObject(

@@ -99,14 +99,13 @@ class VoiceContextVocabularyTest {
     }
 
     @Test
-    fun buildPrioritizesUserTermsThenBuiltInsThenEditorTerms() {
+    fun buildPrioritizesUserTermsThenEditorTerms() {
         val terms = VoiceContextVocabulary.build(
             userTerms = listOf("Roentgen"),
-            builtInTerms = listOf("HeliBoard"),
             editorContext = "we talked about Wittgenstein yesterday",
             limit = 10
         )
-        assertEquals(listOf("Roentgen", "HeliBoard", "Wittgenstein"), terms)
+        assertEquals(listOf("Roentgen", "Wittgenstein"), terms)
     }
 
     @Test
@@ -114,35 +113,32 @@ class VoiceContextVocabularyTest {
         val editorContext = (1..50).joinToString(" ") { "x Term$it Zebra Yankee Xray" }
         val terms = VoiceContextVocabulary.build(
             userTerms = listOf("Alpha", "Bravo"),
-            builtInTerms = listOf("Charlie", "Delta"),
             editorContext = editorContext,
             limit = 5
         )
         assertEquals(5, terms.size)
         // The user's own terms are never crowded out by harvested ones.
-        assertEquals(listOf("Alpha", "Bravo", "Charlie", "Delta"), terms.take(4))
+        assertEquals(listOf("Alpha", "Bravo"), terms.take(2))
     }
 
     @Test
     fun buildDeduplicatesAcrossSourcesCaseInsensitively() {
         val terms = VoiceContextVocabulary.build(
             userTerms = listOf("Kubernetes"),
-            builtInTerms = listOf("kubernetes", "HeliBoard"),
             editorContext = "the KUBERNETES cluster",
             limit = 10
         )
-        assertEquals(listOf("Kubernetes", "HeliBoard"), terms)
+        assertEquals(listOf("Kubernetes"), terms)
     }
 
     @Test
     fun buildHandlesNoEditorContext() {
         val terms = VoiceContextVocabulary.build(
-            userTerms = emptyList(),
-            builtInTerms = listOf("HeliBoard"),
+            userTerms = listOf("Roentgen"),
             editorContext = null,
             limit = 10
         )
-        assertEquals(listOf("HeliBoard"), terms)
+        assertEquals(listOf("Roentgen"), terms)
     }
 
     @Test
@@ -150,7 +146,6 @@ class VoiceContextVocabularyTest {
         assertTrue(
             VoiceContextVocabulary.build(
                 userTerms = listOf("Roentgen"),
-                builtInTerms = listOf("HeliBoard"),
                 editorContext = "Wittgenstein",
                 limit = 0
             ).isEmpty()

@@ -17,8 +17,8 @@ import java.util.Locale
  * Priority order, because Google notes accuracy is best at roughly 100 terms
  * even though 1,000 are accepted:
  * 1. the user's own list — explicit intent,
- * 2. the built-in product/technical terms,
- * 3. terms harvested from the editor, nearest the caret first.
+ * 2. terms harvested from the editor, nearest the caret first.
+ * No vocabulary terms ship with the app.
  */
 object VoiceContextVocabulary {
 
@@ -75,13 +75,11 @@ object VoiceContextVocabulary {
      * Assemble the vocabulary list for one session.
      *
      * @param userTerms terms the user entered in settings, in their order.
-     * @param builtInTerms terms that ship with the app.
      * @param editorContext editor text before the caret, oldest character first.
      * @param limit maximum number of terms to send.
      */
     fun build(
         userTerms: List<String>,
-        builtInTerms: List<String>,
         editorContext: String?,
         limit: Int
     ): List<String> {
@@ -100,7 +98,6 @@ object VoiceContextVocabulary {
         }
 
         add(userTerms)
-        add(builtInTerms)
         if (result.size < limit) {
             add(extractTermsFromContext(editorContext, limit - result.size))
         }
