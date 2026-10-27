@@ -4,15 +4,16 @@ package helium314.keyboard.latin.voice
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
 import helium314.keyboard.latin.utils.Log
 import kotlin.concurrent.thread
-import kotlin.math.sqrt
 
 /**
  * Records audio from the device microphone with client-side silence detection.
@@ -302,6 +303,9 @@ class VoiceRecorder(private val context: Context) {
         val energyHistory = ArrayDeque<Double>()
         var noiseFloorRecalcCounter = 0
         var consecutiveEmptyReads = 0
+        val diagnostics = VoiceAudioDiagnostics()
+        var lastRoute: String? = null
+        var pcmSamples = 0L
         val configSnapshot = silenceConfig
         val minSilenceThreshold = configSnapshot.silenceThreshold
         val minSpeechThreshold = minSilenceThreshold + SPEECH_HYSTERESIS
@@ -309,6 +313,8 @@ class VoiceRecorder(private val context: Context) {
         try {
             while (isRecording) {
                 if (isPaused) {
+                    diagnostics.takeSummary()?.let { Log.i(TAG, it) }
+                    lastRoute = null
                     silenceDurationMs = 0L
                     isSpeaking = false
                     try {
@@ -373,12 +379,16 @@ class VoiceRecorder(private val context: Context) {
                 val chunk = if (bytesRead == BYTES_PER_READ) readBuffer.copyOf()
                             else readBuffer.copyOf(bytesRead)
 
-                val energy = rmsEnergy(chunk)
+                // One PCM pass supplies both the unchanged RMS detector and diagnostics.
+                val level = VoiceAudioDiagnostics.measure(chunk)
+                val energy = level.rms
+                pcmSamples += level.samples
                 smoothedEnergy = (ENERGY_SMOOTHING_ALPHA * energy) +
                     ((1.0 - ENERGY_SMOOTHING_ALPHA) * smoothedEnergy)
 
-                val speechThreshold = maxOf(minSpeechThreshold, noiseFloor + SPEECH_MARGIN)
-                val silenceThreshold = maxOf(minSilenceThreshold, noiseFloor + SILENCE_MARGIN)
+                val detectorNoiseFloor = noiseFloor
+                val speechThreshold = maxOf(minSpeechThreshold, detectorNoiseFloor + SPEECH_MARGIN)
+                val silenceThreshold = maxOf(minSilenceThreshold, detectorNoiseFloor + SILENCE_MARGIN)
                 val chunkMs = (bytesRead.toLong() * 1000) / (SAMPLE_RATE * BYTES_PER_SAMPLE)
                 val hasSpeech = if (isSpeaking) {
                     smoothedEnergy >= silenceThreshold
@@ -394,6 +404,18 @@ class VoiceRecorder(private val context: Context) {
                 val containsSpeech = energy >= silenceThreshold
                 val callbackSnapshot = recordingCallback
                 mainHandler.post { callbackSnapshot?.onAudioChunk(chunk, containsSpeech) }
+
+                val fullWindow = diagnostics.add(
+                    level, detectorNoiseFloor, silenceThreshold, speechThreshold, smoothedEnergy
+                )
+                if (lastRoute == null || fullWindow) {
+                    val route = captureRouteDiagnostic()
+                    if (route != lastRoute) {
+                        Log.i(TAG, "VOICE capture route pcmMs=${pcmSamples * 1000 / SAMPLE_RATE} $route")
+                        lastRoute = route
+                    }
+                }
+                if (fullWindow) diagnostics.takeSummary()?.let { Log.i(TAG, it) }
 
                 // Percentile-based noise floor: track raw RMS energy (not EMA-smoothed)
                 // to avoid speech->silence lag contaminating the low-percentile baseline.
@@ -419,6 +441,9 @@ class VoiceRecorder(private val context: Context) {
                 if (hasSpeech) {
                     if (!isSpeaking) {
                         isSpeaking = true
+                        Log.i(TAG, "VOICE speech started pcmMs=${pcmSamples * 1000 / SAMPLE_RATE} " +
+                            "rawRms=${energy.toInt()} ema=${smoothedEnergy.toInt()} " +
+                            "noiseFloor=${detectorNoiseFloor.toInt()} onsetThreshold=${speechThreshold.toInt()}")
                         val callbackSnapshot = recordingCallback
                         mainHandler.post { callbackSnapshot?.onSpeechStarted() }
                     }
@@ -432,7 +457,9 @@ class VoiceRecorder(private val context: Context) {
                             Log.i(
                                 TAG,
                                 "VOICE_STEP_2 silence detected (${configSnapshot.silenceDurationMs}ms window), " +
-                                    "energy=${smoothedEnergy.toInt()}, threshold=${silenceThreshold.toInt()} — speech stopped"
+                                    "pcmMs=${pcmSamples * 1000 / SAMPLE_RATE} rawRms=${energy.toInt()}, " +
+                                    "energy=${smoothedEnergy.toInt()}, threshold=${silenceThreshold.toInt()} " +
+                                    "— speech stopped; boundary=local_silence"
                             )
                             val callbackSnapshot = recordingCallback
                             mainHandler.post { callbackSnapshot?.onSpeechStopped() }
@@ -448,23 +475,32 @@ class VoiceRecorder(private val context: Context) {
             Log.e(TAG, "Error in recording loop: ${e.message}")
             val callbackSnapshot = recordingCallback
             mainHandler.post { callbackSnapshot?.onRecordingError("Recording error: ${e.message}") }
+        } finally {
+            diagnostics.takeSummary()?.let { Log.i(TAG, it) }
         }
     }
 
     // ── Utility functions ──────────────────────────────────────────────
 
-    /** Calculate RMS energy of PCM16 little-endian audio. */
-    private fun rmsEnergy(data: ByteArray): Double {
-        if (data.size < 2) return 0.0
-        var sum = 0.0
-        val samples = data.size / 2
-        for (i in 0 until samples) {
-            val lo = data[i * 2].toInt() and 0xFF
-            val hi = data[i * 2 + 1].toInt()
-            val sample = (hi shl 8) or lo  // signed 16-bit little-endian
-            sum += (sample * sample).toDouble()
+    /** Query the actual recording route; names, addresses and device IDs stay private. */
+    private fun captureRouteDiagnostic(): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return "source=MIC route=unavailable_api"
+        return try {
+            val device = audioRecord?.routedDevice ?: return "source=MIC route=unknown"
+            val type = when (device.type) {
+                AudioDeviceInfo.TYPE_BUILTIN_MIC -> "built_in_mic"
+                AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "bluetooth_sco"
+                AudioDeviceInfo.TYPE_BLE_HEADSET -> "bluetooth_le_headset"
+                AudioDeviceInfo.TYPE_WIRED_HEADSET -> "wired_headset"
+                AudioDeviceInfo.TYPE_USB_DEVICE -> "usb_device"
+                AudioDeviceInfo.TYPE_USB_HEADSET -> "usb_headset"
+                else -> "other_type_${device.type}"
+            }
+            "source=MIC route=$type"
+        } catch (_: Exception) {
+            // Observability must never terminate capture or change routing.
+            "source=MIC route=query_unavailable"
         }
-        return sqrt(sum / samples)
     }
 
     private fun mapAudioReadError(errorCode: Int): String {

@@ -313,6 +313,13 @@ effects. Explicit spoken commands such as "New paragraph." are still handled by
 
 ## Verifying against the real API
 
+For quiet speech or Bluetooth omissions, first use the controlled volume test in
+`docs/gemini-transcription.md`. Capture logs include two-second numeric level
+windows, actual route type, adaptive thresholds and provider/assembly character
+counts. A saved RMS threshold is a minimum; the noise-floor margins can raise it.
+All PCM is still forwarded. Compare Smart transcription on/off separately from
+microphone routing or pause settings; do not infer ignored words from RMS alone.
+
 `GeminiTranscriptionClientTest`, `GeminiTranscriptionClientStreamTest` (local
 WebSocket server, including the 1007 tier fallback) and `VoiceContextVocabularyTest`
 cover the wire format and client state machine. They cannot confirm what Google's

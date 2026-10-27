@@ -448,6 +448,114 @@ The WAV must be 16-bit PCM, 16 kHz, mono:
 
 ## Integrity regression and device checks
 
+### Quiet speech and Bluetooth troubleshooting
+
+The local RMS setting is a minimum, not a microphone gain control or a provider
+VAD threshold. The recorder computes:
+
+- speech onset: `max(saved RMS + 140, estimated noise floor + 260)`
+- continuing speech/silence: `max(saved RMS, estimated noise floor + 140)`
+
+The noise estimate starts at 120, uses the 20th percentile of up to 30 seconds
+of raw RMS history, and is bounded to 40–1000. Thus a saved value of 50 starts
+with effective onset/silence thresholds of 380/260; even at the lowest estimated
+floor they are 300/180. Smoothing (alpha 0.2) also affects boundary decisions.
+The history includes speech, so extended speech can raise this estimate and make
+a quieter continuation look like local silence. All PCM, including that quiet
+continuation, is sent. The local detector can still prompt `audioStreamEnd` after
+the configured chunk silence, or eventually auto-stop recording.
+
+Gemini has a separate server VAD, with high start sensitivity and low end
+sensitivity in the full setup tier. The app has no Gemini speaker-identity filter
+or local background-voice rejection. It uses Android's `MIC` source without
+explicit Bluetooth routing, gain control or noise suppression. Earbuds being
+connected does not establish which microphone Android selected. Firmware/platform
+processing may affect the signal before PCM reaches the app.
+
+The existing **Transcription → Voice diagnostics** export now also includes:
+
+- `VOICE capture route`: actual input type from the recording AudioRecord on
+  API 23+, checked after the first read and every twenty reads. Only type is
+  recorded (built-in, Bluetooth SCO/LE, wired/USB, other/unknown); no device names,
+  addresses or IDs. A route-query failure cannot stop capture. API 21–22 reports
+  the query unavailable. Short route changes between checks can be missed.
+- `VOICE levels`: one summary per twenty reads (normally two seconds), plus a
+  partial window at pause/end. `pcmMs` counts captured samples and excludes
+  paused time. `chunkRms` is chronological; `chunkSamples` gives each read's
+  size (1600 samples = 100 ms). Effective onset/silence thresholds, noise-floor
+  range, last smoothed RMS, window RMS/peak, zero/clipped sample counts and
+  above/below-silence chunk counts show whether quiet speech was considered
+  local silence. `pcmPolicy=forward_all` describes capture policy, not proof of
+  server receipt. RMS is PCM amplitude, not calibrated sound pressure.
+- `VOICE recognition`: interim counts/last lengths at most once per two
+  seconds, provider-final character count and emitted-segment character count
+  for every final, and turn boundaries. A zero-length emitted segment may be a
+  duplicate final; a smaller segment may be a cumulative suffix. These counts
+  do not show transcript text or prove an interim contained a missing phrase.
+- Finalization logs include elapsed/captured/accepted durations and local/socket
+  queues. Existing `final accepted` and paragraph-replacement logs describe
+  subsequent local dispatch/cleanup. Acceptance remains local dispatch evidence.
+
+These diagnostics never save audio, words, transcript hashes or provider payloads.
+They cannot label an individual word as used/ignored by Gemini or recover words
+that were suppressed before capture. The 500-line in-memory voice ring is shared
+with lifecycle events, so keep each trial short and export immediately, before
+the app process exits. Save the observed output separately with the expected
+script and identify any missing clause.
+
+Use this controlled test before collecting a long free-form dictation:
+
+1. Keep RMS at 50 and record the current Smart transcription, server pause,
+   chunk silence and auto-stop settings. Use a quiet room and one host editor.
+   Start each trial with three seconds of room silence.
+2. Read the following once per fresh recording. Brackets are instructions;
+   do not speak them. Speak the soft clause at an ordinary quiet conversational
+   level, without a deliberate pause when changing volume. Then repeat the
+   sequence with a one-second hesitation before the soft clause.
+
+   > [normal] The blue notebook is beside the window,
+   > [soft] the small brass key is under the folded towel,
+   > [normal] and the red umbrella is next to the door.
+   >
+   > [normal] Tomorrow we will visit the market,
+   > [gradually softer] buy fresh apples and a loaf of bread,
+   > [normal] and take the afternoon train home.
+   >
+   > [soft from the first word] A green bicycle is waiting near the garden gate.
+
+3. Wait three seconds, tap Stop, wait for processing to finish, and immediately
+   export Voice diagnostics. Label the file/trial and copy the resulting text;
+   record the specific missing clause and approximate time from mic start.
+4. Compare three conditions with identical settings: Bluetooth disconnected with
+   the phone nearby; earbuds connected with the phone in the same position;
+   earbuds connected with the phone farther away/in a pocket. The logged route,
+   not the connection icon, identifies the selected mic. Avoid covering or tapping
+   the mic, which adds handling noise.
+5. Repeat the condition that fails with **Smart transcription off** (Gemini
+   `VERBATIM`), changing only that setting. Local punctuation/command cleanup
+   still runs, so avoid spoken punctuation commands, fillers and self-corrections
+   in the acoustic test.
+6. If failure correlates with local finalization, separately compare a longer
+   chunk silence (for example 5 seconds instead of 2), keeping server pause
+   unchanged. Compare server pause (for example 2500 ms instead of 1500) in a
+   separate trial. These affect turn timing, not microphone gain.
+
+After reproducing with the short script, try a 30–45 second paragraph that starts
+at normal volume and gradually becomes quiet; this tests noise-floor drift.
+Test background voices/music only after the quiet-room comparison. Separate
+recordings and exports make comparisons easier and preserve the relevant ring.
+
+If the route is unexpectedly built-in, explicit microphone selection is the next
+candidate. If captured energy stays healthy but a boundary interrupts a soft
+clause, consider an optional server-only automatic-finalization comparison and
+an adaptive local detector with a noise estimate protected from speech and a
+lower continuation threshold after reliable onset. Such a detector must still
+forward every PCM frame and must distinguish reduced volume from actual silence.
+If capture itself becomes zero/very weak, investigate routing/earbud processing
+before software gain. Gain also amplifies noise and cannot restore audio already
+removed by the microphone/firmware. Numeric logs alone cannot prove the provider
+received or recognized each word.
+
 Startup rejection is distinct from interruption of a usable stream. The service
 can reject setup with a 1011 close whose detail says prepayment credits are depleted,
 without a gRPC status name. Match that detail before generic close/quota wording;

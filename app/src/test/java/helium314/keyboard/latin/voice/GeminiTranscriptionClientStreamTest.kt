@@ -1,6 +1,7 @@
 package helium314.keyboard.latin.voice
 
 import android.os.Looper
+import helium314.keyboard.latin.utils.Log
 import java.time.Duration
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.assertEquals
@@ -99,6 +100,35 @@ class GeminiTranscriptionClientStreamTest {
         assertEquals("Hello world.", transcripts.single().text)
         // The interim hypothesis must never reach the editor.
         assertEquals(1, transcripts.size)
+    }
+
+    @Test
+    fun recognitionDiagnosticsExposeAssemblyCountsWithoutTranscriptContent() {
+        enqueueServer(object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                if (text.contains("\"setup\"")) webSocket.send("""{"setupComplete":{}}""")
+            }
+        })
+        startClient()
+        awaitUntil { events.contains("ready") }
+        val logStart = Log.getLog().size
+        val secret = "Private phrase"
+        currentServerSocket!!.send(
+            """{"serverContent":{"interimInputTranscription":{"text":"$secret"}}}"""
+        )
+        listOf(secret, secret, "$secret extended").forEach { text ->
+            currentServerSocket!!.send(
+                """{"serverContent":{"inputTranscription":{"text":"$text"}}}"""
+            )
+        }
+        awaitUntil { responseHasFinal.count { it } == 3 }
+        assertEquals(listOf(secret, "extended"), transcripts.map { it.text })
+        val lines = Log.getLog().drop(logStart).filter { it.message.contains("VOICE recognition") }
+        assertEquals(4, lines.size) // One interim summary and all three authoritative finals.
+        assertTrue(lines.any { it.message.contains("providerChars=14 emittedChars=14") })
+        assertTrue(lines.any { it.message.contains("providerChars=14 emittedChars=0") })
+        assertTrue(lines.any { it.message.contains("providerChars=23 emittedChars=8") })
+        assertTrue(lines.none { it.message.contains(secret) || it.message.contains("extended") })
     }
 
     @Test

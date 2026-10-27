@@ -4,7 +4,8 @@ Tests for the Gemini Live voice pipeline.
 
 ## Direct files
 - `GeminiTranscriptionClientTest.kt` - `setup` wire format, audio framing, language resolution, server-message parsing, and transcript assembly.
-- `GeminiTranscriptionClientStreamTest.kt` - end-to-end WebSocket lifecycle against a local `MockWebServer`, including the close-code-1007 setup-tier fallback, authoritative-only insertion, malformed response handling, and failure during drain.
+- `GeminiTranscriptionClientStreamTest.kt` - end-to-end WebSocket lifecycle against a local `MockWebServer`, including the close-code-1007 setup-tier fallback, authoritative-only insertion, malformed response handling, failure during drain, and content-free provider/assembly diagnostic counts for duplicate and growing finals.
+- `VoiceAudioDiagnosticsTest.kt` - signed PCM math, clipping/zero counts, quiet evidence, bounded summaries, tail flushing and capture offsets.
 - `TranscriptPostProcessorTest.kt` - finalized-text cleanup tests.
 - `TranscriptionPreferencesTest.kt` - Gemini preference defaults, sanitization, and cleanup of previous providers' keys.
 - `VoiceContextVocabularyTest.kt` - editor-derived speech-biasing vocabulary.
@@ -13,6 +14,7 @@ Tests for the Gemini Live voice pipeline.
 - `VoiceInputManagerTest.kt` - acknowledged transcript FIFO, bounded audio/control FIFO, terminal failures, immediate cancellation/restart during drain, and anchored deadlines using injected recorder/client/network dependencies. Finals wait from the current speech epoch's submitted boundary; delayed older boundaries and live interims must allow long utterances. Covers intentional silence auto-stop, noisy PCM after a final, equal-deadline timer ordering, watchdog cancellation at stop, late drain finals, and duplicate final progress with queued-speech safeguards. Whole-stop tests bound setup/upload/EOF/close to one 20-second budget, release processing on expiry, reject late callbacks, preserve newer recordings, and prevent reentrant stop failure/cancellation from restoring the spinner.
 - `VoiceNetworkMonitorTest.kt` - validated internet, route loss/handoff, stale observations, and API-21 receiver cleanup.
 - `VoiceRecorderLifecycleTest.kt` - missed capture join/restart guard, callback ownership across an in-flight native read, immutable raw-energy speech evidence on quiet PCM during the speaking window, and errors/exceptions from a read interrupted by rapid pause/resume while new-phase errors still surface.
+- Recorder tests also verify sustained quiet PCM delivery after local speech stops, actual route-type diagnostics without identity, nonfatal route-query failure, and API-21 routing guards.
 
 ## Non-obvious notes
 - Voice bugs split cleanly between transport/session setup and local post-processing; keep that distinction clear in new tests.

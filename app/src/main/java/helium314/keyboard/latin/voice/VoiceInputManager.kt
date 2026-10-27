@@ -498,6 +498,10 @@ class VoiceInputManager internal constructor(
                     armResponseTimeout(sessionId)
                     armFinalTimeout(sessionId)
                     Log.i(TAG, "session=$sessionId finalize finish=${next.finish} " +
+                        "elapsedMs=${SystemClock.elapsedRealtime() - sessionStartedAtMs} " +
+                        "capturedMs=${capturedBytes * 1000 / (VoiceRecorder.SAMPLE_RATE * 2)} " +
+                        "acceptedMs=${acceptedAudioBytes * 1000 / (VoiceRecorder.SAMPLE_RATE * 2)} " +
+                        "pendingPcmBytes=$pendingAudioBytes socketQueuedBytes=${transcriptionClient.queuedFrameBytes()} " +
                         "pendingSpeech=$unconfirmedSpeech finalWait=${finalTimeout != null}")
                     if (next.finish) {
                         waitingForClose = true

@@ -3,6 +3,7 @@ package helium314.keyboard.latin.voice
 
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import helium314.keyboard.latin.utils.Log
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -680,6 +681,10 @@ class GeminiTranscriptionClient {
     private var pendingFinalizeCloseRunnable: Runnable? = null
 
     private val accumulator = TranscriptAccumulator()
+    private var diagnosticInterims = 0
+    private var diagnosticLastInterimChars = 0
+    private var diagnosticLastInterimLogAtMs: Long? = null
+    private var diagnosticFinals = 0
 
     // Audio/control sends are serialized on the main looper. OkHttp drains in
     // FIFO order, so a queue no larger than this suffix contains only quiet PCM
@@ -724,6 +729,10 @@ class GeminiTranscriptionClient {
         isSessionReady = false
         awaitingSetupTier = tier
         accumulator.reset()
+        diagnosticInterims = 0
+        diagnosticLastInterimChars = 0
+        diagnosticLastInterimLogAtMs = null
+        diagnosticFinals = 0
         clearFinalizeCloseTimer()
 
         val request = Request.Builder()
@@ -996,8 +1005,17 @@ class GeminiTranscriptionClient {
         if (connectionToken != activeConnectionToken) return
         var sawResponse = false
         var sawTranscript = false
-        extractInterimTranscript(json)?.let {
+        extractInterimTranscript(json)?.let { interim ->
             sawResponse = true
+            diagnosticInterims++
+            diagnosticLastInterimChars = interim.length
+            val now = SystemClock.elapsedRealtime()
+            val lastLog = diagnosticLastInterimLogAtMs
+            if (lastLog == null || now - lastLog >= 2000) {
+                diagnosticLastInterimLogAtMs = now
+                Log.i(TAG, "connection=$connectionToken VOICE recognition interimCount=$diagnosticInterims " +
+                    "lastInterimChars=$diagnosticLastInterimChars policy=provisional_not_inserted")
+            }
             callback?.onInterimTranscription()
         }
         if (connectionToken != activeConnectionToken) return
@@ -1005,6 +1023,11 @@ class GeminiTranscriptionClient {
             sawResponse = true
             sawTranscript = true
             val segment = accumulator.accept(finalText)
+            diagnosticFinals++
+            Log.i(TAG, "connection=$connectionToken VOICE recognition finalIndex=$diagnosticFinals " +
+                "providerChars=${finalText.length} emittedChars=${segment?.text?.length ?: 0} " +
+                "attaches=${segment?.attachesToPrevious ?: false} " +
+                "interimCount=$diagnosticInterims lastInterimChars=$diagnosticLastInterimChars")
             if (segment != null) {
                 callback?.onTranscriptionResult(segment)
             }
@@ -1012,6 +1035,11 @@ class GeminiTranscriptionClient {
         if (connectionToken != activeConnectionToken) return
         if (isTurnComplete(json)) {
             sawResponse = true
+            Log.i(TAG, "connection=$connectionToken VOICE recognition turnComplete " +
+                "finalCount=$diagnosticFinals interimCount=$diagnosticInterims " +
+                "lastInterimChars=$diagnosticLastInterimChars")
+            diagnosticInterims = 0
+            diagnosticLastInterimChars = 0
             // This is not an audio acknowledgment and must never flush an interim.
             accumulator.reset()
         }
