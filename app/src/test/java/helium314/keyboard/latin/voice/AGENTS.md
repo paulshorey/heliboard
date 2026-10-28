@@ -7,12 +7,14 @@ Tests for the Gemini Live voice pipeline.
 - `GeminiTranscriptionClientStreamTest.kt` - end-to-end WebSocket lifecycle against a local `MockWebServer`, including the close-code-1007 setup-tier fallback, authoritative-only insertion, malformed response handling, and failure during drain.
 - `TranscriptPostProcessorTest.kt` - finalized-text cleanup tests.
 - `TranscriptionPreferencesTest.kt` - Gemini preference defaults, sanitization, and cleanup of previous providers' keys.
+- `VoiceMicrophoneRouterTest.kt` - built-in isolation, Bluetooth SCO/BLE preference, actual-route verification/timeout/loss, request cleanup and API 21/22/23/30/35 compatibility.
 - `VoiceContextVocabularyTest.kt` - editor-derived speech-biasing vocabulary, user-term priority, deduplication, and limits.
 
 - `GeminiAudioQueueTest.kt` - production bounded sender, queue acceptance/backpressure/failure, speech versus trailing quiet/control frames, stale frames, and EOF queue deadline.
 - `VoiceInputManagerTest.kt` - acknowledged transcript FIFO, bounded audio/control FIFO, terminal failures, immediate cancellation/restart during drain, and anchored deadlines using injected recorder/client/network dependencies. Finals wait from the current speech epoch's submitted boundary; delayed older boundaries and live interims must allow long utterances. Covers intentional silence auto-stop, noisy PCM after a final, equal-deadline timer ordering, watchdog cancellation at stop, late drain finals, and duplicate final progress with queued-speech safeguards. Whole-stop tests bound setup/upload/EOF/close to one 20-second budget, release processing on expiry, reject late callbacks, preserve newer recordings, and prevent reentrant stop failure/cancellation from restoring the spinner.
 - `VoiceNetworkMonitorTest.kt` - validated internet, route loss/handoff, stale observations, and API-21 receiver cleanup.
 - `VoiceRecorderLifecycleTest.kt` - missed capture join/restart guard, callback ownership across an in-flight native read, immutable raw-energy speech evidence on quiet PCM during the speaking window, and errors/exceptions from a read interrupted by rapid pause/resume while new-phase errors still surface.
+- Its microphone routing integration regressions withhold external PCM before phone readiness, deliver the verified phone chunk and report terminal failure if the route switches back to a headset; pause/failed-resume release each owned Bluetooth request. Manager tests also keep Bluetooth activation outside the user's short silence auto-stop window.
 
 ## Non-obvious notes
 - Voice bugs split cleanly between transport/session setup and local post-processing; keep that distinction clear in new tests.

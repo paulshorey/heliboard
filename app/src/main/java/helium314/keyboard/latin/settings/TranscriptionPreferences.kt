@@ -15,6 +15,19 @@ import helium314.keyboard.latin.voice.GeminiTranscriptionClient
  * here even though nothing else references those providers.
  */
 object TranscriptionPreferences {
+    const val MICROPHONE_AUTOMATIC = "automatic"
+    const val MICROPHONE_BUILT_IN = "built_in"
+
+    fun readMicrophone(prefs: SharedPreferences): String =
+        sanitizeMicrophone(prefs.getString(Settings.PREF_VOICE_MICROPHONE, Defaults.PREF_VOICE_MICROPHONE))
+
+    fun writeMicrophone(prefs: SharedPreferences, value: String) {
+        prefs.edit { putString(Settings.PREF_VOICE_MICROPHONE, sanitizeMicrophone(value)) }
+    }
+
+    private fun sanitizeMicrophone(value: String?): String =
+        if (value == MICROPHONE_BUILT_IN) MICROPHONE_BUILT_IN else MICROPHONE_AUTOMATIC
+
     private const val LEGACY_CUSTOM_TERMS_PREF = "soniox_custom_terms"
 
     /**

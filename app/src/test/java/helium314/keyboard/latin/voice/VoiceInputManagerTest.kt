@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import helium314.keyboard.latin.settings.TranscriptionPreferences
+import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.utils.prefs
 import java.time.Duration
 import kotlin.test.assertEquals
@@ -91,6 +92,20 @@ class VoiceInputManagerTest {
     }
 
     @After fun tearDown() { manager.destroy() }
+
+    @Test fun bluetoothActivationDoesNotConsumeTheUsersSilenceAutoStopWindow() {
+        ApplicationProvider.getApplicationContext<Context>().prefs().edit()
+            .putInt(Settings.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS, 5).commit()
+        start()
+        advance(6_000)
+        assertTrue(manager.isRecording)
+        capture.onRecordingStarted()
+        advance(4_999)
+        assertTrue(manager.isRecording)
+        advance(1)
+        assertFalse(manager.isRecording)
+        assertTrue(errors.isEmpty())
+    }
     private fun start(ready: Boolean = true) {
         assertTrue(manager.startRecording())
         if (ready) stream.onStreamReady()

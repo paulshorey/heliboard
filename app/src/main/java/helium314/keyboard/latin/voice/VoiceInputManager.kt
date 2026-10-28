@@ -197,7 +197,11 @@ class VoiceInputManager internal constructor(
         stopReason = null
         hasFinalizedCurrentSilence = false
         voiceRecorder.setCallback(object : VoiceRecorder.RecordingCallback {
-            override fun onRecordingStarted() { }
+            override fun onRecordingStarted() {
+                if (isCurrent(sessionId) && currentState == State.RECORDING && !isSessionStopping && !localSpeechActive) {
+                    startAutoStopTimer()
+                }
+            }
             override fun onAudioChunk(pcmData: ByteArray, containsSpeech: Boolean) {
                 if (!isCurrent(sessionId) || !acceptingAudio) return
                 if (pcmData.isEmpty() || pcmData.size % 2 != 0) {
@@ -260,7 +264,7 @@ class VoiceInputManager internal constructor(
         // A synchronous recorder error may already have invalidated this session.
         if (!isCurrent(sessionId)) return false
         updateState(State.RECORDING)
-        startAutoStopTimer()
+        startAutoStopTimer(minimumDelayMs = VoiceMicrophoneRouter.ROUTE_TIMEOUT_MS + 1_000)
         return true
     }
 
@@ -331,7 +335,7 @@ class VoiceInputManager internal constructor(
         if (!isCurrent(sessionId)) return
         hasFinalizedCurrentSilence = false
         updateState(State.RECORDING)
-        startAutoStopTimer()
+        startAutoStopTimer(minimumDelayMs = VoiceMicrophoneRouter.ROUTE_TIMEOUT_MS + 1_000)
     }
     fun togglePause() {
         when (currentState) {
@@ -745,11 +749,12 @@ class VoiceInputManager internal constructor(
 
     // ── Timers ─────────────────────────────────────────────────────────
 
-    private fun startAutoStopTimer() {
+    private fun startAutoStopTimer(minimumDelayMs: Long = 0) {
         cancelAutoStopTimer()
         if (currentState == State.RECORDING) {
-            autoStopAtMs = SystemClock.elapsedRealtime() + autoStopSilenceMs
-            mainHandler.postDelayed(autoStopSilenceRunnable, autoStopSilenceMs)
+            val delayMs = maxOf(autoStopSilenceMs, minimumDelayMs)
+            autoStopAtMs = SystemClock.elapsedRealtime() + delayMs
+            mainHandler.postDelayed(autoStopSilenceRunnable, delayMs)
         }
     }
 
