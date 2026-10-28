@@ -183,6 +183,7 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
     public static final String PREF_GEMINI_USE_EDITOR_CONTEXT = "gemini_use_editor_context";
     public static final String PREF_GEMINI_CUSTOM_VOCABULARY = "gemini_custom_vocabulary";
     public static final String PREF_VOICE_CHUNK_SILENCE_SECONDS = "voice_chunk_silence_seconds";
+    public static final String PREF_VOICE_MICROPHONE = "voice_microphone";
     public static final String PREF_VOICE_SILENCE_THRESHOLD = "voice_silence_threshold";
     public static final String PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = "voice_auto_stop_silence_seconds";
 

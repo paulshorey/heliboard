@@ -185,6 +185,7 @@ object Defaults {
     // Two seconds keeps the server's own semantic end-of-speech detection in
     // charge for normal speech and only steps in when it has not fired.
     const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 2
+    const val PREF_VOICE_MICROPHONE = "automatic"
     const val PREF_VOICE_SILENCE_THRESHOLD = 220
     const val PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = 30
     const val PREF_EDIT_HISTORY_ENABLED = true

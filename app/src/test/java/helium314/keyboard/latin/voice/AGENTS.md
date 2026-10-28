@@ -8,6 +8,7 @@ Tests for the Gemini Live voice pipeline.
 - `VoiceAudioDiagnosticsTest.kt` - signed PCM math, clipping/zero counts, quiet evidence, bounded summaries, tail flushing and capture offsets.
 - `TranscriptPostProcessorTest.kt` - finalized-text cleanup tests.
 - `TranscriptionPreferencesTest.kt` - Gemini preference defaults, sanitization, and cleanup of previous providers' keys.
+- `VoiceMicrophoneRouterTest.kt` - built-in isolation, Bluetooth SCO/BLE preference, actual-route verification/timeout/loss, request cleanup and API 21/22/23/30/35 compatibility.
 - `VoiceContextVocabularyTest.kt` - editor-derived speech-biasing vocabulary, user-term priority, deduplication, and limits.
 
 - `GeminiAudioQueueTest.kt` - production bounded sender, queue acceptance/backpressure/failure, speech versus trailing quiet/control frames, stale frames, and EOF queue deadline.
@@ -15,6 +16,7 @@ Tests for the Gemini Live voice pipeline.
 - `VoiceNetworkMonitorTest.kt` - validated internet, route loss/handoff, stale observations, and API-21 receiver cleanup.
 - `VoiceRecorderLifecycleTest.kt` - missed capture join/restart guard, callback ownership across an in-flight native read, immutable raw-energy speech evidence on quiet PCM during the speaking window, and errors/exceptions from a read interrupted by rapid pause/resume while new-phase errors still surface.
 - Recorder tests also verify sustained quiet PCM delivery after local speech stops, actual route-type diagnostics without identity, nonfatal route-query failure, and API-21 routing guards.
+- Its microphone routing integration regressions withhold external PCM before phone readiness, deliver the verified phone chunk and report terminal failure if the route switches back to a headset; pause/failed-resume release each owned Bluetooth request. Manager tests also keep Bluetooth activation outside the user's short silence auto-stop window.
 
 ## Non-obvious notes
 - Manual-phrase tests cover explicit setup with no automatic fallback, activity/audio order, unchanged quiet PCM, shared backpressure budget, Pause/Stop without duplicate controls, long activity without an interim, resume/old-boundary deadlines, bounded Pause/Stop waits and network failure. Existing automatic-mode cases remain regression coverage.

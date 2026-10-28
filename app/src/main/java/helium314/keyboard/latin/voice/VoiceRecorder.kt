@@ -6,13 +6,18 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioDeviceInfo
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.widget.Toast
 import androidx.core.content.ContextCompat
+import helium314.keyboard.latin.R
+import helium314.keyboard.latin.settings.TranscriptionPreferences
 import helium314.keyboard.latin.utils.Log
+import helium314.keyboard.latin.utils.prefs
 import kotlin.concurrent.thread
 
 /**
@@ -117,6 +122,7 @@ class VoiceRecorder(private val context: Context) {
     )
 
     private var audioRecord: AudioRecord? = null
+    @Volatile private var microphoneRouter: VoiceMicrophoneRouter? = null
     private var recordingThread: Thread? = null
     @Volatile private var isRecording = false
     @Volatile private var isPaused = false
@@ -192,6 +198,7 @@ class VoiceRecorder(private val context: Context) {
                 return false
             }
 
+            prepareMicrophone()
             isPaused = false
             audioRecord?.startRecording()
             isRecording = true
@@ -200,7 +207,6 @@ class VoiceRecorder(private val context: Context) {
             recordingThread = thread(start = true, name = "VoiceRecorder") {
                 recordingLoop(callbackSnapshot)
             }
-            mainHandler.post { callbackSnapshot?.onRecordingStarted() }
             val configSnapshot = silenceConfig
             Log.i(
                 TAG,
@@ -263,6 +269,7 @@ class VoiceRecorder(private val context: Context) {
             } catch (e: Exception) {
                 Log.e(TAG, "Error pausing AudioRecord: ${e.message}")
             }
+            microphoneRouter?.release()
             Log.i(TAG, "Recording paused")
         }
     }
@@ -270,10 +277,12 @@ class VoiceRecorder(private val context: Context) {
     fun resumeRecording() {
         if (isRecording && isPaused) {
             try {
+                prepareMicrophone()
                 audioRecord?.startRecording()
                 capturePhase++
                 isPaused = false
             } catch (e: Exception) {
+                microphoneRouter?.release()
                 Log.e(TAG, "Error resuming AudioRecord: ${e.message}")
                 val callbackSnapshot = callback
                 mainHandler.post {
@@ -288,8 +297,25 @@ class VoiceRecorder(private val context: Context) {
     private fun releaseRecorder() {
         try { audioRecord?.release() } catch (_: Exception) {}
         audioRecord = null
+        microphoneRouter?.release()
+        microphoneRouter = null
         // Retain a stuck thread so a new session cannot reuse capture state.
         if (recordingThread?.isAlive != true) recordingThread = null
+    }
+
+    private fun prepareMicrophone() {
+        val recorder = checkNotNull(audioRecord)
+        microphoneRouter?.release()
+        val router = VoiceMicrophoneRouter(
+            context,
+            context.getSystemService(Context.AUDIO_SERVICE) as AudioManager,
+            TranscriptionPreferences.readMicrophone(context.prefs()),
+        )
+        microphoneRouter = router // Retain ownership even when preparation fails part way through.
+        router.prepare(recorder)
+        if (router.usesBluetooth) {
+            Toast.makeText(context, R.string.voice_microphone_connecting, Toast.LENGTH_LONG).show()
+        }
     }
 
     // ── Recording loop with silence detection ──────────────────────────
@@ -306,6 +332,7 @@ class VoiceRecorder(private val context: Context) {
         val diagnostics = VoiceAudioDiagnostics()
         var lastRoute: String? = null
         var pcmSamples = 0L
+        var readyPhase: Long? = null
         val configSnapshot = silenceConfig
         val minSilenceThreshold = configSnapshot.silenceThreshold
         val minSpeechThreshold = minSilenceThreshold + SPEECH_HYSTERESIS
@@ -343,6 +370,27 @@ class VoiceRecorder(private val context: Context) {
                     isSpeaking = false
                     consecutiveEmptyReads = 0
                     continue
+                }
+                // During route activation, never forward PCM from a different microphone.
+                // Check even on empty reads so an ignored routing request has a deadline.
+                val router = microphoneRouter
+                val routeReady = try {
+                    bytesRead < 0 || router == null || router.acceptsAudio(checkNotNull(audioRecord))
+                } catch (e: Exception) {
+                    if (!isRecording || isPaused || readPhase != capturePhase) continue
+                    throw e
+                }
+                if (!isRecording || isPaused || readPhase != capturePhase || !routeReady) continue
+                if (bytesRead > 0 && readyPhase != readPhase) {
+                    readyPhase = readPhase
+                    mainHandler.post {
+                        if (isRecording && !isPaused && capturePhase == readPhase && callback === recordingCallback) {
+                            recordingCallback?.onRecordingStarted()
+                            if (router?.usesBluetooth == true) {
+                                Toast.makeText(context, R.string.voice_microphone_ready, Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
                 }
                 when {
                     bytesRead > 0 -> {

@@ -34,6 +34,7 @@ not "optimize" latency at the expense of transcript quality.
 | File | Role |
 |------|------|
 | `VoiceRecorder.kt` | PCM16 capture, adaptive RMS silence detection |
+| `VoiceMicrophoneRouter.kt` | Automatic (prefer Bluetooth) or always built-in input, actual-route verification and phase-owned Bluetooth cleanup |
 | `GeminiTranscriptionClient.kt` | WebSocket client for `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=…`. Builds the `setup` payload at a negotiated [setup tier](#setup-tier-degradation), streams base64 PCM as JSON text frames, parses `inputTranscription` / `interimInputTranscription` / `turnComplete` / `goAway`, sends `audioStreamEnd` for Hybrid VAD, and reassembles editor segments |
 | `VoiceContextVocabulary.kt` | Harvests proper nouns and acronyms from editor text and merges them with user terms into `customVocabulary`; no bundled terms |
 | `TranscriptSegment.kt` | Finalized chunk passed from the client to the IME pipeline |
@@ -49,6 +50,19 @@ except `LatinIME.java` (parent package) and the settings UI/preferences helpers 
 `latin/settings` and `settings/screens`.
 
 ## Chunked Audio Flow
+
+The Microphone choice at the top of Transcription settings persists `automatic`
+(default, prefer BLE/SCO; otherwise Android chooses) or `built_in` (always phone,
+even with Bluetooth/wired/USB connected). Capture reads it on start/resume.
+On Android 6+ the recorder requests the input and verifies `getRoutedDevice()`
+before releasing PCM. Bluetooth uses `setCommunicationDevice` on Android 12+
+and legacy SCO on Android 6–11; owned requests are released on pause/stop/failure.
+Connecting/ready messages precede Bluetooth dictation. Activation has an 8-second
+deadline; losing the verified route stops dictation and requires explicit restart.
+The silence auto-stop window resets at microphone readiness, allowing activation
+to finish even with a short user-configured silence timeout.
+Android 5 retains platform routing and displays a compatibility explanation.
+No names, addresses or device IDs are stored or logged.
 
 1. Mic chunks are captured locally in `VoiceRecorder` (~100 ms each).
 2. `VoiceInputManager` builds a session config from preferences, the current

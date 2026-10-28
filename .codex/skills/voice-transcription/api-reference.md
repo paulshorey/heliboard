@@ -289,6 +289,7 @@ ephemeral tokens would require a server component.
 | `PREF_GEMINI_USE_EDITOR_CONTEXT` | Boolean | Harvest proper nouns near the caret into `customVocabulary` (default `true`) |
 | `PREF_GEMINI_CUSTOM_VOCABULARY` | String | User-defined `customVocabulary`, one word or phrase per line. Empty by default; no bundled terms. |
 | `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Local silence window before sending `audioStreamEnd` (default 2) |
+| `PREF_VOICE_MICROPHONE` | String | `automatic` (default, prefer Bluetooth) or `built_in`; read on start/resume; explicit routing requires Android 6+ |
 | `PREF_VOICE_SILENCE_THRESHOLD` | Int | RMS threshold used for silence detection |
 | `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` | Int | Silence duration before auto-stopping recording |
 

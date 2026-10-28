@@ -24,6 +24,17 @@ class TranscriptionPreferencesTest {
         assertEquals(2500, TranscriptionPreferences.readGeminiConfig(prefs).endOfSpeechSilenceMs)
     }
 
+    @Test fun microphoneChoicePersistsAndInvalidValuesUseAutomatic() {
+        val prefs = newPrefs()
+        assertEquals(TranscriptionPreferences.MICROPHONE_AUTOMATIC, TranscriptionPreferences.readMicrophone(prefs))
+        TranscriptionPreferences.writeMicrophone(prefs, TranscriptionPreferences.MICROPHONE_BUILT_IN)
+        assertEquals(TranscriptionPreferences.MICROPHONE_BUILT_IN, TranscriptionPreferences.readMicrophone(prefs))
+        prefs.edit().putString(Settings.PREF_VOICE_MICROPHONE, "disconnected-device-id").commit()
+        assertEquals(TranscriptionPreferences.MICROPHONE_AUTOMATIC, TranscriptionPreferences.readMicrophone(prefs))
+        TranscriptionPreferences.writeMicrophone(prefs, TranscriptionPreferences.MICROPHONE_AUTOMATIC)
+        assertEquals(Defaults.PREF_VOICE_MICROPHONE, prefs.getString(Settings.PREF_VOICE_MICROPHONE, null))
+    }
+
     @Test
     fun readGeminiApiKey_clearsPreviousProviderKeysWithoutCopyingThem() {
         val prefs = newPrefs()

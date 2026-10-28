@@ -4,9 +4,12 @@ package helium314.keyboard.latin.voice
 import android.app.Application
 import android.content.Context
 import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
+import helium314.keyboard.latin.settings.TranscriptionPreferences
+import helium314.keyboard.latin.utils.prefs
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
@@ -21,6 +24,76 @@ import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 class VoiceRecorderLifecycleTest {
+    @Test fun pauseAndFailedResumeReleaseTheirOwnBluetoothRequests() {
+        val context = Mockito.spy(ApplicationProvider.getApplicationContext<Context>())
+        TranscriptionPreferences.writeMicrophone(context.prefs(), TranscriptionPreferences.MICROPHONE_AUTOMATIC)
+        val manager = Mockito.mock(AudioManager::class.java)
+        Mockito.doReturn(manager).`when`(context).getSystemService(Context.AUDIO_SERVICE)
+        val headset = Mockito.mock(AudioDeviceInfo::class.java)
+        Mockito.`when`(headset.type).thenReturn(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+        Mockito.`when`(manager.getDevices(AudioManager.GET_DEVICES_INPUTS)).thenReturn(arrayOf(headset))
+        Mockito.`when`(manager.availableCommunicationDevices).thenReturn(listOf(headset))
+        Mockito.`when`(manager.setCommunicationDevice(headset)).thenReturn(true)
+        val audio = Mockito.mock(AudioRecord::class.java)
+        Mockito.`when`(audio.setPreferredDevice(headset)).thenReturn(true)
+        Mockito.doThrow(IllegalStateException("capture unavailable")).`when`(audio).startRecording()
+        val router = VoiceMicrophoneRouter(context, manager, TranscriptionPreferences.MICROPHONE_AUTOMATIC)
+        router.prepare(audio)
+        val recorder = VoiceRecorder(context)
+        val events = Events()
+        recorder.setCallback(events)
+        setField(recorder, "audioRecord", audio)
+        setField(recorder, "microphoneRouter", router)
+        setField(recorder, "isRecording", true)
+        try {
+            recorder.pauseRecording()
+            Mockito.verify(manager, Mockito.times(1)).clearCommunicationDevice()
+            recorder.resumeRecording()
+            shadowOf(Looper.getMainLooper()).idle()
+            Mockito.verify(manager, Mockito.times(2)).setCommunicationDevice(headset)
+            Mockito.verify(manager, Mockito.times(2)).clearCommunicationDevice()
+            assertTrue(recorder.isCurrentlyPaused)
+            assertEquals(listOf("Failed to resume recording: capture unavailable"), events.errors)
+        } finally { recorder.stopRecording() }
+        Mockito.verify(manager, Mockito.times(2)).clearCommunicationDevice()
+    }
+
+    @Test fun selectedPhoneRouteWithholdsHeadsetPcmThenFailsOnExternalRouteChange() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val recorder = VoiceRecorder(context)
+        val events = Events()
+        recorder.setCallback(events)
+        val phone = Mockito.mock(AudioDeviceInfo::class.java)
+        val headset = Mockito.mock(AudioDeviceInfo::class.java)
+        Mockito.`when`(phone.type).thenReturn(AudioDeviceInfo.TYPE_BUILTIN_MIC)
+        Mockito.`when`(headset.type).thenReturn(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+        val manager = Mockito.mock(AudioManager::class.java)
+        Mockito.`when`(manager.getDevices(AudioManager.GET_DEVICES_INPUTS)).thenReturn(arrayOf(headset, phone))
+        var reads = 0
+        val audio = Mockito.mock(AudioRecord::class.java) { call ->
+            when (call.method.name) {
+                "setPreferredDevice" -> true
+                "getRoutedDevice" -> if (reads == 2) phone else headset
+                "read" -> { reads++; (call.arguments[0] as ByteArray).fill(reads.toByte()); 3200 }
+                else -> Mockito.RETURNS_DEFAULTS.answer(call)
+            }
+        }
+        val router = VoiceMicrophoneRouter(context, manager, TranscriptionPreferences.MICROPHONE_BUILT_IN)
+        router.prepare(audio)
+        setField(recorder, "isRecording", true)
+        setField(recorder, "audioRecord", audio)
+        setField(recorder, "microphoneRouter", router)
+        try {
+            VoiceRecorder::class.java.getDeclaredMethod("recordingLoop", VoiceRecorder.RecordingCallback::class.java)
+                .apply { isAccessible = true }.invoke(recorder, events)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(3, reads)
+            assertEquals(1, events.audioChunks)
+            assertEquals(1, events.errors.size)
+            assertTrue(events.errors.single().contains("microphone changed or disconnected"))
+        } finally { recorder.stopRecording() }
+    }
+
     @Test fun missedCaptureJoinReportsFailureAndBlocksReuseOfTheLiveThread() {
         val recorder = VoiceRecorder(ApplicationProvider.getApplicationContext<Context>())
         val events = Events()

@@ -24,10 +24,27 @@ End-to-end voice transcription pipeline: local capture, Gemini Live real-time st
 └─────────────────┘     └──────────────────────┘
 ```
 
+## Manual phrase comparison
+
+The flows below describe automatic mode. With the opt-in manual-phrase setting,
+server VAD is disabled and every capture phase is bracketed by `activityStart`
+before first PCM and `activityEnd` at explicit Pause/Stop. No local silence
+finalization/auto-stop or open-activity transcription-response deadline applies.
+Declared activity includes quiet PCM for final/queue progress. Explicit boundary
+waits, Stop/upload/network/editor/cancellation/session bounds remain enforced.
+Never substitute `audioStreamEnd` or silently negotiate away this configuration.
+The same selected/verified microphone and unchanged PCM are used in both modes.
+
 ## Components
 
 ### VoiceRecorder.kt
 Captures audio from the microphone with client-side silence detection.
+
+`VoiceMicrophoneRouter` reads the saved automatic/built-in choice on start/resume,
+requests the input, and verifies its actual route before PCM delivery on API 23+.
+Bluetooth activation shows connecting/ready messages and times out after 8 seconds.
+Route loss is terminal; pause/stop/failure releases owned Bluetooth requests.
+API 21–22 retain platform routing without device selection.
 - **Format**: PCM16 little-endian, 16 kHz, mono — the Live API's native input format
 - **Silence detection**: adaptive RMS threshold on each 100 ms chunk
 - **Callbacks**: supplies PCM chunks to `VoiceInputManager`; speech-stop silence requests a turn finalize, and longer silence requests auto-stop

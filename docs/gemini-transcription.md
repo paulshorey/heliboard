@@ -55,6 +55,7 @@ costs the user more than a second of waiting.
 - `app/src/main/java/helium314/keyboard/latin/voice/TranscriptSegment.kt`
 - `app/src/main/java/helium314/keyboard/latin/voice/VoiceInputManager.kt`
 - `app/src/main/java/helium314/keyboard/latin/voice/VoiceRecorder.kt`
+- `app/src/main/java/helium314/keyboard/latin/voice/VoiceMicrophoneRouter.kt`
 - `app/src/main/java/helium314/keyboard/latin/voice/VoiceNetworkMonitor.kt`
 - `app/src/main/java/helium314/keyboard/latin/settings/TranscriptionPreferences.kt`
 - `app/src/main/java/helium314/keyboard/settings/screens/TranscriptionScreen.kt`
@@ -63,6 +64,56 @@ costs the user more than a second of waiting.
 - `app/src/main/java/helium314/keyboard/latin/LatinIME.java`
 - `tools/gemini-live-smoke-test.py` — verifies the wire protocol against the real
   endpoint
+
+## Microphone selection
+
+The first setting under **Transcription → Microphone** persists one of two policies:
+
+- **Automatic (prefer Bluetooth)** (default): request a connected BLE or SCO headset
+  microphone when available. Without Bluetooth input, Android selects the input,
+  including a wired or USB microphone when connected.
+- **Built-in phone microphone**: explicitly request the phone's microphone even
+  when Bluetooth, wired or USB input is connected. If the built-in input is absent
+  or Android refuses the route, report an error instead of using an external mic.
+
+The choice is read at every start/resume; it never stores transient device IDs or
+names. Android 6+ supports explicit input preference and actual-route queries.
+Android 5 retains its platform route and shows a compatibility explanation in settings.
+
+`VoiceMicrophoneRouter` calls `AudioRecord.setPreferredDevice` before capture.
+For Bluetooth it also owns an `AudioManager.setCommunicationDevice` request on
+Android 12+, selecting an **output** from `availableCommunicationDevices` (Android
+selects its matching input). Android 6–11 uses `startBluetoothSco`/`stopBluetoothSco`.
+Only the normal `MODIFY_AUDIO_SETTINGS` permission is added: there is no pairing,
+scanning or direct Bluetooth-device access. No global audio mode is changed.
+
+Android's preferred input is only a request. Before delivering each PCM read, the
+router checks the actual `AudioRecord.getRoutedDevice()` type. During initial
+activation, reads from another/unknown route are withheld for at most 8 seconds;
+Bluetooth displays connecting and ready messages, so wait for ready before speaking.
+The user's silence auto-stop window starts again at microphone readiness; its
+startup guard allows route activation to finish even with a 5-second silence setting.
+After readiness, route loss or a change to another input type stops dictation and
+uses the existing interruption handling. Restart explicitly after disconnecting a
+headset to choose the current automatic fallback. Quiet PCM from the verified
+input is still forwarded without a loudness gate.
+
+Pause releases the phase's Bluetooth request. Resume reapplies the current saved
+preference and verifies the route again. Stop, cancellation and setup/resume failure
+also release owned requests; platform routing is not reset when this app owns none.
+Route diagnostics contain types only, never names, addresses or device IDs.
+
+Research: FUTO exposes a [Bluetooth Microphone preference](https://docs.keyboard.futo.tech/settings/voiceinput).
+Android documents [preferred recording inputs](https://developer.android.com/develop/connectivity/bluetooth/ble-audio/audio-recording)
+and [communication-device selection and cleanup](https://developer.android.com/reference/android/media/AudioManager#setCommunicationDevice(android.media.AudioDeviceInfo)).
+
+Phone acceptance remains separate from JVM tests: connect a Bluetooth headset,
+choose built-in, and speak near the phone with the headset distant; reverse the
+positions under Automatic after the ready message. Repeat after an app restart,
+pause/resume, and with a wired/USB mic. Unplug/disconnect during capture, retry with
+the current devices, and confirm normal media routing returns after stop/cancel.
+Test Bluetooth Classic and BLE on actual Android versions; Robolectric cannot
+prove a manufacturer's audio policy or headset activation behavior.
 
 ## The `setup` payload
 
@@ -488,8 +539,11 @@ Do not commit raw user log exports or claim server VAD is proven responsible.
 
 For a controlled phone comparison:
 
-1. Keep the same microphone position, quiet room, language and Verbatim setting.
-   Enable **Finish phrases manually (test)** before starting a fresh recording.
+1. First select the intended Microphone policy (Automatic prefers connected
+   Bluetooth), wait for readiness and verify the captured route. Compare normal
+   and quiet speech with **Finish phrases manually (test)** off. If omissions
+   remain, turn it on for a fresh recording with the same route, position, quiet
+   room, language and Verbatim setting.
 2. Read a short normal/quiet/normal passage without tapping controls at the volume
    changes. Tap **Pause** after the entire passage, then wait for finalized text.
    Stop after the final arrives and leave the editor visible until processing
@@ -524,10 +578,12 @@ the configured chunk silence, or eventually auto-stop recording.
 
 Gemini has a separate server VAD, with high start sensitivity and low end
 sensitivity in the full setup tier. The app has no Gemini speaker-identity filter
-or local background-voice rejection. It uses Android's `MIC` source without
-explicit Bluetooth routing, gain control or noise suppression. Earbuds being
-connected does not establish which microphone Android selected. Firmware/platform
-processing may affect the signal before PCM reaches the app.
+or local background-voice rejection. It uses Android's `MIC` source with the saved
+Microphone policy and verifies the selected route before forwarding PCM. It adds
+no software gain or noise suppression. Earbuds being connected alone does not
+establish which microphone an older diagnostics build selected; the October 28
+trials reported the built-in route. Firmware/platform processing may affect the
+signal before PCM reaches the app.
 
 The existing **Transcription → Voice diagnostics** export now also includes:
 

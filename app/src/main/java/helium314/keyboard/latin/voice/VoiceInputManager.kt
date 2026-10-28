@@ -198,7 +198,11 @@ class VoiceInputManager internal constructor(
         stopReason = null
         hasFinalizedCurrentSilence = false
         voiceRecorder.setCallback(object : VoiceRecorder.RecordingCallback {
-            override fun onRecordingStarted() { }
+            override fun onRecordingStarted() {
+                if (isCurrent(sessionId) && currentState == State.RECORDING && !isSessionStopping && !localSpeechActive) {
+                    startAutoStopTimer()
+                }
+            }
             override fun onAudioChunk(pcmData: ByteArray, containsSpeech: Boolean) {
                 if (!isCurrent(sessionId) || !acceptingAudio) return
                 if (pcmData.isEmpty() || pcmData.size % 2 != 0) {
@@ -266,7 +270,7 @@ class VoiceInputManager internal constructor(
         // A synchronous recorder error may already have invalidated this session.
         if (!isCurrent(sessionId)) return false
         updateState(State.RECORDING)
-        startAutoStopTimer()
+        startAutoStopTimer(minimumDelayMs = VoiceMicrophoneRouter.ROUTE_TIMEOUT_MS + 1_000)
         return true
     }
 
@@ -344,7 +348,7 @@ class VoiceInputManager internal constructor(
         }
         hasFinalizedCurrentSilence = false
         updateState(State.RECORDING)
-        startAutoStopTimer()
+        startAutoStopTimer(minimumDelayMs = VoiceMicrophoneRouter.ROUTE_TIMEOUT_MS + 1_000)
     }
     fun togglePause() {
         when (currentState) {
@@ -604,7 +608,8 @@ class VoiceInputManager internal constructor(
         // duration. Repeated controls/interims cannot extend this boundary's wait.
         val boundaryAtMs = finalizedAtMs ?: return
         // A raw RMS spike may be breathing or room noise. Only recognized words
-        // justify waiting for a final transcript after a speech boundary.
+        // justify that wait in automatic mode. Manual activity is explicitly
+        // declared, so its quiet audio also requires a final after the boundary.
         val pendingFinal = unconfirmedTranscript || (geminiConfig.manualPhrases && unconfirmedSpeech)
         if (isSessionStopping || localSpeechActive || !pendingFinal || finalTimeout != null) return
         finalTimeout = Runnable {
@@ -771,11 +776,12 @@ class VoiceInputManager internal constructor(
 
     // ── Timers ─────────────────────────────────────────────────────────
 
-    private fun startAutoStopTimer() {
+    private fun startAutoStopTimer(minimumDelayMs: Long = 0) {
         cancelAutoStopTimer()
         if (currentState == State.RECORDING && !geminiConfig.manualPhrases) {
-            autoStopAtMs = SystemClock.elapsedRealtime() + autoStopSilenceMs
-            mainHandler.postDelayed(autoStopSilenceRunnable, autoStopSilenceMs)
+            val delayMs = maxOf(autoStopSilenceMs, minimumDelayMs)
+            autoStopAtMs = SystemClock.elapsedRealtime() + delayMs
+            mainHandler.postDelayed(autoStopSilenceRunnable, delayMs)
         }
     }
 

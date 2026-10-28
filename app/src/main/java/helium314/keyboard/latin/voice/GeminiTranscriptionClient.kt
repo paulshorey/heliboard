@@ -916,6 +916,7 @@ class GeminiTranscriptionClient {
     internal fun queuedFrameBytes(): Long = webSocket?.queueSize() ?: 0L
 
     /**
+     * Manual phrases use activityEnd; automatic mode uses audioStreamEnd.
      * Ask Gemini to finalize the current turn immediately instead of waiting out
      * its own silence window (Hybrid VAD). The session stays open and the next
      * audio chunk reopens the stream, so this is also the right signal to send
@@ -939,7 +940,7 @@ class GeminiTranscriptionClient {
             }
             sent
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to send Gemini audioStreamEnd: ${e.message}")
+            Log.e(TAG, "Failed to send Gemini speech boundary: ${e.message}")
             false
         }
     }

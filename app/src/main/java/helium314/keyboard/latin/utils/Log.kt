@@ -93,6 +93,7 @@ object Log {
     private val VOICE_DIAGNOSTIC_TAGS = setOf(
         "VoiceInputManager",
         "VoiceRecorder",
+        "VoiceMicrophoneRouter",
         "GeminiTranscription",
         "VoiceNetwork",
     )
