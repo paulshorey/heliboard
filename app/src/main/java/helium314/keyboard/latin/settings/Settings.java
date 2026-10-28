@@ -177,6 +177,7 @@ public final class Settings implements SharedPreferences.OnSharedPreferenceChang
     // Voice Input (Gemini Live transcription)
     public static final String PREF_GEMINI_API_KEY = "gemini_api_key";
     public static final String PREF_GEMINI_TRANSCRIPTION_MODE = "gemini_transcription_mode";
+    public static final String PREF_GEMINI_MANUAL_PHRASES = "gemini_manual_phrases";
     public static final String PREF_GEMINI_END_OF_SPEECH_SILENCE_MS = "gemini_end_of_speech_silence_ms";
     public static final String PREF_GEMINI_AUTO_DETECT_LANGUAGE = "gemini_auto_detect_language";
     public static final String PREF_GEMINI_USE_EDITOR_CONTEXT = "gemini_use_editor_context";

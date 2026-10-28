@@ -21,7 +21,18 @@ speech-to-text model `gemini-3.5-transcribe-live`. Documentation:
 - **Handshake**: the first client message must be `setup`, and the client must wait
   for `setupComplete` before sending anything else.
 
-### Setup message (first WebSocket text frame)
+### Manual phrase comparison
+
+With `PREF_GEMINI_MANUAL_PHRASES` on, replace the automatic detector object with
+`{"disabled": true}` and set `realtimeInputConfig.activityHandling` to
+`"NO_INTERRUPTION"`. Send `{"realtimeInput":{"activityStart":{}}}` before a phase's
+first PCM and `{"realtimeInput":{"activityEnd":{}}}` on explicit Pause/Stop.
+`audioStreamEnd` is for automatic detection only and must never be sent here.
+Schema fallback may remove the optional instruction, but must not remove manual
+activity configuration. See Google's [manual VAD guide](https://ai.google.dev/gemini-api/docs/live-api/live-transcribe#manual-vad-push-to-talk)
+and [wire reference](https://ai.google.dev/api/live#bidigeneratecontentrealtimeinput).
+
+### Setup message (first WebSocket text frame, automatic mode)
 
 ```json
 {

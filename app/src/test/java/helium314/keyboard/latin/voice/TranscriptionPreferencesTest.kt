@@ -14,6 +14,15 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class TranscriptionPreferencesTest {
+    @Test fun manualPhraseComparisonIsOptInAndPreservesSavedAutomaticSettings() {
+        val prefs = newPrefs()
+        assertFalse(TranscriptionPreferences.readGeminiConfig(prefs).manualPhrases)
+        TranscriptionPreferences.writeGeminiEndOfSpeechSilenceMs(prefs, 2500)
+        TranscriptionPreferences.writeGeminiManualPhrases(prefs, true)
+        assertTrue(TranscriptionPreferences.readGeminiConfig(prefs).manualPhrases)
+        TranscriptionPreferences.writeGeminiManualPhrases(prefs, false)
+        assertEquals(2500, TranscriptionPreferences.readGeminiConfig(prefs).endOfSpeechSilenceMs)
+    }
 
     @Test
     fun readGeminiApiKey_clearsPreviousProviderKeysWithoutCopyingThem() {

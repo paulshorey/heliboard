@@ -131,6 +131,74 @@ class GeminiTranscriptionClientStreamTest {
         assertTrue(lines.none { it.message.contains(secret) || it.message.contains("extended") })
     }
 
+    @Test fun manualPhrasesBracketEveryCapturePhaseAndNeverSendAudioStreamEnd() {
+        readyServer()
+        startClient(manualPhrases = true)
+        awaitUntil { events.contains("ready") }
+        assertTrue(client.sendAudioChunk(ByteArray(3200)))
+        assertTrue(client.finalizeTurn())
+        assertTrue(client.sendAudioChunk(ByteArray(3200)))
+        assertTrue(client.finishStreaming())
+        awaitUntil { serverReceived.size == 7 }
+        val kinds = serverReceived.drop(1).map {
+            JSONObject(it).getJSONObject("realtimeInput").keys().asSequence().single()
+        }
+        assertEquals(listOf("activityStart", "audio", "activityEnd", "activityStart", "audio", "activityEnd"), kinds)
+        val setup = JSONObject(serverReceived.first()).getJSONObject("setup")
+        assertTrue(setup.getJSONObject("realtimeInputConfig")
+            .getJSONObject("automaticActivityDetection").getBoolean("disabled"))
+        currentServerSocket!!.send(
+            """{"serverContent":{"interimInputTranscription":{"text":"provisional quiet phrase"}}}"""
+        )
+        awaitUntil { events.contains("interim") }
+        assertTrue(transcripts.isEmpty())
+        currentServerSocket!!.send(
+            """{"serverContent":{"inputTranscription":{"text":"Complete quiet phrase."}}}"""
+        )
+        awaitUntil { transcripts.isNotEmpty() }
+        assertEquals("Complete quiet phrase.", transcripts.single().text)
+    }
+
+    @Test fun manualStopAfterPauseDoesNotSendAnExtraEmptyActivityEnd() {
+        readyServer(); startClient(manualPhrases = true)
+        awaitUntil { events.contains("ready") }
+        assertTrue(client.sendAudioChunk(ByteArray(3200)))
+        assertTrue(client.finalizeTurn())
+        assertTrue(client.finishStreaming())
+        awaitUntil { serverReceived.size == 4 }
+        assertEquals(1, serverReceived.count { it.contains("activityEnd") })
+        assertTrue(serverReceived.none { it.contains("audioStreamEnd") })
+    }
+
+    @Test fun manualModeNeverInheritsAnAutomaticOnlyCachedSetupTier() {
+        readyServer()
+        GeminiTranscriptionClient.negotiatedSetupTier = GeminiTranscriptionClient.Companion.SetupTier.MINIMAL
+        startClient(manualPhrases = true)
+        awaitUntil { events.contains("ready") }
+        val setup = JSONObject(serverReceived.single()).getJSONObject("setup")
+        assertTrue(setup.getJSONObject("realtimeInputConfig")
+            .getJSONObject("automaticActivityDetection").getBoolean("disabled"))
+    }
+
+    @Test fun rejectedManualDetectionCannotFallBackToAutomaticDetection() {
+        repeat(2) {
+            enqueueServer(object : WebSocketListener() {
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    serverReceived.add(text)
+                    webSocket.close(1007, "unsupported setup field")
+                }
+            })
+        }
+        startClient(manualPhrases = true)
+        awaitUntil { events.any { it.startsWith("error:") } }
+        assertEquals(2, serverReceived.size)
+        assertTrue(events.none { it == "ready" })
+        assertTrue(serverReceived.all {
+            JSONObject(it).getJSONObject("setup").getJSONObject("realtimeInputConfig")
+                .getJSONObject("automaticActivityDetection").getBoolean("disabled")
+        })
+    }
+
     @Test
     fun holdsAudioUntilSetupCompleteArrives() {
         enqueueServer(object : WebSocketListener() {
@@ -403,14 +471,15 @@ class GeminiTranscriptionClientStreamTest {
         server.enqueue(MockResponse().withWebSocketUpgrade(tracking))
     }
 
-    private fun startClient() {
+    private fun startClient(manualPhrases: Boolean = false) {
         client.startStreaming(
             apiKey = "test-key",
             sessionConfig = GeminiTranscriptionClient.buildSessionConfig(
                 languageTag = "en_US",
                 autoDetectLanguage = false,
                 transcriptionMode = "SMART",
-                endOfSpeechSilenceMs = 1500
+                endOfSpeechSilenceMs = 1500,
+                manualPhrases = manualPhrases
             ),
             callback = object : GeminiTranscriptionClient.StreamingCallback {
                 override fun onStreamReady() {

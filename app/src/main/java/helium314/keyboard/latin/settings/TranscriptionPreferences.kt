@@ -53,7 +53,8 @@ object TranscriptionPreferences {
         val autoDetectLanguage: Boolean,
         /** When true, editor text near the caret seeds `customVocabulary`. */
         val useEditorContext: Boolean,
-        val customVocabulary: List<String>
+        val customVocabulary: List<String>,
+        val manualPhrases: Boolean = false
     )
 
     fun readGeminiApiKey(prefs: SharedPreferences): String {
@@ -79,7 +80,8 @@ object TranscriptionPreferences {
             endOfSpeechSilenceMs = readGeminiEndOfSpeechSilenceMs(prefs),
             autoDetectLanguage = readGeminiAutoDetectLanguage(prefs),
             useEditorContext = readGeminiUseEditorContext(prefs),
-            customVocabulary = readGeminiCustomVocabulary(prefs)
+            customVocabulary = readGeminiCustomVocabulary(prefs),
+            manualPhrases = readGeminiManualPhrases(prefs)
         )
     }
 
@@ -114,6 +116,13 @@ object TranscriptionPreferences {
                 GeminiTranscriptionClient.TRANSCRIPTION_MODE_VERBATIM
             }
         )
+    }
+
+    fun readGeminiManualPhrases(prefs: SharedPreferences): Boolean =
+        prefs.getBoolean(Settings.PREF_GEMINI_MANUAL_PHRASES, Defaults.PREF_GEMINI_MANUAL_PHRASES)
+
+    fun writeGeminiManualPhrases(prefs: SharedPreferences, enabled: Boolean) {
+        prefs.edit { putBoolean(Settings.PREF_GEMINI_MANUAL_PHRASES, enabled) }
     }
 
     fun readGeminiEndOfSpeechSilenceMs(prefs: SharedPreferences): Int {

@@ -211,7 +211,8 @@ class GeminiTranscriptionClient {
             /** `automaticActivityDetection.silenceDurationMs`. */
             val endOfSpeechSilenceMs: Int,
             /** `inputAudioTranscription.customVocabulary`. */
-            val customVocabulary: List<String>
+            val customVocabulary: List<String>,
+            val manualPhrases: Boolean = false
         )
 
         internal fun buildSessionConfig(
@@ -220,7 +221,8 @@ class GeminiTranscriptionClient {
             transcriptionMode: String,
             endOfSpeechSilenceMs: Int,
             userVocabulary: List<String> = emptyList(),
-            editorContext: String? = null
+            editorContext: String? = null,
+            manualPhrases: Boolean = false
         ): SessionConfig {
             val resolvedLanguage = if (autoDetectLanguage) null else resolveLanguageCode(languageTag)
             return SessionConfig(
@@ -230,6 +232,7 @@ class GeminiTranscriptionClient {
                     MIN_END_OF_SPEECH_SILENCE_MS,
                     MAX_END_OF_SPEECH_SILENCE_MS
                 ),
+                manualPhrases = manualPhrases,
                 customVocabulary = VoiceContextVocabulary.build(
                     userTerms = userVocabulary,
                     editorContext = editorContext,
@@ -249,6 +252,9 @@ class GeminiTranscriptionClient {
             "$streamingEndpoint?key=$apiKey"
 
         internal fun buildSetupMessage(config: SessionConfig, tier: SetupTier): String {
+            require(!config.manualPhrases || tier == SetupTier.FULL || tier == SetupTier.NO_SYSTEM_INSTRUCTION) {
+                "Manual phrases require explicit activity detection configuration"
+            }
             val transcription = JSONObject()
                 // Explicit empty array is the documented way to request
                 // automatic language identification.
@@ -274,21 +280,26 @@ class GeminiTranscriptionClient {
                 .put("inputAudioTranscription", transcription)
 
             if (tier == SetupTier.FULL || tier == SetupTier.NO_SYSTEM_INSTRUCTION) {
+                val detection = if (config.manualPhrases) {
+                    JSONObject().put("disabled", true)
+                } else {
+                    JSONObject()
+                        .put("disabled", false)
+                        .put("startOfSpeechSensitivity", START_OF_SPEECH_SENSITIVITY)
+                        .put("prefixPaddingMs", PREFIX_PADDING_MS)
+                        .put("endOfSpeechSensitivity", END_OF_SPEECH_SENSITIVITY)
+                        .put("silenceDurationMs", config.endOfSpeechSilenceMs)
+                }
                 setup.put(
                     "realtimeInputConfig",
                     JSONObject().put(
                         "automaticActivityDetection",
-                        JSONObject()
-                            // Server VAD stays on for accurate speech onset with
-                            // prefix padding; the client only adds an early
-                            // finalize via audioStreamEnd (Hybrid VAD).
-                            .put("disabled", false)
-                            .put("startOfSpeechSensitivity", START_OF_SPEECH_SENSITIVITY)
-                            .put("prefixPaddingMs", PREFIX_PADDING_MS)
-                            .put("endOfSpeechSensitivity", END_OF_SPEECH_SENSITIVITY)
-                            .put("silenceDurationMs", config.endOfSpeechSilenceMs)
+                        detection
                     )
                 )
+                if (config.manualPhrases) {
+                    setup.getJSONObject("realtimeInputConfig").put("activityHandling", "NO_INTERRUPTION")
+                }
             }
 
             if (tier == SetupTier.FULL) {
@@ -328,6 +339,11 @@ class GeminiTranscriptionClient {
                 "realtimeInput",
                 JSONObject().put("audioStreamEnd", true)
             ).toString()
+
+        internal val ACTIVITY_START_MESSAGE: String =
+            JSONObject().put("realtimeInput", JSONObject().put("activityStart", JSONObject())).toString()
+        internal val ACTIVITY_END_MESSAGE: String =
+            JSONObject().put("realtimeInput", JSONObject().put("activityEnd", JSONObject())).toString()
 
         internal fun isSetupComplete(json: JSONObject): Boolean = json.has("setupComplete")
 
@@ -667,6 +683,8 @@ class GeminiTranscriptionClient {
     private var pendingFinalizeCloseRunnable: Runnable? = null
 
     private val accumulator = TranscriptAccumulator()
+    private var manualPhrases = false
+    private var activityOpen = false
     private var diagnosticInterims = 0
     private var diagnosticLastInterimChars = 0
     private var diagnosticLastInterimLogAtMs: Long? = null
@@ -697,7 +715,12 @@ class GeminiTranscriptionClient {
         sessionConfig: SessionConfig,
         callback: StreamingCallback
     ) {
-        startStreaming(apiKey, sessionConfig, callback, negotiatedSetupTier)
+        // A cached automatic-mode fallback must not silently re-enable server VAD.
+        val tier = if (sessionConfig.manualPhrases &&
+            negotiatedSetupTier !in listOf(SetupTier.FULL, SetupTier.NO_SYSTEM_INSTRUCTION)) {
+            SetupTier.NO_SYSTEM_INSTRUCTION
+        } else negotiatedSetupTier
+        startStreaming(apiKey, sessionConfig, callback, tier)
     }
 
     private fun startStreaming(
@@ -711,6 +734,8 @@ class GeminiTranscriptionClient {
         stopStreamingInternal(cancel = true, clearCallback = false)
 
         this.callback = callback
+        manualPhrases = sessionConfig.manualPhrases
+        activityOpen = false
         isClosing = false
         isSessionReady = false
         awaitingSetupTier = tier
@@ -731,6 +756,7 @@ class GeminiTranscriptionClient {
                 "(model=$MODEL, setupTier=$tier, " +
                 "languages=${sessionConfig.languageCodes.ifEmpty { listOf("auto") }}, " +
                 "mode=${sessionConfig.transcriptionMode}, " +
+                "manualPhrases=${sessionConfig.manualPhrases}, " +
                 "endOfSpeechSilenceMs=${sessionConfig.endOfSpeechSilenceMs}, " +
                 "customVocabulary=${sessionConfig.customVocabulary.size})"
         )
@@ -829,6 +855,7 @@ class GeminiTranscriptionClient {
         // would just repeat the same failure.
         if (statusFromReason(reason) != null) return false
         val fallback = rejectedTier.next() ?: return false
+        if (sessionConfig.manualPhrases && fallback == SetupTier.NO_REALTIME_CONFIG) return false
         negotiatedSetupTier = fallback
         Log.w(
             TAG,
@@ -849,12 +876,19 @@ class GeminiTranscriptionClient {
         }
         val socket = webSocket ?: return AudioSendResult.FAILED
         val message = buildAudioMessage(pcmData)
+        val startMessage = if (manualPhrases && !activityOpen) ACTIVITY_START_MESSAGE else null
         // Audio frames are ASCII (base64 + JSON). Reserve space for control frames.
         if (message.length > MAX_SOCKET_AUDIO_BYTES) return AudioSendResult.FAILED
-        if (socket.queueSize() + message.length > MAX_SOCKET_AUDIO_BYTES) {
+        if (socket.queueSize() + message.length + (startMessage?.length ?: 0) > MAX_SOCKET_AUDIO_BYTES) {
             return AudioSendResult.BACKPRESSURE
         }
         return try {
+            if (startMessage != null) {
+                if (!socket.send(startMessage)) return AudioSendResult.FAILED
+                activityOpen = true
+                nonSpeechSuffixBytes += startMessage.length
+                Log.i(TAG, "connection=$activeConnectionToken activityStart sent")
+            }
             if (!socket.send(message)) return AudioSendResult.FAILED
             if (containsSpeech) {
                 hasAcceptedSpeech = true
@@ -892,9 +926,17 @@ class GeminiTranscriptionClient {
         if (isClosing) return false
         val socket = webSocket ?: return false
         if (!isSessionReady) return false
+        // Pause then Stop without resumed PCM must not create an empty second activity.
+        if (manualPhrases && !activityOpen) return true
         return try {
-            val sent = socket.send(AUDIO_STREAM_END_MESSAGE)
-            if (sent) nonSpeechSuffixBytes += AUDIO_STREAM_END_MESSAGE.length
+            val message = if (manualPhrases) ACTIVITY_END_MESSAGE else AUDIO_STREAM_END_MESSAGE
+            val sent = socket.send(message)
+            if (sent) {
+                nonSpeechSuffixBytes += message.length
+                if (manualPhrases) activityOpen = false
+                Log.i(TAG, "connection=$activeConnectionToken boundary sent kind=" +
+                    if (manualPhrases) "activityEnd" else "audioStreamEnd")
+            }
             sent
         } catch (e: Exception) {
             Log.e(TAG, "Failed to send Gemini audioStreamEnd: ${e.message}")
@@ -925,7 +967,7 @@ class GeminiTranscriptionClient {
         pendingFinalizeCloseRunnable = closeRunnable
         mainHandler.postDelayed(closeRunnable, FINALIZE_CLOSE_GRACE_MS)
 
-        Log.i(TAG, "Gemini audioStreamEnd sent; awaiting final transcript")
+        Log.i(TAG, "Gemini finish sent manualPhrases=$manualPhrases; awaiting final transcript")
         return true
     }
 
@@ -938,6 +980,7 @@ class GeminiTranscriptionClient {
         clearFinalizeCloseTimer()
         isClosing = true
         isSessionReady = false
+        activityOpen = false
         awaitingSetupTier = null
         accumulator.reset()
         hasAcceptedSpeech = false

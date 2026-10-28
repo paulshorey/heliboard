@@ -20,6 +20,74 @@ import org.robolectric.Shadows.shadowOf
 
 @RunWith(RobolectricTestRunner::class)
 class VoiceInputManagerTest {
+    private fun enableManualPhrases() {
+        TranscriptionPreferences.writeGeminiManualPhrases(
+            ApplicationProvider.getApplicationContext<Context>().prefs(), true)
+    }
+
+    @Test fun manualPhrasesKeepQuietAudioAndInterimsThroughLongActivityUntilExplicitPause() {
+        enableManualPhrases()
+        start()
+        capture.onSpeechStarted()
+        audio(containsSpeech = false)
+        stream.onInterimTranscription()
+        capture.onSpeechStopped()
+        advance(65_000)
+        assertTrue(manager.isRecording)
+        assertEquals(listOf("audio:1"), sent)
+        assertTrue(inserted.isEmpty())
+        assertTrue(markers.isEmpty())
+        assertTrue(errors.isEmpty())
+        manager.pauseRecording()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals("end", sent.last())
+        final("The complete quiet phrase.")
+        assertEquals(listOf("The complete quiet phrase."), inserted)
+        assertTrue(errors.isEmpty())
+    }
+
+    @Test fun manualResumeClearsThePreviousBoundaryDeadlineEvenWithoutLoudOnset() {
+        enableManualPhrases(); start(); audio(containsSpeech = false)
+        manager.pauseRecording(); shadowOf(Looper.getMainLooper()).idle()
+        advance(29_000)
+        manager.resumeRecording()
+        audio(containsSpeech = false)
+        advance(65_000)
+        assertTrue(manager.isRecording)
+        assertTrue(errors.isEmpty())
+        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
+        final("Quiet speech after resuming."); stream.onStreamClosed()
+        assertEquals(listOf("Quiet speech after resuming."), inserted)
+        assertTrue(markers.isEmpty())
+    }
+
+    @Test fun manualPauseStillBoundsMissingFinalEvenIfNoInterimWasReceived() {
+        enableManualPhrases(); start(); audio(containsSpeech = false)
+        advance(65_000)
+        manager.pauseRecording(); shadowOf(Looper.getMainLooper()).idle()
+        advance(30_100)
+        assertTrue(manager.isIdle)
+        assertEquals(1, errors.size)
+        assertEquals(1, markers.size)
+        assertTrue(inserted.isEmpty())
+    }
+
+    @Test fun manualStopStillUsesTheAbsoluteTwentySecondBudgetAndRejectsLateText() {
+        enableManualPhrases(); start(); audio(containsSpeech = false)
+        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
+        advance(20_100)
+        final("too late")
+        assertTrue(manager.isIdle)
+        assertTrue(inserted.isEmpty())
+        assertEquals(1, markers.size)
+    }
+
+    @Test fun manualActivityStillStopsImmediatelyOnNetworkLoss() {
+        enableManualPhrases(); start(); audio(containsSpeech = false)
+        network.loss!!()
+        assertTrue(manager.isIdle)
+        assertEquals(1, markers.size)
+    }
     private lateinit var manager: VoiceInputManager
     private lateinit var capture: VoiceRecorder.RecordingCallback
     private lateinit var stream: GeminiTranscriptionClient.StreamingCallback

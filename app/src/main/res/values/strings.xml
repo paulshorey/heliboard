@@ -286,6 +286,8 @@
     <string name="gemini_api_key_summary">API key for voice transcription. Create one at aistudio.google.com/apikey — the key needs access to the Gemini Live API.</string>
     <!-- Toggle between Gemini's SMART and VERBATIM transcription modes. -->
     <string name="gemini_smart_mode_title">Smart transcription</string>
+    <string name="gemini_manual_phrases_title">Finish phrases manually (test)</string>
+    <string name="gemini_manual_phrases_summary">Tap Pause or Stop to finish a phrase. Turns off automatic speech detection and silence stop for testing quiet speech. Text may appear only after you finish. Saved pause and loudness settings apply again when this is off.</string>
     <string name="gemini_smart_mode_summary">Gemini removes filler words, resolves spoken corrections such as \"Tuesday — actually Wednesday\", and applies punctuation, capitalization and list formatting. Turn this off for a literal word-for-word transcript.</string>
     <!-- Toggle for seeding Gemini's speech bias from surrounding editor text. -->
     <string name="gemini_use_editor_context_title">Learn names from the text field</string>

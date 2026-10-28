@@ -28,10 +28,17 @@ class GeminiAudioQueueTest {
     private val transcripts = mutableListOf<String>()
     private var closed = false
 
-    @Before fun setUp() {
+    @Before fun setUp() = connect(manualPhrases = false)
+
+    private fun connect(manualPhrases: Boolean) {
+        if (::client.isInitialized) client.cancelAll()
+        socket.messages.clear()
+        socket.bytes = 0
+        socket.cancelled = false
         client = GeminiTranscriptionClient()
         client.socketFactory = WebSocket.Factory { _, listener -> transport = listener; socket }
-        client.startStreaming("test-key", GeminiTranscriptionClient.buildSessionConfig("en_US", false, "SMART", 1500),
+        client.startStreaming("test-key", GeminiTranscriptionClient.buildSessionConfig("en_US", false, "SMART", 1500,
+            manualPhrases = manualPhrases),
             object : GeminiTranscriptionClient.StreamingCallback {
                 override fun onStreamReady() { }
                 override fun onTranscriptionResult(segment: TranscriptSegment) { transcripts.add(segment.text) }
@@ -45,6 +52,24 @@ class GeminiAudioQueueTest {
         shadowOf(Looper.getMainLooper()).idle()
     }
     @After fun tearDown() { client.cancelAll() }
+
+    @Test fun manualStartAndAudioShareOneBackpressureBudgetAndQuietSamplesAreUnchanged() {
+        connect(manualPhrases = true)
+        val quiet = ByteArray(3200) { (it % 23).toByte() }
+        val message = GeminiTranscriptionClient.buildAudioMessage(quiet)
+        socket.bytes = GeminiTranscriptionClient.MAX_SOCKET_AUDIO_BYTES - message.length
+        assertEquals(GeminiTranscriptionClient.AudioSendResult.BACKPRESSURE,
+            client.offerAudioChunk(quiet, containsSpeech = false))
+        assertTrue(socket.messages.isEmpty())
+        socket.bytes = 0
+        assertEquals(GeminiTranscriptionClient.AudioSendResult.ACCEPTED,
+            client.offerAudioChunk(quiet, containsSpeech = false))
+        assertEquals(listOf(GeminiTranscriptionClient.ACTIVITY_START_MESSAGE, message), socket.messages)
+        assertTrue(client.finalizeTurn())
+        assertTrue(client.finishStreaming())
+        assertEquals(GeminiTranscriptionClient.ACTIVITY_END_MESSAGE, socket.messages.last())
+        assertEquals(3, socket.messages.size)
+    }
 
     @Test fun fullSocketQueueIsBackpressureRatherThanAWriteFailure() {
         socket.bytes = GeminiTranscriptionClient.MAX_SOCKET_AUDIO_BYTES

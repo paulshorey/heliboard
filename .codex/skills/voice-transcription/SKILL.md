@@ -179,7 +179,22 @@ feeding an already-typed paragraph to a generative model risks it echoing that
 text back as transcription. Casing and punctuation continuity with surrounding
 text is handled locally instead (see below).
 
-## Turn finalization (Hybrid VAD)
+## Manual phrase comparison
+
+`PREF_GEMINI_MANUAL_PHRASES` defaults off. The opt-in setting disables server
+automatic activity detection and local silence finalization/auto-stop. Start each
+capture phase with `activityStart` immediately before its first PCM; finish with
+`activityEnd` on explicit Pause/Stop. Keep `NO_INTERRUPTION` so a new phase does not
+interrupt the prior response. Never send `audioStreamEnd` in this mode or degrade
+to a setup tier that omits the manual activity configuration. Text may arrive only
+after the explicit boundary. Open manual activity has no transcription-response
+watchdog; explicit Pause has bounded response/final waits and Stop retains its
+20-second absolute budget. Declared activity includes quiet PCM for queue/final
+progress; raw capture diagnostics remain independent. Keep all terminal network,
+queue, editor, session-limit and cancellation guards. Phone/provider acceptance is
+still required; bypassing VAD does not guarantee recognition of inaudible speech.
+
+## Turn finalization (Hybrid VAD, automatic mode)
 
 Server VAD stays enabled with patient end detection. Local silence, pause, and stop
 enqueue `audioStreamEnd` behind all preceding PCM. Forward all captured audio,

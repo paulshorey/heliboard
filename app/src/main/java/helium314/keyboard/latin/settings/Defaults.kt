@@ -165,6 +165,7 @@ object Defaults {
     // self-corrections, and applies punctuation, casing and list formatting.
     // Verbatim is available for users who want the literal words instead.
     const val PREF_GEMINI_TRANSCRIPTION_MODE = "SMART"
+    const val PREF_GEMINI_MANUAL_PHRASES = false
     // Server-side end-of-speech window. Google documents that short windows split
     // one utterance into fragments and cost accuracy because the model loses
     // cross-fragment context, so this defaults well above the API's own default

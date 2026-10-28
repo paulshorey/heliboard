@@ -62,6 +62,9 @@ fun TranscriptionScreen(
     var geminiSmartMode by remember {
         mutableStateOf(TranscriptionPreferences.readGeminiSmartMode(prefs))
     }
+    var geminiManualPhrases by remember {
+        mutableStateOf(TranscriptionPreferences.readGeminiManualPhrases(prefs))
+    }
     var geminiUseEditorContext by remember {
         mutableStateOf(TranscriptionPreferences.readGeminiUseEditorContext(prefs))
     }
@@ -127,6 +130,15 @@ fun TranscriptionScreen(
                     onCheckedChange = { checked ->
                         geminiSmartMode = checked
                         TranscriptionPreferences.writeGeminiSmartMode(prefs, checked)
+                    }
+                )
+                BooleanSettingRow(
+                    label = stringResource(R.string.gemini_manual_phrases_title),
+                    summary = stringResource(R.string.gemini_manual_phrases_summary),
+                    checked = geminiManualPhrases,
+                    onCheckedChange = { checked ->
+                        geminiManualPhrases = checked
+                        TranscriptionPreferences.writeGeminiManualPhrases(prefs, checked)
                     }
                 )
                 BooleanSettingRow(

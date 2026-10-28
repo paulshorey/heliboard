@@ -449,6 +449,62 @@ The WAV must be 16-bit PCM, 16 kHz, mono:
 
 ## Integrity regression and device checks
 
+### Manual phrase comparison for quiet-speech omissions
+
+**Finish phrases manually (test)** in Transcription settings is opt-in and defaults
+off. It keeps the same microphone samples, gain, language, vocabulary and
+Smart/Verbatim setting, while replacing automatic speech detection with explicit
+activity boundaries. Google documents this as [manual VAD](https://ai.google.dev/gemini-api/docs/live-api/live-transcribe#manual-vad-push-to-talk).
+
+- Setup sends `automaticActivityDetection: {disabled: true}` and
+  `activityHandling: "NO_INTERRUPTION"`. A cached automatic-only setup tier cannot
+  remove this choice; rejection of both supported tiers fails before audio.
+- `activityStart` immediately precedes each capture phase's first PCM; both fit
+  the same bounded socket budget. Explicit Pause/Stop sends `activityEnd` behind
+  preceding audio. Pause then Stop without resumed audio adds no empty activity.
+  No `audioStreamEnd` is sent: Google's [wire reference](https://ai.google.dev/api/live#bidigeneratecontentrealtimeinput)
+  reserves it for automatic detection.
+- Local RMS boundaries and automatic silence stop are inactive. The saved
+  automatic settings remain available when this mode is turned off. Every PCM
+  frame in the declared activity counts as pending for final/queue accounting;
+  raw capture speech counts still describe the original energy detector.
+- An open declared activity can exceed 30 seconds without a transcription
+  response. Text may wait until Pause/Stop. Resume clears old boundary waits even
+  if speech starts quietly. Explicit Pause still has a 30-second response/final
+  bound; Stop keeps its existing 20-second overall budget and eight-second final
+  grace. Network/transport, upload queues, editor rejection, cancellation and the
+  nine-minute session limit retain their guards. Only authoritative finals enter
+  the editor.
+
+The October 28 volume trial logs showed why this comparison is needed: all five
+trials used Verbatim and the built-in mic. Provider-final and emitted character
+counts matched (236, 44, 298, 249, 323 respectively), with locally accepted audio
+counts matching captured counts. Trials 2, 3 and 5 issued no local silence boundary
+during the passage; trials 1, 2 and 4 ended on a 30-second no-transcription-response
+watchdog. Thus changing local RMS alone cannot explain/fix every omission. Local
+noise estimates still climbed as high as 1000, which is a separate detector
+weakness. These numeric logs do not establish intelligibility or server receipt.
+Do not commit raw user log exports or claim server VAD is proven responsible.
+
+For a controlled phone comparison:
+
+1. Keep the same microphone position, quiet room, language and Verbatim setting.
+   Enable **Finish phrases manually (test)** before starting a fresh recording.
+2. Read a short normal/quiet/normal passage without tapping controls at the volume
+   changes. Tap **Pause** after the entire passage, then wait for finalized text.
+   Stop after the final arrives and leave the editor visible until processing
+   clears. Hiding/closing the input view cancels pending work; the earlier fifth
+   trial cancelled drain about one second after Stop.
+3. Export diagnostics and save the output. `manualPhrases=true`, `activityStart`
+   and `activityEnd` identify this mode. A `VOICE_STEP_2` local silence line is
+   advisory only here and must not have an automatic wire boundary alongside it.
+4. Compare with manual mode off, keeping volume pattern and hardware unchanged.
+   If the manual trial recovers the quiet clauses, that implicates automatic
+   detection/segmentation. If omissions remain, investigate the captured signal
+   and recognition with an explicitly consented exact-PCM recording/replay before
+   adopting gain or another provider. Disabling VAD cannot recover speech already
+   removed before capture, and software gain does not improve signal-to-noise.
+
 ### Quiet speech and Bluetooth troubleshooting
 
 The local RMS setting is a minimum, not a microphone gain control or a provider

@@ -185,6 +185,7 @@ class VoiceInputManager internal constructor(
         lastFinalAtMs = null
         finalizedAtMs = null
         Log.i(TAG, "session=$sessionId start mode=${geminiConfig.transcriptionMode} " +
+            "manualPhrases=${geminiConfig.manualPhrases} " +
             "localSilenceMs=$chunkSilenceDurationMs threshold=$chunkSilenceThreshold " +
             "autoStopMs=$autoStopSilenceMs serverSilenceMs=${geminiConfig.endOfSpeechSilenceMs} " +
             "autoLanguage=${geminiConfig.autoDetectLanguage} editorVocabulary=${geminiConfig.useEditorContext}")
@@ -209,13 +210,16 @@ class VoiceInputManager internal constructor(
                 capturedBytes += pcmData.size
                 if (containsSpeech) {
                     capturedSpeechChunks++
-                    noteUnconfirmedSpeech(sessionId, "pcm")
                 }
+                // Manual activity is declared by the user, including its quiet PCM.
+                // Keep raw capture counts separate from this progress/queue evidence.
+                val requiresFinal = containsSpeech || geminiConfig.manualPhrases
+                if (requiresFinal) noteUnconfirmedSpeech(sessionId, if (containsSpeech) "pcm" else "manual_activity")
                 if (pcmData.size > MAX_PENDING_AUDIO_BYTES - pendingAudioBytes) {
                     failSession("Voice audio queue is full. Dictation stopped before skipping audio.")
                     return
                 }
-                outbound.addLast(Outbound.Audio(pcmData, SystemClock.elapsedRealtime(), containsSpeech))
+                outbound.addLast(Outbound.Audio(pcmData, SystemClock.elapsedRealtime(), requiresFinal))
                 pendingAudioBytes += pcmData.size
                 flushOutbound(sessionId)
             }
@@ -223,6 +227,7 @@ class VoiceInputManager internal constructor(
                 // Tail speech evidence lives in the annotated PCM. A boundary
                 // posted before a pause/stop must not restart capture watchdogs.
                 if (!isCurrent(sessionId) || !acceptingAudio || !isRecording || isSessionStopping) return
+                if (geminiConfig.manualPhrases) return
                 localSpeechActive = true
                 speechEpoch++
                 cancelAutoStopTimer()
@@ -239,6 +244,7 @@ class VoiceInputManager internal constructor(
             }
             override fun onSpeechStopped() {
                 if (!isCurrent(sessionId) || currentState != State.RECORDING) return
+                if (geminiConfig.manualPhrases) return
                 localSpeechActive = false
                 startAutoStopTimer()
                 if (!hasFinalizedCurrentSilence) {
@@ -329,6 +335,13 @@ class VoiceInputManager internal constructor(
         Log.i(TAG, "session=$sessionId resume")
         voiceRecorder.resumeRecording()
         if (!isCurrent(sessionId)) return
+        if (geminiConfig.manualPhrases) {
+            speechEpoch++
+            clearFinalTimeout()
+            finalizedAtMs = null
+            responseTimeout?.let(mainHandler::removeCallbacks)
+            responseTimeout = null
+        }
         hasFinalizedCurrentSilence = false
         updateState(State.RECORDING)
         startAutoStopTimer()
@@ -355,6 +368,7 @@ class VoiceInputManager internal constructor(
             endOfSpeechSilenceMs = geminiConfig.endOfSpeechSilenceMs,
             userVocabulary = geminiConfig.customVocabulary,
             editorContext = editorContext,
+            manualPhrases = geminiConfig.manualPhrases,
         )
         isStreamingConnecting = true
         scheduleConnectTimeout(sessionId)
@@ -591,10 +605,12 @@ class VoiceInputManager internal constructor(
         val boundaryAtMs = finalizedAtMs ?: return
         // A raw RMS spike may be breathing or room noise. Only recognized words
         // justify waiting for a final transcript after a speech boundary.
-        if (isSessionStopping || localSpeechActive || !unconfirmedTranscript || finalTimeout != null) return
+        val pendingFinal = unconfirmedTranscript || (geminiConfig.manualPhrases && unconfirmedSpeech)
+        if (isSessionStopping || localSpeechActive || !pendingFinal || finalTimeout != null) return
         finalTimeout = Runnable {
             finalTimeout = null
-            if (isCurrent(sessionId) && !isSessionStopping && unconfirmedTranscript) {
+            if (isCurrent(sessionId) && !isSessionStopping &&
+                (unconfirmedTranscript || (geminiConfig.manualPhrases && unconfirmedSpeech))) {
                 if (stopForElapsedSilence()) return@Runnable
                 failSession("No final transcript arrived for pending speech")
             }
@@ -605,17 +621,23 @@ class VoiceInputManager internal constructor(
     }
 
     private fun armResponseTimeout(sessionId: Long) {
-        if (isSessionStopping || (!unconfirmedTranscript && !localSpeechActive) || responseTimeout != null) return
+        if (isSessionStopping || !needsResponse() || responseTimeout != null) return
         responseTimeout = Runnable {
             responseTimeout = null
             // Quiet audio with no recognized words does not require a server
             // response. Leave that case to the intentional silence auto-stop.
-            if (isCurrent(sessionId) && !isSessionStopping && (unconfirmedTranscript || localSpeechActive)) {
+            if (isCurrent(sessionId) && !isSessionStopping && needsResponse()) {
                 if (stopForElapsedSilence()) return@Runnable
                 failSession("Transcription stopped responding")
             }
         }.also { mainHandler.postDelayed(it, PROGRESS_TIMEOUT_MS) }
     }
+
+    private fun needsResponse(): Boolean = if (geminiConfig.manualPhrases) {
+        // Continuous declared activity may produce text only after explicit Pause/Stop.
+        finalizedAtMs != null && currentState != State.RECORDING &&
+            (unconfirmedSpeech || unconfirmedTranscript)
+    } else unconfirmedTranscript || localSpeechActive
 
     private fun scheduleConnectTimeout(sessionId: Long) {
         connectTimeout = Runnable {
@@ -751,7 +773,7 @@ class VoiceInputManager internal constructor(
 
     private fun startAutoStopTimer() {
         cancelAutoStopTimer()
-        if (currentState == State.RECORDING) {
+        if (currentState == State.RECORDING && !geminiConfig.manualPhrases) {
             autoStopAtMs = SystemClock.elapsedRealtime() + autoStopSilenceMs
             mainHandler.postDelayed(autoStopSilenceRunnable, autoStopSilenceMs)
         }

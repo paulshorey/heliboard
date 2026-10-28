@@ -17,6 +17,7 @@ Tests for the Gemini Live voice pipeline.
 - Recorder tests also verify sustained quiet PCM delivery after local speech stops, actual route-type diagnostics without identity, nonfatal route-query failure, and API-21 routing guards.
 
 ## Non-obvious notes
+- Manual-phrase tests cover explicit setup with no automatic fallback, activity/audio order, unchanged quiet PCM, shared backpressure budget, Pause/Stop without duplicate controls, long activity without an interim, resume/old-boundary deadlines, bounded Pause/Stop waits and network failure. Existing automatic-mode cases remain regression coverage.
 - Voice bugs split cleanly between transport/session setup and local post-processing; keep that distinction clear in new tests.
 - `GeminiTranscriptionClientTest.kt` needs Robolectric even though it tests pure functions: the client builds payloads with `org.json`, which is an unimplemented stub on the plain JVM test classpath.
 - `GeminiTranscriptionClientTest.kt` should keep asserting the two `setup` placement rules that fail catastrophically at runtime — `inputAudioTranscription` beside `generationConfig`, and `responseModalities: ["TEXT"]` inside it — plus that each `SetupTier` drops exactly one feature.
