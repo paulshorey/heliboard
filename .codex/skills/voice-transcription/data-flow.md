@@ -32,6 +32,8 @@ before first PCM and `activityEnd` at explicit Pause/Stop. No local silence
 finalization/auto-stop or open-activity transcription-response deadline applies.
 Declared activity includes quiet PCM for final/queue progress. Explicit boundary
 waits, Stop/upload/network/editor/cancellation/session bounds remain enforced.
+Manual Resume waits for pending paused speech/boundaries to be confirmed; a delayed
+older final cannot acknowledge a newly resumed phase while the older one is pending.
 Never substitute `audioStreamEnd` or silently negotiate away this configuration.
 The same selected/verified microphone and unchanged PCM are used in both modes.
 
@@ -40,11 +42,16 @@ The same selected/verified microphone and unchanged PCM are used in both modes.
 ### VoiceRecorder.kt
 Captures audio from the microphone with client-side silence detection.
 
-`VoiceMicrophoneRouter` reads the saved automatic/built-in choice on start/resume,
+`VoiceMicrophoneRouter` reads the saved automatic/built-in/Bluetooth-only choice on start/resume,
 requests the input, and verifies its actual route before PCM delivery on API 23+.
 Bluetooth activation shows connecting/ready messages and times out after 8 seconds.
 Route loss is terminal; pause/stop/failure releases owned Bluetooth requests.
+Bluetooth-only fails if no headset microphone is available; no phone fallback.
 API 21–22 retain platform routing without device selection.
+Legacy SCO (API 23–30) captures mono PCM16 at 8 kHz and `VoicePcmResampler`
+converts to 16 kHz without gain/gating. Route/rate are resolved before recorder
+creation; resume recreates it if needed. Diagnostics measure raw capture levels
+and rate-correct duration.
 - **Format**: PCM16 little-endian, 16 kHz, mono — the Live API's native input format
 - **Silence detection**: adaptive RMS threshold on each 100 ms chunk
 - **Callbacks**: supplies PCM chunks to `VoiceInputManager`; speech-stop silence requests a turn finalize, and longer silence requests auto-stop

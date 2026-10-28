@@ -38,7 +38,9 @@ internal class VoiceAudioDiagnostics {
     private val rmsValues = ArrayList<Int>(20)
     private val chunkSamples = ArrayList<Int>(20)
     private var samples = 0
-    private var totalSamples = 0L
+    private var totalDurationUs = 0L
+    private var windowDurationUs = 0L
+    private var captureRate = VoiceRecorder.SAMPLE_RATE
     private var squareSum = 0.0
     private var peak = 0
     private var zeros = 0
@@ -53,12 +55,18 @@ internal class VoiceAudioDiagnostics {
     private var lastSmoothed = 0.0
 
     /** At most twenty reads (normally two seconds) are retained between summaries. */
-    fun add(level: Level, noiseFloor: Double, silence: Double, onset: Double, smoothed: Double): Boolean {
+    fun add(
+        level: Level, noiseFloor: Double, silence: Double, onset: Double,
+        smoothed: Double, sampleRate: Int = VoiceRecorder.SAMPLE_RATE,
+    ): Boolean {
         check(rmsValues.size < 20)
         rmsValues.add(level.rms.toInt())
         chunkSamples.add(level.samples)
         samples += level.samples
-        totalSamples += level.samples
+        captureRate = sampleRate
+        val durationUs = level.samples.toLong() * 1_000_000 / sampleRate
+        totalDurationUs += durationUs
+        windowDurationUs += durationUs
         squareSum += level.squareSum
         peak = maxOf(peak, level.peak)
         zeros += level.zeroSamples
@@ -77,10 +85,10 @@ internal class VoiceAudioDiagnostics {
     /** Flush at the normal cadence and at pause/end so short tests retain their tail. */
     fun takeSummary(): String? {
         if (rmsValues.isEmpty()) return null
-        val startMs = (totalSamples - samples) * 1000 / VoiceRecorder.SAMPLE_RATE
-        val endMs = totalSamples * 1000 / VoiceRecorder.SAMPLE_RATE
+        val startMs = (totalDurationUs - windowDurationUs) / 1000
+        val endMs = totalDurationUs / 1000
         val result = "VOICE levels pcmMs=$startMs..$endMs chunks=${rmsValues.size} " +
-            "chunkRms=$rmsValues chunkSamples=$chunkSamples " +
+            "captureRate=$captureRate chunkRms=$rmsValues chunkSamples=$chunkSamples " +
             "rms=${if (samples == 0) 0 else sqrt(squareSum / samples).toInt()} peak=$peak " +
             "zeroSamples=$zeros clippedSamples=$clipped samples=$samples " +
             "noiseFloor=${noiseMin.toInt()}..${noiseMax.toInt()} " +
@@ -91,6 +99,7 @@ internal class VoiceAudioDiagnostics {
         rmsValues.clear()
         chunkSamples.clear()
         samples = 0
+        windowDurationUs = 0L
         squareSum = 0.0
         peak = 0
         zeros = 0

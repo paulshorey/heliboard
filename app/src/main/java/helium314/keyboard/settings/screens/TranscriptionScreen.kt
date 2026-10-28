@@ -288,15 +288,19 @@ private fun MicrophonePreference() {
     var showDialog by remember { mutableStateOf(false) }
     val supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
     val items = listOf(
-        TranscriptionPreferences.MICROPHONE_AUTOMATIC to stringResource(R.string.voice_microphone_automatic),
         TranscriptionPreferences.MICROPHONE_BUILT_IN to stringResource(R.string.voice_microphone_builtin),
+        TranscriptionPreferences.MICROPHONE_AUTOMATIC to stringResource(R.string.voice_microphone_automatic),
+        TranscriptionPreferences.MICROPHONE_BLUETOOTH to stringResource(R.string.voice_microphone_bluetooth),
     )
     Preference(
         name = stringResource(R.string.voice_microphone_title),
         description = if (!supported) stringResource(R.string.voice_microphone_unsupported) else {
             items.first { it.first == selected }.second + "\n" + stringResource(
-                if (selected == TranscriptionPreferences.MICROPHONE_BUILT_IN) R.string.voice_microphone_builtin_summary
-                else R.string.voice_microphone_automatic_summary
+                when (selected) {
+                    TranscriptionPreferences.MICROPHONE_BUILT_IN -> R.string.voice_microphone_builtin_summary
+                    TranscriptionPreferences.MICROPHONE_BLUETOOTH -> R.string.voice_microphone_bluetooth_summary
+                    else -> R.string.voice_microphone_automatic_summary
+                }
             )
         },
         onClick = { if (supported) showDialog = true },

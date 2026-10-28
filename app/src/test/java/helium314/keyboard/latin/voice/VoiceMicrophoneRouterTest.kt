@@ -8,6 +8,7 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import androidx.test.core.app.ApplicationProvider
 import helium314.keyboard.latin.settings.TranscriptionPreferences
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -81,6 +82,7 @@ class VoiceMicrophoneRouterTest {
         val route = router()
         route.prepare(recorder)
         assertTrue(route.usesBluetooth)
+        assertEquals(16_000, route.captureSampleRate)
         Mockito.verify(manager).setCommunicationDevice(output)
         Mockito.verify(recorder).setPreferredDevice(bluetooth)
         Mockito.`when`(recorder.routedDevice).thenReturn(phone)
@@ -164,6 +166,7 @@ class VoiceMicrophoneRouterTest {
     @Test @Config(sdk = [23, 30]) fun olderAndroidRequestsScoAndCleansUpWithoutModernApis() {
         inputs(bluetooth, phone)
         val route = router()
+        assertEquals(8_000, route.captureSampleRate)
         route.prepare(recorder)
         Mockito.verify(manager).startBluetoothSco()
         Mockito.`when`(recorder.routedDevice).thenReturn(bluetooth)
@@ -182,5 +185,58 @@ class VoiceMicrophoneRouterTest {
         route.release()
         Mockito.verifyNoInteractions(manager, recorder)
         assertFailsWith<IllegalStateException> { router(builtIn = true).prepare(recorder) }
+        assertFailsWith<IllegalStateException> { bluetoothOnly().prepare(recorder) }
+    }
+
+    private fun bluetoothOnly() = VoiceMicrophoneRouter(context, manager, TranscriptionPreferences.MICROPHONE_BLUETOOTH) { time }
+
+    @Test fun bluetoothOnlyRejectsPhoneWiredUsbAndPlaybackOnlyDevicesBeforeRecording() {
+        inputs(phone, device(AudioDeviceInfo.TYPE_WIRED_HEADSET), device(AudioDeviceInfo.TYPE_USB_HEADSET))
+        val playbackOnly = device(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP)
+        Mockito.`when`(manager.availableCommunicationDevices).thenReturn(listOf(playbackOnly))
+        assertFailsWith<IllegalStateException> { bluetoothOnly().prepare(recorder) }
+        Mockito.verifyNoInteractions(recorder)
+        Mockito.verify(manager, Mockito.never()).clearCommunicationDevice()
+    }
+
+    @Test fun bluetoothOnlyVerifiesRouteAndFailsOnDisconnectInsteadOfFallingBack() {
+        inputs(phone)
+        Mockito.`when`(manager.availableCommunicationDevices).thenReturn(listOf(bluetooth))
+        Mockito.`when`(manager.setCommunicationDevice(bluetooth)).thenReturn(true)
+        val route = bluetoothOnly()
+        route.prepare(recorder)
+        Mockito.`when`(recorder.routedDevice).thenReturn(phone)
+        assertFalse(route.acceptsAudio(recorder))
+        Mockito.`when`(recorder.routedDevice).thenReturn(bluetooth)
+        assertTrue(route.acceptsAudio(recorder))
+        Mockito.`when`(recorder.routedDevice).thenReturn(phone)
+        assertFailsWith<IllegalStateException> { route.acceptsAudio(recorder) }
+        route.release()
+        Mockito.verify(manager).clearCommunicationDevice()
+    }
+
+    @Suppress("DEPRECATION")
+    @Test @Config(sdk = [23, 30]) fun legacyBluetoothCanActivateBeforeItsInputIsPublished() {
+        inputs(phone)
+        Mockito.`when`(manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)).thenReturn(arrayOf(bluetooth))
+        val route = bluetoothOnly()
+        assertEquals(8_000, route.captureSampleRate)
+        route.prepare(recorder)
+        Mockito.verify(manager).startBluetoothSco()
+        Mockito.`when`(recorder.routedDevice).thenReturn(phone)
+        assertFalse(route.acceptsAudio(recorder))
+        Mockito.`when`(recorder.routedDevice).thenReturn(bluetooth)
+        assertTrue(route.acceptsAudio(recorder))
+        route.release()
+        Mockito.verify(manager).stopBluetoothSco()
+    }
+
+    @Test @Config(sdk = [23, 30]) fun legacySampleRateDependsOnSelectedPolicyAndAvailableHeadset() {
+        inputs(phone, bluetooth)
+        assertEquals(8_000, bluetoothOnly().captureSampleRate)
+        assertEquals(16_000, router(builtIn = true).captureSampleRate)
+        inputs(phone)
+        assertEquals(16_000, router().captureSampleRate)
+        assertFailsWith<IllegalStateException> { bluetoothOnly().captureSampleRate }
     }
 }

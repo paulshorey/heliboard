@@ -48,19 +48,40 @@ class VoiceInputManagerTest {
         assertTrue(errors.isEmpty())
     }
 
-    @Test fun manualResumeClearsThePreviousBoundaryDeadlineEvenWithoutLoudOnset() {
+    @Test fun manualResumeWaitsForPriorFinalThenKeepsQuietNewActivityPending() {
         enableManualPhrases(); start(); audio(containsSpeech = false)
         manager.pauseRecording(); shadowOf(Looper.getMainLooper()).idle()
         advance(29_000)
         manager.resumeRecording()
+        assertTrue(manager.isPaused)
+        assertEquals(1, errors.size)
+        assertTrue(errors.single().contains("paused phrase"))
+        final("Earlier phrase.")
+        errors.clear()
+        manager.resumeRecording()
+        assertTrue(manager.isRecording)
         audio(containsSpeech = false)
         advance(65_000)
         assertTrue(manager.isRecording)
         assertTrue(errors.isEmpty())
         manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
         final("Quiet speech after resuming."); stream.onStreamClosed()
-        assertEquals(listOf("Quiet speech after resuming."), inserted)
+        assertEquals(listOf("Earlier phrase.", "Quiet speech after resuming."), inserted)
         assertTrue(markers.isEmpty())
+    }
+
+    @Test fun manualResumeCannotLetADelayedOldFinalHideUnconfirmedNewQuietAudio() {
+        enableManualPhrases(); start(); audio(containsSpeech = false)
+        manager.pauseRecording(); shadowOf(Looper.getMainLooper()).idle()
+        manager.resumeRecording()
+        assertTrue(manager.isPaused)
+        final("First phrase.")
+        manager.resumeRecording(); audio(containsSpeech = false)
+        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
+        stream.onStreamClosed()
+        assertEquals(listOf("First phrase."), inserted)
+        assertEquals(1, markers.size)
+        assertTrue(errors.last().contains("pending speech"))
     }
 
     @Test fun manualPauseStillBoundsMissingFinalEvenIfNoInterimWasReceived() {

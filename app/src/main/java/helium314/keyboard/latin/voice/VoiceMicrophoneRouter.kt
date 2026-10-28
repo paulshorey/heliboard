@@ -24,17 +24,19 @@ internal class VoiceMicrophoneRouter(
     private var ready = false
     private var deadline = 0L
 
-    val usesBluetooth: Boolean get() = requiredType?.let(::isBluetooth) == true
+    private data class Selection(val input: AudioDeviceInfo?, val output: AudioDeviceInfo?, val type: Int? = null)
+    private val selection: Selection by lazy { select() }
+    val usesBluetooth: Boolean get() = selection.type?.let(::isBluetooth) == true
+    val captureSampleRate: Int get() =
+        if (usesBluetooth && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) 8_000 else VoiceRecorder.SAMPLE_RATE
 
-    /** Called before starting AudioRecord. API 21–22 retain platform routing in automatic mode. */
-    @Suppress("DEPRECATION")
-    fun prepare(recorder: AudioRecord) {
-        deadline = now() + ROUTE_TIMEOUT_MS
+    // Resolve once per phase, before creating the recorder, so legacy SCO uses its required rate.
+    private fun select(): Selection {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-            check(preference != TranscriptionPreferences.MICROPHONE_BUILT_IN) {
+            check(preference == TranscriptionPreferences.MICROPHONE_AUTOMATIC) {
                 context.getString(R.string.voice_microphone_unsupported)
             }
-            return
+            return Selection(null, null)
         }
         val inputs = audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)
         val builtIn = preference == TranscriptionPreferences.MICROPHONE_BUILT_IN
@@ -44,6 +46,10 @@ internal class VoiceMicrophoneRouter(
             val outputs = audioManager.availableCommunicationDevices
             outputs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLE_HEADSET }
                 ?: outputs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+        } else if (!builtIn && inputs.none { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }) {
+            // Legacy phones can publish only the connected headset output until SCO starts.
+            audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).orEmpty()
+                .firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
         } else null
         val input = if (builtIn) {
             inputs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
@@ -54,8 +60,21 @@ internal class VoiceMicrophoneRouter(
             inputs.firstOrNull { Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && it.type == AudioDeviceInfo.TYPE_BLE_HEADSET }
                 ?: inputs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
         }
-        requiredType = bluetoothOutput?.type ?: input?.type
-        // No Bluetooth input: leave wired/USB/phone selection to Android.
+        val selected = Selection(input, bluetoothOutput, bluetoothOutput?.type ?: input?.type)
+        check(preference != TranscriptionPreferences.MICROPHONE_BLUETOOTH || selected.type?.let(::isBluetooth) == true) {
+            context.getString(R.string.voice_microphone_bluetooth_unavailable)
+        }
+        return selected
+    }
+
+    /** Called before starting AudioRecord. API 21–22 retain platform routing in automatic mode. */
+    @Suppress("DEPRECATION")
+    fun prepare(recorder: AudioRecord) {
+        deadline = now() + ROUTE_TIMEOUT_MS
+        val (input, bluetoothOutput) = selection
+        requiredType = selection.type
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        // No Bluetooth input in Automatic: leave wired/USB/phone selection to Android.
         if (requiredType == null) {
             // A resumed AudioRecord may still prefer the previous phase's phone/headset input.
             if (recorder.preferredDevice != null) {
@@ -63,6 +82,7 @@ internal class VoiceMicrophoneRouter(
                     context.getString(R.string.voice_microphone_selection_failed)
                 }
             }
+            Log.i(TAG, "VOICE microphone preference=$preference requestedType=platform captureRate=$captureSampleRate")
             return
         }
 
@@ -87,7 +107,7 @@ internal class VoiceMicrophoneRouter(
                 context.getString(R.string.voice_microphone_selection_failed)
             }
         }
-        Log.i(TAG, "VOICE microphone preference=$preference requestedType=$requiredType")
+        Log.i(TAG, "VOICE microphone preference=$preference requestedType=$requiredType captureRate=$captureSampleRate uploadRate=${VoiceRecorder.SAMPLE_RATE}")
     }
 
     /** Verify the actual route before exposing PCM; a preferred device is only a request. */

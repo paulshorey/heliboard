@@ -28,8 +28,8 @@ import kotlin.concurrent.thread
  * boundary callbacks ([RecordingCallback.onSpeechStarted] / [RecordingCallback.onSpeechStopped])
  * based on adaptive silence detection.
  *
- * Audio format: PCM 16-bit little-endian, 16 kHz, mono — the native input format
- * for the Gemini Live API and for most streaming speech APIs.
+ * Upload format: PCM 16-bit little-endian, 16 kHz, mono. Legacy SCO capture is
+ * 8 kHz and is linearly upsampled before callbacks; diagnostics measure raw input.
  */
 class VoiceRecorder(private val context: Context) {
 
@@ -121,7 +121,8 @@ class VoiceRecorder(private val context: Context) {
         val silenceThreshold: Double = DEFAULT_SILENCE_THRESHOLD
     )
 
-    private var audioRecord: AudioRecord? = null
+    @Volatile private var audioRecord: AudioRecord? = null
+    @Volatile private var captureSampleRate = SAMPLE_RATE
     @Volatile private var microphoneRouter: VoiceMicrophoneRouter? = null
     private var recordingThread: Thread? = null
     @Volatile private var isRecording = false
@@ -180,24 +181,7 @@ class VoiceRecorder(private val context: Context) {
             return false
         }
 
-        val minBuf = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
-        if (minBuf == AudioRecord.ERROR || minBuf == AudioRecord.ERROR_BAD_VALUE) {
-            Log.e(TAG, "Invalid buffer size: $minBuf")
-            callback?.onRecordingError("Failed to initialize audio recording")
-            return false
-        }
-
         try {
-            val bufferSize = maxOf(minBuf * 2, BYTES_PER_READ * 4)
-            audioRecord = AudioRecord(AUDIO_SOURCE, SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT, bufferSize)
-
-            if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-                Log.e(TAG, "AudioRecord not initialized")
-                callback?.onRecordingError("Failed to initialize audio recording")
-                releaseRecorder()
-                return false
-            }
-
             prepareMicrophone()
             isPaused = false
             audioRecord?.startRecording()
@@ -210,7 +194,7 @@ class VoiceRecorder(private val context: Context) {
             val configSnapshot = silenceConfig
             Log.i(
                 TAG,
-                "VOICE_STEP_1 recording started (${SAMPLE_RATE}Hz), " +
+                "VOICE_STEP_1 recording started captureRate=$captureSampleRate uploadRate=$SAMPLE_RATE, " +
                     "silenceDuration=${configSnapshot.silenceDurationMs}ms, " +
                     "silenceThreshold=${configSnapshot.silenceThreshold}"
             )
@@ -304,7 +288,6 @@ class VoiceRecorder(private val context: Context) {
     }
 
     private fun prepareMicrophone() {
-        val recorder = checkNotNull(audioRecord)
         microphoneRouter?.release()
         val router = VoiceMicrophoneRouter(
             context,
@@ -312,7 +295,21 @@ class VoiceRecorder(private val context: Context) {
             TranscriptionPreferences.readMicrophone(context.prefs()),
         )
         microphoneRouter = router // Retain ownership even when preparation fails part way through.
-        router.prepare(recorder)
+        val rate = router.captureSampleRate
+        if (audioRecord == null || captureSampleRate != rate) {
+            audioRecord?.release()
+            audioRecord = null
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                throw SecurityException("Microphone permission denied")
+            }
+            val minBuf = AudioRecord.getMinBufferSize(rate, CHANNEL_CONFIG, AUDIO_FORMAT)
+            check(minBuf > 0) { "Failed to initialize audio recording" }
+            val bytesPerRead = (rate * BYTES_PER_SAMPLE * READ_INTERVAL_MS / 1000).toInt()
+            audioRecord = AudioRecord(AUDIO_SOURCE, rate, CHANNEL_CONFIG, AUDIO_FORMAT, maxOf(minBuf * 2, bytesPerRead * 4))
+            check(audioRecord?.state == AudioRecord.STATE_INITIALIZED) { "Failed to initialize audio recording" }
+            captureSampleRate = rate
+        }
+        router.prepare(checkNotNull(audioRecord))
         if (router.usesBluetooth) {
             Toast.makeText(context, R.string.voice_microphone_connecting, Toast.LENGTH_LONG).show()
         }
@@ -331,8 +328,10 @@ class VoiceRecorder(private val context: Context) {
         var consecutiveEmptyReads = 0
         val diagnostics = VoiceAudioDiagnostics()
         var lastRoute: String? = null
-        var pcmSamples = 0L
+        var pcmDurationUs = 0L
         var readyPhase: Long? = null
+        var resamplerPhase: Long? = null
+        var resampler = VoicePcmResampler()
         val configSnapshot = silenceConfig
         val minSilenceThreshold = configSnapshot.silenceThreshold
         val minSpeechThreshold = minSilenceThreshold + SPEECH_HYSTERESIS
@@ -353,8 +352,11 @@ class VoiceRecorder(private val context: Context) {
                 }
 
                 val readPhase = capturePhase
+                val readRecorder = audioRecord ?: break
+                val readRate = captureSampleRate
+                val readSize = (readRate * BYTES_PER_SAMPLE * READ_INTERVAL_MS / 1000).toInt()
                 val bytesRead = try {
-                    audioRecord?.read(readBuffer, 0, BYTES_PER_READ) ?: break
+                    readRecorder.read(readBuffer, 0, readSize)
                 } catch (e: Exception) {
                     // A rapid pause/resume can finish before the interrupted
                     // native read returns. Its exception belongs to the old
@@ -375,7 +377,7 @@ class VoiceRecorder(private val context: Context) {
                 // Check even on empty reads so an ignored routing request has a deadline.
                 val router = microphoneRouter
                 val routeReady = try {
-                    bytesRead < 0 || router == null || router.acceptsAudio(checkNotNull(audioRecord))
+                    bytesRead < 0 || router == null || router.acceptsAudio(readRecorder)
                 } catch (e: Exception) {
                     if (!isRecording || isPaused || readPhase != capturePhase) continue
                     throw e
@@ -424,20 +426,24 @@ class VoiceRecorder(private val context: Context) {
                     }
                 }
 
-                val chunk = if (bytesRead == BYTES_PER_READ) readBuffer.copyOf()
-                            else readBuffer.copyOf(bytesRead)
+                if (resamplerPhase != readPhase) {
+                    diagnostics.takeSummary()?.let { Log.i(TAG, it) }
+                    resampler = VoicePcmResampler()
+                    resamplerPhase = readPhase
+                }
+                val chunk = readBuffer.copyOf(bytesRead)
 
                 // One PCM pass supplies both the unchanged RMS detector and diagnostics.
                 val level = VoiceAudioDiagnostics.measure(chunk)
                 val energy = level.rms
-                pcmSamples += level.samples
+                pcmDurationUs += level.samples.toLong() * 1_000_000 / readRate
                 smoothedEnergy = (ENERGY_SMOOTHING_ALPHA * energy) +
                     ((1.0 - ENERGY_SMOOTHING_ALPHA) * smoothedEnergy)
 
                 val detectorNoiseFloor = noiseFloor
                 val speechThreshold = maxOf(minSpeechThreshold, detectorNoiseFloor + SPEECH_MARGIN)
                 val silenceThreshold = maxOf(minSilenceThreshold, detectorNoiseFloor + SILENCE_MARGIN)
-                val chunkMs = (bytesRead.toLong() * 1000) / (SAMPLE_RATE * BYTES_PER_SAMPLE)
+                val chunkMs = (bytesRead.toLong() * 1000) / (readRate * BYTES_PER_SAMPLE)
                 val hasSpeech = if (isSpeaking) {
                     smoothedEnergy >= silenceThreshold
                 } else {
@@ -451,15 +457,16 @@ class VoiceRecorder(private val context: Context) {
                 // This annotation never gates PCM delivery to Gemini.
                 val containsSpeech = energy >= silenceThreshold
                 val callbackSnapshot = recordingCallback
-                mainHandler.post { callbackSnapshot?.onAudioChunk(chunk, containsSpeech) }
+                val upload = if (readRate == SAMPLE_RATE) chunk else resampler.upsample8kTo16k(chunk)
+                mainHandler.post { callbackSnapshot?.onAudioChunk(upload, containsSpeech) }
 
                 val fullWindow = diagnostics.add(
-                    level, detectorNoiseFloor, silenceThreshold, speechThreshold, smoothedEnergy
+                    level, detectorNoiseFloor, silenceThreshold, speechThreshold, smoothedEnergy, readRate
                 )
                 if (lastRoute == null || fullWindow) {
                     val route = captureRouteDiagnostic()
                     if (route != lastRoute) {
-                        Log.i(TAG, "VOICE capture route pcmMs=${pcmSamples * 1000 / SAMPLE_RATE} $route")
+                        Log.i(TAG, "VOICE capture route pcmMs=${pcmDurationUs / 1000} $route")
                         lastRoute = route
                     }
                 }
@@ -489,7 +496,7 @@ class VoiceRecorder(private val context: Context) {
                 if (hasSpeech) {
                     if (!isSpeaking) {
                         isSpeaking = true
-                        Log.i(TAG, "VOICE speech started pcmMs=${pcmSamples * 1000 / SAMPLE_RATE} " +
+                        Log.i(TAG, "VOICE speech started pcmMs=${pcmDurationUs / 1000} " +
                             "rawRms=${energy.toInt()} ema=${smoothedEnergy.toInt()} " +
                             "noiseFloor=${detectorNoiseFloor.toInt()} onsetThreshold=${speechThreshold.toInt()}")
                         val callbackSnapshot = recordingCallback
@@ -505,7 +512,7 @@ class VoiceRecorder(private val context: Context) {
                             Log.i(
                                 TAG,
                                 "VOICE_STEP_2 silence detected (${configSnapshot.silenceDurationMs}ms window), " +
-                                    "pcmMs=${pcmSamples * 1000 / SAMPLE_RATE} rawRms=${energy.toInt()}, " +
+                                    "pcmMs=${pcmDurationUs / 1000} rawRms=${energy.toInt()}, " +
                                     "energy=${smoothedEnergy.toInt()}, threshold=${silenceThreshold.toInt()} " +
                                     "— speech stopped; boundary=local_silence"
                             )

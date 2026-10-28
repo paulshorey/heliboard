@@ -135,7 +135,8 @@ the server accepts today.
 ### Audio format
 
 - **Encoding**: PCM16 (16-bit signed, little-endian), mono, 16 kHz — the model's
-  native input format.
+  native input format. Legacy SCO captures 8 kHz and is linearly upsampled to 16 kHz
+  before framing; raw capture diagnostics use the input rate.
 - **MIME type**: `audio/pcm;rate=16000`.
 - **Chunk size**: 100 ms (3 200 bytes at 16 kHz mono PCM16), matching
   `VoiceRecorder`'s read interval and Google's documented guidance.
@@ -289,7 +290,7 @@ ephemeral tokens would require a server component.
 | `PREF_GEMINI_USE_EDITOR_CONTEXT` | Boolean | Harvest proper nouns near the caret into `customVocabulary` (default `true`) |
 | `PREF_GEMINI_CUSTOM_VOCABULARY` | String | User-defined `customVocabulary`, one word or phrase per line. Empty by default; no bundled terms. |
 | `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Local silence window before sending `audioStreamEnd` (default 2) |
-| `PREF_VOICE_MICROPHONE` | String | `automatic` (default, prefer Bluetooth) or `built_in`; read on start/resume; explicit routing requires Android 6+ |
+| `PREF_VOICE_MICROPHONE` | String | `automatic` (default, prefer Bluetooth), `built_in` (require phone), or `bluetooth` (require headset); read on start/resume; explicit routing requires Android 6+ |
 | `PREF_VOICE_SILENCE_THRESHOLD` | Int | RMS threshold used for silence detection |
 | `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` | Int | Silence duration before auto-stopping recording |
 

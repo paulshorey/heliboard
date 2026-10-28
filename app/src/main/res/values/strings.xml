@@ -7,8 +7,11 @@
 <resources xmlns:tools="http://schemas.android.com/tools" xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
     <string name="voice_microphone_title">Microphone</string>
     <string name="voice_microphone_summary">Choose the microphone for voice transcription. Applies when you start or resume dictation.</string>
-    <string name="voice_microphone_automatic">Automatic (prefer Bluetooth)</string>
-    <string name="voice_microphone_builtin">Built-in phone microphone</string>
+    <string name="voice_microphone_automatic">Automatic</string>
+    <string name="voice_microphone_builtin">Always use phone microphone</string>
+    <string name="voice_microphone_bluetooth">Always use Bluetooth headset microphone</string>
+    <string name="voice_microphone_bluetooth_summary">Require a connected Bluetooth headset microphone. If unavailable or disconnected, stop and ask you to reconnect or change this setting.</string>
+    <string name="voice_manual_phrase_pending">Wait for the paused phrase to finish processing before resuming.</string>
     <string name="voice_microphone_automatic_summary">Use a connected Bluetooth headset microphone when available; otherwise let Android choose.</string>
     <string name="voice_microphone_builtin_summary">Always use the phone microphone, even with a Bluetooth, wired, or USB microphone connected.</string>
     <string name="voice_microphone_unsupported">Microphone selection requires Android 6 or later. Android chooses the microphone on this device.</string>
@@ -18,7 +21,7 @@
     <string name="voice_microphone_route_timeout">Android did not activate the requested microphone. Check your microphone setting and try again.</string>
     <string name="voice_microphone_route_lost">The selected microphone changed or disconnected. Tap the mic to start again.</string>
     <string name="voice_microphone_connecting">Connecting Bluetooth microphone. Wait for the ready message before speaking.</string>
-    <string name="voice_microphone_ready">Microphone ready</string>
+    <string name="voice_microphone_ready">Bluetooth microphone ready</string>
     <!-- Name of Android spell checker service. The app name should not be translated. -->
     <string name="spell_checker_service_name">HeliBoard Spell Checker</string>
     <!-- Title for IME settings screen. The app name should not be translated. -->

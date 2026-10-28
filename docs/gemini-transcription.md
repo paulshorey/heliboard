@@ -67,14 +67,18 @@ costs the user more than a second of waiting.
 
 ## Microphone selection
 
-The first setting under **Transcription → Microphone** persists one of two policies:
+The first setting under **Transcription → Microphone** persists one of three policies:
 
-- **Automatic (prefer Bluetooth)** (default): request a connected BLE or SCO headset
+- **Automatic** (default): request a connected BLE or SCO headset
   microphone when available. Without Bluetooth input, Android selects the input,
   including a wired or USB microphone when connected.
-- **Built-in phone microphone**: explicitly request the phone's microphone even
+- **Always use phone microphone**: explicitly request the phone's microphone even
   when Bluetooth, wired or USB input is connected. If the built-in input is absent
   or Android refuses the route, report an error instead of using an external mic.
+- **Always use Bluetooth headset microphone**: require a connected BLE/SCO headset
+  microphone. If none is available, reject Start/Resume with a reconnect/change-setting
+  message. A headset connected only for playback is not a microphone. Never fall
+  back to the phone in this policy.
 
 The choice is read at every start/resume; it never stores transient device IDs or
 names. Android 6+ supports explicit input preference and actual-route queries.
@@ -84,6 +88,14 @@ Android 5 retains its platform route and shows a compatibility explanation in se
 For Bluetooth it also owns an `AudioManager.setCommunicationDevice` request on
 Android 12+, selecting an **output** from `availableCommunicationDevices` (Android
 selects its matching input). Android 6–11 uses `startBluetoothSco`/`stopBluetoothSco`.
+Legacy SCO requires mono 8 kHz capture, per Android's
+[`startBluetoothSco` contract](https://developer.android.com/reference/android/media/AudioManager#startBluetoothSco()).
+Resolve the route before creating the recorder. `VoicePcmResampler` performs
+streaming linear 2x interpolation into the unchanged 16 kHz upload format, with
+no gain or noise gate. A start/resume selecting another rate recreates the recorder;
+old-phase reads are discarded. Diagnostics measure raw input levels before conversion,
+log `captureRate`/`uploadRate`, and preserve elapsed PCM time across rate changes.
+Other capture routes remain at 16 kHz.
 Only the normal `MODIFY_AUDIO_SETTINGS` permission is added: there is no pairing,
 scanning or direct Bluetooth-device access. No global audio mode is changed.
 
@@ -108,10 +120,13 @@ Android documents [preferred recording inputs](https://developer.android.com/dev
 and [communication-device selection and cleanup](https://developer.android.com/reference/android/media/AudioManager#setCommunicationDevice(android.media.AudioDeviceInfo)).
 
 Phone acceptance remains separate from JVM tests: connect a Bluetooth headset,
-choose built-in, and speak near the phone with the headset distant; reverse the
-positions under Automatic after the ready message. Repeat after an app restart,
-pause/resume, and with a wired/USB mic. Unplug/disconnect during capture, retry with
-the current devices, and confirm normal media routing returns after stop/cancel.
+choose **Always use phone microphone**, and speak near the phone with the headset
+distant; reverse the positions under **Always use Bluetooth headset microphone**
+after the ready message. Repeat after an app restart and pause/resume, changing
+policies while paused. Check Automatic with no headset and with wired/USB input.
+Start Bluetooth-only with no connected headset: expect an error, no phone fallback.
+Disconnect during capture: expect visible stop and an explicit restart. Confirm
+normal media routing returns after stop/cancel.
 Test Bluetooth Classic and BLE on actual Android versions; Robolectric cannot
 prove a manufacturer's audio policy or headset activation behavior.
 
@@ -520,8 +535,11 @@ activity boundaries. Google documents this as [manual VAD](https://ai.google.dev
   frame in the declared activity counts as pending for final/queue accounting;
   raw capture speech counts still describe the original energy detector.
 - An open declared activity can exceed 30 seconds without a transcription
-  response. Text may wait until Pause/Stop. Resume clears old boundary waits even
-  if speech starts quietly. Explicit Pause still has a 30-second response/final
+  response. Text may wait until Pause/Stop. Resume waits until pending paused
+  speech and its queued boundary are confirmed; otherwise it leaves capture paused
+  and asks the user to wait. Finals have no phase ID, so overlapping unconfirmed
+  phases could let an old final acknowledge newer quiet speech. After confirmation,
+  Resume clears old boundary waits even if speech starts quietly. Explicit Pause still has a 30-second response/final
   bound; Stop keeps its existing 20-second overall budget and eight-second final
   grace. Network/transport, upload queues, editor rejection, cancellation and the
   nine-minute session limit retain their guards. Only authoritative finals enter
@@ -539,8 +557,8 @@ Do not commit raw user log exports or claim server VAD is proven responsible.
 
 For a controlled phone comparison:
 
-1. First select the intended Microphone policy (Automatic prefers connected
-   Bluetooth), wait for readiness and verify the captured route. Compare normal
+1. First select **Always use Bluetooth headset microphone** for the headset trial
+   (or **Always use phone microphone** for the phone comparison), wait for readiness and verify the captured route. Compare normal
    and quiet speech with **Finish phrases manually (test)** off. If omissions
    remain, turn it on for a fresh recording with the same route, position, quiet
    room, language and Verbatim setting.

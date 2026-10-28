@@ -40,6 +40,18 @@ class VoiceAudioDiagnosticsTest {
         assertNull(diagnostics.takeSummary())
     }
 
+    @Test fun legacyCaptureRateAndRateChangesPreserveRealTimeOffsetsAndRawLevels() {
+        val diagnostics = VoiceAudioDiagnostics()
+        val level = VoiceAudioDiagnostics.measure(pcm(*IntArray(800) { 50 }))
+        diagnostics.add(level, 120.0, 260.0, 380.0, 50.0, 8000)
+        val first = diagnostics.takeSummary()!!
+        assertTrue(first.contains("pcmMs=0..100"))
+        assertTrue(first.contains("captureRate=8000"))
+        assertTrue(first.contains("rms=50 peak=50"))
+        diagnostics.add(level, 120.0, 260.0, 380.0, 50.0, 16000)
+        assertTrue(diagnostics.takeSummary()!!.contains("pcmMs=100..150"))
+    }
+
     @Test fun boundsEachWindowAndPreservesCaptureOffsetsAfterReset() {
         val diagnostics = VoiceAudioDiagnostics()
         val level = VoiceAudioDiagnostics.measure(pcm(*IntArray(1600) { 1000 }))

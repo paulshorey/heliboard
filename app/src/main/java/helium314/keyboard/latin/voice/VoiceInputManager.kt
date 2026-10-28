@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import helium314.keyboard.latin.R
 import helium314.keyboard.latin.settings.Defaults
 import helium314.keyboard.latin.settings.Settings
 import helium314.keyboard.latin.settings.TranscriptionPreferences
@@ -335,6 +336,13 @@ class VoiceInputManager internal constructor(
     }
     fun resumeRecording() {
         if (!isPaused || !sessionOpen || isSessionStopping) return
+        // Finals have no capture-phase ID. Keep manual phases from overlapping while
+        // earlier speech or its queued boundary is unconfirmed; otherwise a delayed
+        // earlier final could acknowledge a newer quiet phrase after its PCM drains.
+        if (geminiConfig.manualPhrases && (unconfirmedSpeech || unconfirmedTranscript || outbound.isNotEmpty())) {
+            listener?.onError(context.getString(R.string.voice_manual_phrase_pending))
+            return
+        }
         val sessionId = activeSessionId
         Log.i(TAG, "session=$sessionId resume")
         voiceRecorder.resumeRecording()

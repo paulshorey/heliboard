@@ -29,6 +29,8 @@ class TranscriptionPreferencesTest {
         assertEquals(TranscriptionPreferences.MICROPHONE_AUTOMATIC, TranscriptionPreferences.readMicrophone(prefs))
         TranscriptionPreferences.writeMicrophone(prefs, TranscriptionPreferences.MICROPHONE_BUILT_IN)
         assertEquals(TranscriptionPreferences.MICROPHONE_BUILT_IN, TranscriptionPreferences.readMicrophone(prefs))
+        TranscriptionPreferences.writeMicrophone(prefs, TranscriptionPreferences.MICROPHONE_BLUETOOTH)
+        assertEquals(TranscriptionPreferences.MICROPHONE_BLUETOOTH, TranscriptionPreferences.readMicrophone(prefs))
         prefs.edit().putString(Settings.PREF_VOICE_MICROPHONE, "disconnected-device-id").commit()
         assertEquals(TranscriptionPreferences.MICROPHONE_AUTOMATIC, TranscriptionPreferences.readMicrophone(prefs))
         TranscriptionPreferences.writeMicrophone(prefs, TranscriptionPreferences.MICROPHONE_AUTOMATIC)

@@ -24,6 +24,37 @@ import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 class VoiceRecorderLifecycleTest {
+    @Test fun legacyCaptureReadsOneHundredMillisecondsAndUploadsQuietPcmAtSixteenKhz() {
+        val recorder = VoiceRecorder(ApplicationProvider.getApplicationContext<Context>())
+        val events = Events()
+        recorder.setCallback(events)
+        var reads = 0
+        val audio = Mockito.mock(AudioRecord::class.java) { call ->
+            if (call.method.name == "read") {
+                assertEquals(1600, call.arguments[2]) // 100 ms at 8 kHz PCM16.
+                if (++reads == 2) {
+                    setField(recorder, "isRecording", false)
+                    0
+                } else {
+                    val data = call.arguments[0] as ByteArray
+                    for (offset in 0 until 1600 step 2) { data[offset] = 50; data[offset + 1] = 0 }
+                    1600
+                }
+            } else Mockito.RETURNS_DEFAULTS.answer(call)
+        }
+        setField(recorder, "isRecording", true)
+        setField(recorder, "audioRecord", audio)
+        setField(recorder, "captureSampleRate", 8000)
+        VoiceRecorder::class.java.getDeclaredMethod("recordingLoop", VoiceRecorder.RecordingCallback::class.java)
+            .apply { isAccessible = true }.invoke(recorder, events)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(1, events.audioChunks)
+        assertEquals(3200, events.audioBytes)
+        assertEquals(50, events.lastSample)
+        assertEquals(listOf(false), events.speechEvidence)
+        assertTrue(events.errors.isEmpty())
+    }
+
     @Test fun pauseAndFailedResumeReleaseTheirOwnBluetoothRequests() {
         val context = Mockito.spy(ApplicationProvider.getApplicationContext<Context>())
         TranscriptionPreferences.writeMicrophone(context.prefs(), TranscriptionPreferences.MICROPHONE_AUTOMATIC)
@@ -314,6 +345,7 @@ class VoiceRecorderLifecycleTest {
 
     private class Events : VoiceRecorder.RecordingCallback {
         var audioChunks = 0
+        var audioBytes = 0
         val speechEvidence = mutableListOf<Boolean>()
         val errors = mutableListOf<String>()
         var speechStops = 0
@@ -321,6 +353,7 @@ class VoiceRecorderLifecycleTest {
         override fun onRecordingStarted() { }
         override fun onAudioChunk(pcmData: ByteArray, containsSpeech: Boolean) {
             audioChunks++
+            audioBytes += pcmData.size
             speechEvidence.add(containsSpeech)
             lastSample = (pcmData[1].toInt() shl 8) or (pcmData[0].toInt() and 0xff)
         }
