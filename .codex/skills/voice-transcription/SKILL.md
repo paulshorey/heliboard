@@ -94,38 +94,32 @@ No names, addresses or device IDs are stored or logged.
    host cannot confirm the caret (even when the cached selection is collapsed).
    Startup rejection leaves the editor untouched
    and reports the service reason. Do not attempt a marker after editor failure.
-9. Stop joins the recorder and queues EOF after its posted tail. Block restart
-   until the existing connection closes. No automatic reconnect or rotation.
+9. Stop joins the recorder and queues EOF after its posted tail. A mic tap during
+   drain queues one explicit restart after clean close, with ordinary feedback.
+   Repeated taps do not duplicate it; cancellation/failure invalidates the request.
+   Recording starts only when Listening is shown. No overlapping sockets/replay.
 
-The PCM FIFO is bounded to 960,000 bytes; the socket audio queue to 256 KiB of
-encoded JSON. Backpressure retains the head and retries locally every 25 ms;
-controls never overtake audio; at most 64 controls may wait locally. Overflow stops
-instead of dropping/coalescing data. Oldest queued PCM has 30 seconds to enter the
-socket queue. Active local speech or pending recognized words has 30 seconds
-without a server response. The missing-final wait applies to recognized words,
-not raw volume spikes, and starts when a speech
-boundary's `audioStreamEnd` enters the socket queue, not when speech first becomes
-pending. Repeated controls/interims cannot extend that wait; a new speech onset
-clears it until the next boundary. Long utterances with live interims continue.
-Controls retain their captured speech epoch so backpressure cannot apply an older
-boundary's final deadline to a newer utterance.
-The setup deadline is 12 seconds across every schema tier. Stop reads finals for
-eight seconds before initiating close, with a 15-second EOF/close deadline and a
-20-second overall deadline from the stop request, including capture shutdown,
-remaining setup and upload. Readiness, retries, EOF and finals cannot reset the
-overall budget. Completion/cancellation removes both stop timers. A restart tap
-during drain reports that processing must finish without hiding the spinner while
-work remains pending. Recheck session ownership after
-capture shutdown and the IDLE state listener so reentrant failure/cancellation
-cannot restore processing UI.
-Clear older response/final watchdogs as soon as graceful stop begins. Silence
-auto-stop is intentional: accept late finals, never promote interims, and close
-normally without a marker for unconfirmed noise/hypotheses. Actual transport,
-microphone, queue, and drain failures still report interruptions. Equal-deadline
-silence and speech timers favor the normal silence stop. Repeated authoritative
-finals acknowledge progress without another editor write; queued speech still
-prevents acknowledgment. Pause/resume capture phases discard results/errors from
-a native read interrupted by the earlier phase.
+PCM FIFO is bounded to 960,000 bytes; socket audio to 256 KiB encoded JSON;
+controls and finalized text each to 64 entries. Backpressure retains the exact
+head and controls cannot overtake audio. Setup has one 12-second deadline and
+oldest queued PCM has 30 seconds to enter the socket queue.
+
+Automatic phrase endings use Gemini VAD. Local energy controls silence auto-stop
+only, never PCM forwarding or forced phrase boundaries. Explicit Pause/Stop flush
+behind audio. Pending recognized words (not raw energy) drive processing and the
+30-second response watchdog. An authoritative final resolves earlier recognition;
+subsequent interims become pending again. Manual mode additionally tracks declared
+activity, with queued speech preventing its acknowledgement. Keep boundary times
+for late interims; Pause final waits are bounded from the submitted boundary and
+new speech clears the earlier wait. Never promote interims.
+
+Stop settles for two seconds without unfinished recognition or retains its original
+eight-second final deadline while a hypothesis is pending. A late interim restores
+that original deadline; later finals can shorten the remaining wait. Queued bytes
+get the full original budget even at a short settle. Nothing extends the original
+deadline; manager EOF/close remains 15 seconds, complete Stop 20 seconds. New
+recording intent is honored only after a clean close. Keyboard hiding/host clears
+cancel immediately, and actual network/queue/editor failures remain terminal.
 
 ## Setup payload
 
@@ -217,19 +211,13 @@ progress. Volume measurements are not logged. Keep all terminal network,
 queue, editor, session-limit and cancellation guards. Phone/provider acceptance is
 still required; bypassing VAD does not guarantee recognition of inaudible speech.
 
-## Turn finalization (Hybrid VAD, automatic mode)
+## Automatic phrase finalization
 
-Server VAD stays enabled with patient end detection. Local silence, pause, and stop
-enqueue `audioStreamEnd` behind all preceding PCM. Forward all captured audio,
-including silence; local RMS VAD must not decide which samples are discarded. PCM
-callbacks carry raw-energy speech evidence captured with that chunk, not the
-mutable speaking flag or its silence/smoothing tail. Only queued speech blocks
-final progress; a queued quiet/control suffix does not require another final.
-Audio after `audioStreamEnd` reopens the turn. Only authoritative finals reach the
-editor; an unfinished tail that fails to finalize is visibly interrupted.
-
-The 800 ms interim fallback, held-silence prefix buffer, and stale-interim finalize
-timer were removed because they could insert provisional words or omit soft audio.
+Server VAD detects automatic phrase endings with patient silence and prefix padding.
+Local energy dips do not send `audioStreamEnd`; explicit Pause/Stop still queue it
+behind all PCM. Every microphone sample is forwarded. A raw speech flag does not
+prove an unfinished word or require another final after confirmed text. A later
+recognition interim does. Manual phrase mode retains explicit activity signals.
 
 ## Transcript assembly
 

@@ -2177,6 +2177,11 @@ public class LatinIME extends InputMethodService implements
             }
 
             @Override
+            public void onRestartQueued() {
+                mKeyboardSwitcher.showToast(getString(R.string.voice_restart_queued), false);
+            }
+
+            @Override
             public void onProcessingStarted() {
                 try {
                     mKeyboardSwitcher.showProcessingIndicator();

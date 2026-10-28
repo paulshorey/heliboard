@@ -35,6 +35,7 @@ class GeminiAudioQueueTest {
         socket.messages.clear()
         socket.bytes = 0
         socket.cancelled = false
+        socket.closeCalls = 0
         client = GeminiTranscriptionClient()
         client.socketFactory = WebSocket.Factory { _, listener -> transport = listener; socket }
         client.startStreaming("test-key", GeminiTranscriptionClient.buildSessionConfig("en_US", false, "SMART", 1500,
@@ -167,10 +168,45 @@ class GeminiAudioQueueTest {
         assertFalse(closed)
     }
 
+    @Test fun completedAutomaticPhraseSettlesInTwoSecondsInsteadOfAlwaysWaitingEight() {
+        assertTrue(client.finishStreaming(awaitTranscript = false))
+        socket.bytes = 0
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1999))
+        assertEquals(0, socket.closeCalls)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1))
+        assertEquals(1, socket.closeCalls)
+        assertTrue(errors.isEmpty())
+    }
+
+    @Test fun lateInterimRestoresTheOriginalFinalWaitWithoutExtendingItsDeadline() {
+        assertTrue(client.finishStreaming(awaitTranscript = false)); socket.bytes = 0
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1500))
+        client.updateFinishWait(awaitTranscript = true)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(5000))
+        assertEquals(0, socket.closeCalls)
+        client.updateFinishWait(awaitTranscript = false) // Late authoritative final at 6.5 s.
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1499))
+        assertEquals(0, socket.closeCalls)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1))
+        assertEquals(1, socket.closeCalls)
+    }
+
+    @Test fun shortSettleCannotFailOrCloseBeforeQueuedAudioHasItsOriginalDrainBudget() {
+        assertTrue(client.finishStreaming(awaitTranscript = false))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(2000))
+        assertEquals(0, socket.closeCalls)
+        assertTrue(errors.isEmpty())
+        socket.bytes = 0
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(6000))
+        assertEquals(1, socket.closeCalls)
+        assertTrue(errors.isEmpty())
+    }
+
     private class FakeSocket : WebSocket {
         var bytes = 0L
         var accepts = true
         var cancelled = false
+        var closeCalls = 0
         val messages = mutableListOf<String>()
         override fun request(): Request = Request.Builder().url("https://example.test/").build()
         override fun queueSize() = bytes
@@ -180,7 +216,7 @@ class GeminiAudioQueueTest {
             return true
         }
         override fun send(bytes: ByteString) = false
-        override fun close(code: Int, reason: String?) = accepts
+        override fun close(code: Int, reason: String?): Boolean { closeCalls++; return accepts }
         override fun cancel() { cancelled = true }
     }
 }
