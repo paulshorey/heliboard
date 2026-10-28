@@ -19,6 +19,7 @@ import helium314.keyboard.latin.settings.TranscriptionPreferences
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.prefs
 import kotlin.concurrent.thread
+import kotlin.math.sqrt
 
 /**
  * Records audio from the device microphone with client-side silence detection.
@@ -29,7 +30,7 @@ import kotlin.concurrent.thread
  * based on adaptive silence detection.
  *
  * Upload format: PCM 16-bit little-endian, 16 kHz, mono. Legacy SCO capture is
- * 8 kHz and is linearly upsampled before callbacks; diagnostics measure raw input.
+ * 8 kHz and is linearly upsampled before callbacks.
  */
 class VoiceRecorder(private val context: Context) {
 
@@ -86,6 +87,17 @@ class VoiceRecorder(private val context: Context) {
 
         /** Guard against "recording" sessions that never produce readable audio. */
         private const val MAX_CONSECUTIVE_EMPTY_READS = 50
+
+        internal fun rms(pcm: ByteArray): Double {
+            val samples = pcm.size / 2
+            if (samples == 0) return 0.0
+            var squares = 0.0
+            for (offset in 0 until samples * 2 step 2) {
+                val sample = (pcm[offset + 1].toInt() shl 8) or (pcm[offset].toInt() and 0xff)
+                squares += sample.toDouble() * sample
+            }
+            return sqrt(squares / samples)
+        }
     }
 
     /**
@@ -195,8 +207,7 @@ class VoiceRecorder(private val context: Context) {
             Log.i(
                 TAG,
                 "VOICE_STEP_1 recording started captureRate=$captureSampleRate uploadRate=$SAMPLE_RATE, " +
-                    "silenceDuration=${configSnapshot.silenceDurationMs}ms, " +
-                    "silenceThreshold=${configSnapshot.silenceThreshold}"
+                    "silenceDuration=${configSnapshot.silenceDurationMs}ms"
             )
             return true
         } catch (e: SecurityException) {
@@ -326,9 +337,6 @@ class VoiceRecorder(private val context: Context) {
         val energyHistory = ArrayDeque<Double>()
         var noiseFloorRecalcCounter = 0
         var consecutiveEmptyReads = 0
-        val diagnostics = VoiceAudioDiagnostics()
-        var lastRoute: String? = null
-        var pcmDurationUs = 0L
         var readyPhase: Long? = null
         var resamplerPhase: Long? = null
         var resampler = VoicePcmResampler()
@@ -339,8 +347,6 @@ class VoiceRecorder(private val context: Context) {
         try {
             while (isRecording) {
                 if (isPaused) {
-                    diagnostics.takeSummary()?.let { Log.i(TAG, it) }
-                    lastRoute = null
                     silenceDurationMs = 0L
                     isSpeaking = false
                     try {
@@ -385,6 +391,7 @@ class VoiceRecorder(private val context: Context) {
                 if (!isRecording || isPaused || readPhase != capturePhase || !routeReady) continue
                 if (bytesRead > 0 && readyPhase != readPhase) {
                     readyPhase = readPhase
+                    Log.i(TAG, "VOICE capture route ${captureRouteDiagnostic()}")
                     mainHandler.post {
                         if (isRecording && !isPaused && capturePhase == readPhase && callback === recordingCallback) {
                             recordingCallback?.onRecordingStarted()
@@ -427,16 +434,12 @@ class VoiceRecorder(private val context: Context) {
                 }
 
                 if (resamplerPhase != readPhase) {
-                    diagnostics.takeSummary()?.let { Log.i(TAG, it) }
                     resampler = VoicePcmResampler()
                     resamplerPhase = readPhase
                 }
                 val chunk = readBuffer.copyOf(bytesRead)
 
-                // One PCM pass supplies both the unchanged RMS detector and diagnostics.
-                val level = VoiceAudioDiagnostics.measure(chunk)
-                val energy = level.rms
-                pcmDurationUs += level.samples.toLong() * 1_000_000 / readRate
+                val energy = rms(chunk)
                 smoothedEnergy = (ENERGY_SMOOTHING_ALPHA * energy) +
                     ((1.0 - ENERGY_SMOOTHING_ALPHA) * smoothedEnergy)
 
@@ -459,18 +462,6 @@ class VoiceRecorder(private val context: Context) {
                 val callbackSnapshot = recordingCallback
                 val upload = if (readRate == SAMPLE_RATE) chunk else resampler.upsample8kTo16k(chunk)
                 mainHandler.post { callbackSnapshot?.onAudioChunk(upload, containsSpeech) }
-
-                val fullWindow = diagnostics.add(
-                    level, detectorNoiseFloor, silenceThreshold, speechThreshold, smoothedEnergy, readRate
-                )
-                if (lastRoute == null || fullWindow) {
-                    val route = captureRouteDiagnostic()
-                    if (route != lastRoute) {
-                        Log.i(TAG, "VOICE capture route pcmMs=${pcmDurationUs / 1000} $route")
-                        lastRoute = route
-                    }
-                }
-                if (fullWindow) diagnostics.takeSummary()?.let { Log.i(TAG, it) }
 
                 // Percentile-based noise floor: track raw RMS energy (not EMA-smoothed)
                 // to avoid speech->silence lag contaminating the low-percentile baseline.
@@ -496,9 +487,7 @@ class VoiceRecorder(private val context: Context) {
                 if (hasSpeech) {
                     if (!isSpeaking) {
                         isSpeaking = true
-                        Log.i(TAG, "VOICE speech started pcmMs=${pcmDurationUs / 1000} " +
-                            "rawRms=${energy.toInt()} ema=${smoothedEnergy.toInt()} " +
-                            "noiseFloor=${detectorNoiseFloor.toInt()} onsetThreshold=${speechThreshold.toInt()}")
+                        Log.i(TAG, "VOICE speech started")
                         val callbackSnapshot = recordingCallback
                         mainHandler.post { callbackSnapshot?.onSpeechStarted() }
                     }
@@ -512,9 +501,7 @@ class VoiceRecorder(private val context: Context) {
                             Log.i(
                                 TAG,
                                 "VOICE_STEP_2 silence detected (${configSnapshot.silenceDurationMs}ms window), " +
-                                    "pcmMs=${pcmDurationUs / 1000} rawRms=${energy.toInt()}, " +
-                                    "energy=${smoothedEnergy.toInt()}, threshold=${silenceThreshold.toInt()} " +
-                                    "— speech stopped; boundary=local_silence"
+                                    "boundary=local_silence"
                             )
                             val callbackSnapshot = recordingCallback
                             mainHandler.post { callbackSnapshot?.onSpeechStopped() }
@@ -530,8 +517,6 @@ class VoiceRecorder(private val context: Context) {
             Log.e(TAG, "Error in recording loop: ${e.message}")
             val callbackSnapshot = recordingCallback
             mainHandler.post { callbackSnapshot?.onRecordingError("Recording error: ${e.message}") }
-        } finally {
-            diagnostics.takeSummary()?.let { Log.i(TAG, it) }
         }
     }
 

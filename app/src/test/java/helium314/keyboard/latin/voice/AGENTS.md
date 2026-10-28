@@ -6,7 +6,7 @@ Tests for the Gemini Live voice pipeline.
 - `GeminiTranscriptionClientTest.kt` - `setup` wire format, audio framing, language resolution, server-message parsing, and transcript assembly.
 - `GeminiTranscriptionClientStreamTest.kt` - end-to-end WebSocket lifecycle against a local `MockWebServer`, including the close-code-1007 setup-tier fallback, authoritative-only insertion, malformed response handling, failure during drain, and content-free provider/assembly diagnostic counts for duplicate and growing finals.
 - `VoicePcmResamplerTest.kt` - legacy SCO interpolation, quiet/full-scale PCM, duration, phase reset and continuity across reads.
-- `VoiceAudioDiagnosticsTest.kt` - signed PCM math, clipping/zero counts, quiet evidence, bounded summaries, tail flushing and capture offsets.
+- `VoiceRecorderRmsTest.kt` - unchanged RMS math for quiet and signed full-scale PCM, without volume logging.
 - `TranscriptPostProcessorTest.kt` - finalized-text cleanup tests.
 - `TranscriptionPreferencesTest.kt` - Gemini preference defaults, sanitization, and cleanup of previous providers' keys.
 - `VoiceMicrophoneRouterTest.kt` - built-in isolation, Bluetooth SCO/BLE preference, actual-route verification/timeout/loss, Bluetooth-only absence/disconnect, legacy capture rates/unpublished inputs, request cleanup and API 21/22/23/30/35 compatibility.

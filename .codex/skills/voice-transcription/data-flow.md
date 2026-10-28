@@ -50,8 +50,7 @@ Bluetooth-only fails if no headset microphone is available; no phone fallback.
 API 21–22 retain platform routing without device selection.
 Legacy SCO (API 23–30) captures mono PCM16 at 8 kHz and `VoicePcmResampler`
 converts to 16 kHz without gain/gating. Route/rate are resolved before recorder
-creation; resume recreates it if needed. Diagnostics measure raw capture levels
-and rate-correct duration.
+creation; resume recreates it if needed. Volume measurements are not logged.
 - **Format**: PCM16 little-endian, 16 kHz, mono — the Live API's native input format
 - **Silence detection**: adaptive RMS threshold on each 100 ms chunk
 - **Callbacks**: supplies PCM chunks to `VoiceInputManager`; speech-stop silence requests a turn finalize, and longer silence requests auto-stop

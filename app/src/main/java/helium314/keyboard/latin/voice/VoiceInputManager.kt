@@ -187,7 +187,7 @@ class VoiceInputManager internal constructor(
         finalizedAtMs = null
         Log.i(TAG, "session=$sessionId start mode=${geminiConfig.transcriptionMode} " +
             "manualPhrases=${geminiConfig.manualPhrases} " +
-            "localSilenceMs=$chunkSilenceDurationMs threshold=$chunkSilenceThreshold " +
+            "localSilenceMs=$chunkSilenceDurationMs " +
             "autoStopMs=$autoStopSilenceMs serverSilenceMs=${geminiConfig.endOfSpeechSilenceMs} " +
             "autoLanguage=${geminiConfig.autoDetectLanguage} editorVocabulary=${geminiConfig.useEditorContext}")
         acceptingAudio = true

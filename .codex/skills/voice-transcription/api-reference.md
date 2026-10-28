@@ -136,7 +136,7 @@ the server accepts today.
 
 - **Encoding**: PCM16 (16-bit signed, little-endian), mono, 16 kHz — the model's
   native input format. Legacy SCO captures 8 kHz and is linearly upsampled to 16 kHz
-  before framing; raw capture diagnostics use the input rate.
+  before framing.
 - **MIME type**: `audio/pcm;rate=16000`.
 - **Chunk size**: 100 ms (3 200 bytes at 16 kHz mono PCM16), matching
   `VoiceRecorder`'s read interval and Google's documented guidance.

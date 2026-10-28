@@ -65,7 +65,7 @@ before releasing PCM. Bluetooth uses `setCommunicationDevice` on Android 12+
 and legacy SCO on Android 6–11; owned requests are released on pause/stop/failure.
 Legacy SCO captures 8 kHz mono PCM16 and uses `VoicePcmResampler` for streaming
 linear 16 kHz upload without gain/gating. Recreate capture on a start/resume rate
-change. Raw numeric diagnostics use the capture rate and preserve elapsed time.
+change. Capture/start logs include the selected rate without volume measurements.
 Connecting/ready messages precede Bluetooth dictation. Activation has an 8-second
 deadline; losing the verified route stops dictation and requires explicit restart.
 The silence auto-stop window resets at microphone readiness, allowing activation
@@ -213,7 +213,7 @@ to a setup tier that omits the manual activity configuration. Text may arrive on
 after the explicit boundary. Open manual activity has no transcription-response
 watchdog; explicit Pause has bounded response/final waits and Stop retains its
 20-second absolute budget. Declared activity includes quiet PCM for queue/final
-progress; raw capture diagnostics remain independent. Keep all terminal network,
+progress. Volume measurements are not logged. Keep all terminal network,
 queue, editor, session-limit and cancellation guards. Phone/provider acceptance is
 still required; bypassing VAD does not guarantee recognition of inaudible speech.
 
@@ -351,12 +351,11 @@ effects. Explicit spoken commands such as "New paragraph." are still handled by
 
 ## Verifying against the real API
 
-For quiet speech or Bluetooth omissions, first use the controlled volume test in
-`docs/gemini-transcription.md`. Capture logs include two-second numeric level
-windows, actual route type, adaptive thresholds and provider/assembly character
-counts. A saved RMS threshold is a minimum; the noise-floor margins can raise it.
-All PCM is still forwarded. Compare Smart transcription on/off separately from
-microphone routing or pause settings; do not infer ignored words from RMS alone.
+Use **Transcription → Voice diagnostics** for focused interruption, route and
+phrase-boundary events. About-page debug export adds app/lifecycle warnings.
+Volume windows and threshold measurements have been removed; all PCM is still
+forwarded and RMS math is unchanged. Verify microphone policy separately from
+provider recognition and phrase finalization.
 
 `GeminiTranscriptionClientTest`, `GeminiTranscriptionClientStreamTest` (local
 WebSocket server, including the 1007 tier fallback) and `VoiceContextVocabularyTest`
