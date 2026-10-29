@@ -133,6 +133,7 @@ class VoiceInputManagerTest {
     private var onInsert: (() -> Unit)? = null
     private var onRecorderStop: (() -> Unit)? = null
     private var onStateChange: ((VoiceInputManager.State) -> Unit)? = null
+    private var onProcessingIdle: (() -> Unit)? = null
 
     @Before
     fun setUp() {
@@ -176,7 +177,7 @@ class VoiceInputManagerTest {
             }
             override fun onTranscriptionInterrupted(marker: String): Boolean { markers.add(marker); return true }
             override fun onProcessingStarted() { processing = true }
-            override fun onProcessingIdle() { processing = false }
+            override fun onProcessingIdle() { processing = false; onProcessingIdle?.invoke() }
             override fun onPendingProcessingCancelled() { }
             override fun onError(error: String) { errors.add(error) }
             override fun onPermissionRequired() { error("unexpected permission request") }
@@ -484,6 +485,19 @@ class VoiceInputManagerTest {
         manager.cancelRecording(); shadowOf(Looper.getMainLooper()).idle()
         assertTrue(manager.isIdle)
         assertEquals(1, starts)
+    }
+
+    @Test fun cancellationFromProcessingIdleCannotReviveQueuedRestart() {
+        start(); audio(); manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
+        manager.startRecording()
+        onProcessingIdle = {
+            onProcessingIdle = null
+            manager.cancelRecording()
+        }
+        stream.onStreamClosed(); shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(manager.isIdle)
+        assertEquals(1, starts)
+        assertTrue(errors.isEmpty())
     }
 
     @Test fun failureClearsQueuedRestartWithoutCapturingIntoABrokenSession() {

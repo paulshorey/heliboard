@@ -97,6 +97,8 @@ No names, addresses or device IDs are stored or logged.
 9. Stop joins the recorder and queues EOF after its posted tail. A mic tap during
    drain queues one explicit restart after clean close, with ordinary feedback.
    Repeated taps do not duplicate it; cancellation/failure invalidates the request.
+   Capture the ended generation before cleanup/listener callbacks; cancellation
+   from processing-idle feedback must invalidate the old restart too.
    Recording starts only when Listening is shown. No overlapping sockets/replay.
 
 PCM FIFO is bounded to 960,000 bytes; socket audio to 256 KiB encoded JSON;
