@@ -718,6 +718,9 @@ class VoiceInputManager internal constructor(
         sessionOpen = false
         acceptingAudio = false
         activeSessionId += 1
+        // Capture ownership before cleanup/listener callbacks can cancel, destroy,
+        // or start another generation. Their cancellation must invalidate this restart.
+        val endedGeneration = activeSessionId
         networkMonitor.stop()
         cancelAutoStopTimer()
         listOf(audioRetry, connectTimeout, responseTimeout, finalTimeout, sessionLimit, drainTimeout, stopTimeout)
@@ -746,8 +749,7 @@ class VoiceInputManager internal constructor(
         updateState(State.IDLE)
         if (cancelled && hadPendingWork) listener?.onPendingProcessingCancelled()
         listener?.onProcessingIdle()
-        if (restartAfterClose && isIdle) {
-            val endedGeneration = activeSessionId
+        if (restartAfterClose && activeSessionId == endedGeneration && isIdle) {
             mainHandler.post {
                 if (activeSessionId == endedGeneration && isIdle) startRecording()
             }

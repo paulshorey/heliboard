@@ -30,7 +30,7 @@ Tests for the Gemini Live voice pipeline.
 - `VoiceContextVocabularyTest.kt` covers what must *not* be biased as much as what must: common words, sentence-initial capitals, digits, and URL/path/email/identifier fragments.
 - Neither suite can confirm what Google's server does with a given `setup` field. Use `tools/gemini-live-smoke-test.py` with a real `GEMINI_API_KEY` for that.
 
-- Interruption regressions cover final-then-noisy-PCM without spinner/watchdog/marker, server-only automatic boundaries with resumed-prefix PCM, queued one-shot restart and invalidation, late interim/final stop settling, the original absolute drain deadline and full upload budget.
+- Interruption regressions cover final-then-noisy-PCM without spinner/watchdog/marker, server-only automatic boundaries with resumed-prefix PCM, queued one-shot restart and invalidation including cancellation from the processing-idle callback, late interim/final stop settling, the original absolute drain deadline and full upload budget.
 - Manager fakes capture the actual callbacks and drive the paused main looper. Client `internal` methods have mangled JVM names; Mockito answers normalize them with `substringBefore('$')`.
 - API-21 network tests use `android.app.Application` to isolate the monitor from unrelated app subtype initialization.
 - Startup-rejection tests use the truncated depleted-credit detail from a device log (1011), an HTTP-429 handshake body, and queued pre-readiness PCM. No live billable request is needed; startup rejection must leave existing editor text untouched.
