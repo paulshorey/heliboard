@@ -88,7 +88,7 @@ and [wire reference](https://ai.google.dev/api/live#bidigeneratecontentrealtimei
     proper nouns harvested from editor text by `VoiceContextVocabulary`. No terms
     ship with the app; this field is omitted when both sources are empty. The
     example above assumes the user entered `MyProject`.
-- **`realtimeInputConfig.automaticActivityDetection`**: server VAD. HeliBoard keeps
+- **`realtimeInputConfig.automaticActivityDetection`**: server VAD. In automatic phrase mode HeliBoard keeps
   it **enabled** (`disabled: false`) so speech onset keeps its prefix padding, and
   tunes only the end of speech.
   - **`silenceDurationMs`**: non-speech duration before end-of-speech is committed.
@@ -112,8 +112,10 @@ and [wire reference](https://ai.google.dev/api/live#bidigeneratecontentrealtimei
 Not used: `tools`, `speechConfig`, `outputAudioTranscription`, `translationConfig`,
 `proactivity`, `historyConfig`, `contextWindowCompression`, `sessionResumption`.
 Sessions are capped at 10 minutes and each dictation utterance is independent, so
-HeliBoard stops and drains before requiring an explicit new recording. `activityHandling` and
-`turnCoverage` are conversational-agent concepts and are left at their defaults.
+HeliBoard stops and drains before requiring an explicit new recording.
+`turnCoverage` stays at its default. `activityHandling` stays at its default in
+automatic phrase mode; manual phrase mode explicitly sets `NO_INTERRUPTION` as
+described above.
 
 ### Setup tiers
 
@@ -162,9 +164,11 @@ stays open and subsequent audio reopens the stream. Every captured chunk is
 forwarded, including quiet audio; local RMS detection does not discard samples.
 Only authoritative finals become text. There is no interim promotion deadline.
 
-Manual VAD (`activityStart` / `activityEnd`, both empty objects) requires
-`automaticActivityDetection.disabled: true` and gives up the server's pre-speech
-buffer, so HeliBoard does not use it.
+Manual phrase mode uses `activityStart` / `activityEnd` (both empty objects)
+with `automaticActivityDetection.disabled: true`, as described above. It gives up
+the server's pre-speech buffer; HeliBoard instead declares activity before the
+phase's first PCM. The `audioStreamEnd` behavior in this section applies only to
+automatic phrase mode.
 
 ### Server responses
 
