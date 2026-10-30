@@ -132,10 +132,10 @@ cancel immediately, and actual network/queue/editor failures remain terminal.
   "model":"models/gemini-3.5-transcribe-live",
   "generationConfig":{"responseModalities":["TEXT"]},
   "inputAudioTranscription":{"languageCodes":["en-US"],"mode":"SMART","customVocabulary":["…"]},
-  "realtimeInputConfig":{"automaticActivityDetection":{
+  "realtimeInputConfig":{"activityHandling":"NO_INTERRUPTION","automaticActivityDetection":{
     "disabled":false,
     "startOfSpeechSensitivity":"START_SENSITIVITY_HIGH","prefixPaddingMs":300,
-    "endOfSpeechSensitivity":"END_SENSITIVITY_LOW","silenceDurationMs":1000}},
+    "endOfSpeechSensitivity":"END_SENSITIVITY_LOW","silenceDurationMs":2000}},
   "systemInstruction":{"parts":[{"text":"…"}]}
 }}
 ```
@@ -167,11 +167,11 @@ put it in the tier that matches how well-documented it is for this model.
 - **`mode: SMART`** — disfluency removal, inline self-correction resolution,
   list/number/date formatting, grammar and casing polish. `VERBATIM` is the
   literal alternative.
-- **`silenceDurationMs`** (default **1000 ms**, range 400–5000) with
+- **`silenceDurationMs`** (default **2000 ms**, range 400–5000) with
   **`endOfSpeechSensitivity: END_SENSITIVITY_LOW`**. Google documents that short
   windows split one utterance into fragments and that the model then loses
-  cross-fragment context, lowering quality. The one-second default follows owner
-  phone testing; retain longer saved values.
+  cross-fragment context, lowering quality. The two-second default follows extended
+  owner phone testing; preserve saved timing choices.
 - **`customVocabulary`** — user terms, then editor-harvested terms, capped at 100
   (Google notes best results around 100 even though 1 000 are accepted). No terms
   ship with the app; the field is omitted when both sources are empty.
@@ -223,6 +223,11 @@ Local energy dips do not send `audioStreamEnd`; explicit Pause/Stop still queue 
 behind all PCM. Every microphone sample is forwarded. A raw speech flag does not
 prove an unfinished word or require another final after confirmed text. A later
 recognition interim does. Manual phrase mode retains explicit activity signals.
+Both modes set `activityHandling: NO_INTERRUPTION` at realtime-configured tiers;
+new speech must not barge into an in-flight dictation response. A final or idle
+spinner never pauses capture/forwarding or reopens the socket. The shared API's
+default interruption policy and VAD recognition can still matter after schema
+fallback; local acceptance does not prove provider word coverage.
 
 ## Transcript assembly
 
@@ -349,6 +354,10 @@ phrase-boundary events. About-page debug export adds app/lifecycle warnings.
 Volume windows and threshold measurements have been removed; all PCM is still
 forwarded and RMS math is unchanged. Verify microphone policy separately from
 provider recognition and phrase finalization.
+Final-progress checkpoints include capture/accept counts, queues, latest PCM
+callback age and maximum callback interval per capture phase (reset on Resume).
+This measures main-looper cadence, not native sample loss. Provider interruption
+signals are logged while accompanying finals and subsequent PCM remain usable.
 
 `GeminiTranscriptionClientTest`, `GeminiTranscriptionClientStreamTest` (local
 WebSocket server, including the 1007 tier fallback) and `VoiceContextVocabularyTest`

@@ -47,12 +47,13 @@ and [wire reference](https://ai.google.dev/api/live#bidigeneratecontentrealtimei
       "customVocabulary": ["MyProject"]
     },
     "realtimeInputConfig": {
+      "activityHandling": "NO_INTERRUPTION",
       "automaticActivityDetection": {
         "disabled": false,
         "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
         "prefixPaddingMs": 300,
         "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
-        "silenceDurationMs": 1000
+        "silenceDurationMs": 2000
       }
     },
     "systemInstruction": {
@@ -93,16 +94,21 @@ and [wire reference](https://ai.google.dev/api/live#bidigeneratecontentrealtimei
   tunes only the end of speech.
   - **`silenceDurationMs`**: non-speech duration before end-of-speech is committed.
     Larger tolerates longer gaps at the cost of latency. HeliBoard clamps to
-    **400–5000 ms**, default **1000 ms**. Google warns that 100–200 ms values split
+    **400–5000 ms**, default **2000 ms**. Google warns that 100–200 ms values split
     one utterance into fragments and that the model then loses cross-fragment
     context, lowering transcription quality.
   - **`endOfSpeechSensitivity`**: `END_SENSITIVITY_HIGH` (API default) ends speech
     more often; `END_SENSITIVITY_LOW` ends it less often. HeliBoard pins **LOW**.
   - **`startOfSpeechSensitivity`**: HeliBoard pins **`START_SENSITIVITY_HIGH`** to
     detect onset eagerly.
-  - **`prefixPaddingMs`**: speech duration required before start-of-speech is
-    committed; the server retains this much prefix audio, which is what prevents
-    front-word truncation. HeliBoard sends **300**.
+  - **`prefixPaddingMs`**: look-back audio retained before detected speech onset,
+    protecting the first syllable before VAD fires. HeliBoard sends **300**.
+- **`realtimeInputConfig.activityHandling`**: `NO_INTERRUPTION` in both automatic
+  and manual modes, at FULL/NO_SYSTEM_INSTRUCTION tiers. The shared API defaults
+  to new activity interrupting a model response; dictation must allow the next
+  sentence to stream while the preceding response finishes. Lower schema tiers
+  omit this configuration. Provider `interrupted` signals are logged, never used
+  to discard accompanying finals or gate subsequent PCM.
 - **`systemInstruction`**: short static dictation guidance that tells the model
   to emit unfinished trailing speech when the turn ends rather than wait for the
   next word. Live Transcription's documented feature list does not include system
@@ -294,11 +300,11 @@ ephemeral tokens would require a server component.
 |-----|------|-------------|
 | `PREF_GEMINI_API_KEY` | String | Google Gemini API key for transcription |
 | `PREF_GEMINI_TRANSCRIPTION_MODE` | String | `SMART` (default) or `VERBATIM` |
-| `PREF_GEMINI_END_OF_SPEECH_SILENCE_MS` | Int | `silenceDurationMs`, clamped 400–5000, default 1000 |
+| `PREF_GEMINI_END_OF_SPEECH_SILENCE_MS` | Int | `silenceDurationMs`, clamped 400–5000, default 2000 |
 | `PREF_GEMINI_AUTO_DETECT_LANGUAGE` | Boolean | Send `languageCodes: []` instead of the subtype's language (default `false`) |
 | `PREF_GEMINI_USE_EDITOR_CONTEXT` | Boolean | Harvest proper nouns near the caret into `customVocabulary` (default `true`) |
 | `PREF_GEMINI_CUSTOM_VOCABULARY` | String | User-defined `customVocabulary`, one word or phrase per line. Empty by default; no bundled terms. |
-| `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Local silence confirmation before starting the auto-stop timer (default 1) |
+| `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Local silence confirmation before starting the auto-stop timer (default 2) |
 | `PREF_VOICE_MICROPHONE` | String | `automatic` (default, prefer Bluetooth), `built_in` (require phone), or `bluetooth` (require headset); read on start/resume; explicit routing requires Android 6+ |
 | `PREF_VOICE_SILENCE_THRESHOLD` | Int | RMS threshold used for silence detection |
 | `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` | Int | Silence duration before auto-stopping recording |

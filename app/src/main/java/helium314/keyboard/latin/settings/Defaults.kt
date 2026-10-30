@@ -166,9 +166,9 @@ object Defaults {
     // Verbatim is available for users who want the literal words instead.
     const val PREF_GEMINI_TRANSCRIPTION_MODE = "SMART"
     const val PREF_GEMINI_MANUAL_PHRASES = false
-    // One-second server pause, validated in owner phone testing. Longer saved
-    // pauses remain available for speech with longer breaks within a phrase.
-    const val PREF_GEMINI_END_OF_SPEECH_SILENCE_MS = 1000
+    // Allow natural pauses within a phrase. Shorter saved choices remain valid;
+    // phrase finalization must never pause microphone capture or audio forwarding.
+    const val PREF_GEMINI_END_OF_SPEECH_SILENCE_MS = 2000
     // Off by default: Google recommends sending an explicit language hint because
     // auto-detection misfires on short utterances, which is the common case for
     // keyboard dictation. The hint comes from the active keyboard subtype.
@@ -181,7 +181,7 @@ object Defaults {
     const val PREF_GEMINI_CUSTOM_VOCABULARY = ""
     // Local silence confirmation starts the auto-stop timer; it does not
     // finalize phrases. Gemini VAD controls automatic phrase endings.
-    const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 1
+    const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 2
     const val PREF_VOICE_MICROPHONE = "automatic"
     const val PREF_VOICE_SILENCE_THRESHOLD = 220
     const val PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = 30

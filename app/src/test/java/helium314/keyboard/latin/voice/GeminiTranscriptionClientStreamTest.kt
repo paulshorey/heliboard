@@ -11,6 +11,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okio.ByteString.Companion.decodeBase64
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Before
@@ -129,6 +130,47 @@ class GeminiTranscriptionClientStreamTest {
         assertTrue(lines.any { it.message.contains("providerChars=14 emittedChars=0") })
         assertTrue(lines.any { it.message.contains("providerChars=23 emittedChars=8") })
         assertTrue(lines.none { it.message.contains(secret) || it.message.contains("extended") })
+    }
+
+    @Test fun phraseFinalsAndDelayedTurnBoundariesKeepAllFollowingPcmOnTheSameSocket() {
+        readyServer(); startClient(endOfSpeechSilenceMs = 1000)
+        awaitUntil { events.contains("ready") }
+        val chunks = listOf(ByteArray(3200) { 7 }, ByteArray(3200), ByteArray(3200) { 1 })
+        assertTrue(client.sendAudioChunk(chunks[0]))
+        currentServerSocket!!.send("""{"serverContent":{"inputTranscription":{"text":"First sentence."}}}""")
+        awaitUntil { transcripts.size == 1 }
+        // A quiet onset of the next sentence can precede the previous turn's
+        // completion notification. Neither notification may gate or reset audio.
+        assertTrue(client.sendAudioChunk(chunks[1]))
+        currentServerSocket!!.send("""{"serverContent":{"turnComplete":true}}""")
+        assertTrue(client.sendAudioChunk(chunks[2]))
+        currentServerSocket!!.send("""{"serverContent":{"interimInputTranscription":{"text":"Second sentence"}}}""")
+        currentServerSocket!!.send("""{"serverContent":{"inputTranscription":{"text":"Second sentence."},"turnComplete":true}}""")
+        awaitUntil { transcripts.size == 2 && serverReceived.count { it.contains("\"audio\"") } == 3 }
+        assertEquals(listOf("First sentence.", "Second sentence."), transcripts.map { it.text })
+        assertEquals(1, serverReceived.count { it.contains("\"setup\"") })
+        assertTrue(serverReceived.none { it.contains("audioStreamEnd") || it.contains("activityEnd") })
+        val received = serverReceived.filter { it.contains("\"audio\"") }.map {
+            JSONObject(it).getJSONObject("realtimeInput").getJSONObject("audio")
+                .getString("data").decodeBase64()!!.toByteArray().toList()
+        }
+        assertEquals(chunks.map { it.toList() }, received)
+        assertTrue(events.none { it.startsWith("error:") || it == "closed" })
+    }
+
+    @Test fun serverInterruptionIsObservableWithoutDroppingFinalsOrFollowingAudio() {
+        readyServer(); startClient()
+        awaitUntil { events.contains("ready") }
+        val logStart = Log.getLog().size
+        currentServerSocket!!.send("""{"serverContent":{"interrupted":true,"inputTranscription":{"text":"Private final."}}}""")
+        awaitUntil { transcripts.size == 1 }
+        assertTrue(client.sendAudioChunk(ByteArray(3200) { 9 }))
+        awaitUntil { serverReceived.any { it.contains("\"audio\"") } }
+        val lines = Log.getLog().drop(logStart)
+        assertTrue(lines.any { it.message.contains("VOICE recognition interrupted") })
+        assertTrue(lines.none { it.message.contains("Private final") })
+        assertEquals("Private final.", transcripts.single().text)
+        assertTrue(events.none { it.startsWith("error:") || it == "closed" })
     }
 
     @Test fun manualPhrasesBracketEveryCapturePhaseAndNeverSendAudioStreamEnd() {
@@ -471,14 +513,14 @@ class GeminiTranscriptionClientStreamTest {
         server.enqueue(MockResponse().withWebSocketUpgrade(tracking))
     }
 
-    private fun startClient(manualPhrases: Boolean = false) {
+    private fun startClient(manualPhrases: Boolean = false, endOfSpeechSilenceMs: Int = 1500) {
         client.startStreaming(
             apiKey = "test-key",
             sessionConfig = GeminiTranscriptionClient.buildSessionConfig(
                 languageTag = "en_US",
                 autoDetectLanguage = false,
                 transcriptionMode = "SMART",
-                endOfSpeechSilenceMs = 1500,
+                endOfSpeechSilenceMs = endOfSpeechSilenceMs,
                 manualPhrases = manualPhrases
             ),
             callback = object : GeminiTranscriptionClient.StreamingCallback {

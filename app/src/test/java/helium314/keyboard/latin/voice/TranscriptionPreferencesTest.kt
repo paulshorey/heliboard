@@ -95,7 +95,7 @@ class TranscriptionPreferencesTest {
     }
 
     @Test
-    fun defaultsUsePhoneTestedOneSecondPausesAndRetainTextQualitySettings() {
+    fun defaultsUseTwoSecondPausesAndRetainTextQualitySettings() {
         val prefs = newPrefs()
         val config = TranscriptionPreferences.readGeminiConfig(prefs)
 
@@ -107,8 +107,8 @@ class TranscriptionPreferencesTest {
         // An explicit language hint beats auto-detection on short dictations.
         assertFalse(config.autoDetectLanguage)
         assertTrue(config.useEditorContext)
-        assertEquals(1000, config.endOfSpeechSilenceMs)
-        assertEquals(1, prefs.getInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS,
+        assertEquals(2000, config.endOfSpeechSilenceMs)
+        assertEquals(2, prefs.getInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS,
             Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS))
         assertTrue(prefs.all.isEmpty()) // Reading defaults must not persist or migrate pauses.
     }

@@ -142,12 +142,13 @@ prove a manufacturer's audio policy or headset activation behavior.
       "customVocabulary": ["HeliBoard", "Roentgen"]
     },
     "realtimeInputConfig": {
+      "activityHandling": "NO_INTERRUPTION",
       "automaticActivityDetection": {
         "disabled": false,
         "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
         "prefixPaddingMs": 300,
         "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
-        "silenceDurationMs": 1000
+        "silenceDurationMs": 2000
       }
     },
     "systemInstruction": { "parts": [{ "text": "…dictation guidance…" }] }
@@ -197,10 +198,10 @@ which tiers the server actually accepts today.
   `VERBATIM` gives the literal words instead.
 - **`endOfSpeechSensitivity: END_SENSITIVITY_LOW`** plus
   **`silenceDurationMs`** (`PREF_GEMINI_END_OF_SPEECH_SILENCE_MS`, default
-  **1000 ms**, range 400–5000). Google documents that short windows split one
+  **2000 ms**, range 400–5000). Google documents that short windows split one
   utterance into fragments and that the model then "loses cross-fragment context,
-  resulting in lower transcription quality". The one-second default follows owner
-  phone testing; increase it for longer pauses within a phrase. Saved timing
+  resulting in lower transcription quality". The two-second default follows
+  extended owner phone testing; increase it for longer pauses within a phrase. Saved timing
   choices are preserved rather than migrated to the new defaults.
 - **`startOfSpeechSensitivity: START_SENSITIVITY_HIGH`** with
   **`prefixPaddingMs: 300`** — detect speech onset eagerly and keep prefix audio,
@@ -257,6 +258,22 @@ Local RMS silence only starts the auto-stop timer; it no longer forces
 `audioStreamEnd` in the middle of a continuous capture. Explicit Pause/Stop still
 send that flush behind preceding PCM. Every captured chunk is forwarded, including
 quiet speech and pauses. Manual phrase mode continues to use declared activity signals.
+
+Both phrase modes send `realtimeInputConfig.activityHandling: NO_INTERRUPTION`
+at the FULL and NO_SYSTEM_INSTRUCTION setup tiers. The shared Live API otherwise
+defaults to allowing new activity to interrupt a response still being generated
+([ActivityHandling reference](https://ai.google.dev/api/live#activityhandling)).
+That conversational behavior is unsuitable for successive dictated sentences.
+Lower schema fallback tiers omit realtime configuration and use server defaults;
+the connection diagnostics report the negotiated tier. This protection does not
+prove that the transcription model recognizes every supplied word.
+
+A finalized phrase and an idle processing spinner never pause capture, discard
+PCM, send a boundary, or reopen the socket. The next sentence flows over the same
+connection, including quiet onset audio before the local speech detector fires.
+Only explicit Pause/Stop, the longer silence auto-stop, session limits, failure or
+editor/lifecycle cancellation end capture. The one- and two-second settings are
+not a delay before listening restarts: no restart occurs at a phrase boundary.
 
 The processing indicator and response watchdog follow unfinished recognition,
 not raw microphone energy. An authoritative final resolves the preceding interim;
@@ -440,13 +457,13 @@ can still fail independently, which remains terminal.
   user's own vocabulary list across.
 - Gemini session settings:
   - `PREF_GEMINI_TRANSCRIPTION_MODE` (`SMART` / `VERBATIM`, default `SMART`)
-  - `PREF_GEMINI_END_OF_SPEECH_SILENCE_MS` (int, 400–5000, default 1000)
+  - `PREF_GEMINI_END_OF_SPEECH_SILENCE_MS` (int, 400–5000, default 2000)
   - `PREF_GEMINI_AUTO_DETECT_LANGUAGE` (boolean, default `false`)
   - `PREF_GEMINI_USE_EDITOR_CONTEXT` (boolean, default `true`)
   - `PREF_GEMINI_CUSTOM_VOCABULARY` (string, one term per line)
 - Local silence settings:
   - `PREF_VOICE_CHUNK_SILENCE_SECONDS` — local silence confirmation before the
-    auto-stop timer (default 1 second); it does not force a phrase boundary
+    auto-stop timer (default 2 seconds); it does not force a phrase boundary
   - `PREF_VOICE_SILENCE_THRESHOLD` — RMS threshold for the local detector
   - `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` — longer pause that stops recording
 
@@ -572,3 +589,28 @@ same focused voice events plus broader app/lifecycle warnings. The voice ring ho
 500 lines in memory; export promptly after reproducing the problem, before the app
 process exits. Keep the observed output separately and note Pause/Stop/restart actions.
 No audio, words, transcript hashes, provider payloads or device identities are saved.
+
+Each accepted final includes a continuity checkpoint with captured/locally accepted
+chunk counts, pending PCM/socket bytes, age of the latest PCM callback and the
+largest callback interval in the capture phase. These measure main-looper delivery
+cadence, not native sample loss or provider receipt; intentional Pause/Resume resets
+the cadence window. Provider `serverContent.interrupted` events are logged without
+discarding accompanying finals or stopping audio. A gap or growing queue helps
+locate a client-side stall; matching counts alone cannot rule out provider omissions.
+
+The final October 30 test stayed on one capture/socket through four finals, with
+matching provider/emitted character counts and 288/288 audio chunks locally accepted
+by cancellation. No local phrase-boundary stop or flush was recorded. It ended with
+an actual/expected editor-cursor mismatch, a separate cancellation guard. These
+logs contain no audio or transcript content, so they cannot prove the cause of the
+reported missing sentence beginnings. Retain the cursor guard and distinguish an
+intentional editor move from a host correction in subsequent testing.
+
+For a continuity comparison, leave manual phrase mode off and test both 1000 ms/1 s
+and 2000 ms/2 s. Read: "Blue lantern starts the first sentence. Green meadow starts
+the second sentence. Silver compass starts the third sentence. Purple window
+starts the fourth sentence." Pause for about one second, then about three seconds
+between sentences, and begin one sentence while the previous result is still
+processing. Continue through the spinner becoming idle without touching the mic or
+editor. Check every distinctive opening, export diagnostics promptly, and record
+the observed omissions separately. Repeat with the microphone in the same position.

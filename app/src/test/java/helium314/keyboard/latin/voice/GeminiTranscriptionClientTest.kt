@@ -46,6 +46,19 @@ class GeminiTranscriptionClientTest {
 
     // ── setup message ──────────────────────────────────────────────────
 
+    @Test fun automaticPhrasesDoNotInterruptRecognitionWhenTheNextSentenceStarts() {
+        for (silenceMs in listOf(400, 1000, 2000)) {
+            for (tier in listOf(SetupTier.FULL, SetupTier.NO_SYSTEM_INSTRUCTION)) {
+                val realtime = setupObject(tier, sessionConfig(endOfSpeechSilenceMs = silenceMs))
+                    .getJSONObject("realtimeInputConfig")
+                assertEquals("NO_INTERRUPTION", realtime.getString("activityHandling"))
+                val detection = realtime.getJSONObject("automaticActivityDetection")
+                assertFalse(detection.getBoolean("disabled"))
+                assertEquals(silenceMs, detection.getInt("silenceDurationMs"))
+            }
+        }
+    }
+
     @Test
     fun setupMessage_placesTranscriptionConfigBesideGenerationConfig() {
         val setup = setupObject(SetupTier.FULL)

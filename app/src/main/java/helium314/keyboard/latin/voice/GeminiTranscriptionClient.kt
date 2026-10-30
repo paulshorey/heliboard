@@ -293,14 +293,14 @@ class GeminiTranscriptionClient {
                 }
                 setup.put(
                     "realtimeInputConfig",
-                    JSONObject().put(
+                    // Dictation has no conversational response for the next
+                    // sentence to barge into. Keep recognition in flight while
+                    // the following audio is already arriving, in both modes.
+                    JSONObject().put("activityHandling", "NO_INTERRUPTION").put(
                         "automaticActivityDetection",
                         detection
                     )
                 )
-                if (config.manualPhrases) {
-                    setup.getJSONObject("realtimeInputConfig").put("activityHandling", "NO_INTERRUPTION")
-                }
             }
 
             if (tier == SetupTier.FULL) {
@@ -1055,6 +1055,14 @@ class GeminiTranscriptionClient {
         if (connectionToken != activeConnectionToken) return
         var sawResponse = false
         var sawTranscript = false
+        if (json.optJSONObject("serverContent")?.optBoolean("interrupted", false) == true) {
+            // Observe provider-side interruption separately from app cancellation.
+            // Process any accompanying transcript and keep forwarding microphone
+            // audio; this event neither acknowledges audio nor ends capture.
+            sawResponse = true
+            Log.w(TAG, "connection=$connectionToken VOICE recognition interrupted " +
+                "finalCount=$diagnosticFinals interimCount=$diagnosticInterims policy=keep_streaming")
+        }
         extractInterimTranscript(json)?.let { interim ->
             sawResponse = true
             diagnosticInterims++

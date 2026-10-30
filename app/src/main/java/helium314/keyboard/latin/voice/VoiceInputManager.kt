@@ -113,6 +113,8 @@ class VoiceInputManager internal constructor(
     private var lastResponseAtMs: Long? = null
     private var lastInterimAtMs: Long? = null
     private var lastFinalAtMs: Long? = null
+    private var lastPcmCallbackAtMs: Long? = null
+    private var maxPcmCallbackGapMs = 0L
     private var finalizedAtMs: Long? = null
 
     private var chunkSilenceDurationMs = Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS * 1000L
@@ -189,6 +191,8 @@ class VoiceInputManager internal constructor(
         lastResponseAtMs = null
         lastInterimAtMs = null
         lastFinalAtMs = null
+        lastPcmCallbackAtMs = null
+        maxPcmCallbackGapMs = 0L
         finalizedAtMs = null
         Log.i(TAG, "session=$sessionId start mode=${geminiConfig.transcriptionMode} " +
             "manualPhrases=${geminiConfig.manualPhrases} " +
@@ -215,6 +219,9 @@ class VoiceInputManager internal constructor(
                     return
                 }
                 hasCapturedAudio = true
+                val now = SystemClock.elapsedRealtime()
+                lastPcmCallbackAtMs?.let { maxPcmCallbackGapMs = maxOf(maxPcmCallbackGapMs, now - it) }
+                lastPcmCallbackAtMs = now
                 capturedChunks++
                 capturedBytes += pcmData.size
                 if (containsSpeech) {
@@ -346,6 +353,9 @@ class VoiceInputManager internal constructor(
         }
         val sessionId = activeSessionId
         Log.i(TAG, "session=$sessionId resume")
+        // Deliberate Pause time is not a delivery gap within a capture phase.
+        lastPcmCallbackAtMs = null
+        maxPcmCallbackGapMs = 0L
         voiceRecorder.resumeRecording()
         if (!isCurrent(sessionId)) return
         // Resume is a new capture phase even when its first words are too quiet
@@ -606,7 +616,10 @@ class VoiceInputManager internal constructor(
         }
         if (newSegment) Log.i(TAG, "session=$sessionId final progress unconfirmedActivity=$unconfirmedSpeech " +
             "queuedPcmSpeech=$queuedPcmSpeech queuedSocketSpeech=$queuedSocketSpeech " +
-            "capturedSpeechChunks=$capturedSpeechChunks")
+            "capturedSpeechChunks=$capturedSpeechChunks " +
+            "capturedChunks=$capturedChunks acceptedAudioChunks=$acceptedAudioChunks " +
+            "pendingPcmBytes=$pendingAudioBytes socketQueuedBytes=${transcriptionClient.queuedFrameBytes()} " +
+            pcmCallbackDiagnostics())
         // Duplicate final notifications prove liveness but add no settling work.
         // Preserve the existing timer unless new text or pending recognition changed.
         if (waitingForClose && (newSegment || previouslyPending != pendingFinal)) {
@@ -708,11 +721,17 @@ class VoiceInputManager internal constructor(
             "socketQueuedBytes=${transcriptionClient.queuedFrameBytes()} finals=$acceptedFinals " +
             "pendingText=${pendingTranscripts.size} unconfirmedActivity=$unconfirmedSpeech " +
             "pendingWords=$unconfirmedTranscript localSpeech=$localSpeechActive stopReason=${stopReason ?: "none"} " +
+            "${pcmCallbackDiagnostics()} " +
             "lastResponseAgoMs=${lastResponseAtMs?.let { now - it } ?: "none"} " +
             "lastInterimAgoMs=${lastInterimAtMs?.let { now - it } ?: "none"} " +
             "lastFinalAgoMs=${lastFinalAtMs?.let { now - it } ?: "none"} " +
             "finalizedAgoMs=${finalizedAtMs?.let { now - it } ?: "none"}"
     }
+
+    // Main-looper delivery cadence, not native sample loss or provider receipt.
+    private fun pcmCallbackDiagnostics(): String =
+        "lastPcmCallbackAgoMs=${lastPcmCallbackAtMs?.let { SystemClock.elapsedRealtime() - it } ?: "none"} " +
+            "maxPcmCallbackGapMs=$maxPcmCallbackGapMs"
 
     private fun endSession(cancelled: Boolean, failed: Boolean = false) {
         if (sessionOpen && !failed) {

@@ -6,6 +6,7 @@ import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import helium314.keyboard.latin.settings.TranscriptionPreferences
 import helium314.keyboard.latin.settings.Settings
+import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.prefs
 import java.time.Duration
 import kotlin.test.assertEquals
@@ -843,6 +844,39 @@ class VoiceInputManagerTest {
         assertEquals(listOf("All spoken words."), inserted)
         assertTrue(markers.isEmpty())
         assertTrue(errors.isEmpty())
+    }
+
+    @Test fun oneSecondPhraseBoundariesAndSpinnerIdleNeverGateTheNextQuietOnset() {
+        val prefs = ApplicationProvider.getApplicationContext<Context>().prefs()
+        TranscriptionPreferences.writeGeminiEndOfSpeechSilenceMs(prefs, 1000)
+        prefs.edit().putInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, 1).commit()
+        start(); capture.onRecordingStarted()
+        val logStart = Log.getLog().size
+        repeat(3) { sentence ->
+            audio(sentence * 3 + 1, containsSpeech = false) // Keep the quiet first syllable.
+            speaking = true; capture.onSpeechStarted()
+            audio(sentence * 3 + 2, containsSpeech = true)
+            stream.onInterimTranscription()
+            assertTrue(processing)
+            speaking = false; capture.onSpeechStopped()
+            advance(1000)
+            final("Sentence ${sentence + 1}.")
+            assertFalse(processing)
+            assertTrue(manager.isRecording)
+            // This can arrive before local onset detection or another interim.
+            audio(sentence * 3 + 3, containsSpeech = false)
+        }
+        assertEquals((1..9).map { "audio:$it" }, sent)
+        assertEquals(1, starts)
+        assertEquals(0, stopped)
+        assertTrue(errors.isEmpty())
+        assertTrue(markers.isEmpty())
+        val checkpoints = Log.getLog().drop(logStart).filter { it.message.contains("final progress") }
+        assertEquals(3, checkpoints.size)
+        assertTrue(checkpoints.last().message.contains("capturedChunks=8 acceptedAudioChunks=8"))
+        assertTrue(checkpoints.last().message.contains("pendingPcmBytes=0"))
+        assertTrue(checkpoints.last().message.contains("maxPcmCallbackGapMs=1000"))
+        assertTrue(checkpoints.none { it.message.contains("Sentence") })
     }
 
     @Test fun onlyQueuedSocketSilenceDoesNotPreventAcceptingACompleteFinal() {
