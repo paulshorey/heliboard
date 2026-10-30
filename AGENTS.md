@@ -4,10 +4,12 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
 
 ## Layout and entry points
 
-- `app/src/main/java/helium314/keyboard/latin/`: IME, text pipeline, voice, and spell checker.
+Java/Kotlin paths below are relative to `app/src/main/java/helium314/keyboard/`.
+
+- `latin/`: IME, text pipeline, voice, and spell checker.
   Start with `LatinIME.java`, `inputlogic/InputLogic.java`, `WordComposer.java`,
   `RichInputConnection.java`, and `voice/VoiceInputManager.kt`.
-- `keyboard/` under the same package: key geometry, pointers, layouts, emoji/clipboard UI.
+- `keyboard/`: key geometry, pointers, layouts, emoji/clipboard UI.
 - `settings/`: Compose settings/full-app editor; `latin/settings/`: runtime preferences.
 - `app/src/main/res/`, `app/src/main/assets/`, and `app/src/main/jni/`: resources, layouts/dictionaries, and native code.
 - `app/src/test/`: JVM/Robolectric tests. `tools/`: environment, build, and release tooling.
@@ -15,6 +17,7 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
   Read nested guides for the exact subtree before changing it.
 
 ## Cross-folder rules worth remembering
+
 - There are two settings trees: `latin/settings` holds runtime preference keys, defaults, and snapshots; `settings/` holds the Compose UI and fullapp screens.
 - Ordinary typing, voice insertion, and fullapp sync should flow through `InputConnection`; do not write directly into the extract/fullapp text widgets.
 - `WordComposer` is the source of truth for the current word; `inputlogic/EditorWordMirror.java` is the bridge that mirrors it into the host editor.
@@ -49,7 +52,8 @@ folder guides current when ownership or cross-folder contracts change; read
 
 # Research and report
 
-If something went wrong, stop and report back. Include all info, data, and logs.
+If something goes wrong, stop the affected operation and report relevant findings, data, and logs.
+Redact secrets and private content.
 If unsure about something, research, search the web, find latest techniques and best practices.
 
 # Next steps
