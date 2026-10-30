@@ -52,7 +52,7 @@ and [wire reference](https://ai.google.dev/api/live#bidigeneratecontentrealtimei
         "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
         "prefixPaddingMs": 300,
         "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
-        "silenceDurationMs": 1500
+        "silenceDurationMs": 1000
       }
     },
     "systemInstruction": {
@@ -93,7 +93,7 @@ and [wire reference](https://ai.google.dev/api/live#bidigeneratecontentrealtimei
   tunes only the end of speech.
   - **`silenceDurationMs`**: non-speech duration before end-of-speech is committed.
     Larger tolerates longer gaps at the cost of latency. HeliBoard clamps to
-    **400–5000 ms**, default **1500 ms**. Google warns that 100–200 ms values split
+    **400–5000 ms**, default **1000 ms**. Google warns that 100–200 ms values split
     one utterance into fragments and that the model then loses cross-fragment
     context, lowering transcription quality.
   - **`endOfSpeechSensitivity`**: `END_SENSITIVITY_HIGH` (API default) ends speech
@@ -294,11 +294,11 @@ ephemeral tokens would require a server component.
 |-----|------|-------------|
 | `PREF_GEMINI_API_KEY` | String | Google Gemini API key for transcription |
 | `PREF_GEMINI_TRANSCRIPTION_MODE` | String | `SMART` (default) or `VERBATIM` |
-| `PREF_GEMINI_END_OF_SPEECH_SILENCE_MS` | Int | `silenceDurationMs`, clamped 400–5000, default 1500 |
+| `PREF_GEMINI_END_OF_SPEECH_SILENCE_MS` | Int | `silenceDurationMs`, clamped 400–5000, default 1000 |
 | `PREF_GEMINI_AUTO_DETECT_LANGUAGE` | Boolean | Send `languageCodes: []` instead of the subtype's language (default `false`) |
 | `PREF_GEMINI_USE_EDITOR_CONTEXT` | Boolean | Harvest proper nouns near the caret into `customVocabulary` (default `true`) |
 | `PREF_GEMINI_CUSTOM_VOCABULARY` | String | User-defined `customVocabulary`, one word or phrase per line. Empty by default; no bundled terms. |
-| `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Local silence confirmation before starting the auto-stop timer (default 2) |
+| `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Local silence confirmation before starting the auto-stop timer (default 1) |
 | `PREF_VOICE_MICROPHONE` | String | `automatic` (default, prefer Bluetooth), `built_in` (require phone), or `bluetooth` (require headset); read on start/resume; explicit routing requires Android 6+ |
 | `PREF_VOICE_SILENCE_THRESHOLD` | Int | RMS threshold used for silence detection |
 | `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` | Int | Silence duration before auto-stopping recording |

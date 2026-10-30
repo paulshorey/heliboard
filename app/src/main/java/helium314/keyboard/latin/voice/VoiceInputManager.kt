@@ -434,7 +434,7 @@ class VoiceInputManager internal constructor(
                 responseTimeout = null
                 // Repeated authoritative finals still prove transcript progress
                 // even when the client has suppressed a duplicate editor write.
-                if (hasTranscriptText) acknowledgeFinal(sessionId, logProgress = false)
+                if (hasTranscriptText) acknowledgeFinal(sessionId, newSegment = false)
                 armResponseTimeout(sessionId)
                 // Interim and turnComplete prove responsiveness, not audio coverage.
             }
@@ -587,8 +587,9 @@ class VoiceInputManager internal constructor(
         armFinalTimeout(sessionId)
     }
 
-    private fun acknowledgeFinal(sessionId: Long, logProgress: Boolean = true) {
+    private fun acknowledgeFinal(sessionId: Long, newSegment: Boolean = true) {
         lastFinalAtMs = SystemClock.elapsedRealtime()
+        val previouslyPending = hasPendingFinal()
         // Track raw/declared activity separately from authoritative recognition.
         // The transport FIFO still protects audio and controls from being discarded.
         val queuedPcmSpeech = outbound.any { it is Outbound.Audio && it.containsSpeech }
@@ -597,15 +598,20 @@ class VoiceInputManager internal constructor(
         // energy is not evidence of more words; a later interim will become pending again.
         unconfirmedTranscript = false
         if (!queuedPcmSpeech && !queuedSocketSpeech) unconfirmedSpeech = false
-        if (!hasPendingFinal()) {
+        val pendingFinal = hasPendingFinal()
+        if (!pendingFinal) {
             clearFinalTimeout()
             responseTimeout?.let(mainHandler::removeCallbacks)
             responseTimeout = null
         }
-        if (logProgress) Log.i(TAG, "session=$sessionId final progress unconfirmedActivity=$unconfirmedSpeech " +
+        if (newSegment) Log.i(TAG, "session=$sessionId final progress unconfirmedActivity=$unconfirmedSpeech " +
             "queuedPcmSpeech=$queuedPcmSpeech queuedSocketSpeech=$queuedSocketSpeech " +
             "capturedSpeechChunks=$capturedSpeechChunks")
-        if (waitingForClose) transcriptionClient.updateFinishWait(hasPendingFinal())
+        // Duplicate final notifications prove liveness but add no settling work.
+        // Preserve the existing timer unless new text or pending recognition changed.
+        if (waitingForClose && (newSegment || previouslyPending != pendingFinal)) {
+            transcriptionClient.updateFinishWait(pendingFinal)
+        }
         notifyProcessingIdleIfDrained()
     }
 

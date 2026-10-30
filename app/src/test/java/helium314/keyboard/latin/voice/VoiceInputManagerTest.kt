@@ -533,6 +533,32 @@ class VoiceInputManagerTest {
         assertEquals(listOf("Finished sentence.", "Late final."), inserted)
     }
 
+    @Test fun duplicateFinalNotificationsDoNotRestartAnAlreadySettlingStop() {
+        start(); audio(); final("Complete sentence.")
+        manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(listOf(false), finishWaits)
+        repeat(3) {
+            advance(400)
+            stream.onServerResponse(true) // Authoritative duplicate, no new editor segment.
+        }
+        assertEquals(listOf(false), finishWaits)
+        stream.onStreamClosed()
+        assertEquals(listOf("Complete sentence."), inserted)
+        assertTrue(errors.isEmpty())
+    }
+
+    @Test fun newFinalTextRefreshesSettlingOnceAndLateRecognitionRetainsItsWait() {
+        start(); audio(); manager.stopRecording(); shadowOf(Looper.getMainLooper()).idle()
+        advance(500); stream.onInterimTranscription(); stream.onServerResponse(false)
+        final("Trailing words.")
+        assertEquals(listOf(false, true, false), finishWaits)
+        advance(500); final("Another finalized fragment.")
+        assertEquals(listOf(false, true, false, false), finishWaits)
+        stream.onStreamClosed()
+        assertEquals(listOf("Trailing words.", "Another finalized fragment."), inserted)
+        assertTrue(markers.isEmpty())
+    }
+
     @Test fun automaticResumeClearsOldPauseDeadlineEvenWithoutALoudOnset() {
         ApplicationProvider.getApplicationContext<Context>().prefs().edit()
             .putInt(Settings.PREF_VOICE_AUTO_STOP_SILENCE_SECONDS, 120).commit()

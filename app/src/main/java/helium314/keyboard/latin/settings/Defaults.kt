@@ -166,11 +166,9 @@ object Defaults {
     // Verbatim is available for users who want the literal words instead.
     const val PREF_GEMINI_TRANSCRIPTION_MODE = "SMART"
     const val PREF_GEMINI_MANUAL_PHRASES = false
-    // Server-side end-of-speech window. Google documents that short windows split
-    // one utterance into fragments and cost accuracy because the model loses
-    // cross-fragment context, so this defaults well above the API's own default
-    // and trades latency for correct sentence structure.
-    const val PREF_GEMINI_END_OF_SPEECH_SILENCE_MS = 1500
+    // One-second server pause, validated in owner phone testing. Longer saved
+    // pauses remain available for speech with longer breaks within a phrase.
+    const val PREF_GEMINI_END_OF_SPEECH_SILENCE_MS = 1000
     // Off by default: Google recommends sending an explicit language hint because
     // auto-detection misfires on short utterances, which is the common case for
     // keyboard dictation. The hint comes from the active keyboard subtype.
@@ -181,10 +179,9 @@ object Defaults {
     // User-editable Gemini `customVocabulary`, stored as a single string with one
     // term per line. No vocabulary terms are bundled with the app.
     const val PREF_GEMINI_CUSTOM_VOCABULARY = ""
-    // Local pause that triggers an early turn finalize (Gemini `audioStreamEnd`).
-    // Two seconds keeps the server's own semantic end-of-speech detection in
-    // charge for normal speech and only steps in when it has not fired.
-    const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 2
+    // Local silence confirmation starts the auto-stop timer; it does not
+    // finalize phrases. Gemini VAD controls automatic phrase endings.
+    const val PREF_VOICE_CHUNK_SILENCE_SECONDS = 1
     const val PREF_VOICE_MICROPHONE = "automatic"
     const val PREF_VOICE_SILENCE_THRESHOLD = 220
     const val PREF_VOICE_AUTO_STOP_SILENCE_SECONDS = 30

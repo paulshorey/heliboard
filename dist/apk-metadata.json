@@ -2,7 +2,7 @@
   "schema": 1,
   "variant": "debug",
   "application_id": "helium314.keyboard.debug",
-  "built_at": "2026-10-29T05:34:26.671010+00:00",
-  "source_sha256": "100d1afe3e1abb30af6722a770bb41004e5f9ad7096eb19e94f23e8674a8ea69",
-  "apk_sha256": "7d8e86b33290bbab677526bc647945caf060aa134acce75ecdcaeed988ce0fec"
+  "built_at": "2026-10-30T03:09:43.845142+00:00",
+  "source_sha256": "b11fafac7e07622a2d1d25c0d322935cf1c05f5372354fc6b3061666791a037e",
+  "apk_sha256": "fa37347041d2782c65c553118843b654be1c995b801e98d063f1db9971c79e56"
 }

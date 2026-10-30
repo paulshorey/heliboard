@@ -119,7 +119,9 @@ Stop settles for two seconds without unfinished recognition or retains its origi
 eight-second final deadline while a hypothesis is pending. A late interim restores
 that original deadline; later finals can shorten the remaining wait. Queued bytes
 get the full original budget even at a short settle. Nothing extends the original
-deadline; manager EOF/close remains 15 seconds, complete Stop 20 seconds. New
+deadline; duplicate finals without new text or a pending-state change do not
+restart settling. New segments still refresh it. Manager EOF/close remains
+15 seconds, complete Stop 20 seconds. New
 recording intent is honored only after a clean close. Keyboard hiding/host clears
 cancel immediately, and actual network/queue/editor failures remain terminal.
 
@@ -133,7 +135,7 @@ cancel immediately, and actual network/queue/editor failures remain terminal.
   "realtimeInputConfig":{"automaticActivityDetection":{
     "disabled":false,
     "startOfSpeechSensitivity":"START_SENSITIVITY_HIGH","prefixPaddingMs":300,
-    "endOfSpeechSensitivity":"END_SENSITIVITY_LOW","silenceDurationMs":1500}},
+    "endOfSpeechSensitivity":"END_SENSITIVITY_LOW","silenceDurationMs":1000}},
   "systemInstruction":{"parts":[{"text":"…"}]}
 }}
 ```
@@ -165,10 +167,11 @@ put it in the tier that matches how well-documented it is for this model.
 - **`mode: SMART`** — disfluency removal, inline self-correction resolution,
   list/number/date formatting, grammar and casing polish. `VERBATIM` is the
   literal alternative.
-- **`silenceDurationMs`** (default **1500 ms**, range 400–5000) with
+- **`silenceDurationMs`** (default **1000 ms**, range 400–5000) with
   **`endOfSpeechSensitivity: END_SENSITIVITY_LOW`**. Google documents that short
   windows split one utterance into fragments and that the model then loses
-  cross-fragment context, lowering quality. Do not reduce this for latency.
+  cross-fragment context, lowering quality. The one-second default follows owner
+  phone testing; retain longer saved values.
 - **`customVocabulary`** — user terms, then editor-harvested terms, capped at 100
   (Google notes best results around 100 even though 1 000 are accepted). No terms
   ship with the app; the field is omitted when both sources are empty.

@@ -241,8 +241,8 @@ def main() -> int:
                         help="BCP-47 language code; repeat for several, omit for auto-detect")
     parser.add_argument("--vocabulary", action="append", default=[],
                         help="customVocabulary term; repeat for several")
-    parser.add_argument("--silence-ms", type=int, default=1500,
-                        help="automaticActivityDetection.silenceDurationMs (default: 1500)")
+    parser.add_argument("--silence-ms", type=int, default=1000,
+                        help="automaticActivityDetection.silenceDurationMs (default: 1000)")
     parser.add_argument("--realtime", action="store_true",
                         help="pace audio at wall-clock speed instead of sending as fast as possible")
     args = parser.parse_args()

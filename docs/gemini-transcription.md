@@ -147,7 +147,7 @@ prove a manufacturer's audio policy or headset activation behavior.
         "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
         "prefixPaddingMs": 300,
         "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
-        "silenceDurationMs": 1500
+        "silenceDurationMs": 1000
       }
     },
     "systemInstruction": { "parts": [{ "text": "…dictation guidance…" }] }
@@ -197,10 +197,11 @@ which tiers the server actually accepts today.
   `VERBATIM` gives the literal words instead.
 - **`endOfSpeechSensitivity: END_SENSITIVITY_LOW`** plus
   **`silenceDurationMs`** (`PREF_GEMINI_END_OF_SPEECH_SILENCE_MS`, default
-  **1500 ms**, range 400–5000). Google documents that short windows split one
+  **1000 ms**, range 400–5000). Google documents that short windows split one
   utterance into fragments and that the model then "loses cross-fragment context,
-  resulting in lower transcription quality". The default therefore sits well above
-  the API's own and trades latency for correct sentence structure.
+  resulting in lower transcription quality". The one-second default follows owner
+  phone testing; increase it for longer pauses within a phrase. Saved timing
+  choices are preserved rather than migrated to the new defaults.
 - **`startOfSpeechSensitivity: START_SENSITIVITY_HIGH`** with
   **`prefixPaddingMs: 300`** — detect speech onset eagerly and keep prefix audio,
   so the first syllable is not clipped.
@@ -266,7 +267,10 @@ cannot establish missing words. Transport/queue failures remain terminal.
 Stop joins capture, processes its posted tail and queues EOF. With no unfinished
 recognition it settles for two seconds; a late interim restores the original
 eight-second final deadline, and further finals may shorten the remaining wait.
-Neither responses nor rescheduling can extend that original deadline. If bytes
+Duplicate final notifications with no new text or pending-state change do not
+restart the settling timer. New finalized text still refreshes settling, and a
+late recognition hypothesis still restores its wait. Neither responses nor
+rescheduling can extend the original deadline. If bytes
 remain queued at the short settle, they retain the full original upload budget.
 EOF/close is still bounded to 15 seconds and the complete Stop to 20 seconds.
 These are application tradeoffs, not provider latency guarantees; a final that
@@ -436,13 +440,13 @@ can still fail independently, which remains terminal.
   user's own vocabulary list across.
 - Gemini session settings:
   - `PREF_GEMINI_TRANSCRIPTION_MODE` (`SMART` / `VERBATIM`, default `SMART`)
-  - `PREF_GEMINI_END_OF_SPEECH_SILENCE_MS` (int, 400–5000, default 1500)
+  - `PREF_GEMINI_END_OF_SPEECH_SILENCE_MS` (int, 400–5000, default 1000)
   - `PREF_GEMINI_AUTO_DETECT_LANGUAGE` (boolean, default `false`)
   - `PREF_GEMINI_USE_EDITOR_CONTEXT` (boolean, default `true`)
   - `PREF_GEMINI_CUSTOM_VOCABULARY` (string, one term per line)
 - Local silence settings:
-  - `PREF_VOICE_CHUNK_SILENCE_SECONDS` — local pause that triggers
-    `audioStreamEnd`
+  - `PREF_VOICE_CHUNK_SILENCE_SECONDS` — local silence confirmation before the
+    auto-stop timer (default 1 second); it does not force a phrase boundary
   - `PREF_VOICE_SILENCE_THRESHOLD` — RMS threshold for the local detector
   - `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` — longer pause that stops recording
 
