@@ -1,36 +1,23 @@
-# HeliBoard
+# Project: HeliBoard
 
 HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds a Gemini Live voice pipeline, smart auto-capitalization work, and a standalone full-app editing mode.
 
-## Repo map
-- `app/` - Android application module and the main Gradle project to build for product work.
-- `app/src/main/` - shipping Android app: manifest, Java/Kotlin sources, resources, assets, and JNI.
-- `app/src/main/java/helium314/keyboard/` - package root that splits the product into `latin/`, `keyboard/`, `settings/`, `event/`, `compat/`, `accessibility/`, and `dictionarypack/`.
-- `app/src/main/java/helium314/keyboard/latin/` - IME runtime, text pipeline, dictionaries, clipboard history, voice, and spell checker.
-- `app/src/main/java/helium314/keyboard/keyboard/` - keyboard model/view layer, key geometry, pointer handling, popup keys, emoji, and clipboard surfaces.
-- `app/src/main/java/helium314/keyboard/settings/` - standalone settings/fullapp UI built with Compose.
-- `app/src/main/res/` and `app/src/main/assets/` - Android resources, IME metadata, layout definitions, popup text, emoji data, and bundled dictionaries.
-- `app/src/main/jni/` - native dictionary/suggestion/proximity code used through JNI.
-- `app/src/test/` - JVM and Robolectric tests.
-- `docs/` - deeper design notes such as `input-simplified.md` and `gemini-transcription.md`.
-- `tools/` - SDK setup, portable cloud-agent startup, canonical APK build, release scripts, and the `tools:make-emoji-keys` helper module.
-- `.codex/` - canonical agent skills and Codex Gemini Docs MCP (`config.toml`); `.agents/skills` links here for discovery and `.cursor` is a compatibility symlink.
-- `skills-lock.json` - lockfile for the vendored `google-gemini/gemini-skills` packages; refresh them with `./tools/sync-gemini-skills.sh`.
+## Layout and entry points
 
-## High-value entry points
-- `app/src/main/AndroidManifest.xml` - declares the IME service, spell checker service, settings activities, receivers, and direct-boot behavior.
-- `app/src/main/java/helium314/keyboard/latin/LatinIME.java` - main `InputMethodService` and top-level orchestration.
-- `app/src/main/java/helium314/keyboard/latin/inputlogic/InputLogic.java` + `app/src/main/java/helium314/keyboard/latin/WordComposer.java` + `app/src/main/java/helium314/keyboard/latin/RichInputConnection.java` - core text entry pipeline.
-- `app/src/main/java/helium314/keyboard/latin/inputlogic/EditorWordMirror.java` - mirrors the keyboard-owned current word into the host app.
-- `app/src/main/java/helium314/keyboard/latin/Suggest.kt` - suggestion request pipeline entry point.
-- `app/src/main/java/helium314/keyboard/latin/suggestions/SuggestionStripView.kt` + `app/src/main/java/helium314/keyboard/latin/utils/ToolbarUtils.kt` - suggestion strip, toolbar buttons, pinned keys, and voice/fullapp strip controls.
-- `app/src/main/java/helium314/keyboard/latin/voice/VoiceInputManager.kt` + `app/src/main/java/helium314/keyboard/latin/voice/GeminiTranscriptionClient.kt` - voice recording and realtime transcription.
-- `app/src/main/java/helium314/keyboard/settings/FullappEditorActivity.kt` - standalone full-screen editor mode.
-- `app/src/main/java/helium314/keyboard/latin/settings/Settings.java` + `Settings.kt` + `Defaults.kt` + `TranscriptionPreferences.kt` - runtime preference keys, defaults, and typed access.
-- `app/src/main/java/helium314/keyboard/keyboard/internal/keyboard_parser/KeyboardParser.kt` + `app/src/main/assets/layouts/` - keyboard layout parsing and source layout data.
-- `.codex/config.toml` + `.codex/skills/gemini-api-dev/` + `.codex/skills/gemini-live-api-dev/` - Gemini Docs MCP and API skills for current models (including `gemini-3.5-transcribe` / `gemini-3.5-transcribe-live`).
+Java/Kotlin paths below are relative to `app/src/main/java/helium314/keyboard/`.
+
+- `latin/`: IME, text pipeline, voice, and spell checker.
+  Start with `LatinIME.java`, `inputlogic/InputLogic.java`, `WordComposer.java`,
+  `RichInputConnection.java`, and `voice/VoiceInputManager.kt`.
+- `keyboard/`: key geometry, pointers, layouts, emoji/clipboard UI.
+- `settings/`: Compose settings/full-app editor; `latin/settings/`: runtime preferences.
+- `app/src/main/res/`, `app/src/main/assets/`, and `app/src/main/jni/`: resources, layouts/dictionaries, and native code.
+- `app/src/test/`: JVM/Robolectric tests. `tools/`: environment, build, and release tooling.
+- `docs/`: design guides. `.codex/`: canonical skills/MCP; `.agents/skills` links there.
+  Read nested guides for the exact subtree before changing it.
 
 ## Cross-folder rules worth remembering
+
 - There are two settings trees: `latin/settings` holds runtime preference keys, defaults, and snapshots; `settings/` holds the Compose UI and fullapp screens.
 - Ordinary typing, voice insertion, and fullapp sync should flow through `InputConnection`; do not write directly into the extract/fullapp text widgets.
 - `WordComposer` is the source of truth for the current word; `inputlogic/EditorWordMirror.java` is the bridge that mirrors it into the host editor.
@@ -52,30 +39,29 @@ HeliBoard is an Android keyboard app derived from AOSP/OpenBoard. This fork adds
 
 ## Required PR handoff
 
-- Every new or updated PR, including infrastructure/documentation work, must build
-  `./tools/build-dist-apk.sh` after the final file edits on its feature branch.
-  Desktop agents have the same requirement as cloud agents. Read
-  `.codex/skills/android-build-apk/SKILL.md` when preparing the handoff.
-- Commit and push `dist/HeliBoard.apk` and `dist/apk-metadata.json` with the task.
-  Run `python3 tools/apk-handoff.py link` after pushing and include its immutable
-  download link in both the PR description and final response. Rebuild after
-  later file edits; the lightweight PR workflow checks freshness and bytes.
-- Run relevant local checks through `./tools/android-dev.sh`; report what passed
-  and what remains for manual phone testing. A build or JVM test does not prove
-  on-device typing, host-editor or microphone behavior. See
-  `docs/agent-development.md` for the testing matrix and tooling roadmap.
-- If a build is blocked by external prerequisites, preserve work in a draft PR
-  with the actual blocker and an explicitly unavailable APK. Never link an old
-  binary as though it contains the current changes.
+Every new/updated PR, including docs, must follow
+[the APK skill](.codex/skills/android-build-apk/SKILL.md): after final edits, run
+`./tools/build-dist-apk.sh` and `python3 tools/apk-handoff.py check`, commit/push
+`dist/HeliBoard.apk` and `dist/apk-metadata.json`, then run
+`python3 tools/apk-handoff.py link`. Include its verified immutable download link
+in the PR and final response. Later edits require rebuilding. External build
+blockers require a draft PR with the actual error and APK explicitly unavailable.
 
-## Suggested reading order
-1. Root `AGENTS.md`
-2. `app/src/main/AGENTS.md` or `app/src/main/java/helium314/keyboard/AGENTS.md`, depending on whether you are changing Android app wiring or Java/Kotlin package code
-3. The `AGENTS.md` in the exact folder you plan to edit
-4. Relevant long-form docs under `docs/` or task-specific guides under `.codex/skills/`
-5. `.codex/AGENTS.md` when the task involves Gemini APIs, MCP, or Codex agent setup
+Run relevant checks through `./tools/android-dev.sh`; use
+[the testing matrix](docs/agent-development.md). Report phone testing separately:
+a build/JVM test does not prove typing, editor, or microphone behavior. Keep
+folder guides current when ownership or cross-folder contracts change; read
+`.codex/AGENTS.md` for Gemini/MCP/agent-setup work.
 
-## Keep this file current
-- Update this AGENTS.md when files are added, removed, renamed, or repurposed in this folder.
-- If a change here affects neighboring folders or a cross-folder contract, update those AGENTS.md files in the same PR.
-- Treat stale agent documentation as a bug.
+# Research and report
+
+If something goes wrong, stop the affected operation and report relevant findings, data, and logs.
+Redact secrets and private content.
+If unsure about something, research, search the web, find latest techniques and best practices.
+
+# Next steps
+
+Consider what was recently done, what's in progress, and how it contributes to the goal.
+Decide and recommend what to do next.
+
+# Goal: Make Android typing, dictation, and full-screen editing reliable and efficient
