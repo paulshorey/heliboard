@@ -57,6 +57,8 @@ Cross-cutting helpers used across the IME. Search here before adding another gen
 
 ## Non-obvious notes
 
+- Voice diagnostic history includes `VoiceMicrophoneRouter` request/readiness events as well as per-phase actual capture routes and session/boundary/error events; volume measurements are not logged; keep routing logs free of device identities.
+
 - `JniUtils.java` is part of the dictionary/native contract; changes here are higher risk than a normal helper edit.
 - `DeviceProtectedUtils.java` matters because the app supports direct boot.
 - Layout resolution is layered: MAIN comes from the active subtype (`KeyboardLayoutSet` extra value, falling back to `qwerty`); non-MAIN slots resolve subtype override -> global `PREF_LAYOUT_*` -> `Defaults.LayoutType.default`.

@@ -1,6 +1,7 @@
 package helium314.keyboard.latin.voice
 
 import android.os.Looper
+import helium314.keyboard.latin.utils.Log
 import java.time.Duration
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.assertEquals
@@ -10,6 +11,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okio.ByteString.Companion.decodeBase64
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Before
@@ -99,6 +101,144 @@ class GeminiTranscriptionClientStreamTest {
         assertEquals("Hello world.", transcripts.single().text)
         // The interim hypothesis must never reach the editor.
         assertEquals(1, transcripts.size)
+    }
+
+    @Test
+    fun recognitionDiagnosticsExposeAssemblyCountsWithoutTranscriptContent() {
+        enqueueServer(object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                if (text.contains("\"setup\"")) webSocket.send("""{"setupComplete":{}}""")
+            }
+        })
+        startClient()
+        awaitUntil { events.contains("ready") }
+        val logStart = Log.getLog().size
+        val secret = "Private phrase"
+        currentServerSocket!!.send(
+            """{"serverContent":{"interimInputTranscription":{"text":"$secret"}}}"""
+        )
+        listOf(secret, secret, "$secret extended").forEach { text ->
+            currentServerSocket!!.send(
+                """{"serverContent":{"inputTranscription":{"text":"$text"}}}"""
+            )
+        }
+        awaitUntil { responseHasFinal.count { it } == 3 }
+        assertEquals(listOf(secret, "extended"), transcripts.map { it.text })
+        val lines = Log.getLog().drop(logStart).filter { it.message.contains("VOICE recognition") }
+        assertEquals(4, lines.size) // One interim summary and all three authoritative finals.
+        assertTrue(lines.any { it.message.contains("providerChars=14 emittedChars=14") })
+        assertTrue(lines.any { it.message.contains("providerChars=14 emittedChars=0") })
+        assertTrue(lines.any { it.message.contains("providerChars=23 emittedChars=8") })
+        assertTrue(lines.none { it.message.contains(secret) || it.message.contains("extended") })
+    }
+
+    @Test fun phraseFinalsAndDelayedTurnBoundariesKeepAllFollowingPcmOnTheSameSocket() {
+        readyServer(); startClient(endOfSpeechSilenceMs = 1000)
+        awaitUntil { events.contains("ready") }
+        val chunks = listOf(ByteArray(3200) { 7 }, ByteArray(3200), ByteArray(3200) { 1 })
+        assertTrue(client.sendAudioChunk(chunks[0]))
+        currentServerSocket!!.send("""{"serverContent":{"inputTranscription":{"text":"First sentence."}}}""")
+        awaitUntil { transcripts.size == 1 }
+        // A quiet onset of the next sentence can precede the previous turn's
+        // completion notification. Neither notification may gate or reset audio.
+        assertTrue(client.sendAudioChunk(chunks[1]))
+        currentServerSocket!!.send("""{"serverContent":{"turnComplete":true}}""")
+        assertTrue(client.sendAudioChunk(chunks[2]))
+        currentServerSocket!!.send("""{"serverContent":{"interimInputTranscription":{"text":"Second sentence"}}}""")
+        currentServerSocket!!.send("""{"serverContent":{"inputTranscription":{"text":"Second sentence."},"turnComplete":true}}""")
+        awaitUntil { transcripts.size == 2 && serverReceived.count { it.contains("\"audio\"") } == 3 }
+        assertEquals(listOf("First sentence.", "Second sentence."), transcripts.map { it.text })
+        assertEquals(1, serverReceived.count { it.contains("\"setup\"") })
+        assertTrue(serverReceived.none { it.contains("audioStreamEnd") || it.contains("activityEnd") })
+        val received = serverReceived.filter { it.contains("\"audio\"") }.map {
+            JSONObject(it).getJSONObject("realtimeInput").getJSONObject("audio")
+                .getString("data").decodeBase64()!!.toByteArray().toList()
+        }
+        assertEquals(chunks.map { it.toList() }, received)
+        assertTrue(events.none { it.startsWith("error:") || it == "closed" })
+    }
+
+    @Test fun serverInterruptionIsObservableWithoutDroppingFinalsOrFollowingAudio() {
+        readyServer(); startClient()
+        awaitUntil { events.contains("ready") }
+        val logStart = Log.getLog().size
+        currentServerSocket!!.send("""{"serverContent":{"interrupted":true,"inputTranscription":{"text":"Private final."}}}""")
+        awaitUntil { transcripts.size == 1 }
+        assertTrue(client.sendAudioChunk(ByteArray(3200) { 9 }))
+        awaitUntil { serverReceived.any { it.contains("\"audio\"") } }
+        val lines = Log.getLog().drop(logStart)
+        assertTrue(lines.any { it.message.contains("VOICE recognition interrupted") })
+        assertTrue(lines.none { it.message.contains("Private final") })
+        assertEquals("Private final.", transcripts.single().text)
+        assertTrue(events.none { it.startsWith("error:") || it == "closed" })
+    }
+
+    @Test fun manualPhrasesBracketEveryCapturePhaseAndNeverSendAudioStreamEnd() {
+        readyServer()
+        startClient(manualPhrases = true)
+        awaitUntil { events.contains("ready") }
+        assertTrue(client.sendAudioChunk(ByteArray(3200)))
+        assertTrue(client.finalizeTurn())
+        assertTrue(client.sendAudioChunk(ByteArray(3200)))
+        assertTrue(client.finishStreaming())
+        awaitUntil { serverReceived.size == 7 }
+        val kinds = serverReceived.drop(1).map {
+            JSONObject(it).getJSONObject("realtimeInput").keys().asSequence().single()
+        }
+        assertEquals(listOf("activityStart", "audio", "activityEnd", "activityStart", "audio", "activityEnd"), kinds)
+        val setup = JSONObject(serverReceived.first()).getJSONObject("setup")
+        assertTrue(setup.getJSONObject("realtimeInputConfig")
+            .getJSONObject("automaticActivityDetection").getBoolean("disabled"))
+        currentServerSocket!!.send(
+            """{"serverContent":{"interimInputTranscription":{"text":"provisional quiet phrase"}}}"""
+        )
+        awaitUntil { events.contains("interim") }
+        assertTrue(transcripts.isEmpty())
+        currentServerSocket!!.send(
+            """{"serverContent":{"inputTranscription":{"text":"Complete quiet phrase."}}}"""
+        )
+        awaitUntil { transcripts.isNotEmpty() }
+        assertEquals("Complete quiet phrase.", transcripts.single().text)
+    }
+
+    @Test fun manualStopAfterPauseDoesNotSendAnExtraEmptyActivityEnd() {
+        readyServer(); startClient(manualPhrases = true)
+        awaitUntil { events.contains("ready") }
+        assertTrue(client.sendAudioChunk(ByteArray(3200)))
+        assertTrue(client.finalizeTurn())
+        assertTrue(client.finishStreaming())
+        awaitUntil { serverReceived.size == 4 }
+        assertEquals(1, serverReceived.count { it.contains("activityEnd") })
+        assertTrue(serverReceived.none { it.contains("audioStreamEnd") })
+    }
+
+    @Test fun manualModeNeverInheritsAnAutomaticOnlyCachedSetupTier() {
+        readyServer()
+        GeminiTranscriptionClient.negotiatedSetupTier = GeminiTranscriptionClient.Companion.SetupTier.MINIMAL
+        startClient(manualPhrases = true)
+        awaitUntil { events.contains("ready") }
+        val setup = JSONObject(serverReceived.single()).getJSONObject("setup")
+        assertTrue(setup.getJSONObject("realtimeInputConfig")
+            .getJSONObject("automaticActivityDetection").getBoolean("disabled"))
+    }
+
+    @Test fun rejectedManualDetectionCannotFallBackToAutomaticDetection() {
+        repeat(2) {
+            enqueueServer(object : WebSocketListener() {
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    serverReceived.add(text)
+                    webSocket.close(1007, "unsupported setup field")
+                }
+            })
+        }
+        startClient(manualPhrases = true)
+        awaitUntil { events.any { it.startsWith("error:") } }
+        assertEquals(2, serverReceived.size)
+        assertTrue(events.none { it == "ready" })
+        assertTrue(serverReceived.all {
+            JSONObject(it).getJSONObject("setup").getJSONObject("realtimeInputConfig")
+                .getJSONObject("automaticActivityDetection").getBoolean("disabled")
+        })
     }
 
     @Test
@@ -373,14 +513,15 @@ class GeminiTranscriptionClientStreamTest {
         server.enqueue(MockResponse().withWebSocketUpgrade(tracking))
     }
 
-    private fun startClient() {
+    private fun startClient(manualPhrases: Boolean = false, endOfSpeechSilenceMs: Int = 1500) {
         client.startStreaming(
             apiKey = "test-key",
             sessionConfig = GeminiTranscriptionClient.buildSessionConfig(
                 languageTag = "en_US",
                 autoDetectLanguage = false,
                 transcriptionMode = "SMART",
-                endOfSpeechSilenceMs = 1500
+                endOfSpeechSilenceMs = endOfSpeechSilenceMs,
+                manualPhrases = manualPhrases
             ),
             callback = object : GeminiTranscriptionClient.StreamingCallback {
                 override fun onStreamReady() {

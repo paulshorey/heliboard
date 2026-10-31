@@ -5,6 +5,24 @@
     SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-only
 -->
 <resources xmlns:tools="http://schemas.android.com/tools" xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <string name="voice_microphone_title">Microphone</string>
+    <string name="voice_microphone_summary">Choose the microphone for voice transcription. Applies when you start or resume dictation.</string>
+    <string name="voice_microphone_automatic">Automatic</string>
+    <string name="voice_microphone_builtin">Always use phone microphone</string>
+    <string name="voice_microphone_bluetooth">Always use Bluetooth headset microphone</string>
+    <string name="voice_microphone_bluetooth_summary">Require a connected Bluetooth headset microphone. If unavailable or disconnected, stop and ask you to reconnect or change this setting.</string>
+    <string name="voice_restart_queued">Finishing dictation. Recording will restart when ready.</string>
+    <string name="voice_manual_phrase_pending">Wait for the paused phrase to finish processing before resuming.</string>
+    <string name="voice_microphone_automatic_summary">Use a connected Bluetooth headset microphone when available; otherwise let Android choose.</string>
+    <string name="voice_microphone_builtin_summary">Always use the phone microphone, even with a Bluetooth, wired, or USB microphone connected.</string>
+    <string name="voice_microphone_unsupported">Microphone selection requires Android 6 or later. Android chooses the microphone on this device.</string>
+    <string name="voice_microphone_builtin_unavailable">The built-in microphone is unavailable. Check your microphone setting.</string>
+    <string name="voice_microphone_bluetooth_unavailable">The Bluetooth microphone is unavailable. Reconnect it or choose the built-in microphone.</string>
+    <string name="voice_microphone_selection_failed">Android could not select the requested microphone. Check your microphone setting.</string>
+    <string name="voice_microphone_route_timeout">Android did not activate the requested microphone. Check your microphone setting and try again.</string>
+    <string name="voice_microphone_route_lost">The selected microphone changed or disconnected. Tap the mic to start again.</string>
+    <string name="voice_microphone_connecting">Connecting Bluetooth microphone. Wait for the ready message before speaking.</string>
+    <string name="voice_microphone_ready">Bluetooth microphone ready</string>
     <!-- Name of Android spell checker service. The app name should not be translated. -->
     <string name="spell_checker_service_name">HeliBoard Spell Checker</string>
     <!-- Title for IME settings screen. The app name should not be translated. -->
@@ -286,6 +304,8 @@
     <string name="gemini_api_key_summary">API key for voice transcription. Create one at aistudio.google.com/apikey — the key needs access to the Gemini Live API.</string>
     <!-- Toggle between Gemini's SMART and VERBATIM transcription modes. -->
     <string name="gemini_smart_mode_title">Smart transcription</string>
+    <string name="gemini_manual_phrases_title">Finish phrases manually (test)</string>
+    <string name="gemini_manual_phrases_summary">On: tap Pause or Stop to finish each phrase; automatic speech detection and silence stop are disabled. Off: Gemini detects phrase endings automatically. The microphone Stop button works in either mode.</string>
     <string name="gemini_smart_mode_summary">Gemini removes filler words, resolves spoken corrections such as \"Tuesday — actually Wednesday\", and applies punctuation, capitalization and list formatting. Turn this off for a literal word-for-word transcript.</string>
     <!-- Toggle for seeding Gemini's speech bias from surrounding editor text. -->
     <string name="gemini_use_editor_context_title">Learn names from the text field</string>
@@ -319,8 +339,8 @@
     <string name="voice_diagnostics_export">Export</string>
     <string name="voice_diagnostics_auto_refresh">Auto-refresh while viewing</string>
     <string name="voice_diagnostics_line_count">%1$d line(s) shown</string>
-    <string name="voice_chunk_silence_seconds_title">Chunk silence duration (seconds)</string>
-    <string name="voice_chunk_silence_seconds_summary">Backstop for the setting above: after this much local silence the keyboard tells Gemini to finish the phrase, so a trailing sentence is never left waiting. Keep it longer than the end-of-speech pause.</string>
+    <string name="voice_chunk_silence_seconds_title">Local silence confirmation (seconds)</string>
+    <string name="voice_chunk_silence_seconds_summary">How long local silence must last before starting the auto-stop silence timer. Gemini detects phrase endings separately; this does not force a phrase boundary.</string>
     <string name="voice_silence_threshold_title">Silence threshold (RMS loudness)</string>
     <string name="voice_auto_stop_silence_seconds_title">Auto-stop silence duration (seconds)</string>
     <string name="setup_app_breadcrumb">Settings -&gt; Setup this app</string>

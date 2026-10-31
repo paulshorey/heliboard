@@ -2,6 +2,7 @@
 package helium314.keyboard.settings.screens
 
 import android.content.Context
+import android.os.Build
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -44,6 +45,7 @@ import helium314.keyboard.settings.SettingsDestination
 import helium314.keyboard.settings.SettingsWithoutKey
 import helium314.keyboard.settings.Theme
 import helium314.keyboard.settings.preferences.Preference
+import helium314.keyboard.settings.dialogs.ListPickerDialog
 import helium314.keyboard.settings.previewDark
 
 @Composable
@@ -61,6 +63,9 @@ fun TranscriptionScreen(
     }
     var geminiSmartMode by remember {
         mutableStateOf(TranscriptionPreferences.readGeminiSmartMode(prefs))
+    }
+    var geminiManualPhrases by remember {
+        mutableStateOf(TranscriptionPreferences.readGeminiManualPhrases(prefs))
     }
     var geminiUseEditorContext by remember {
         mutableStateOf(TranscriptionPreferences.readGeminiUseEditorContext(prefs))
@@ -109,6 +114,7 @@ fun TranscriptionScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(innerPadding)
             ) {
+                MicrophonePreference()
                 InlineTextField(
                     label = stringResource(R.string.gemini_api_key_title),
                     summary = stringResource(R.string.gemini_api_key_summary),
@@ -127,6 +133,15 @@ fun TranscriptionScreen(
                     onCheckedChange = { checked ->
                         geminiSmartMode = checked
                         TranscriptionPreferences.writeGeminiSmartMode(prefs, checked)
+                    }
+                )
+                BooleanSettingRow(
+                    label = stringResource(R.string.gemini_manual_phrases_title),
+                    summary = stringResource(R.string.gemini_manual_phrases_summary),
+                    checked = geminiManualPhrases,
+                    onCheckedChange = { checked ->
+                        geminiManualPhrases = checked
+                        TranscriptionPreferences.writeGeminiManualPhrases(prefs, checked)
                     }
                 )
                 BooleanSettingRow(
@@ -266,8 +281,50 @@ private fun BooleanSettingRow(
     }
 }
 
-// Settings are handled inline in the screen
+@Composable
+private fun MicrophonePreference() {
+    val prefs = LocalContext.current.prefs()
+    var selected by remember { mutableStateOf(TranscriptionPreferences.readMicrophone(prefs)) }
+    var showDialog by remember { mutableStateOf(false) }
+    val supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+    val items = listOf(
+        TranscriptionPreferences.MICROPHONE_BUILT_IN to stringResource(R.string.voice_microphone_builtin),
+        TranscriptionPreferences.MICROPHONE_AUTOMATIC to stringResource(R.string.voice_microphone_automatic),
+        TranscriptionPreferences.MICROPHONE_BLUETOOTH to stringResource(R.string.voice_microphone_bluetooth),
+    )
+    Preference(
+        name = stringResource(R.string.voice_microphone_title),
+        description = if (!supported) stringResource(R.string.voice_microphone_unsupported) else {
+            items.first { it.first == selected }.second + "\n" + stringResource(
+                when (selected) {
+                    TranscriptionPreferences.MICROPHONE_BUILT_IN -> R.string.voice_microphone_builtin_summary
+                    TranscriptionPreferences.MICROPHONE_BLUETOOTH -> R.string.voice_microphone_bluetooth_summary
+                    else -> R.string.voice_microphone_automatic_summary
+                }
+            )
+        },
+        onClick = { if (supported) showDialog = true },
+    )
+    if (showDialog) {
+        ListPickerDialog(
+            onDismissRequest = { showDialog = false },
+            items = items,
+            selectedItem = items.first { it.first == selected },
+            getItemName = { it.second },
+            title = { Text(stringResource(R.string.voice_microphone_title)) },
+            onItemSelected = {
+                selected = it.first
+                TranscriptionPreferences.writeMicrophone(prefs, it.first)
+            },
+        )
+    }
+}
+
+// Also expose the microphone preference through settings search.
 fun createTranscriptionSettings(context: Context) = listOf(
+    Setting(context, Settings.PREF_VOICE_MICROPHONE, R.string.voice_microphone_title, R.string.voice_microphone_summary) {
+        MicrophonePreference()
+    },
     Setting(context, SettingsWithoutKey.VOICE_DIAGNOSTICS, R.string.voice_diagnostics_title, R.string.voice_diagnostics_summary) { setting ->
         Preference(
             name = setting.title,

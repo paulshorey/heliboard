@@ -4,13 +4,20 @@ package helium314.keyboard.latin.voice
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.widget.Toast
 import androidx.core.content.ContextCompat
+import helium314.keyboard.latin.R
+import helium314.keyboard.latin.settings.TranscriptionPreferences
 import helium314.keyboard.latin.utils.Log
+import helium314.keyboard.latin.utils.prefs
 import kotlin.concurrent.thread
 import kotlin.math.sqrt
 
@@ -22,8 +29,8 @@ import kotlin.math.sqrt
  * boundary callbacks ([RecordingCallback.onSpeechStarted] / [RecordingCallback.onSpeechStopped])
  * based on adaptive silence detection.
  *
- * Audio format: PCM 16-bit little-endian, 16 kHz, mono — the native input format
- * for the Gemini Live API and for most streaming speech APIs.
+ * Upload format: PCM 16-bit little-endian, 16 kHz, mono. Legacy SCO capture is
+ * 8 kHz and is linearly upsampled before callbacks.
  */
 class VoiceRecorder(private val context: Context) {
 
@@ -80,6 +87,17 @@ class VoiceRecorder(private val context: Context) {
 
         /** Guard against "recording" sessions that never produce readable audio. */
         private const val MAX_CONSECUTIVE_EMPTY_READS = 50
+
+        internal fun rms(pcm: ByteArray): Double {
+            val samples = pcm.size / 2
+            if (samples == 0) return 0.0
+            var squares = 0.0
+            for (offset in 0 until samples * 2 step 2) {
+                val sample = (pcm[offset + 1].toInt() shl 8) or (pcm[offset].toInt() and 0xff)
+                squares += sample.toDouble() * sample
+            }
+            return sqrt(squares / samples)
+        }
     }
 
     /**
@@ -115,7 +133,9 @@ class VoiceRecorder(private val context: Context) {
         val silenceThreshold: Double = DEFAULT_SILENCE_THRESHOLD
     )
 
-    private var audioRecord: AudioRecord? = null
+    @Volatile private var audioRecord: AudioRecord? = null
+    @Volatile private var captureSampleRate = SAMPLE_RATE
+    @Volatile private var microphoneRouter: VoiceMicrophoneRouter? = null
     private var recordingThread: Thread? = null
     @Volatile private var isRecording = false
     @Volatile private var isPaused = false
@@ -173,24 +193,8 @@ class VoiceRecorder(private val context: Context) {
             return false
         }
 
-        val minBuf = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
-        if (minBuf == AudioRecord.ERROR || minBuf == AudioRecord.ERROR_BAD_VALUE) {
-            Log.e(TAG, "Invalid buffer size: $minBuf")
-            callback?.onRecordingError("Failed to initialize audio recording")
-            return false
-        }
-
         try {
-            val bufferSize = maxOf(minBuf * 2, BYTES_PER_READ * 4)
-            audioRecord = AudioRecord(AUDIO_SOURCE, SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT, bufferSize)
-
-            if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-                Log.e(TAG, "AudioRecord not initialized")
-                callback?.onRecordingError("Failed to initialize audio recording")
-                releaseRecorder()
-                return false
-            }
-
+            prepareMicrophone()
             isPaused = false
             audioRecord?.startRecording()
             isRecording = true
@@ -199,13 +203,11 @@ class VoiceRecorder(private val context: Context) {
             recordingThread = thread(start = true, name = "VoiceRecorder") {
                 recordingLoop(callbackSnapshot)
             }
-            mainHandler.post { callbackSnapshot?.onRecordingStarted() }
             val configSnapshot = silenceConfig
             Log.i(
                 TAG,
-                "VOICE_STEP_1 recording started (${SAMPLE_RATE}Hz), " +
-                    "silenceDuration=${configSnapshot.silenceDurationMs}ms, " +
-                    "silenceThreshold=${configSnapshot.silenceThreshold}"
+                "VOICE_STEP_1 recording started captureRate=$captureSampleRate uploadRate=$SAMPLE_RATE, " +
+                    "silenceDuration=${configSnapshot.silenceDurationMs}ms"
             )
             return true
         } catch (e: SecurityException) {
@@ -262,6 +264,7 @@ class VoiceRecorder(private val context: Context) {
             } catch (e: Exception) {
                 Log.e(TAG, "Error pausing AudioRecord: ${e.message}")
             }
+            microphoneRouter?.release()
             Log.i(TAG, "Recording paused")
         }
     }
@@ -269,10 +272,12 @@ class VoiceRecorder(private val context: Context) {
     fun resumeRecording() {
         if (isRecording && isPaused) {
             try {
+                prepareMicrophone()
                 audioRecord?.startRecording()
                 capturePhase++
                 isPaused = false
             } catch (e: Exception) {
+                microphoneRouter?.release()
                 Log.e(TAG, "Error resuming AudioRecord: ${e.message}")
                 val callbackSnapshot = callback
                 mainHandler.post {
@@ -287,8 +292,38 @@ class VoiceRecorder(private val context: Context) {
     private fun releaseRecorder() {
         try { audioRecord?.release() } catch (_: Exception) {}
         audioRecord = null
+        microphoneRouter?.release()
+        microphoneRouter = null
         // Retain a stuck thread so a new session cannot reuse capture state.
         if (recordingThread?.isAlive != true) recordingThread = null
+    }
+
+    private fun prepareMicrophone() {
+        microphoneRouter?.release()
+        val router = VoiceMicrophoneRouter(
+            context,
+            context.getSystemService(Context.AUDIO_SERVICE) as AudioManager,
+            TranscriptionPreferences.readMicrophone(context.prefs()),
+        )
+        microphoneRouter = router // Retain ownership even when preparation fails part way through.
+        val rate = router.captureSampleRate
+        if (audioRecord == null || captureSampleRate != rate) {
+            audioRecord?.release()
+            audioRecord = null
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                throw SecurityException("Microphone permission denied")
+            }
+            val minBuf = AudioRecord.getMinBufferSize(rate, CHANNEL_CONFIG, AUDIO_FORMAT)
+            check(minBuf > 0) { "Failed to initialize audio recording" }
+            val bytesPerRead = (rate * BYTES_PER_SAMPLE * READ_INTERVAL_MS / 1000).toInt()
+            audioRecord = AudioRecord(AUDIO_SOURCE, rate, CHANNEL_CONFIG, AUDIO_FORMAT, maxOf(minBuf * 2, bytesPerRead * 4))
+            check(audioRecord?.state == AudioRecord.STATE_INITIALIZED) { "Failed to initialize audio recording" }
+            captureSampleRate = rate
+        }
+        router.prepare(checkNotNull(audioRecord))
+        if (router.usesBluetooth) {
+            Toast.makeText(context, R.string.voice_microphone_connecting, Toast.LENGTH_LONG).show()
+        }
     }
 
     // ── Recording loop with silence detection ──────────────────────────
@@ -302,6 +337,9 @@ class VoiceRecorder(private val context: Context) {
         val energyHistory = ArrayDeque<Double>()
         var noiseFloorRecalcCounter = 0
         var consecutiveEmptyReads = 0
+        var readyPhase: Long? = null
+        var resamplerPhase: Long? = null
+        var resampler = VoicePcmResampler()
         val configSnapshot = silenceConfig
         val minSilenceThreshold = configSnapshot.silenceThreshold
         val minSpeechThreshold = minSilenceThreshold + SPEECH_HYSTERESIS
@@ -320,8 +358,11 @@ class VoiceRecorder(private val context: Context) {
                 }
 
                 val readPhase = capturePhase
+                val readRecorder = audioRecord ?: break
+                val readRate = captureSampleRate
+                val readSize = (readRate * BYTES_PER_SAMPLE * READ_INTERVAL_MS / 1000).toInt()
                 val bytesRead = try {
-                    audioRecord?.read(readBuffer, 0, BYTES_PER_READ) ?: break
+                    readRecorder.read(readBuffer, 0, readSize)
                 } catch (e: Exception) {
                     // A rapid pause/resume can finish before the interrupted
                     // native read returns. Its exception belongs to the old
@@ -337,6 +378,28 @@ class VoiceRecorder(private val context: Context) {
                     isSpeaking = false
                     consecutiveEmptyReads = 0
                     continue
+                }
+                // During route activation, never forward PCM from a different microphone.
+                // Check even on empty reads so an ignored routing request has a deadline.
+                val router = microphoneRouter
+                val routeReady = try {
+                    bytesRead < 0 || router == null || router.acceptsAudio(readRecorder)
+                } catch (e: Exception) {
+                    if (!isRecording || isPaused || readPhase != capturePhase) continue
+                    throw e
+                }
+                if (!isRecording || isPaused || readPhase != capturePhase || !routeReady) continue
+                if (bytesRead > 0 && readyPhase != readPhase) {
+                    readyPhase = readPhase
+                    Log.i(TAG, "VOICE capture route ${captureRouteDiagnostic()}")
+                    mainHandler.post {
+                        if (isRecording && !isPaused && capturePhase == readPhase && callback === recordingCallback) {
+                            recordingCallback?.onRecordingStarted()
+                            if (router?.usesBluetooth == true) {
+                                Toast.makeText(context, R.string.voice_microphone_ready, Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
                 }
                 when {
                     bytesRead > 0 -> {
@@ -370,16 +433,20 @@ class VoiceRecorder(private val context: Context) {
                     }
                 }
 
-                val chunk = if (bytesRead == BYTES_PER_READ) readBuffer.copyOf()
-                            else readBuffer.copyOf(bytesRead)
+                if (resamplerPhase != readPhase) {
+                    resampler = VoicePcmResampler()
+                    resamplerPhase = readPhase
+                }
+                val chunk = readBuffer.copyOf(bytesRead)
 
-                val energy = rmsEnergy(chunk)
+                val energy = rms(chunk)
                 smoothedEnergy = (ENERGY_SMOOTHING_ALPHA * energy) +
                     ((1.0 - ENERGY_SMOOTHING_ALPHA) * smoothedEnergy)
 
-                val speechThreshold = maxOf(minSpeechThreshold, noiseFloor + SPEECH_MARGIN)
-                val silenceThreshold = maxOf(minSilenceThreshold, noiseFloor + SILENCE_MARGIN)
-                val chunkMs = (bytesRead.toLong() * 1000) / (SAMPLE_RATE * BYTES_PER_SAMPLE)
+                val detectorNoiseFloor = noiseFloor
+                val speechThreshold = maxOf(minSpeechThreshold, detectorNoiseFloor + SPEECH_MARGIN)
+                val silenceThreshold = maxOf(minSilenceThreshold, detectorNoiseFloor + SILENCE_MARGIN)
+                val chunkMs = (bytesRead.toLong() * 1000) / (readRate * BYTES_PER_SAMPLE)
                 val hasSpeech = if (isSpeaking) {
                     smoothedEnergy >= silenceThreshold
                 } else {
@@ -393,7 +460,8 @@ class VoiceRecorder(private val context: Context) {
                 // This annotation never gates PCM delivery to Gemini.
                 val containsSpeech = energy >= silenceThreshold
                 val callbackSnapshot = recordingCallback
-                mainHandler.post { callbackSnapshot?.onAudioChunk(chunk, containsSpeech) }
+                val upload = if (readRate == SAMPLE_RATE) chunk else resampler.upsample8kTo16k(chunk)
+                mainHandler.post { callbackSnapshot?.onAudioChunk(upload, containsSpeech) }
 
                 // Percentile-based noise floor: track raw RMS energy (not EMA-smoothed)
                 // to avoid speech->silence lag contaminating the low-percentile baseline.
@@ -419,6 +487,7 @@ class VoiceRecorder(private val context: Context) {
                 if (hasSpeech) {
                     if (!isSpeaking) {
                         isSpeaking = true
+                        Log.i(TAG, "VOICE speech started")
                         val callbackSnapshot = recordingCallback
                         mainHandler.post { callbackSnapshot?.onSpeechStarted() }
                     }
@@ -432,7 +501,7 @@ class VoiceRecorder(private val context: Context) {
                             Log.i(
                                 TAG,
                                 "VOICE_STEP_2 silence detected (${configSnapshot.silenceDurationMs}ms window), " +
-                                    "energy=${smoothedEnergy.toInt()}, threshold=${silenceThreshold.toInt()} — speech stopped"
+                                    "boundary=local_silence"
                             )
                             val callbackSnapshot = recordingCallback
                             mainHandler.post { callbackSnapshot?.onSpeechStopped() }
@@ -453,18 +522,25 @@ class VoiceRecorder(private val context: Context) {
 
     // ── Utility functions ──────────────────────────────────────────────
 
-    /** Calculate RMS energy of PCM16 little-endian audio. */
-    private fun rmsEnergy(data: ByteArray): Double {
-        if (data.size < 2) return 0.0
-        var sum = 0.0
-        val samples = data.size / 2
-        for (i in 0 until samples) {
-            val lo = data[i * 2].toInt() and 0xFF
-            val hi = data[i * 2 + 1].toInt()
-            val sample = (hi shl 8) or lo  // signed 16-bit little-endian
-            sum += (sample * sample).toDouble()
+    /** Query the actual recording route; names, addresses and device IDs stay private. */
+    private fun captureRouteDiagnostic(): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return "source=MIC route=unavailable_api"
+        return try {
+            val device = audioRecord?.routedDevice ?: return "source=MIC route=unknown"
+            val type = when (device.type) {
+                AudioDeviceInfo.TYPE_BUILTIN_MIC -> "built_in_mic"
+                AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "bluetooth_sco"
+                AudioDeviceInfo.TYPE_BLE_HEADSET -> "bluetooth_le_headset"
+                AudioDeviceInfo.TYPE_WIRED_HEADSET -> "wired_headset"
+                AudioDeviceInfo.TYPE_USB_DEVICE -> "usb_device"
+                AudioDeviceInfo.TYPE_USB_HEADSET -> "usb_headset"
+                else -> "other_type_${device.type}"
+            }
+            "source=MIC route=$type"
+        } catch (_: Exception) {
+            // Observability must never terminate capture or change routing.
+            "source=MIC route=query_unavailable"
         }
-        return sqrt(sum / samples)
     }
 
     private fun mapAudioReadError(errorCode: Int): String {

@@ -15,16 +15,24 @@ import helium314.keyboard.latin.voice.GeminiTranscriptionClient
  * here even though nothing else references those providers.
  */
 object TranscriptionPreferences {
+    const val MICROPHONE_AUTOMATIC = "automatic"
+    const val MICROPHONE_BUILT_IN = "built_in"
+    const val MICROPHONE_BLUETOOTH = "bluetooth"
+
+    fun readMicrophone(prefs: SharedPreferences): String =
+        sanitizeMicrophone(prefs.getString(Settings.PREF_VOICE_MICROPHONE, Defaults.PREF_VOICE_MICROPHONE))
+
+    fun writeMicrophone(prefs: SharedPreferences, value: String) {
+        prefs.edit { putString(Settings.PREF_VOICE_MICROPHONE, sanitizeMicrophone(value)) }
+    }
+
+    private fun sanitizeMicrophone(value: String?): String =
+        when (value) {
+            MICROPHONE_BUILT_IN, MICROPHONE_BLUETOOTH -> value
+            else -> MICROPHONE_AUTOMATIC
+        }
+
     private const val LEGACY_CUSTOM_TERMS_PREF = "soniox_custom_terms"
-
-    /**
-     * One-shot flag: the pre-Gemini default for local chunk silence was 1 s.
-     * Gemini Hybrid VAD wants that window at or above the 1500 ms server
-     * `silenceDurationMs`, so stored `1` is rewritten to the new default of 2.
-     */
-    private const val PREF_MIGRATED_CHUNK_SILENCE_SECONDS = "gemini_migrated_chunk_silence_seconds"
-
-    private const val LEGACY_DEFAULT_CHUNK_SILENCE_SECONDS = 1
 
     private val LEGACY_PROVIDER_PREFS = listOf(
         "speechmatics_api_key",
@@ -53,12 +61,12 @@ object TranscriptionPreferences {
         val autoDetectLanguage: Boolean,
         /** When true, editor text near the caret seeds `customVocabulary`. */
         val useEditorContext: Boolean,
-        val customVocabulary: List<String>
+        val customVocabulary: List<String>,
+        val manualPhrases: Boolean = false
     )
 
     fun readGeminiApiKey(prefs: SharedPreferences): String {
         migrateLegacyProviderPrefs(prefs)
-        migrateGeminiVoiceDefaults(prefs)
         return prefs.getString(
             Settings.PREF_GEMINI_API_KEY,
             Defaults.PREF_GEMINI_API_KEY
@@ -79,7 +87,8 @@ object TranscriptionPreferences {
             endOfSpeechSilenceMs = readGeminiEndOfSpeechSilenceMs(prefs),
             autoDetectLanguage = readGeminiAutoDetectLanguage(prefs),
             useEditorContext = readGeminiUseEditorContext(prefs),
-            customVocabulary = readGeminiCustomVocabulary(prefs)
+            customVocabulary = readGeminiCustomVocabulary(prefs),
+            manualPhrases = readGeminiManualPhrases(prefs)
         )
     }
 
@@ -114,6 +123,13 @@ object TranscriptionPreferences {
                 GeminiTranscriptionClient.TRANSCRIPTION_MODE_VERBATIM
             }
         )
+    }
+
+    fun readGeminiManualPhrases(prefs: SharedPreferences): Boolean =
+        prefs.getBoolean(Settings.PREF_GEMINI_MANUAL_PHRASES, Defaults.PREF_GEMINI_MANUAL_PHRASES)
+
+    fun writeGeminiManualPhrases(prefs: SharedPreferences, enabled: Boolean) {
+        prefs.edit { putBoolean(Settings.PREF_GEMINI_MANUAL_PHRASES, enabled) }
     }
 
     fun readGeminiEndOfSpeechSilenceMs(prefs: SharedPreferences): Int {
@@ -215,7 +231,6 @@ object TranscriptionPreferences {
      * backup is cleaned up too, not just an in-place update.
      */
     fun migrateLegacyProviderPrefs(prefs: SharedPreferences) {
-        migrateGeminiVoiceDefaults(prefs)
         if (LEGACY_PROVIDER_PREFS.none { prefs.contains(it) }) return
         val legacyTerms = prefs.getString(LEGACY_CUSTOM_TERMS_PREF, "").orEmpty()
         val currentVocabulary = readGeminiCustomVocabularyRaw(prefs)
@@ -227,26 +242,4 @@ object TranscriptionPreferences {
         }
     }
 
-    /**
-     * Bump a persisted local-silence default of 1 s (the old Soniox-era value)
-     * to 2 s so Hybrid VAD does not finalize 500 ms before Gemini's own
-     * end-of-speech window. Runs once per install. A user who later sets 1 s
-     * in Settings keeps that choice.
-     */
-    fun migrateGeminiVoiceDefaults(prefs: SharedPreferences) {
-        if (prefs.getBoolean(PREF_MIGRATED_CHUNK_SILENCE_SECONDS, false)) return
-        prefs.edit {
-            if (prefs.getInt(
-                    Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS,
-                    Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS
-                ) == LEGACY_DEFAULT_CHUNK_SILENCE_SECONDS
-            ) {
-                putInt(
-                    Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS,
-                    Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS
-                )
-            }
-            putBoolean(PREF_MIGRATED_CHUNK_SILENCE_SECONDS, true)
-        }
-    }
 }

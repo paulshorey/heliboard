@@ -26,8 +26,38 @@ import org.robolectric.RobolectricTestRunner
  */
 @RunWith(RobolectricTestRunner::class)
 class GeminiTranscriptionClientTest {
+    @Test fun manualPhraseSetupDisablesAutomaticVadWithoutAutomaticTimingKnobs() {
+        val config = GeminiTranscriptionClient.buildSessionConfig("en_US", false, "VERBATIM", 1500,
+            manualPhrases = true)
+        for (tier in listOf(SetupTier.FULL, SetupTier.NO_SYSTEM_INSTRUCTION)) {
+            val setup = JSONObject(GeminiTranscriptionClient.buildSetupMessage(config, tier)).getJSONObject("setup")
+            val realtime = setup.getJSONObject("realtimeInputConfig")
+            val detection = realtime.getJSONObject("automaticActivityDetection")
+            assertEquals(true, detection.getBoolean("disabled"))
+            assertEquals(1, detection.length())
+            assertEquals("NO_INTERRUPTION", realtime.getString("activityHandling"))
+        }
+        for (tier in listOf(SetupTier.NO_REALTIME_CONFIG, SetupTier.MINIMAL)) {
+            kotlin.test.assertFailsWith<IllegalArgumentException> {
+                GeminiTranscriptionClient.buildSetupMessage(config, tier)
+            }
+        }
+    }
 
     // ── setup message ──────────────────────────────────────────────────
+
+    @Test fun automaticPhrasesDoNotInterruptRecognitionWhenTheNextSentenceStarts() {
+        for (silenceMs in listOf(400, 1000, 2000)) {
+            for (tier in listOf(SetupTier.FULL, SetupTier.NO_SYSTEM_INSTRUCTION)) {
+                val realtime = setupObject(tier, sessionConfig(endOfSpeechSilenceMs = silenceMs))
+                    .getJSONObject("realtimeInputConfig")
+                assertEquals("NO_INTERRUPTION", realtime.getString("activityHandling"))
+                val detection = realtime.getJSONObject("automaticActivityDetection")
+                assertFalse(detection.getBoolean("disabled"))
+                assertEquals(silenceMs, detection.getInt("silenceDurationMs"))
+            }
+        }
+    }
 
     @Test
     fun setupMessage_placesTranscriptionConfigBesideGenerationConfig() {

@@ -14,6 +14,7 @@ class LogVoiceDiagnosticsTest {
     fun `voice package tags are included`() {
         assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "VoiceInputManager", "VOICE_STEP_1 start")))
         assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "VoiceRecorder", "Recording started")))
+        assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "VoiceMicrophoneRouter", "VOICE microphone ready type=7")))
         assertTrue(Log.isVoiceDiagnosticLine(LogLine('I', "GeminiTranscription", "stream ready")))
         assertTrue(Log.isVoiceDiagnosticLine(LogLine('W', "VoiceNetwork", "default route lost")))
     }
