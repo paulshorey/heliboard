@@ -191,7 +191,12 @@ put it in the tier that matches how well-documented it is for this model.
 `LatinIME.buildVoiceContextText` supplies up to 4 000 chars before the caret;
 `VoiceContextVocabulary` harvests words worth biasing and sends **only those
 words**. Harvested: internal capitals (`iPhone`), all-caps ≤10 chars (`API`), and
-capitalized words not at a sentence start. Rejected: common English words, words
+plain capitalized words repeated at least twice with one mid-sentence occurrence
+and no lowercase conflict. One-off corrections and common words such as `Fine`
+are skipped. Automatic hints have a separate 20-term cap; explicit terms keep
+priority within the overall 100-term cap. Context is read once per explicit
+recording, not on Pause/Resume; there is no persistent correction learner.
+Rejected: common English words, words
 containing digits, and tokens glued by `@ / \ : _` (URLs, paths, emails,
 identifiers).
 
@@ -350,7 +355,11 @@ effects. Explicit spoken commands such as "New paragraph." are still handled by
 ## Verifying against the real API
 
 Use **Transcription → Voice diagnostics** for focused interruption, route and
-phrase-boundary events. About-page debug export adds app/lifecycle warnings.
+phrase-boundary events. Both this screen and About export the same diagnostic
+report with voice events plus app/Android warnings. Debug/verbose traces require
+explicit Android per-tag logging opt-in. Setup logs sent user/editor hint counts;
+finals log provider/emitted hint-match and quoted-match counts without words.
+These counts correlate recognition with hints; they cannot establish what was said.
 Volume windows and threshold measurements have been removed; all PCM is still
 forwarded and RMS math is unchanged. Verify microphone policy separately from
 provider recognition and phrase finalization.

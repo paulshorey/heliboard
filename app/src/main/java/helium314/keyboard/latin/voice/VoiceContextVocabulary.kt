@@ -42,6 +42,13 @@ object VoiceContextVocabulary {
     /** Upper bound on all-caps runs treated as acronyms rather than shouting. */
     private const val MAX_ACRONYM_LENGTH = 10
 
+    /** Automatic guesses have a smaller budget than explicitly chosen vocabulary. */
+    internal const val MAX_EDITOR_TERMS = 20
+
+    internal data class Selection(val terms: List<String>, val userTermCount: Int) {
+        val editorTerms: List<String> get() = terms.drop(userTermCount)
+    }
+
     /**
      * Frequent English words that start sentences. Without this filter every
      * paragraph would contribute "The", "This", "I" and friends and crowd out
@@ -52,7 +59,7 @@ object VoiceContextVocabulary {
         "and", "another", "any", "anyway", "are", "as", "at", "back", "because", "been",
         "before", "being", "besides", "both", "but", "by", "can", "could", "did", "do",
         "does", "doing", "done", "down", "during", "each", "either", "else", "even",
-        "ever", "every", "everyone", "everything", "few", "finally", "first", "for",
+        "ever", "every", "everyone", "everything", "few", "finally", "fine", "first", "for",
         "from", "get", "give", "go", "going", "good", "got", "had", "has", "have",
         "having", "he", "hello", "her", "here", "hers", "hi", "him", "his", "how",
         "however", "i", "if", "in", "instead", "into", "is", "it", "its", "just", "know",
@@ -82,13 +89,15 @@ object VoiceContextVocabulary {
         userTerms: List<String>,
         editorContext: String?,
         limit: Int
-    ): List<String> {
-        if (limit <= 0) return emptyList()
+    ): List<String> = select(userTerms, editorContext, limit).terms
+
+    internal fun select(userTerms: List<String>, editorContext: String?, limit: Int): Selection {
+        if (limit <= 0) return Selection(emptyList(), 0)
         val result = LinkedHashMap<String, String>()
 
-        fun add(terms: Iterable<String>) {
+        fun add(terms: Iterable<String>, maxSize: Int) {
             for (term in terms) {
-                if (result.size >= limit) return
+                if (result.size >= maxSize) return
                 val cleaned = term.trim()
                 if (cleaned.length < MIN_TERM_LENGTH || cleaned.length > MAX_TERM_LENGTH) continue
                 val key = cleaned.lowercase(Locale.US)
@@ -97,11 +106,13 @@ object VoiceContextVocabulary {
             }
         }
 
-        add(userTerms)
+        add(userTerms, limit)
+        val userTermCount = result.size
         if (result.size < limit) {
-            add(extractTermsFromContext(editorContext, limit - result.size))
+            // Extract past user duplicates so they do not consume the automatic budget.
+            add(extractTermsFromContext(editorContext, limit), minOf(limit, result.size + MAX_EDITOR_TERMS))
         }
-        return result.values.toList()
+        return Selection(result.values.toList(), userTermCount)
     }
 
     /**
@@ -112,12 +123,13 @@ object VoiceContextVocabulary {
     internal fun extractTermsFromContext(context: String?, limit: Int): List<String> {
         if (context.isNullOrBlank() || limit <= 0) return emptyList()
         val words = tokenize(context)
+        val occurrences = words.groupBy { it.text.lowercase(Locale.US) }
         val seen = LinkedHashMap<String, String>()
         for (index in words.indices.reversed()) {
             if (seen.size >= limit) break
             val word = words[index]
-            if (!isBiasWorthy(word)) continue
             val key = word.text.lowercase(Locale.US)
+            if (!isBiasWorthy(word, occurrences.getValue(key))) continue
             // Map.putIfAbsent is API 24+; minSdk is 21.
             if (!seen.containsKey(key)) seen[key] = word.text
         }
@@ -183,10 +195,12 @@ object VoiceContextVocabulary {
 
     /**
      * True when biasing recognition toward [word] is likely to help. Words with
-     * internal capitals and acronyms are unambiguous wins. A leading capital only
-     * counts mid-sentence, where English does not capitalize ordinary words.
+     * internal capitals and short acronyms have distinctive spellings. A plain
+     * leading capital is weak evidence: require repeated capitalization and at
+     * least one mid-sentence occurrence, without conflicting lowercase usage.
+     * A one-off correction must not immediately become a recognition preference.
      */
-    private fun isBiasWorthy(word: ContextWord): Boolean {
+    private fun isBiasWorthy(word: ContextWord, occurrences: List<ContextWord>): Boolean {
         val text = word.text
         if (text.length < MIN_TERM_LENGTH || text.length > MAX_TERM_LENGTH) return false
         if (text.none { it.isLetter() }) return false
@@ -194,11 +208,10 @@ object VoiceContextVocabulary {
         if (text.lowercase(Locale.US) in COMMON_WORDS) return false
 
         val first = text[0]
+        if (text.all { !it.isLetter() || it.isUpperCase() }) return text.length <= MAX_ACRONYM_LENGTH
         if (text.substring(1).any { it.isUpperCase() }) return true
-        if (text.length <= MAX_ACRONYM_LENGTH && text.all { !it.isLetter() || it.isUpperCase() }) {
-            return true
-        }
         if (!first.isUpperCase()) return false
-        return !word.startsSentence
+        return occurrences.size >= 2 && occurrences.none { it.text.first().isLowerCase() } &&
+            occurrences.any { !it.startsSentence }
     }
 }

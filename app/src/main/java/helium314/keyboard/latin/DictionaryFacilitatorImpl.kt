@@ -831,7 +831,7 @@ private class DictionaryGroup(
                     if (blacklistFile.isDirectory) blacklistFile.delete()
                     blacklistFile.appendText("$word\n")
                 } catch (e: IOException) {
-                    Log.e(TAG, "Exception while trying to add word \"$word\" to blacklist ${blacklistFile.name}", e)
+                    Log.e(TAG, "Could not add blacklist entry; chars=${word.length}", e)
                 }
             }
         }
@@ -845,7 +845,7 @@ private class DictionaryGroup(
                     val newLines = blacklistFile.readLines().filterNot { it == word }
                     blacklistFile.writeText(newLines.joinToString("\n"))
                 } catch (e: IOException) {
-                    Log.e(TAG, "Exception while trying to remove word \"$word\" to blacklist ${blacklistFile.name}", e)
+                    Log.e(TAG, "Could not remove blacklist entry; chars=${word.length}", e)
                 }
             }
         }

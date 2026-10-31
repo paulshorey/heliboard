@@ -11,6 +11,7 @@ Android spell checker service and session implementation.
 - `SpellCheckerSettingsActivity.kt` - spell checker settings activity entry.
 
 ## Non-obvious notes
+- Routine traces use debug/verbose levels and require explicit Android per-tag opt-in. Log counts and state instead of typed words, host text, dictionary entries or suggestion contents. Preserve warnings/errors needed to diagnose failures.
 - The spell checker is a separate system integration from the IME suggestion strip.
 - If dictionaries or locale behavior change in the IME, verify whether spell checker behavior should change too.
 

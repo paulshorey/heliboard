@@ -316,12 +316,12 @@ public abstract class AndroidWordLevelSpellCheckerSession extends Session {
 
             if (isInDictForAnyCapitalization(text, capitalizeType)) {
                 if (DebugFlags.DEBUG_ENABLED) {
-                    Log.i(TAG, "onGetSuggestionsInternal() : [" + text + "] is a valid word");
+                    Log.d(TAG, "Dictionary word found; chars=" + text.length());
                 }
                 return AndroidSpellCheckerService.getInDictEmptySuggestions();
             }
             if (DebugFlags.DEBUG_ENABLED) {
-                Log.i(TAG, "onGetSuggestionsInternal() : [" + text + "] is NOT a valid word");
+                Log.d(TAG, "Dictionary word not found; chars=" + text.length());
             }
 
             final Keyboard keyboard = mService.getKeyboardForLocale(mLocale);
@@ -335,16 +335,8 @@ public abstract class AndroidWordLevelSpellCheckerSession extends Session {
                     mLocale, composer.getComposedDataSnapshot(), ngramContext, keyboard);
             final Result result = getResult(capitalizeType, mLocale, suggestionsLimit,
                     mService.getRecommendedThreshold(), text, suggestionResults);
-            if (DebugFlags.DEBUG_ENABLED) {
-                if (result.mSuggestions != null && result.mSuggestions.length > 0) {
-                    final StringBuilder builder = new StringBuilder();
-                    for (String suggestion : result.mSuggestions) {
-                        builder.append(" [");
-                        builder.append(suggestion);
-                        builder.append("]");
-                    }
-                    Log.i(TAG, "onGetSuggestionsInternal() : Suggestions =" + builder);
-                }
+            if (DebugFlags.DEBUG_ENABLED && result.mSuggestions != null) {
+                Log.d(TAG, "Spell checker suggestions; count=" + result.mSuggestions.length);
             }
             // Handle word not in dictionary.
             // This is called only once per unique word, so entering multiple

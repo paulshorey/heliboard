@@ -7,6 +7,8 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLog
 
 @RunWith(RobolectricTestRunner::class)
 class LogVoiceDiagnosticsTest {
@@ -73,34 +75,16 @@ class LogVoiceDiagnosticsTest {
     }
 
     @Test
-    fun `filterVoiceDiagnosticsLines keeps newest matching lines`() {
-        val lines = listOf(
-            LogLine('I', "LatinIME", "Starting input. Cursor position = 0,0"),
-            LogLine('I', "VoiceInputManager", "marker-old"),
-            LogLine('I', "VoiceInputManager", "marker-new-0"),
-            LogLine('I', "VoiceInputManager", "marker-new-1"),
-            LogLine('I', "VoiceInputManager", "marker-new-2"),
-        )
-
-        val filtered = Log.filterVoiceDiagnosticsLines(lines, maxLines = 2)
-        assertEquals(2, filtered.size)
-        assertEquals("marker-new-1", filtered[0].message)
-        assertEquals("marker-new-2", filtered[1].message)
-    }
-
-    @Test
     fun `zero or negative line limits return no diagnostics`() {
-        val lines = listOf(LogLine('E', "VoiceInputManager", "failure"))
-        assertTrue(Log.filterVoiceDiagnosticsLines(lines, 0).isEmpty())
-        assertTrue(Log.filterVoiceDiagnosticsLines(lines, -1).isEmpty())
         assertTrue(Log.getVoiceDiagnosticsLog(0).isEmpty())
+        assertTrue(Log.getVoiceDiagnosticsLog(-1).isEmpty())
     }
 
     @Test
     fun `keyboard trace volume cannot evict a voice failure`() {
         val marker = "retention test failure"
         Log.e("VoiceInputManager", marker)
-        repeat(12_100) { Log.d("KeyboardParser", "geometry trace $it") }
+        repeat(12_100) { Log.i("KeyboardParser", "geometry trace $it") }
         assertTrue(Log.getVoiceDiagnosticsLog().any { it.message == marker })
         assertFalse(Log.getLog().any { it.message == marker })
     }
@@ -121,13 +105,38 @@ class LogVoiceDiagnosticsTest {
         val noise = LogLine('D', "KeyboardParser", "adding key q")
         val native = "10-06 10:39:50.174 100 100 W NativeCrash: useful native warning"
         val system = "10-06 10:39:50.174 100 100 W GeminiTranscription: duplicate close\n$native"
-        val export = Log.formatDebugLogExport(listOf(noise, repeat, repeat, repeat), listOf(voice), "3.6 (3604)", system)
-        assertTrue(export.startsWith("HeliBoard voice diagnostics"))
+        val export = Log.formatDiagnosticReport(listOf(noise, repeat, repeat, repeat), listOf(voice), "3.6 (3604)", system)
+        assertTrue(export.startsWith("HeliBoard diagnostic report"))
         assertTrue(export.contains("close code=1011 reason=prepayment credits depleted ?key=[redacted]"))
         assertFalse(export.contains("secret"))
         assertTrue(export.contains("[repeated 3 times]"))
         assertFalse(export.contains("adding key q"))
         assertFalse(export.contains("duplicate close"))
         assertTrue(export.contains(native))
+    }
+
+    @Test fun `debug traces require explicit per-tag opt in`() {
+        val tag = "OptInDiagnosticsTest"
+        ShadowLog.setLoggable(tag, android.util.Log.INFO)
+        Log.d(tag, "hidden debug")
+        Log.v(tag, "hidden verbose")
+        assertFalse(Log.getLog().any { it.tag == tag })
+        assertTrue(ShadowLog.getLogsForTag(tag).isEmpty())
+        ShadowLog.setLoggable(tag, android.util.Log.DEBUG)
+        Log.d(tag, "enabled debug")
+        assertTrue(Log.getLog().any { it.tag == tag && it.message == "enabled debug" })
+        assertTrue(ShadowLog.getLogsForTag(tag).any { it.msg == "enabled debug" })
+    }
+
+    @Test
+    @Config(sdk = [21, 25, 35], application = android.app.Application::class)
+    fun `long trace tags use the legacy property name on old Android`() {
+        val tag = "LongKeyboardDiagnosticsTagForCompatibility"
+        val propertyTag = if (android.os.Build.VERSION.SDK_INT < 26) tag.take(23) else tag
+        ShadowLog.setLoggable(propertyTag, android.util.Log.VERBOSE)
+        Log.d(tag, "compatible debug")
+        Log.v(tag, "compatible verbose")
+        assertTrue(Log.getLog().any { it.tag == tag && it.message == "compatible debug" })
+        assertTrue(Log.getLog().any { it.tag == tag && it.message == "compatible verbose" })
     }
 }

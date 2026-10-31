@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package helium314.keyboard.settings.screens
 
-import android.app.Activity
-import android.content.Intent
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -27,67 +23,30 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import helium314.keyboard.latin.BuildConfig
 import helium314.keyboard.latin.R
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.LogLine
-import helium314.keyboard.latin.utils.getActivity
 import helium314.keyboard.settings.SearchScreen
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Locale
 
 @Composable
 fun VoiceDiagnosticsScreen(
     onClickBack: () -> Unit,
 ) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val export = rememberDiagnosticLogExport()
     var snapshot by remember { mutableStateOf(Log.getVoiceDiagnosticsLog()) }
     var autoRefresh by rememberSaveable { mutableStateOf(true) }
     val listState = rememberLazyListState()
 
     fun refresh() {
         snapshot = Log.getVoiceDiagnosticsLog()
-    }
-
-    val exportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
-        val uri = result.data?.data ?: return@rememberLauncherForActivityResult
-        val lines = Log.getVoiceDiagnosticsLog()
-        scope.launch(Dispatchers.IO) {
-            context.getActivity()?.contentResolver?.openOutputStream(uri)?.use { os ->
-                os.writer().use { writer ->
-                    writer.write(Log.formatVoiceDiagnosticsExport(lines, BuildConfig.VERSION_NAME))
-                }
-            }
-        }
-    }
-
-    fun launchExport() {
-        val date = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(Calendar.getInstance().time)
-        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
-            .addCategory(Intent.CATEGORY_OPENABLE)
-            .putExtra(
-                Intent.EXTRA_TITLE,
-                context.getString(R.string.english_ime_name).replace(" ", "_") + "_voice_log_$date.txt"
-            )
-            .setType("text/plain")
-        exportLauncher.launch(intent)
     }
 
     LaunchedEffect(Unit) {
@@ -122,7 +81,7 @@ fun VoiceDiagnosticsScreen(
         icon = {},
         menu = listOf(
             refreshLabel to ::refresh,
-            exportLabel to ::launchExport,
+            exportLabel to export,
         ),
         content = {
             Scaffold(

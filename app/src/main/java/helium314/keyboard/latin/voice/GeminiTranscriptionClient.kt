@@ -213,7 +213,9 @@ class GeminiTranscriptionClient {
             val endOfSpeechSilenceMs: Int,
             /** `inputAudioTranscription.customVocabulary`. */
             val customVocabulary: List<String>,
-            val manualPhrases: Boolean = false
+            val manualPhrases: Boolean = false,
+            /** Subset of customVocabulary inferred from the editor, for content-free diagnostics. */
+            val editorVocabulary: List<String> = emptyList(),
         )
 
         internal fun buildSessionConfig(
@@ -226,6 +228,9 @@ class GeminiTranscriptionClient {
             manualPhrases: Boolean = false
         ): SessionConfig {
             val resolvedLanguage = if (autoDetectLanguage) null else resolveLanguageCode(languageTag)
+            val vocabulary = VoiceContextVocabulary.select(
+                userVocabulary, editorContext, MAX_CUSTOM_VOCABULARY_TERMS
+            )
             return SessionConfig(
                 languageCodes = listOfNotNull(resolvedLanguage),
                 transcriptionMode = sanitizeTranscriptionMode(transcriptionMode),
@@ -234,11 +239,8 @@ class GeminiTranscriptionClient {
                     MAX_END_OF_SPEECH_SILENCE_MS
                 ),
                 manualPhrases = manualPhrases,
-                customVocabulary = VoiceContextVocabulary.build(
-                    userTerms = userVocabulary,
-                    editorContext = editorContext,
-                    limit = MAX_CUSTOM_VOCABULARY_TERMS
-                )
+                customVocabulary = vocabulary.terms,
+                editorVocabulary = vocabulary.editorTerms,
             )
         }
 
@@ -690,8 +692,8 @@ class GeminiTranscriptionClient {
     private var activityOpen = false
     private var diagnosticInterims = 0
     private var diagnosticLastInterimChars = 0
-    private var diagnosticLastInterimLogAtMs: Long? = null
     private var diagnosticFinals = 0
+    private var vocabularyDiagnostics = VoiceVocabularyDiagnostics(emptyList(), emptyList())
 
     // Audio/control sends are serialized on the main looper. OkHttp drains in
     // FIFO order, so a queue no larger than this suffix contains only quiet PCM
@@ -745,8 +747,10 @@ class GeminiTranscriptionClient {
         accumulator.reset()
         diagnosticInterims = 0
         diagnosticLastInterimChars = 0
-        diagnosticLastInterimLogAtMs = null
         diagnosticFinals = 0
+        val sentVocabulary = if (tier == SetupTier.MINIMAL) emptyList() else sessionConfig.customVocabulary
+        val sentEditorVocabulary = if (tier == SetupTier.MINIMAL) emptyList() else sessionConfig.editorVocabulary
+        vocabularyDiagnostics = VoiceVocabularyDiagnostics(sentVocabulary, sentEditorVocabulary)
         clearFinalizeCloseTimer()
 
         val request = Request.Builder()
@@ -755,13 +759,15 @@ class GeminiTranscriptionClient {
 
         Log.i(
             TAG,
-            "VOICE_STEP_3 opening Gemini Live socket " +
+            "connection=$newToken opening Gemini Live socket " +
                 "(model=$MODEL, setupTier=$tier, " +
                 "languages=${sessionConfig.languageCodes.ifEmpty { listOf("auto") }}, " +
                 "mode=${sessionConfig.transcriptionMode}, " +
                 "manualPhrases=${sessionConfig.manualPhrases}, " +
                 "endOfSpeechSilenceMs=${sessionConfig.endOfSpeechSilenceMs}, " +
-                "customVocabulary=${sessionConfig.customVocabulary.size})"
+                "vocabularyPolicy=conservative_v2 " +
+                "userHints=${sentVocabulary.size - sentEditorVocabulary.size} " +
+                "editorHints=${sentEditorVocabulary.size})"
         )
 
         webSocket = socketFactory.newWebSocket(request, object : WebSocketListener() {
@@ -1067,13 +1073,6 @@ class GeminiTranscriptionClient {
             sawResponse = true
             diagnosticInterims++
             diagnosticLastInterimChars = interim.length
-            val now = SystemClock.elapsedRealtime()
-            val lastLog = diagnosticLastInterimLogAtMs
-            if (lastLog == null || now - lastLog >= 2000) {
-                diagnosticLastInterimLogAtMs = now
-                Log.i(TAG, "connection=$connectionToken VOICE recognition interimCount=$diagnosticInterims " +
-                    "lastInterimChars=$diagnosticLastInterimChars policy=provisional_not_inserted")
-            }
             callback?.onInterimTranscription()
         }
         if (connectionToken != activeConnectionToken) return
@@ -1085,7 +1084,9 @@ class GeminiTranscriptionClient {
             Log.i(TAG, "connection=$connectionToken VOICE recognition finalIndex=$diagnosticFinals " +
                 "providerChars=${finalText.length} emittedChars=${segment?.text?.length ?: 0} " +
                 "attaches=${segment?.attachesToPrevious ?: false} " +
-                "interimCount=$diagnosticInterims lastInterimChars=$diagnosticLastInterimChars")
+                "interimCount=$diagnosticInterims lastInterimChars=$diagnosticLastInterimChars " +
+                "providerHints=[${vocabularyDiagnostics.count(finalText)}] " +
+                "emittedHints=[${vocabularyDiagnostics.count(segment?.text.orEmpty())}]")
             if (segment != null) {
                 callback?.onTranscriptionResult(segment)
             }

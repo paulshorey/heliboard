@@ -3,7 +3,8 @@
 Feature-specific Compose screens for the settings app.
 
 ## Direct files
-- `AboutScreen.kt` - app/about information and debug-log export. Export leads with redacted voice diagnostics, followed by bounded app/native warnings rather than verbose keyboard geometry or duplicate app logcat.
+- `AboutScreen.kt` - app/about information and the shared diagnostic-report export action.
+- `DiagnosticLogExport.kt` - shared document picker, background report collection/write and visible failure feedback, used by About and Voice diagnostics; one filename/format with redacted voice events and app/Android warnings.
 - `AdvancedScreen.kt` - advanced settings screen.
 - `AppearanceScreen.kt` - appearance/theme settings screen (keyboard height appears first under a **Size and layout** heading).
 - `ColorsScreen.kt` - color customization screen.
@@ -23,7 +24,7 @@ Feature-specific Compose screens for the settings app.
 - `TextCorrectionScreen.kt` - text correction/autocorrect settings screen.
 - `ToolbarScreen.kt` - toolbar customization screen.
 - `TranscriptionScreen.kt` - voice transcription settings led by the searchable three-policy Microphone selector (always phone, automatic, always Bluetooth), plus opt-in manual phrase completion for quiet-speech comparisons and links to vocabulary/diagnostics.
-- `VoiceDiagnosticsScreen.kt` - on-device viewer for recent voice/transcription diagnostic log lines.
+- `VoiceDiagnosticsScreen.kt` - on-device viewer for recent voice events; exports the same full diagnostic report as About.
 
 ## Non-obvious notes
 - These screens are UI only; the actual preference keys/defaults live in `latin/settings/`.

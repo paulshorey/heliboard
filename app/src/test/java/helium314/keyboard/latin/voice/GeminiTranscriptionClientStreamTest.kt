@@ -125,11 +125,31 @@ class GeminiTranscriptionClientStreamTest {
         awaitUntil { responseHasFinal.count { it } == 3 }
         assertEquals(listOf(secret, "extended"), transcripts.map { it.text })
         val lines = Log.getLog().drop(logStart).filter { it.message.contains("VOICE recognition") }
-        assertEquals(4, lines.size) // One interim summary and all three authoritative finals.
+        assertEquals(3, lines.size) // Interim counts travel with finals, without per-interim logs.
         assertTrue(lines.any { it.message.contains("providerChars=14 emittedChars=14") })
         assertTrue(lines.any { it.message.contains("providerChars=14 emittedChars=0") })
         assertTrue(lines.any { it.message.contains("providerChars=23 emittedChars=8") })
         assertTrue(lines.none { it.message.contains(secret) || it.message.contains("extended") })
+    }
+
+    @Test fun vocabularyDiagnosticsDistinguishProviderQuotesAndDuplicateFinals() {
+        readyServer()
+        startClient(userVocabulary = listOf("Fine"), editorContext = "use iPhone")
+        awaitUntil { events.contains("ready") }
+        val logStart = Log.getLog().size
+        val final = "'Fine' iPhone, then 'Fine' again."
+        repeat(2) {
+            currentServerSocket!!.send(JSONObject().put("serverContent",
+                JSONObject().put("inputTranscription", JSONObject().put("text", final))).toString())
+        }
+        awaitUntil { responseHasFinal.count { it } == 2 }
+        assertEquals(listOf(final), transcripts.map { it.text })
+        val logs = Log.getLog().drop(logStart).filter { it.message.contains("finalIndex=") }
+        assertEquals(2, logs.size)
+        assertTrue(logs.all { it.message.contains("providerHints=[matches=3,editorMatches=1,quotedMatches=2]") })
+        assertTrue(logs.first().message.contains("emittedHints=[matches=3,editorMatches=1,quotedMatches=2]"))
+        assertTrue(logs.last().message.contains("emittedHints=[matches=0,editorMatches=0,quotedMatches=0]"))
+        assertTrue(logs.none { it.message.contains("Fine") || it.message.contains("iPhone") })
     }
 
     @Test fun phraseFinalsAndDelayedTurnBoundariesKeepAllFollowingPcmOnTheSameSocket() {
@@ -513,7 +533,12 @@ class GeminiTranscriptionClientStreamTest {
         server.enqueue(MockResponse().withWebSocketUpgrade(tracking))
     }
 
-    private fun startClient(manualPhrases: Boolean = false, endOfSpeechSilenceMs: Int = 1500) {
+    private fun startClient(
+        manualPhrases: Boolean = false,
+        endOfSpeechSilenceMs: Int = 1500,
+        userVocabulary: List<String> = emptyList(),
+        editorContext: String? = null,
+    ) {
         client.startStreaming(
             apiKey = "test-key",
             sessionConfig = GeminiTranscriptionClient.buildSessionConfig(
@@ -521,7 +546,9 @@ class GeminiTranscriptionClientStreamTest {
                 autoDetectLanguage = false,
                 transcriptionMode = "SMART",
                 endOfSpeechSilenceMs = endOfSpeechSilenceMs,
-                manualPhrases = manualPhrases
+                manualPhrases = manualPhrases,
+                userVocabulary = userVocabulary,
+                editorContext = editorContext,
             ),
             callback = object : GeminiTranscriptionClient.StreamingCallback {
                 override fun onStreamReady() {

@@ -392,6 +392,9 @@ class VoiceInputManager internal constructor(
             editorContext = editorContext,
             manualPhrases = geminiConfig.manualPhrases,
         )
+        Log.i(TAG, "session=$sessionId vocabulary editorContextAvailable=${!editorContext.isNullOrBlank()} " +
+            "userHints=${config.customVocabulary.size - config.editorVocabulary.size} " +
+            "editorHints=${config.editorVocabulary.size}")
         isStreamingConnecting = true
         scheduleConnectTimeout(sessionId)
         transcriptionClient.startStreaming(apiKey, config, object : GeminiTranscriptionClient.StreamingCallback {

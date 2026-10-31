@@ -309,7 +309,7 @@
     <string name="gemini_smart_mode_summary">Gemini removes filler words, resolves spoken corrections such as \"Tuesday — actually Wednesday\", and applies punctuation, capitalization and list formatting. Turn this off for a literal word-for-word transcript.</string>
     <!-- Toggle for seeding Gemini's speech bias from surrounding editor text. -->
     <string name="gemini_use_editor_context_title">Learn names from the text field</string>
-    <string name="gemini_use_editor_context_summary">Reads names, brands and acronyms already typed before the cursor and sends them as recognition hints, so dictated words match the spelling and casing you used. Only the individual words are sent, never the text itself.</string>
+    <string name="gemini_use_editor_context_summary">Uses repeated names, distinctive brand spellings and acronyms before the cursor as recognition hints. Common words and one-off capitalized words are skipped. Only individual words are sent when a recording starts, never the surrounding text.</string>
     <!-- Toggle for language auto-detection instead of the keyboard subtype's language. -->
     <string name="gemini_auto_detect_language_title">Detect spoken language</string>
     <string name="gemini_auto_detect_language_summary">Let Gemini identify the language instead of assuming the current keyboard language. Useful when you switch languages mid-dictation, but less accurate for short phrases, so leave it off unless you need it.</string>
@@ -333,10 +333,11 @@
     <string name="voice_vocabulary_user_count">%1$d term(s) will be sent</string>
     <string name="voice_diagnostics_title">Voice diagnostics</string>
     <string name="voice_diagnostics_summary">View recent transcription log lines to debug voice input on this device.</string>
-    <string name="voice_diagnostics_privacy_note">May contain dictated text and editor context. Stays on device until you export it.</string>
+    <string name="voice_diagnostics_privacy_note">Voice events record counts and state, not audio, dictated words or editor text. Export saves one report with voice events and app warnings. Stays on device until you share it.</string>
     <string name="voice_diagnostics_empty">No voice diagnostics yet. Use transcription, then return here and tap Refresh.</string>
     <string name="voice_diagnostics_refresh">Refresh</string>
-    <string name="voice_diagnostics_export">Export</string>
+    <string name="voice_diagnostics_export">Export diagnostic report</string>
+    <string name="diagnostic_export_failed">Could not save the diagnostic report. Please try again.</string>
     <string name="voice_diagnostics_auto_refresh">Auto-refresh while viewing</string>
     <string name="voice_diagnostics_line_count">%1$d line(s) shown</string>
     <string name="voice_chunk_silence_seconds_title">Local silence confirmation (seconds)</string>
@@ -894,7 +895,7 @@ New dictionary:
     <!-- description for wiki link -->
     <string name="about_wiki_link_description">The Wiki can be improved by any GitHub user!</string>
     <!-- preference title for saving the log to a file -->
-    <string name="save_log">Save log</string>
+    <string name="save_log">Export diagnostic report</string>
     <!-- license for about screen-->
     <string name="license">Open-source license</string>
     <!-- license link for about screen-->
