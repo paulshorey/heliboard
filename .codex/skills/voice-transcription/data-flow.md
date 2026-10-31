@@ -53,7 +53,7 @@ converts to 16 kHz without gain/gating. Route/rate are resolved before recorder
 creation; resume recreates it if needed. Volume measurements are not logged.
 - **Format**: PCM16 little-endian, 16 kHz, mono — the Live API's native input format
 - **Silence detection**: adaptive RMS threshold on each 100 ms chunk
-- **Callbacks**: supplies PCM chunks to `VoiceInputManager`; speech-stop silence requests a turn finalize, and longer silence requests auto-stop
+- **Callbacks**: forward all PCM; local speech-stop starts the silence auto-stop timer. Gemini controls automatic phrase endings; explicit Pause/Stop flush behind audio.
 
 ### GeminiTranscriptionClient.kt
 WebSocket client for the Gemini Live API.
@@ -80,9 +80,9 @@ Orchestrates recording, Gemini streaming, and ordered transcript delivery.
 - **Terminal failure**: invalidate callback generations, stop capture, clear uncertain work, preserve inserted text, and mark possible loss with `[Dictation interrupted]` once. Editor rejection/exception suppresses a marker and stops later writes.
 - **Explicit restart**: no reconnect, resumption, or rotation. `goAway` or nine minutes stops capture and drains; the next recording requires a mic tap.
 - **Session config**: maps the subtype locale to a documented BCP-47 code, clamps `silenceDurationMs` to 400–5000 ms, and harvests vocabulary once per recording.
-- **Deadlines**: 12 seconds across all setup tiers, 30 seconds for oldest queued PCM, active local speech or pending recognized words without a server response, 15 seconds for EOF/close, and 20 seconds from the stop request across capture shutdown, remaining setup, upload and close. Readiness, retries, EOF and finals cannot reset the overall stop budget; completion/cancellation removes both stop timers. A blocked restart reports that processing must finish. The missing-final wait applies to recognized words, not RMS spikes, and starts at the current speech epoch's submitted `audioStreamEnd`. Repeated controls/interims cannot extend it; new onset clears it until the next boundary. A delayed older boundary cannot start a wait for the newer utterance. Graceful stop clears previous speech watchdogs and continues reading finals. Recheck session ownership after capture shutdown and the IDLE state listener so reentrant failure/cancellation cannot restore the spinner.
-- **Final progress**: an earlier final cannot acknowledge annotated speech still in the PCM or socket queue. PCM carries capture-time raw-energy evidence, separate from the speaking silence window. Track the encoded quiet/control suffix in the socket FIFO so silence alone does not block a final. A repeated authoritative final also acknowledges progress after queued speech drains, without another editor write.
-- **Auto-stop**: prolonged adaptive local silence stops recording intentionally. Local speech-stop, pause, and stop enqueue `audioStreamEnd`. Silence auto-stop drains late finals and closes normally without a marker for unconfirmed noise/hypotheses. Interims never become text; actual failures still report interruptions. At equal deadlines, normal silence stop wins over a speech watchdog.
+- **Deadlines**: setup 12 s; oldest queued PCM and unfinished recognized words without a response 30 s; EOF/close 15 s; entire Stop 20 s. Stop settles for 2 s without an unfinished hypothesis or retains its original 8 s final deadline. Late interims restore that deadline; queued bytes retain the full drain budget. One mic tap during drain queues a restart after clean close, cleared by cancellation/failure. No overlapping sockets or audio replay.
+- **Final progress**: authoritative finals clear preceding recognition; later interims become pending again. Raw energy does not drive the spinner/watchdog or establish missing words. Manual declared activity retains raw queue safeguards. Retain submitted boundary times for late interims; never insert provisional text.
+- **Auto-stop**: prolonged adaptive local silence stops recording intentionally. Explicit pause and stop enqueue `audioStreamEnd`. Silence auto-stop drains late finals and closes normally without a marker for unconfirmed noise/hypotheses. Interims never become text; actual failures still report interruptions. At equal deadlines, normal silence stop wins over a speech watchdog.
 - **Capture shutdown**: a missed two-second join is terminal before EOF; an old live thread blocks reuse and keeps its original recording callback. Pause/resume changes the capture phase, so a native read interrupted by an earlier phase cannot falsely abort resumed recording.
 
 ### LatinIME.java
@@ -126,9 +126,10 @@ Active subtype locale + transcription preferences + editor text
     → languageCodes  = one documented BCP-47 code, or [] to auto-detect
     → mode           = SMART | VERBATIM
     → customVocabulary = user terms ∪ editor-harvested terms (≤ 100; omitted when empty)
-    → silenceDurationMs = PREF_GEMINI_END_OF_SPEECH_SILENCE_MS (400–5000, default 1500)
+    → silenceDurationMs = PREF_GEMINI_END_OF_SPEECH_SILENCE_MS (400–5000, default 2000)
     → endOfSpeechSensitivity = END_SENSITIVITY_LOW
     → startOfSpeechSensitivity = START_SENSITIVITY_HIGH, prefixPaddingMs = 300
+    → activityHandling = NO_INTERRUPTION (automatic and manual modes)
     → model = "models/gemini-3.5-transcribe-live", responseModalities = ["TEXT"]
 ```
 
@@ -181,8 +182,8 @@ PAUSED     → User taps pause  → RECORDING (resume)
 - **Learn names from the text field**: harvests proper nouns near the caret into `customVocabulary`
 - **Custom voice vocabulary**: opens `VoiceVocabularyScreen` to edit the user's own terms, with a format note above the text box (one word or phrase per line; no bundled terms)
 - **Detect spoken language**: sends `languageCodes: []` instead of the subtype's language. Off by default because auto-detection misfires on short utterances.
-- **End-of-speech pause (ms)**: `silenceDurationMs`, 400–5000, default 1500. Higher is more accurate.
-- **Chunk Silence Duration**: local pause that triggers `audioStreamEnd` as a backstop; keep it longer than the end-of-speech pause
+- **End-of-speech pause (ms)**: `silenceDurationMs`, 400–5000, default 2000. Increase it to allow longer pauses within a phrase.
+- **Local silence confirmation**: local pause before starting the auto-stop timer, default 2 seconds. It never sends a phrase boundary or gates audio.
 - **Silence Threshold**: RMS threshold floor for silence/speech detection
 - **Auto-stop Silence Duration**: delay before automatically stopping voice recording
 

@@ -129,6 +129,7 @@ class GeminiTranscriptionClient {
 
         /** How long to keep reading after `audioStreamEnd` before closing. */
         internal const val FINALIZE_CLOSE_GRACE_MS = 8_000L
+        internal const val FINISH_SETTLE_MS = 2_000L
         internal const val MAX_SOCKET_AUDIO_BYTES = 256 * 1024L
 
         /** OkHttp protocol ping cadence; the Live API has no app-level keepalive. */
@@ -292,14 +293,14 @@ class GeminiTranscriptionClient {
                 }
                 setup.put(
                     "realtimeInputConfig",
-                    JSONObject().put(
+                    // Dictation has no conversational response for the next
+                    // sentence to barge into. Keep recognition in flight while
+                    // the following audio is already arriving, in both modes.
+                    JSONObject().put("activityHandling", "NO_INTERRUPTION").put(
                         "automaticActivityDetection",
                         detection
                     )
                 )
-                if (config.manualPhrases) {
-                    setup.getJSONObject("realtimeInputConfig").put("activityHandling", "NO_INTERRUPTION")
-                }
             }
 
             if (tier == SetupTier.FULL) {
@@ -681,6 +682,8 @@ class GeminiTranscriptionClient {
 
     @Volatile
     private var pendingFinalizeCloseRunnable: Runnable? = null
+    private var finalizeDeadlineMs: Long? = null
+    private var closeRequested = false
 
     private val accumulator = TranscriptAccumulator()
     private var manualPhrases = false
@@ -951,25 +954,42 @@ class GeminiTranscriptionClient {
      * Closing right after the last audio chunk is the usual way to lose the
      * final phrase.
      */
-    fun finishStreaming(): Boolean {
+    fun finishStreaming(awaitTranscript: Boolean = true): Boolean {
         if (!finalizeTurn()) return false
         isClosing = true
-
         clearFinalizeCloseTimer()
+        closeRequested = false
+        finalizeDeadlineMs = SystemClock.elapsedRealtime() + FINALIZE_CLOSE_GRACE_MS
+        updateFinishWait(awaitTranscript)
+        Log.i(TAG, "Gemini finish sent manualPhrases=$manualPhrases pendingFinal=$awaitTranscript")
+        return true
+    }
+
+    /** Settle a completed phrase promptly, but allow late hypotheses the original bounded wait. */
+    internal fun updateFinishWait(awaitTranscript: Boolean) {
+        val deadline = finalizeDeadlineMs ?: return
+        if (!isClosing || closeRequested) return
+        pendingFinalizeCloseRunnable?.let(mainHandler::removeCallbacks)
+        val remaining = (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0)
+        val delayMs = if (awaitTranscript) remaining else minOf(remaining, FINISH_SETTLE_MS)
         val connectionToken = activeConnectionToken
-        val closeRunnable = Runnable {
-            if (connectionToken != activeConnectionToken) return@Runnable
+        pendingFinalizeCloseRunnable = Runnable {
+            if (connectionToken != activeConnectionToken || closeRequested) return@Runnable
             val activeSocket = webSocket ?: return@Runnable
+            pendingFinalizeCloseRunnable = null
+            // A short settle is not an upload deadline. Keep the full existing
+            // budget if bytes are still draining from OkHttp's FIFO.
+            if (activeSocket.queueSize() != 0L && SystemClock.elapsedRealtime() < deadline) {
+                updateFinishWait(awaitTranscript = true)
+                return@Runnable
+            }
+            closeRequested = true
             Log.i(TAG, "Gemini finalize grace elapsed; closing socket")
             if (activeSocket.queueSize() != 0L || !activeSocket.close(1000, "client_stop")) {
                 reportStreamError("Voice stream did not drain before the stop deadline")
             }
-        }
-        pendingFinalizeCloseRunnable = closeRunnable
-        mainHandler.postDelayed(closeRunnable, FINALIZE_CLOSE_GRACE_MS)
-
-        Log.i(TAG, "Gemini finish sent manualPhrases=$manualPhrases; awaiting final transcript")
-        return true
+        }.also { mainHandler.postDelayed(it, delayMs) }
+        Log.i(TAG, "connection=$connectionToken finish wait pendingFinal=$awaitTranscript delayMs=$delayMs")
     }
 
     fun cancelAll() {
@@ -1035,6 +1055,14 @@ class GeminiTranscriptionClient {
         if (connectionToken != activeConnectionToken) return
         var sawResponse = false
         var sawTranscript = false
+        if (json.optJSONObject("serverContent")?.optBoolean("interrupted", false) == true) {
+            // Observe provider-side interruption separately from app cancellation.
+            // Process any accompanying transcript and keep forwarding microphone
+            // audio; this event neither acknowledges audio nor ends capture.
+            sawResponse = true
+            Log.w(TAG, "connection=$connectionToken VOICE recognition interrupted " +
+                "finalCount=$diagnosticFinals interimCount=$diagnosticInterims policy=keep_streaming")
+        }
         extractInterimTranscript(json)?.let { interim ->
             sawResponse = true
             diagnosticInterims++
@@ -1122,9 +1150,9 @@ class GeminiTranscriptionClient {
     }
 
     private fun clearFinalizeCloseTimer() {
-        val runnable = pendingFinalizeCloseRunnable ?: return
-        mainHandler.removeCallbacks(runnable)
+        pendingFinalizeCloseRunnable?.let(mainHandler::removeCallbacks)
         pendingFinalizeCloseRunnable = null
+        finalizeDeadlineMs = null
     }
 
 }

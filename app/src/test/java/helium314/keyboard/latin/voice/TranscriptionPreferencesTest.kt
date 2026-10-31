@@ -95,7 +95,7 @@ class TranscriptionPreferencesTest {
     }
 
     @Test
-    fun defaults_preferAccuracyOverLatency() {
+    fun defaultsUseTwoSecondPausesAndRetainTextQualitySettings() {
         val prefs = newPrefs()
         val config = TranscriptionPreferences.readGeminiConfig(prefs)
 
@@ -107,16 +107,10 @@ class TranscriptionPreferencesTest {
         // An explicit language hint beats auto-detection on short dictations.
         assertFalse(config.autoDetectLanguage)
         assertTrue(config.useEditorContext)
-        assertEquals(
-            Defaults.PREF_GEMINI_END_OF_SPEECH_SILENCE_MS,
-            config.endOfSpeechSilenceMs
-        )
-        // The local finalize backstop must not fire before the server's own
-        // end-of-speech window, or utterances get chopped in half.
-        assertTrue(
-            Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS * 1000 >
-                Defaults.PREF_GEMINI_END_OF_SPEECH_SILENCE_MS
-        )
+        assertEquals(2000, config.endOfSpeechSilenceMs)
+        assertEquals(2, prefs.getInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS,
+            Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS))
+        assertTrue(prefs.all.isEmpty()) // Reading defaults must not persist or migrate pauses.
     }
 
     @Test
@@ -181,38 +175,34 @@ class TranscriptionPreferencesTest {
         )
     }
 
-    @Test
-    fun migrateGeminiVoiceDefaults_bumpsLegacyOneSecondChunkSilence() {
+    @Test fun readingSettingsPreservesOneSecondChoicesWithoutLegacyMigration() {
         val prefs = newPrefs()
+        TranscriptionPreferences.writeGeminiEndOfSpeechSilenceMs(prefs, 1000)
         prefs.edit().putInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, 1).commit()
-
-        TranscriptionPreferences.migrateGeminiVoiceDefaults(prefs)
-
-        assertEquals(
-            Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS,
-            prefs.getInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, -1)
-        )
+        val saved = prefs.all.toMap()
+        assertEquals(1000, TranscriptionPreferences.readGeminiConfig(prefs).endOfSpeechSilenceMs)
+        assertEquals(saved, prefs.all)
     }
 
-    @Test
-    fun migrateGeminiVoiceDefaults_leavesALaterUserChoiceOfOneSecond() {
-        val prefs = newPrefs()
-        TranscriptionPreferences.migrateGeminiVoiceDefaults(prefs)
-        prefs.edit().putInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, 1).commit()
-
-        TranscriptionPreferences.migrateGeminiVoiceDefaults(prefs)
-
-        assertEquals(1, prefs.getInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, -1))
+    @Test fun readingSettingsKeepsLongerSavedPauses() {
+        for (local in listOf(2, 4)) {
+            val prefs = newPrefs()
+            TranscriptionPreferences.writeGeminiEndOfSpeechSilenceMs(prefs, 2500)
+            prefs.edit().putInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, local).commit()
+            val saved = prefs.all.toMap()
+            assertEquals(2500, TranscriptionPreferences.readGeminiConfig(prefs).endOfSpeechSilenceMs)
+            assertEquals(saved, prefs.all)
+        }
     }
 
-    @Test
-    fun migrateGeminiVoiceDefaults_keepsACustomChunkSilenceAboveTheOldDefault() {
+    @Test fun readingSettingsKeepsValuesFromAnAlreadyMigratedInstall() {
         val prefs = newPrefs()
-        prefs.edit().putInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, 4).commit()
-
-        TranscriptionPreferences.migrateGeminiVoiceDefaults(prefs)
-
-        assertEquals(4, prefs.getInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, -1))
+        prefs.edit().putBoolean("gemini_migrated_chunk_silence_seconds", true)
+            .putInt(Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS, 2)
+            .putInt(Settings.PREF_GEMINI_END_OF_SPEECH_SILENCE_MS, 1500).commit()
+        val saved = prefs.all.toMap()
+        assertEquals(1500, TranscriptionPreferences.readGeminiConfig(prefs).endOfSpeechSilenceMs)
+        assertEquals(saved, prefs.all)
     }
 
     private fun newPrefs() = ApplicationProvider.getApplicationContext<Context>()

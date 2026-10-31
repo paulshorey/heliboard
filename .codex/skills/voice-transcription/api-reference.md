@@ -47,12 +47,13 @@ and [wire reference](https://ai.google.dev/api/live#bidigeneratecontentrealtimei
       "customVocabulary": ["MyProject"]
     },
     "realtimeInputConfig": {
+      "activityHandling": "NO_INTERRUPTION",
       "automaticActivityDetection": {
         "disabled": false,
         "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
         "prefixPaddingMs": 300,
         "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
-        "silenceDurationMs": 1500
+        "silenceDurationMs": 2000
       }
     },
     "systemInstruction": {
@@ -93,16 +94,21 @@ and [wire reference](https://ai.google.dev/api/live#bidigeneratecontentrealtimei
   tunes only the end of speech.
   - **`silenceDurationMs`**: non-speech duration before end-of-speech is committed.
     Larger tolerates longer gaps at the cost of latency. HeliBoard clamps to
-    **400–5000 ms**, default **1500 ms**. Google warns that 100–200 ms values split
+    **400–5000 ms**, default **2000 ms**. Google warns that 100–200 ms values split
     one utterance into fragments and that the model then loses cross-fragment
     context, lowering transcription quality.
   - **`endOfSpeechSensitivity`**: `END_SENSITIVITY_HIGH` (API default) ends speech
     more often; `END_SENSITIVITY_LOW` ends it less often. HeliBoard pins **LOW**.
   - **`startOfSpeechSensitivity`**: HeliBoard pins **`START_SENSITIVITY_HIGH`** to
     detect onset eagerly.
-  - **`prefixPaddingMs`**: speech duration required before start-of-speech is
-    committed; the server retains this much prefix audio, which is what prevents
-    front-word truncation. HeliBoard sends **300**.
+  - **`prefixPaddingMs`**: look-back audio retained before detected speech onset,
+    protecting the first syllable before VAD fires. HeliBoard sends **300**.
+- **`realtimeInputConfig.activityHandling`**: `NO_INTERRUPTION` in both automatic
+  and manual modes, at FULL/NO_SYSTEM_INSTRUCTION tiers. The shared API defaults
+  to new activity interrupting a model response; dictation must allow the next
+  sentence to stream while the preceding response finishes. Lower schema tiers
+  omit this configuration. Provider `interrupted` signals are logged, never used
+  to discard accompanying finals or gate subsequent PCM.
 - **`systemInstruction`**: short static dictation guidance that tells the model
   to emit unfinished trailing speech when the turn ends rather than wait for the
   next word. Live Transcription's documented feature list does not include system
@@ -158,8 +164,8 @@ the server accepts today.
 {"realtimeInput":{"audioStreamEnd":true}}
 ```
 
-HeliBoard queues this behind preceding PCM on local speech-stop silence, pause,
-and stop. It is valid while automatic activity detection is enabled. The session
+HeliBoard queues this behind preceding PCM on explicit Pause/Stop. Automatic
+phrase boundaries use Gemini VAD; local energy only controls silence auto-stop. It is valid while automatic activity detection is enabled. The session
 stays open and subsequent audio reopens the stream. Every captured chunk is
 forwarded, including quiet audio; local RMS detection does not discard samples.
 Only authoritative finals become text. There is no interim promotion deadline.
@@ -208,12 +214,15 @@ automatic phrase mode.
   sets OkHttp `pingInterval` to 20 s. The dominant cause of 1011 is not the network
   but a turn left open with no incoming audio, which `audioStreamEnd` on mic pause
   prevents.
-- Graceful shutdown: stop/join capture, queue EOF after the posted tail, read
-  finals for 8 s, then initiate close 1000. A nonempty socket queue is failure.
+- Graceful shutdown: stop/join capture, queue EOF after the posted tail, settle
+  for 2 s without unfinished recognition, or retain the original 8 s final deadline
+  while recognition is pending, then initiate close 1000. A late interim restores
+  that deadline; queued audio retains the full drain budget. A nonempty socket queue is failure.
   The manager bounds EOF/close to 15 s and the entire stop to 20 s from the stop
   request, including capture shutdown, remaining setup and upload. Readiness,
   retries, EOF and finals cannot reset that budget. Completion/cancellation removes
-  both timers. A blocked restart reports that processing must finish. Recheck
+  both timers. A mic tap during drain queues one restart after clean close, with ordinary
+  feedback. Repeated taps do not duplicate it; cancellation/failure clears it. Recheck
   session ownership after capture shutdown and the IDLE state listener before
   restoring processing UI.
   Clear old response/final timers at stop. Silence auto-stop drains and completes
@@ -226,8 +235,9 @@ automatic phrase mode.
   socket audio queue is 256 KiB of encoded JSON, and finalized text is limited to
   64 queued entries. Locally queued boundary controls also have a 64-entry limit.
   Overflow stops rather than dropping or merging data.
-- The setup deadline is 12 s across all tiers. Oldest local audio, active local
-  speech and pending recognized words without a response have 30 s deadlines.
+- The setup deadline is 12 s across all tiers. Oldest local audio and unfinished
+  recognized words without a response have 30 s deadlines. Raw energy does not
+  prove pending words or arm the processing spinner/response watchdog.
   A missing-final wait applies to recognized words, not RMS spikes, and starts at
   submitted `audioStreamEnd`; repeated controls/interims cannot extend it. A new
   speech onset clears the final wait until the next boundary. Live interims allow
@@ -236,7 +246,8 @@ automatic phrase mode.
   backpressure cannot start the newer utterance's final wait.
   At equal deadlines the intentional silence stop takes precedence. Duplicate
   authoritative finals still count as progress without duplicate insertion;
-  queued speech prevents acknowledgment. Interrupted native reads belong to
+  a later interim becomes pending again, while raw queued energy is not another
+  recognition hypothesis. Manual declared activity retains its queue safeguards. Interrupted native reads belong to
   their original pause/resume capture phase, even after a rapid resume.
 - Interactive keyboard hiding, editor disconnection, and verified host clears
   cancel capture and all queued work immediately; explicit mic stop still drains.
@@ -289,20 +300,18 @@ ephemeral tokens would require a server component.
 |-----|------|-------------|
 | `PREF_GEMINI_API_KEY` | String | Google Gemini API key for transcription |
 | `PREF_GEMINI_TRANSCRIPTION_MODE` | String | `SMART` (default) or `VERBATIM` |
-| `PREF_GEMINI_END_OF_SPEECH_SILENCE_MS` | Int | `silenceDurationMs`, clamped 400–5000, default 1500 |
+| `PREF_GEMINI_END_OF_SPEECH_SILENCE_MS` | Int | `silenceDurationMs`, clamped 400–5000, default 2000 |
 | `PREF_GEMINI_AUTO_DETECT_LANGUAGE` | Boolean | Send `languageCodes: []` instead of the subtype's language (default `false`) |
 | `PREF_GEMINI_USE_EDITOR_CONTEXT` | Boolean | Harvest proper nouns near the caret into `customVocabulary` (default `true`) |
 | `PREF_GEMINI_CUSTOM_VOCABULARY` | String | User-defined `customVocabulary`, one word or phrase per line. Empty by default; no bundled terms. |
-| `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Local silence window before sending `audioStreamEnd` (default 2) |
+| `PREF_VOICE_CHUNK_SILENCE_SECONDS` | Int | Local silence confirmation before starting the auto-stop timer (default 2) |
 | `PREF_VOICE_MICROPHONE` | String | `automatic` (default, prefer Bluetooth), `built_in` (require phone), or `bluetooth` (require headset); read on start/resume; explicit routing requires Android 6+ |
 | `PREF_VOICE_SILENCE_THRESHOLD` | Int | RMS threshold used for silence detection |
 | `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` | Int | Silence duration before auto-stopping recording |
 
-`PREF_VOICE_CHUNK_SILENCE_SECONDS` and `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` drive
-different behaviors: chunk silence sends `audioStreamEnd` so a pending phrase is
-committed, while auto-stop silence ends the recording session after a longer pause.
-Keep chunk silence **longer** than `PREF_GEMINI_END_OF_SPEECH_SILENCE_MS` so the
-server's semantic end-of-speech detection normally decides where a sentence ends.
+`PREF_VOICE_CHUNK_SILENCE_SECONDS` confirms local silence before starting the
+`PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` timer. Neither forces an automatic phrase
+boundary; the separate Gemini end-of-speech pause controls server detection.
 
 The model id, endpoint, VAD sensitivities, `prefixPaddingMs`, the system
 instruction, and the 100-term vocabulary cap are hardcoded in

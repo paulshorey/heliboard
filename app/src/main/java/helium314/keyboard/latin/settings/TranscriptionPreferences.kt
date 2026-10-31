@@ -34,15 +34,6 @@ object TranscriptionPreferences {
 
     private const val LEGACY_CUSTOM_TERMS_PREF = "soniox_custom_terms"
 
-    /**
-     * One-shot flag: the pre-Gemini default for local chunk silence was 1 s.
-     * Gemini Hybrid VAD wants that window at or above the 1500 ms server
-     * `silenceDurationMs`, so stored `1` is rewritten to the new default of 2.
-     */
-    private const val PREF_MIGRATED_CHUNK_SILENCE_SECONDS = "gemini_migrated_chunk_silence_seconds"
-
-    private const val LEGACY_DEFAULT_CHUNK_SILENCE_SECONDS = 1
-
     private val LEGACY_PROVIDER_PREFS = listOf(
         "speechmatics_api_key",
         "deepgram_api_key",
@@ -76,7 +67,6 @@ object TranscriptionPreferences {
 
     fun readGeminiApiKey(prefs: SharedPreferences): String {
         migrateLegacyProviderPrefs(prefs)
-        migrateGeminiVoiceDefaults(prefs)
         return prefs.getString(
             Settings.PREF_GEMINI_API_KEY,
             Defaults.PREF_GEMINI_API_KEY
@@ -241,7 +231,6 @@ object TranscriptionPreferences {
      * backup is cleaned up too, not just an in-place update.
      */
     fun migrateLegacyProviderPrefs(prefs: SharedPreferences) {
-        migrateGeminiVoiceDefaults(prefs)
         if (LEGACY_PROVIDER_PREFS.none { prefs.contains(it) }) return
         val legacyTerms = prefs.getString(LEGACY_CUSTOM_TERMS_PREF, "").orEmpty()
         val currentVocabulary = readGeminiCustomVocabularyRaw(prefs)
@@ -253,26 +242,4 @@ object TranscriptionPreferences {
         }
     }
 
-    /**
-     * Bump a persisted local-silence default of 1 s (the old Soniox-era value)
-     * to 2 s so Hybrid VAD does not finalize 500 ms before Gemini's own
-     * end-of-speech window. Runs once per install. A user who later sets 1 s
-     * in Settings keeps that choice.
-     */
-    fun migrateGeminiVoiceDefaults(prefs: SharedPreferences) {
-        if (prefs.getBoolean(PREF_MIGRATED_CHUNK_SILENCE_SECONDS, false)) return
-        prefs.edit {
-            if (prefs.getInt(
-                    Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS,
-                    Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS
-                ) == LEGACY_DEFAULT_CHUNK_SILENCE_SECONDS
-            ) {
-                putInt(
-                    Settings.PREF_VOICE_CHUNK_SILENCE_SECONDS,
-                    Defaults.PREF_VOICE_CHUNK_SILENCE_SECONDS
-                )
-            }
-            putBoolean(PREF_MIGRATED_CHUNK_SILENCE_SECONDS, true)
-        }
-    }
 }

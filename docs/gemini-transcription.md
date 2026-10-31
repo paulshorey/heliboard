@@ -43,7 +43,7 @@ costs the user more than a second of waiting.
    Rejection before `setupComplete` leaves the editor untouched and reports why
    dictation could not start; no PCM was submitted to that connection.
 7. Restoring internet never resumes the failed recording. The user must tap the
-   mic explicitly. A normal stop blocks restart until the outgoing stream closes.
+   mic explicitly. A mic tap during normal stop queues one restart after the outgoing stream closes.
    Interactive keyboard hiding, finished input/view callbacks, and host clears
    instead cancel all work immediately and remove the spinner, allowing a fresh
    mic tap without waiting for an old socket to drain.
@@ -142,12 +142,13 @@ prove a manufacturer's audio policy or headset activation behavior.
       "customVocabulary": ["HeliBoard", "Roentgen"]
     },
     "realtimeInputConfig": {
+      "activityHandling": "NO_INTERRUPTION",
       "automaticActivityDetection": {
         "disabled": false,
         "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
         "prefixPaddingMs": 300,
         "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
-        "silenceDurationMs": 1500
+        "silenceDurationMs": 2000
       }
     },
     "systemInstruction": { "parts": [{ "text": "…dictation guidance…" }] }
@@ -197,10 +198,11 @@ which tiers the server actually accepts today.
   `VERBATIM` gives the literal words instead.
 - **`endOfSpeechSensitivity: END_SENSITIVITY_LOW`** plus
   **`silenceDurationMs`** (`PREF_GEMINI_END_OF_SPEECH_SILENCE_MS`, default
-  **1500 ms**, range 400–5000). Google documents that short windows split one
+  **2000 ms**, range 400–5000). Google documents that short windows split one
   utterance into fragments and that the model then "loses cross-fragment context,
-  resulting in lower transcription quality". The default therefore sits well above
-  the API's own and trades latency for correct sentence structure.
+  resulting in lower transcription quality". The two-second default follows
+  extended owner phone testing; increase it for longer pauses within a phrase. Saved timing
+  choices are preserved rather than migrated to the new defaults.
 - **`startOfSpeechSensitivity: START_SENSITIVITY_HIGH`** with
   **`prefixPaddingMs: 300`** — detect speech onset eagerly and keep prefix audio,
   so the first syllable is not clipped.
@@ -250,39 +252,53 @@ punctuation continuity that vocabulary cannot.
 
 ## Turn finalization (Hybrid VAD)
 
-Keep server VAD enabled with patient end detection. Local speech-stop silence,
-mic pause, and explicit stop enqueue `audioStreamEnd` behind preceding audio.
-Forward quiet PCM too: withholding it based on local RMS detection can drop soft
-speech or the beginning of a new utterance. Audio following `audioStreamEnd`
-reopens the stream, as documented. Local VAD controls finalization and auto-stop,
-not which recorded samples the service receives. Each chunk carries raw-energy
-speech evidence snapshotted before posting to the main looper. The speaking flag
-includes the silence window and its smoothing tail, so it is not used to rearm
-pending speech. Quiet PCM after a final does not create another missing-final
-deadline.
+Keep server VAD enabled with patient end detection and prefix padding. Automatic
+phrase endings come from Gemini, as documented in the [VAD strategies](https://ai.google.dev/gemini-api/docs/live-api/live-transcribe#voice-activity-detection-vad-strategies).
+Local RMS silence only starts the auto-stop timer; it no longer forces
+`audioStreamEnd` in the middle of a continuous capture. Explicit Pause/Stop still
+send that flush behind preceding PCM. Every captured chunk is forwarded, including
+quiet speech and pauses. Manual phrase mode continues to use declared activity signals.
 
-There is no stale-interim insertion timer. An interim is never evidence that all
-speech was received. On explicit stop, stop/join the recorder, process its already
-posted tail callbacks, enqueue EOF, and read for eight seconds before initiating
-WebSocket close. A nonempty transport queue at that deadline is failure. The
-manager bounds EOF/close to 15 seconds, plus the entire stop operation to 20 seconds
-from the stop request, including capture shutdown, any remaining setup, queued
-upload, EOF and close. Readiness, upload retries, EOF and finals cannot extend
-that overall deadline. Completion or cancellation removes both timers; expiry
-releases processing and permits an explicit new recording. A restart tap during
-drain reports that processing must finish and keeps the spinner visible while
-work remains pending. After capture shutdown and the IDLE
-state listener, recheck session ownership so reentrant failure/cancellation cannot
-restore the spinner. A capture thread still alive after
-two seconds reports terminal failure before the EOF barrier, blocks native capture
-reuse, and keeps its original recording callback for all late reads. Pause/resume
-changes the capture phase so an interrupted native read cannot falsely abort
-resumed recording. Missing finals after an explicit mic stop can produce an
-interruption marker; a normal silence auto-stop does not.
+Both phrase modes send `realtimeInputConfig.activityHandling: NO_INTERRUPTION`
+at the FULL and NO_SYSTEM_INSTRUCTION setup tiers. The shared Live API otherwise
+defaults to allowing new activity to interrupt a response still being generated
+([ActivityHandling reference](https://ai.google.dev/api/live#activityhandling)).
+That conversational behavior is unsuitable for successive dictated sentences.
+Lower schema fallback tiers omit realtime configuration and use server defaults;
+the connection diagnostics report the negotiated tier. This protection does not
+prove that the transcription model recognizes every supplied word.
 
-These are application deadlines, not Google latency guarantees. A healthy slow
-final can be interrupted; accuracy takes priority over inserting a provisional
-hypothesis.
+A finalized phrase and an idle processing spinner never pause capture, discard
+PCM, send a boundary, or reopen the socket. The next sentence flows over the same
+connection, including quiet onset audio before the local speech detector fires.
+Only explicit Pause/Stop, the longer silence auto-stop, session limits, failure or
+editor/lifecycle cancellation end capture. The one- and two-second settings are
+not a delay before listening restarts: no restart occurs at a phrase boundary.
+
+The processing indicator and response watchdog follow unfinished recognition,
+not raw microphone energy. An authoritative final resolves the preceding interim;
+subsequent interims become pending again. Manual mode additionally tracks its
+declared PCM activity. Raw energy may be traffic, breathing or room noise and
+cannot establish missing words. Transport/queue failures remain terminal.
+
+Stop joins capture, processes its posted tail and queues EOF. With no unfinished
+recognition it settles for two seconds; a late interim restores the original
+eight-second final deadline, and further finals may shorten the remaining wait.
+Duplicate final notifications with no new text or pending-state change do not
+restart the settling timer. New finalized text still refreshes settling, and a
+late recognition hypothesis still restores its wait. Neither responses nor
+rescheduling can extend the original deadline. If bytes
+remain queued at the short settle, they retain the full original upload budget.
+EOF/close is still bounded to 15 seconds and the complete Stop to 20 seconds.
+These are application tradeoffs, not provider latency guarantees; a final that
+arrives after the chosen close window cannot be recovered.
+
+A mic tap during drain retains one restart request and shows ordinary feedback.
+Repeated taps do not duplicate it. The next recording starts after clean close,
+refreshing settings/context, with no audio replay or overlapping sockets. It is
+not yet listening while finishing; wait for the Listening/microphone indicator.
+Cancellation, network/editor failure and newer generations invalidate that request.
+Keyboard hiding and host clears still cancel immediately. Do not promote interims.
 
 ## Transcript assembly
 
@@ -322,7 +338,7 @@ minutes to avoid an unprovable transcript boundary at socket replacement.
 Deadlines are anchored rather than reset by each PCM chunk:
 
 - Oldest locally queued audio: 30 seconds to enter the bounded transport queue.
-- Active local speech or pending recognized words with no server response:
+- Pending recognized words with no server response:
   30 seconds. A response signals liveness; interims and `turnComplete` do not
   confirm the speech. Quiet audio with only raw RMS spikes does not require
   transcription responses.
@@ -337,17 +353,16 @@ Deadlines are anchored rather than reset by each PCM chunk:
   newer utterance. The response watchdog and
   oldest-audio deadlines still apply. Raw volume evidence alone does not arm a
   missing-final wait: breathing or room noise may cross that threshold.
-  A final cannot clear pending speech while annotated speech frames are still
-  queued locally: it may describe an earlier utterance. Pending speech remains until a
-  later final arrives after speech frames drain; draining alone is not confirmation.
-  Queued quiet PCM and controls do not block that final. The sender counts encoded
-  bytes after the last speech frame; FIFO queue size distinguishes queued speech
-  from its quiet/control suffix. A duplicate authoritative final also advances
-  progress, even when transcript assembly suppresses the duplicate editor write.
+  An authoritative final resolves preceding recognition; a later interim becomes
+  pending again. The submitted boundary timestamp remains available to bound a
+  late interim after a prior final. Raw queued audio is not a word hypothesis.
+  A duplicate authoritative final advances recognition without duplicate insertion.
+  Every explicit Resume starts a new boundary epoch, including quiet resumed
+  speech without a local onset; the old Pause cannot time it out.
 - Stop request: cancel the earlier response/final watchdogs and start one
   20-second budget for capture shutdown, remaining setup, upload, EOF and close.
-  Within that budget, read finals for eight seconds after EOF before initiating
-  close, and allow at most 15 seconds from EOF for close completion.
+  Within that budget, settle for two seconds without unfinished recognition or
+  allow the original eight-second final wait when recognition remains pending, and allow at most 15 seconds from EOF for close completion.
 
 The configured local silence timeout is a normal stop reason. It drains the same
 connection and accepts late authoritative finals, then completes without a marker
@@ -442,13 +457,13 @@ can still fail independently, which remains terminal.
   user's own vocabulary list across.
 - Gemini session settings:
   - `PREF_GEMINI_TRANSCRIPTION_MODE` (`SMART` / `VERBATIM`, default `SMART`)
-  - `PREF_GEMINI_END_OF_SPEECH_SILENCE_MS` (int, 400–5000, default 1500)
+  - `PREF_GEMINI_END_OF_SPEECH_SILENCE_MS` (int, 400–5000, default 2000)
   - `PREF_GEMINI_AUTO_DETECT_LANGUAGE` (boolean, default `false`)
   - `PREF_GEMINI_USE_EDITOR_CONTEXT` (boolean, default `true`)
   - `PREF_GEMINI_CUSTOM_VOCABULARY` (string, one term per line)
 - Local silence settings:
-  - `PREF_VOICE_CHUNK_SILENCE_SECONDS` — local pause that triggers
-    `audioStreamEnd`
+  - `PREF_VOICE_CHUNK_SILENCE_SECONDS` — local silence confirmation before the
+    auto-stop timer (default 2 seconds); it does not force a phrase boundary
   - `PREF_VOICE_SILENCE_THRESHOLD` — RMS threshold for the local detector
   - `PREF_VOICE_AUTO_STOP_SILENCE_SECONDS` — longer pause that stops recording
 
@@ -544,37 +559,21 @@ activity boundaries. Google documents this as [manual VAD](https://ai.google.dev
   nine-minute session limit retain their guards. Only authoritative finals enter
   the editor.
 
-The October 28 volume trial logs showed why this comparison is needed: all five
-trials used Verbatim and the built-in mic. Provider-final and emitted character
-counts matched (236, 44, 298, 249, 323 respectively), with locally accepted audio
-counts matching captured counts. Trials 2, 3 and 5 issued no local silence boundary
-during the passage; trials 1, 2 and 4 ended on a 30-second no-transcription-response
-watchdog. Thus changing local RMS alone cannot explain/fix every omission. Local
-noise estimates still climbed as high as 1000, which is a separate detector
-weakness. These numeric logs do not establish intelligibility or server receipt.
-Do not commit raw user log exports or claim server VAD is proven responsible.
+For a controlled finalization trial, keep the built-in microphone close and
+compare the same short text with manual mode on/off. Include a 10–20 second pause,
+resume with an unmistakable new sentence, then Stop and tap the mic once while
+processing. Wait for Listening before speaking in the next recording. Export the
+focused diagnostics promptly; note the mode, Pause/Stop/restart actions, missing
+words and whether the spinner clears.
 
-For a controlled phone comparison:
-
-1. First select **Always use Bluetooth headset microphone** for the headset trial
-   (or **Always use phone microphone** for the phone comparison), wait for readiness and verify the captured route. Compare normal
-   and quiet speech with **Finish phrases manually (test)** off. If omissions
-   remain, turn it on for a fresh recording with the same route, position, quiet
-   room, language and Verbatim setting.
-2. Read a short normal/quiet/normal passage without tapping controls at the volume
-   changes. Tap **Pause** after the entire passage, then wait for finalized text.
-   Stop after the final arrives and leave the editor visible until processing
-   clears. Hiding/closing the input view cancels pending work; the earlier fifth
-   trial cancelled drain about one second after Stop.
-3. Export diagnostics and save the output. `manualPhrases=true`, `activityStart`
-   and `activityEnd` identify this mode. A `VOICE_STEP_2` local silence line is
-   advisory only here and must not have an automatic wire boundary alongside it.
-4. Compare with manual mode off, keeping volume pattern and hardware unchanged.
-   If the manual trial recovers the quiet clauses, that implicates automatic
-   detection/segmentation. If omissions remain, investigate the captured signal
-   and recognition with an explicitly consented exact-PCM recording/replay before
-   adopting gain or another provider. Disabling VAD cannot recover speech already
-   removed before capture, and software gain does not improve signal-to-noise.
+The October 28 interruption logs contained six `Transcription stopped responding`
+failures and five normal client-close failures caused by pending raw audio despite
+no unfinished interim. In session 87 a final was accepted at 18:13:29.834, raw PCM
+reopened pending speech 25 ms later, and the client-initiated normal close became
+an interruption at 18:13:39.055. Repeated restart taps during the fixed grace were
+rejected. Captured/locally accepted byte counts matched at these failures; this
+establishes local bookkeeping defects, not provider word coverage. No raw exports
+or dictated text are committed. New regression tests reproduce these state transitions.
 
 ### Diagnostics for interruption and phrase-finalization problems
 
@@ -590,3 +589,28 @@ same focused voice events plus broader app/lifecycle warnings. The voice ring ho
 500 lines in memory; export promptly after reproducing the problem, before the app
 process exits. Keep the observed output separately and note Pause/Stop/restart actions.
 No audio, words, transcript hashes, provider payloads or device identities are saved.
+
+Each accepted final includes a continuity checkpoint with captured/locally accepted
+chunk counts, pending PCM/socket bytes, age of the latest PCM callback and the
+largest callback interval in the capture phase. These measure main-looper delivery
+cadence, not native sample loss or provider receipt; intentional Pause/Resume resets
+the cadence window. Provider `serverContent.interrupted` events are logged without
+discarding accompanying finals or stopping audio. A gap or growing queue helps
+locate a client-side stall; matching counts alone cannot rule out provider omissions.
+
+The final October 30 test stayed on one capture/socket through four finals, with
+matching provider/emitted character counts and 288/288 audio chunks locally accepted
+by cancellation. No local phrase-boundary stop or flush was recorded. It ended with
+an actual/expected editor-cursor mismatch, a separate cancellation guard. These
+logs contain no audio or transcript content, so they cannot prove the cause of the
+reported missing sentence beginnings. Retain the cursor guard and distinguish an
+intentional editor move from a host correction in subsequent testing.
+
+For a continuity comparison, leave manual phrase mode off and test both 1000 ms/1 s
+and 2000 ms/2 s. Read: "Blue lantern starts the first sentence. Green meadow starts
+the second sentence. Silver compass starts the third sentence. Purple window
+starts the fourth sentence." Pause for about one second, then about three seconds
+between sentences, and begin one sentence while the previous result is still
+processing. Continue through the spinner becoming idle without touching the mic or
+editor. Check every distinctive opening, export diagnostics promptly, and record
+the observed omissions separately. Repeat with the microphone in the same position.
