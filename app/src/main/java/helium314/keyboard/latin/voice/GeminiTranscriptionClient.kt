@@ -694,6 +694,8 @@ class GeminiTranscriptionClient {
     private var diagnosticLastInterimChars = 0
     private var diagnosticFinals = 0
     private var vocabularyDiagnostics = VoiceVocabularyDiagnostics(emptyList(), emptyList())
+    private var setupVocabulary = emptyList<String>()
+    private var setupEditorVocabulary = emptyList<String>()
 
     // Audio/control sends are serialized on the main looper. OkHttp drains in
     // FIFO order, so a queue no larger than this suffix contains only quiet PCM
@@ -750,6 +752,8 @@ class GeminiTranscriptionClient {
         diagnosticFinals = 0
         val sentVocabulary = if (tier == SetupTier.MINIMAL) emptyList() else sessionConfig.customVocabulary
         val sentEditorVocabulary = if (tier == SetupTier.MINIMAL) emptyList() else sessionConfig.editorVocabulary
+        setupVocabulary = sentVocabulary
+        setupEditorVocabulary = sentEditorVocabulary
         vocabularyDiagnostics = VoiceVocabularyDiagnostics(sentVocabulary, sentEditorVocabulary)
         clearFinalizeCloseTimer()
 
@@ -1010,6 +1014,8 @@ class GeminiTranscriptionClient {
         activityOpen = false
         awaitingSetupTier = null
         accumulator.reset()
+        setupVocabulary = emptyList()
+        setupEditorVocabulary = emptyList()
         hasAcceptedSpeech = false
         nonSpeechSuffixBytes = 0L
         val socket = webSocket
@@ -1045,6 +1051,9 @@ class GeminiTranscriptionClient {
 
         if (isSetupComplete(json)) {
             postIfCurrent(connectionToken) {
+                if (awaitingSetupTier != null) {
+                    VoiceVocabularySnapshot.record(setupVocabulary, setupEditorVocabulary)
+                }
                 awaitingSetupTier = null
                 isSessionReady = true
                 Log.i(TAG, "connection=$connectionToken setupComplete received; stream ready")

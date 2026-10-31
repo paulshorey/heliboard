@@ -5,6 +5,9 @@ import helium314.keyboard.latin.utils.Log
 import java.time.Duration
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.test.fail
 import okhttp3.WebSocket
@@ -150,6 +153,53 @@ class GeminiTranscriptionClientStreamTest {
         assertTrue(logs.first().message.contains("emittedHints=[matches=3,editorMatches=1,quotedMatches=2]"))
         assertTrue(logs.last().message.contains("emittedHints=[matches=0,editorMatches=0,quotedMatches=0]"))
         assertTrue(logs.none { it.message.contains("Fine") || it.message.contains("iPhone") })
+    }
+
+    @Test fun settingsVocabularyMatchesAcceptedSetupAndSurvivesRecordingCancellation() {
+        enqueueServer(object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) { serverReceived.add(text) }
+        })
+        val previous = VoiceVocabularySnapshot.latest.value
+        startClient(userVocabulary = listOf("PrivateCustomHint"),
+            editorContext = "use iPhone and API; the Fine correction")
+        awaitUntil { serverReceived.isNotEmpty() }
+        assertSame(previous, VoiceVocabularySnapshot.latest.value) // Unconfirmed setups are not published.
+        currentServerSocket!!.send("""{"setupComplete":{}}""")
+        awaitUntil { events.contains("ready") }
+        val snapshot = assertNotNull(VoiceVocabularySnapshot.latest.value)
+        assertEquals(listOf("PrivateCustomHint"), snapshot.customTerms)
+        assertEquals(listOf("API", "iPhone"), snapshot.editorTerms)
+        val wireTerms = JSONObject(serverReceived.single()).getJSONObject("setup")
+            .getJSONObject("inputAudioTranscription").getJSONArray("customVocabulary")
+        assertEquals((0 until wireTerms.length()).map { wireTerms.getString(it) },
+            snapshot.customTerms + snapshot.editorTerms)
+        assertTrue(snapshot.connectedAtMillis > 0)
+        client.cancelAll()
+        assertSame(snapshot, VoiceVocabularySnapshot.latest.value)
+        assertFalse(snapshot.toString().contains("PrivateCustomHint"))
+        val export = Log.formatDiagnosticReport(Log.getLog(), Log.getVoiceDiagnosticsLog(), "test", "")
+        assertFalse(export.contains("PrivateCustomHint"))
+        assertFalse(export.contains("iPhone"))
+    }
+
+    @Test fun minimalSetupReplacesPreviousVocabularyWithTheEmptyListActuallySent() {
+        readyServer()
+        GeminiTranscriptionClient.negotiatedSetupTier = GeminiTranscriptionClient.Companion.SetupTier.MINIMAL
+        startClient(userVocabulary = listOf("PrivateCustomHint"), editorContext = "use iPhone")
+        awaitUntil { events.contains("ready") }
+        val snapshot = assertNotNull(VoiceVocabularySnapshot.latest.value)
+        assertTrue(snapshot.customTerms.isEmpty())
+        assertTrue(snapshot.editorTerms.isEmpty())
+        assertFalse(JSONObject(serverReceived.single()).getJSONObject("setup")
+            .getJSONObject("inputAudioTranscription").has("customVocabulary"))
+    }
+
+    @Test fun rejectedStartupKeepsTheLastAcceptedVocabulary() {
+        val previous = VoiceVocabularySnapshot.latest.value
+        server.enqueue(MockResponse().setResponseCode(401))
+        startClient(userVocabulary = listOf("RejectedPrivateHint"))
+        awaitUntil { events.any { it.startsWith("error:") } }
+        assertSame(previous, VoiceVocabularySnapshot.latest.value)
     }
 
     @Test fun phraseFinalsAndDelayedTurnBoundariesKeepAllFollowingPcmOnTheSameSocket() {

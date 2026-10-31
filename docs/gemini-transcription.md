@@ -52,6 +52,7 @@ costs the user more than a second of waiting.
 
 - `app/src/main/java/helium314/keyboard/latin/voice/GeminiTranscriptionClient.kt`
 - `app/src/main/java/helium314/keyboard/latin/voice/VoiceContextVocabulary.kt`
+- `app/src/main/java/helium314/keyboard/latin/voice/VoiceVocabularySnapshot.kt`
 - `app/src/main/java/helium314/keyboard/latin/voice/TranscriptSegment.kt`
 - `app/src/main/java/helium314/keyboard/latin/voice/VoiceInputManager.kt`
 - `app/src/main/java/helium314/keyboard/latin/voice/VoiceRecorder.kt`
@@ -252,6 +253,17 @@ does not persist a separate correction-learning history.
 No vocabulary terms ship with the app. Toggle editor-derived terms with
 `PREF_GEMINI_USE_EDITOR_CONTEXT` (default on). If both sources are empty, the
 setup payload omits `customVocabulary`.
+
+**Transcription → Vocabulary sent to Gemini**, directly below Custom voice vocabulary,
+shows the exact most recently accepted list, split into custom terms and words
+from the text field, with its connection time. The same viewer appears inside the
+custom vocabulary editor. Publish only after `setupComplete` and use the accepted
+tier's actual vocabulary; MINIMAL shows no hints. Failed or unacknowledged setups
+leave the previous timestamped snapshot intact. Stop/cancellation keeps it available
+for inspection. This single snapshot exists only in process memory, clears on
+process exit, is never persisted/exported or fed back into recognition, and retains
+no surrounding editor text. A new installation cannot reconstruct words from older
+count-only logs.
 
 **Verbatim editor text is deliberately not sent to the model.** Neither
 `systemInstruction` nor a seeded `clientContent` history is a documented input for

@@ -329,8 +329,14 @@
     <string name="voice_vocabulary_user_field_label">Custom terms</string>
     <!-- Placeholder for an empty user-terms text field. -->
     <string name="voice_vocabulary_user_placeholder">Add one term per line</string>
-    <!-- Counter under the user-terms text field showing how many terms will be sent. -->
-    <string name="voice_vocabulary_user_count">%1$d term(s) will be sent</string>
+    <!-- Counter under the user-terms text field distinguishing saved terms from the session limit. -->
+    <string name="voice_vocabulary_user_count">%1$d custom term(s) saved. Up to %2$d are used per recording.</string>
+    <string name="voice_vocabulary_sent_title">Vocabulary sent to Gemini</string>
+    <string name="voice_vocabulary_sent_summary">Last connected %1$s: %2$d custom, %3$d from the text field. Tap to view.</string>
+    <string name="voice_vocabulary_sent_unavailable">Start a recording to see its vocabulary. No recording has connected since the app started.</string>
+    <string name="voice_vocabulary_sent_empty">No vocabulary hints were sent for this recording.</string>
+    <string name="voice_vocabulary_sent_editor_section">From the text field</string>
+    <string name="voice_vocabulary_sent_note">These are the hints from the last recording that connected to Gemini. They stay fixed during that recording. Custom vocabulary and text edits apply to the next recording. This view clears when the app restarts; words are excluded from diagnostic reports.</string>
     <string name="voice_diagnostics_title">Voice diagnostics</string>
     <string name="voice_diagnostics_summary">View recent transcription log lines to debug voice input on this device.</string>
     <string name="voice_diagnostics_privacy_note">Voice events record counts and state, not audio, dictated words or editor text. Export saves one report with voice events and app warnings. Stays on device until you share it.</string>

@@ -19,7 +19,8 @@ Feature-specific Compose screens for the settings app.
 - `PreferencesScreen.kt` - general preference settings screen.
 - `SecondaryLayoutScreen.kt` - secondary layout settings screen.
 - `SetupAppScreen.kt` - app setup/onboarding utility screen.
-- `VoiceVocabularyScreen.kt` - voice transcription custom vocabulary editor, with a note above the text box explaining one word or phrase per line; no built-in term list.
+- `VoiceVocabularyScreen.kt` - voice transcription custom vocabulary editor, format help, and the shared last-vocabulary viewer; no built-in term list.
+- `VoiceVocabularySnapshotPreference.kt` - timestamped on-device viewer beside Custom voice vocabulary in Transcription and inside its editor. Lists actual last accepted custom/editor hints, handles empty/no-session states and keeps words out of saved state and reports.
 - `SubtypeScreen.kt` - subtype detail/configuration screen. Contains `LayoutSlotEditor`, a reusable composable that provides add/edit/delete/fork controls for any `LayoutType` slot. All layout types (MAIN, SYMBOLS, FUNCTIONAL, etc.) use this unified component with identical affordances.
 - `TextCorrectionScreen.kt` - text correction/autocorrect settings screen.
 - `ToolbarScreen.kt` - toolbar customization screen.
