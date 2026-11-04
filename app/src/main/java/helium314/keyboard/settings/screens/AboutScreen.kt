@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package helium314.keyboard.settings.screens
 
-import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
@@ -9,13 +8,10 @@ import android.text.method.LinkMovementMethod
 import android.view.View
 import android.widget.TextView
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
@@ -27,9 +23,7 @@ import helium314.keyboard.latin.R
 import helium314.keyboard.latin.common.Links
 import helium314.keyboard.latin.settings.DebugSettings
 import helium314.keyboard.latin.settings.Defaults
-import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.SpannableStringUtils
-import helium314.keyboard.latin.utils.getActivity
 import helium314.keyboard.latin.utils.prefs
 import helium314.keyboard.settings.SettingsContainer
 import helium314.keyboard.settings.SettingsWithoutKey
@@ -39,12 +33,7 @@ import helium314.keyboard.settings.SearchSettingsScreen
 import helium314.keyboard.settings.SettingsActivity
 import helium314.keyboard.settings.Theme
 import helium314.keyboard.settings.previewDark
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Calendar
 import androidx.core.content.edit
-import java.util.Locale
 
 @Composable
 fun AboutScreen(
@@ -160,43 +149,11 @@ fun createAboutSettings(context: Context) = listOf(
         )
     },
     Setting(context, SettingsWithoutKey.SAVE_LOG, R.string.save_log) { setting ->
-        val ctx = LocalContext.current
-        val scope = rememberCoroutineScope()
-        val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
-            val uri = result.data?.data ?: return@rememberLauncherForActivityResult
-            scope.launch(Dispatchers.IO) {
-                ctx.getActivity()?.contentResolver?.openOutputStream(uri)?.use { os ->
-                    os.writer().use { writer ->
-                        val logcat = runCatching {
-                            Runtime.getRuntime().exec(arrayOf(
-                                "logcat", "-d", "-t", "200", "-b", "main,system", "-v", "threadtime",
-                                "--pid", android.os.Process.myPid().toString(), "*:W"
-                            )).inputStream.use { it.reader().readText() }
-                        }.getOrElse { "Android logcat unavailable: ${it.javaClass.simpleName}" }
-                        writer.write(Log.formatDebugLogExport(
-                            Log.getLog(), Log.getVoiceDiagnosticsLog(),
-                            "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", logcat
-                        ))
-                    }
-                }
-            }
-        }
+        val export = rememberDiagnosticLogExport()
         Preference(
             name = setting.title,
             description = setting.description,
-            onClick = {
-                val date = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(Calendar.getInstance().time)
-                val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
-                    .addCategory(Intent.CATEGORY_OPENABLE)
-                    .putExtra(
-                        Intent.EXTRA_TITLE,
-                        ctx.getString(R.string.english_ime_name)
-                            .replace(" ", "_") + "_log_$date.txt"
-                    )
-                    .setType("text/plain")
-                launcher.launch(intent)
-            },
+            onClick = export,
             icon = R.drawable.ic_settings_about_log
         )
     },

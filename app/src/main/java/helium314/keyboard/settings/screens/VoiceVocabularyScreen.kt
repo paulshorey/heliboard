@@ -28,6 +28,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import helium314.keyboard.latin.R
 import helium314.keyboard.latin.settings.TranscriptionPreferences
+import helium314.keyboard.latin.voice.GeminiTranscriptionClient
 import helium314.keyboard.latin.utils.Log
 import helium314.keyboard.latin.utils.getActivity
 import helium314.keyboard.latin.utils.prefs
@@ -110,11 +111,13 @@ fun VoiceVocabularyScreen(
                 )
 
                 Text(
-                    text = stringResource(R.string.voice_vocabulary_user_count, parsedCount),
+                    text = stringResource(R.string.voice_vocabulary_user_count, parsedCount,
+                        GeminiTranscriptionClient.MAX_CUSTOM_VOCABULARY_TERMS),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 16.dp)
                 )
+                VoiceVocabularySnapshotPreference()
             }
         }
     }

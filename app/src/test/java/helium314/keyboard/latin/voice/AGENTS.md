@@ -4,13 +4,14 @@ Tests for the Gemini Live voice pipeline.
 
 ## Direct files
 - `GeminiTranscriptionClientTest.kt` - `setup` wire format, audio framing, language resolution, server-message parsing, and transcript assembly.
-- `GeminiTranscriptionClientStreamTest.kt` - end-to-end WebSocket lifecycle against a local `MockWebServer`, including the close-code-1007 setup-tier fallback, authoritative-only insertion, malformed response handling, failure during drain, and content-free provider/assembly diagnostic counts for duplicate and growing finals.
+- `GeminiTranscriptionClientStreamTest.kt` - end-to-end WebSocket lifecycle against a local `MockWebServer`, including last-vocabulary publication only after accepted setup, source/wire equality, retention on cancellation/rejection, MINIMAL empty vocabulary, report privacy, the close-code-1007 setup-tier fallback, authoritative-only insertion, malformed response handling, failure during drain, and content-free provider/assembly diagnostic counts for duplicate and growing finals.
 - `VoicePcmResamplerTest.kt` - legacy SCO interpolation, quiet/full-scale PCM, duration, phase reset and continuity across reads.
 - `VoiceRecorderRmsTest.kt` - unchanged RMS math for quiet and signed full-scale PCM, without volume logging.
 - `TranscriptPostProcessorTest.kt` - finalized-text cleanup tests.
 - `TranscriptionPreferencesTest.kt` - Gemini preference defaults, sanitization, and cleanup of previous providers' keys.
 - `VoiceMicrophoneRouterTest.kt` - built-in isolation, Bluetooth SCO/BLE preference, actual-route verification/timeout/loss, Bluetooth-only absence/disconnect, legacy capture rates/unpublished inputs, request cleanup and API 21/22/23/30/35 compatibility.
-- `VoiceContextVocabularyTest.kt` - editor-derived speech-biasing vocabulary, user-term priority, deduplication, and limits.
+- `VoiceContextVocabularyTest.kt` - conservative editor hints, single corrections/common words, repeated capitals/lowercase conflicts, quote stripping, acronym bounds, user-term priority, deduplication and separate automatic/overall limits.
+- `VoiceVocabularyDiagnosticsTest.kt` - content-free literal hint counts, quoted matches, Unicode boundaries and omitted vocabulary. Stream tests also verify provider/emitted counts for repeated quoted finals without logging words.
 
 - `GeminiAudioQueueTest.kt` - production bounded sender, queue acceptance/backpressure/failure, speech versus trailing quiet/control frames, stale frames, and EOF queue deadline.
 - `VoiceInputManagerTest.kt` - acknowledged transcript FIFO, bounded audio/control FIFO, terminal failures, immediate cancellation/restart during drain, and anchored deadlines using injected recorder/client/network dependencies. Finals wait from the current speech epoch's submitted boundary; delayed older boundaries and live interims must allow long utterances. Covers intentional silence auto-stop, noisy PCM after a final, equal-deadline timer ordering, watchdog cancellation at stop, late drain finals, and duplicate final progress and separate recognition versus raw audio evidence. Whole-stop tests bound setup/upload/EOF/close to one 20-second budget, release processing on expiry, reject late callbacks, preserve newer recordings, and prevent reentrant stop failure/cancellation from restoring the spinner.

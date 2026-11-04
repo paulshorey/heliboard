@@ -3,7 +3,7 @@
 Focused tests for IME utility helpers.
 
 ## Direct files
-- `LogVoiceDiagnosticsTest.kt` - voice filtering/redaction (including microphone routing and host-selection checks), bounded history retained through keyboard trace floods, warning compaction, and voice-first general export.
+- `LogVoiceDiagnosticsTest.kt` - voice filtering/redaction (including microphone routing and host-selection checks), bounded history retained through keyboard trace floods, warning compaction, the unified voice-first diagnostic report and explicit debug/verbose opt-in.
 - `PinnedToolbarLayoutTest.kt` - even-width secondary-toolbar fitting on narrow screens.
 - `ReorderSwitchPreferenceUtilsTest.kt` - reorderable preference normalization.
 

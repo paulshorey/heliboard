@@ -37,6 +37,7 @@ not "optimize" latency at the expense of transcript quality.
 | `VoicePcmResampler.kt` | Streaming 8-to-16 kHz conversion for legacy SCO capture |
 | `VoiceMicrophoneRouter.kt` | Automatic (prefer Bluetooth), always built-in, or Bluetooth-only input, actual-route verification and phase-owned Bluetooth cleanup |
 | `GeminiTranscriptionClient.kt` | WebSocket client for `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=…`. Builds the `setup` payload at a negotiated [setup tier](#setup-tier-degradation), streams base64 PCM as JSON text frames, parses `inputTranscription` / `interimInputTranscription` / `turnComplete` / `goAway`, sends `audioStreamEnd` for Hybrid VAD, and reassembles editor segments |
+| `VoiceVocabularySnapshot.kt` | Last accepted setup vocabulary in process memory for the on-device settings viewer; custom/editor sources, no persistence/export |
 | `VoiceContextVocabulary.kt` | Harvests proper nouns and acronyms from editor text and merges them with user terms into `customVocabulary`; no bundled terms |
 | `TranscriptSegment.kt` | Finalized chunk passed from the client to the IME pipeline |
 | `VoiceInputManager.kt` | State machine (IDLE→RECORDING↔PAUSED→IDLE), FIFO retained until local insertion succeeds, terminal failure, capture stop on `goAway`, auto-stop timers, session config assembly |
@@ -191,7 +192,17 @@ put it in the tier that matches how well-documented it is for this model.
 `LatinIME.buildVoiceContextText` supplies up to 4 000 chars before the caret;
 `VoiceContextVocabulary` harvests words worth biasing and sends **only those
 words**. Harvested: internal capitals (`iPhone`), all-caps ≤10 chars (`API`), and
-capitalized words not at a sentence start. Rejected: common English words, words
+plain capitalized words repeated at least twice with one mid-sentence occurrence
+and no lowercase conflict. One-off corrections and common words such as `Fine`
+are skipped. Automatic hints have a separate 20-term cap; explicit terms keep
+priority within the overall 100-term cap. Context is read once per explicit
+recording, not on Pause/Resume; there is no persistent correction learner.
+The timestamped **Vocabulary sent to Gemini** row beside Custom voice vocabulary
+(and inside its editor) shows that recording's actual accepted custom/editor list.
+Publish after `setupComplete`, accounting for tier omission; failed/unacknowledged
+setups leave the previous snapshot intact. Keep it through cancellation for review,
+only in process memory, never logs/exports, saved UI state or future recognition.
+Rejected: common English words, words
 containing digits, and tokens glued by `@ / \ : _` (URLs, paths, emails,
 identifiers).
 
@@ -350,7 +361,11 @@ effects. Explicit spoken commands such as "New paragraph." are still handled by
 ## Verifying against the real API
 
 Use **Transcription → Voice diagnostics** for focused interruption, route and
-phrase-boundary events. About-page debug export adds app/lifecycle warnings.
+phrase-boundary events. Both this screen and About export the same diagnostic
+report with voice events plus app/Android warnings. Debug/verbose traces require
+explicit Android per-tag logging opt-in. Setup logs sent user/editor hint counts;
+finals log provider/emitted hint-match and quoted-match counts without words.
+These counts correlate recognition with hints; they cannot establish what was said.
 Volume windows and threshold measurements have been removed; all PCM is still
 forwarded and RMS math is unchanged. Verify microphone policy separately from
 provider recognition and phrase finalization.

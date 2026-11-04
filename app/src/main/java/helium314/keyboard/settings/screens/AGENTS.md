@@ -3,7 +3,8 @@
 Feature-specific Compose screens for the settings app.
 
 ## Direct files
-- `AboutScreen.kt` - app/about information and debug-log export. Export leads with redacted voice diagnostics, followed by bounded app/native warnings rather than verbose keyboard geometry or duplicate app logcat.
+- `AboutScreen.kt` - app/about information and the shared diagnostic-report export action.
+- `DiagnosticLogExport.kt` - shared document picker, background report collection/write and visible failure feedback, used by About and Voice diagnostics; one filename/format with redacted voice events and app/Android warnings.
 - `AdvancedScreen.kt` - advanced settings screen.
 - `AppearanceScreen.kt` - appearance/theme settings screen (keyboard height appears first under a **Size and layout** heading).
 - `ColorsScreen.kt` - color customization screen.
@@ -18,12 +19,13 @@ Feature-specific Compose screens for the settings app.
 - `PreferencesScreen.kt` - general preference settings screen.
 - `SecondaryLayoutScreen.kt` - secondary layout settings screen.
 - `SetupAppScreen.kt` - app setup/onboarding utility screen.
-- `VoiceVocabularyScreen.kt` - voice transcription custom vocabulary editor, with a note above the text box explaining one word or phrase per line; no built-in term list.
+- `VoiceVocabularyScreen.kt` - voice transcription custom vocabulary editor, format help, and the shared last-vocabulary viewer; no built-in term list.
+- `VoiceVocabularySnapshotPreference.kt` - timestamped on-device viewer beside Custom voice vocabulary in Transcription and inside its editor. Lists actual last accepted custom/editor hints, handles empty/no-session states and keeps words out of saved state and reports.
 - `SubtypeScreen.kt` - subtype detail/configuration screen. Contains `LayoutSlotEditor`, a reusable composable that provides add/edit/delete/fork controls for any `LayoutType` slot. All layout types (MAIN, SYMBOLS, FUNCTIONAL, etc.) use this unified component with identical affordances.
 - `TextCorrectionScreen.kt` - text correction/autocorrect settings screen.
 - `ToolbarScreen.kt` - toolbar customization screen.
 - `TranscriptionScreen.kt` - voice transcription settings led by the searchable three-policy Microphone selector (always phone, automatic, always Bluetooth), plus opt-in manual phrase completion for quiet-speech comparisons and links to vocabulary/diagnostics.
-- `VoiceDiagnosticsScreen.kt` - on-device viewer for recent voice/transcription diagnostic log lines.
+- `VoiceDiagnosticsScreen.kt` - on-device viewer for recent voice events; exports the same full diagnostic report as About.
 
 ## Non-obvious notes
 - These screens are UI only; the actual preference keys/defaults live in `latin/settings/`.

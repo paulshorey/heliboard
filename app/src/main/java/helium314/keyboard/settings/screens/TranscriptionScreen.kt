@@ -160,6 +160,7 @@ fun TranscriptionScreen(
                         SettingsDestination.navigateTo(SettingsDestination.VoiceVocabulary)
                     },
                 ) { NextScreenIcon() }
+                VoiceVocabularySnapshotPreference()
                 Preference(
                     name = stringResource(R.string.voice_diagnostics_title),
                     description = stringResource(R.string.voice_diagnostics_summary),

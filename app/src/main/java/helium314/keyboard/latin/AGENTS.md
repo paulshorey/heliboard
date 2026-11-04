@@ -55,6 +55,7 @@ This is the main IME engine. It owns the InputMethodService lifecycle, the curre
 - `voice/` - Gemini Live recording, streaming, and transcript post-processing.
 
 ## Non-obvious notes
+- Routine traces use debug/verbose levels and require explicit Android per-tag opt-in. Log counts and state instead of typed words, host text, dictionary entries or suggestion contents. Preserve warnings/errors needed to diagnose failures.
 - The simplified input model keeps the current word in `WordComposer`, not in the host editor.
 - `EditorWordMirror` in `inputlogic/` mirrors that current word into the host app using committed-text operations; bypassing it tends to break deletion, suggestions, and revert logic.
 - Suggestion lookup is driven by `WordComposer` plus `needsToLookupSuggestions()`. Host `TYPE_TEXT_FLAG_NO_SUGGESTIONS` no longer hides the strip or skips current-word tracking; password and non-text fields still do. Autocorrect and user-history learning still honor that host flag unless the field also set `TYPE_TEXT_FLAG_AUTO_CORRECT`. An empty 3-slot strip almost always means lookup was skipped, not that the host hid the current word.

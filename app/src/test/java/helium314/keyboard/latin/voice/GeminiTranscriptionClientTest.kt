@@ -46,6 +46,18 @@ class GeminiTranscriptionClientTest {
 
     // ── setup message ──────────────────────────────────────────────────
 
+    @Test fun setupUsesConservativeEditorHintsWithoutChangingExplicitVocabulary() {
+        val config = sessionConfig(userVocabulary = listOf("Fine"),
+            editorContext = "the Fine correction concerns Alice and an iPhone API")
+        assertEquals(listOf("Fine", "API", "iPhone"), config.customVocabulary)
+        assertEquals(listOf("API", "iPhone"), config.editorVocabulary)
+        val transcription = setupObject(SetupTier.FULL, config).getJSONObject("inputAudioTranscription")
+        assertEquals(config.customVocabulary, (0 until transcription.getJSONArray("customVocabulary").length())
+            .map { transcription.getJSONArray("customVocabulary").getString(it) })
+        assertFalse(setupObject(SetupTier.MINIMAL, config)
+            .getJSONObject("inputAudioTranscription").has("customVocabulary"))
+    }
+
     @Test fun automaticPhrasesDoNotInterruptRecognitionWhenTheNextSentenceStarts() {
         for (silenceMs in listOf(400, 1000, 2000)) {
             for (tier in listOf(SetupTier.FULL, SetupTier.NO_SYSTEM_INSTRUCTION)) {

@@ -52,6 +52,7 @@ costs the user more than a second of waiting.
 
 - `app/src/main/java/helium314/keyboard/latin/voice/GeminiTranscriptionClient.kt`
 - `app/src/main/java/helium314/keyboard/latin/voice/VoiceContextVocabulary.kt`
+- `app/src/main/java/helium314/keyboard/latin/voice/VoiceVocabularySnapshot.kt`
 - `app/src/main/java/helium314/keyboard/latin/voice/TranscriptSegment.kt`
 - `app/src/main/java/helium314/keyboard/latin/voice/VoiceInputManager.kt`
 - `app/src/main/java/helium314/keyboard/latin/voice/VoiceRecorder.kt`
@@ -227,8 +228,14 @@ Harvested, nearest the caret first:
 
 - words with internal capitals (`iPhone`, `McDonald's`, `HeliBoard`)
 - all-caps runs up to 10 characters (`API`, `CLI`)
-- capitalized words **not** at the start of a sentence, which in English is where
-  ordinary words are not capitalized
+- plain capitalized words appearing at least twice, with at least one occurrence
+  inside a sentence and no conflicting lowercase usage
+
+A single correction such as `Fine` must not become a name hint. Common words
+(including `fine`) are excluded even when repeated. Repetition is a conservative
+heuristic, not name recognition: a name typed only once may need an explicit
+vocabulary entry. Distinctive internal capitals and short acronyms still qualify
+on their first occurrence. Surrounding quotes are stripped, never added to hints.
 
 Rejected: common English words, anything containing a digit, and tokens glued
 together by `@ / \ : _` (URLs, paths, emails, code identifiers).
@@ -237,11 +244,26 @@ Final list order, capped at 100 terms because Google notes accuracy is best
 around 100 even though 1 000 are accepted:
 
 1. the user's list (`PREF_GEMINI_CUSTOM_VOCABULARY`, one term per line)
-2. editor-harvested terms
+2. editor-harvested terms, with a separate maximum of 20 automatic hints
+
+Explicit terms retain priority and may include common words. The editor is read
+once per explicit recording; Pause/Resume does not rebuild vocabulary, and the app
+does not persist a separate correction-learning history.
 
 No vocabulary terms ship with the app. Toggle editor-derived terms with
 `PREF_GEMINI_USE_EDITOR_CONTEXT` (default on). If both sources are empty, the
 setup payload omits `customVocabulary`.
+
+**Transcription → Vocabulary sent to Gemini**, directly below Custom voice vocabulary,
+shows the exact most recently accepted list, split into custom terms and words
+from the text field, with its connection time. The same viewer appears inside the
+custom vocabulary editor. Publish only after `setupComplete` and use the accepted
+tier's actual vocabulary; MINIMAL shows no hints. Failed or unacknowledged setups
+leave the previous timestamped snapshot intact. Stop/cancellation keeps it available
+for inspection. This single snapshot exists only in process memory, clears on
+process exit, is never persisted/exported or fed back into recognition, and retains
+no surrounding editor text. A new installation cannot reconstruct words from older
+count-only logs.
 
 **Verbatim editor text is deliberately not sent to the model.** Neither
 `systemInstruction` nor a seeded `clientContent` history is a documented input for
@@ -584,11 +606,32 @@ and its saved settings are unchanged.
 
 Use **Transcription → Voice diagnostics** for session mode, actual microphone route
 once per capture phase, final/interim progress, boundary submission, upload queues,
-stop/close timing and terminal error details. **About → Debug log** includes those
-same focused voice events plus broader app/lifecycle warnings. The voice ring holds
+stop/close timing and terminal error details. **Export diagnostic report** here
+and in **About** saves the same single file: voice events, app warnings/errors and
+bounded Android warnings with app duplicates excluded. There is no second export
+format to collect. The voice ring holds
 500 lines in memory; export promptly after reproducing the problem, before the app
 process exits. Keep the observed output separately and note Pause/Stop/restart actions.
-No audio, words, transcript hashes, provider payloads or device identities are saved.
+Voice events contain no audio, words, transcript hashes, provider payloads or
+microphone identities. The report header includes the phone model and OS version;
+Android/app warning text should still be reviewed before sharing.
+
+Each socket setup logs `vocabularyPolicy=conservative_v2` and the **sent** user/editor
+hint counts; a MINIMAL setup tier logs zero because it omits vocabulary. Each final
+logs hint-match, editor-hint-match and single-quoted-hint-match counts separately
+for the full provider result and the emitted segment. This shows whether quoted
+hint matches already arrived from the provider and whether duplicate/cumulative
+results added local text. Counts show correlation, not that a word was spoken or
+that a recognition choice was wrong. Keep the expected/observed wording separately.
+
+Debug and verbose app traces are off unless a tag is explicitly enabled through
+Android logging (for example `adb shell setprop log.tag.KeyboardParser DEBUG`).
+On Android 7.1 and older, use the first 23 characters of longer tag names for
+the property. Routine IME lifecycle traces use debug level. Dictionary, completion,
+spell-check and composing-verification logs use counts instead of words or host
+text. Voice state/count checkpoints and all warnings/errors remain available without
+that opt-in. Repeated app warnings are collapsed in the report; per-interim
+hypotheses and PCM samples are never logged.
 
 Each accepted final includes a continuity checkpoint with captured/locally accepted
 chunk counts, pending PCM/socket bytes, age of the latest PCM callback and the

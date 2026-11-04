@@ -5,6 +5,9 @@ import helium314.keyboard.latin.utils.Log
 import java.time.Duration
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.test.fail
 import okhttp3.WebSocket
@@ -125,11 +128,78 @@ class GeminiTranscriptionClientStreamTest {
         awaitUntil { responseHasFinal.count { it } == 3 }
         assertEquals(listOf(secret, "extended"), transcripts.map { it.text })
         val lines = Log.getLog().drop(logStart).filter { it.message.contains("VOICE recognition") }
-        assertEquals(4, lines.size) // One interim summary and all three authoritative finals.
+        assertEquals(3, lines.size) // Interim counts travel with finals, without per-interim logs.
         assertTrue(lines.any { it.message.contains("providerChars=14 emittedChars=14") })
         assertTrue(lines.any { it.message.contains("providerChars=14 emittedChars=0") })
         assertTrue(lines.any { it.message.contains("providerChars=23 emittedChars=8") })
         assertTrue(lines.none { it.message.contains(secret) || it.message.contains("extended") })
+    }
+
+    @Test fun vocabularyDiagnosticsDistinguishProviderQuotesAndDuplicateFinals() {
+        readyServer()
+        startClient(userVocabulary = listOf("Fine"), editorContext = "use iPhone")
+        awaitUntil { events.contains("ready") }
+        val logStart = Log.getLog().size
+        val final = "'Fine' iPhone, then 'Fine' again."
+        repeat(2) {
+            currentServerSocket!!.send(JSONObject().put("serverContent",
+                JSONObject().put("inputTranscription", JSONObject().put("text", final))).toString())
+        }
+        awaitUntil { responseHasFinal.count { it } == 2 }
+        assertEquals(listOf(final), transcripts.map { it.text })
+        val logs = Log.getLog().drop(logStart).filter { it.message.contains("finalIndex=") }
+        assertEquals(2, logs.size)
+        assertTrue(logs.all { it.message.contains("providerHints=[matches=3,editorMatches=1,quotedMatches=2]") })
+        assertTrue(logs.first().message.contains("emittedHints=[matches=3,editorMatches=1,quotedMatches=2]"))
+        assertTrue(logs.last().message.contains("emittedHints=[matches=0,editorMatches=0,quotedMatches=0]"))
+        assertTrue(logs.none { it.message.contains("Fine") || it.message.contains("iPhone") })
+    }
+
+    @Test fun settingsVocabularyMatchesAcceptedSetupAndSurvivesRecordingCancellation() {
+        enqueueServer(object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) { serverReceived.add(text) }
+        })
+        val previous = VoiceVocabularySnapshot.latest.value
+        startClient(userVocabulary = listOf("PrivateCustomHint"),
+            editorContext = "use iPhone and API; the Fine correction")
+        awaitUntil { serverReceived.isNotEmpty() }
+        assertSame(previous, VoiceVocabularySnapshot.latest.value) // Unconfirmed setups are not published.
+        currentServerSocket!!.send("""{"setupComplete":{}}""")
+        awaitUntil { events.contains("ready") }
+        val snapshot = assertNotNull(VoiceVocabularySnapshot.latest.value)
+        assertEquals(listOf("PrivateCustomHint"), snapshot.customTerms)
+        assertEquals(listOf("API", "iPhone"), snapshot.editorTerms)
+        val wireTerms = JSONObject(serverReceived.single()).getJSONObject("setup")
+            .getJSONObject("inputAudioTranscription").getJSONArray("customVocabulary")
+        assertEquals((0 until wireTerms.length()).map { wireTerms.getString(it) },
+            snapshot.customTerms + snapshot.editorTerms)
+        assertTrue(snapshot.connectedAtMillis > 0)
+        client.cancelAll()
+        assertSame(snapshot, VoiceVocabularySnapshot.latest.value)
+        assertFalse(snapshot.toString().contains("PrivateCustomHint"))
+        val export = Log.formatDiagnosticReport(Log.getLog(), Log.getVoiceDiagnosticsLog(), "test", "")
+        assertFalse(export.contains("PrivateCustomHint"))
+        assertFalse(export.contains("iPhone"))
+    }
+
+    @Test fun minimalSetupReplacesPreviousVocabularyWithTheEmptyListActuallySent() {
+        readyServer()
+        GeminiTranscriptionClient.negotiatedSetupTier = GeminiTranscriptionClient.Companion.SetupTier.MINIMAL
+        startClient(userVocabulary = listOf("PrivateCustomHint"), editorContext = "use iPhone")
+        awaitUntil { events.contains("ready") }
+        val snapshot = assertNotNull(VoiceVocabularySnapshot.latest.value)
+        assertTrue(snapshot.customTerms.isEmpty())
+        assertTrue(snapshot.editorTerms.isEmpty())
+        assertFalse(JSONObject(serverReceived.single()).getJSONObject("setup")
+            .getJSONObject("inputAudioTranscription").has("customVocabulary"))
+    }
+
+    @Test fun rejectedStartupKeepsTheLastAcceptedVocabulary() {
+        val previous = VoiceVocabularySnapshot.latest.value
+        server.enqueue(MockResponse().setResponseCode(401))
+        startClient(userVocabulary = listOf("RejectedPrivateHint"))
+        awaitUntil { events.any { it.startsWith("error:") } }
+        assertSame(previous, VoiceVocabularySnapshot.latest.value)
     }
 
     @Test fun phraseFinalsAndDelayedTurnBoundariesKeepAllFollowingPcmOnTheSameSocket() {
@@ -513,7 +583,12 @@ class GeminiTranscriptionClientStreamTest {
         server.enqueue(MockResponse().withWebSocketUpgrade(tracking))
     }
 
-    private fun startClient(manualPhrases: Boolean = false, endOfSpeechSilenceMs: Int = 1500) {
+    private fun startClient(
+        manualPhrases: Boolean = false,
+        endOfSpeechSilenceMs: Int = 1500,
+        userVocabulary: List<String> = emptyList(),
+        editorContext: String? = null,
+    ) {
         client.startStreaming(
             apiKey = "test-key",
             sessionConfig = GeminiTranscriptionClient.buildSessionConfig(
@@ -521,7 +596,9 @@ class GeminiTranscriptionClientStreamTest {
                 autoDetectLanguage = false,
                 transcriptionMode = "SMART",
                 endOfSpeechSilenceMs = endOfSpeechSilenceMs,
-                manualPhrases = manualPhrases
+                manualPhrases = manualPhrases,
+                userVocabulary = userVocabulary,
+                editorContext = editorContext,
             ),
             callback = object : GeminiTranscriptionClient.StreamingCallback {
                 override fun onStreamReady() {

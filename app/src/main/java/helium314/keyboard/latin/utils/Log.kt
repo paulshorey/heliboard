@@ -5,11 +5,7 @@ import helium314.keyboard.latin.BuildConfig
 import java.time.LocalDateTime
 import java.util.Date
 
-/**
- * Logger that does the android logging, but also allows reading the log in the app.
- * It's only a little slower than the android logger, but since both are used we end up at
- * half performance (still fast enough to not be noticeable, unless spamming thousands of log lines)
- */
+/** Bounded app/voice histories and one diagnostic report shared by both export entry points. */
 object Log {
     @JvmStatic
     fun wtf(tag: String?, message: String) {
@@ -55,20 +51,29 @@ object Log {
 
     @JvmStatic
     fun d(tag: String?, message: String, e: Throwable?) {
+        if (!isTraceEnabled(tag, android.util.Log.DEBUG)) return
         log(LogLine('D', tag, "$message\n${e?.stackTraceToString()}"))
         android.util.Log.d(tag, message, e)
     }
 
     @JvmStatic
     fun d(tag: String?, message: String) {
+        if (!isTraceEnabled(tag, android.util.Log.DEBUG)) return
         log(LogLine('D', tag, message))
         android.util.Log.d(tag, message)
     }
 
     @JvmStatic
     fun v(tag: String?, message: String) {
+        if (!isTraceEnabled(tag, android.util.Log.VERBOSE)) return
         log(LogLine('V', tag, message))
         android.util.Log.v(tag, message)
+    }
+
+    private fun isTraceEnabled(tag: String?, level: Int): Boolean {
+        // isLoggable rejects tags longer than 23 characters on Android 7.1 and older.
+        val propertyTag = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) tag?.take(23) else tag
+        return android.util.Log.isLoggable(propertyTag, level)
     }
 
     private fun log(line: LogLine) {
@@ -135,8 +140,7 @@ object Log {
     @JvmStatic
     fun redactVoiceDiagnosticMessage(message: String): String {
         var result = RAW_TRANSCRIPT_PATTERN.replace(message) { match ->
-            val content = match.groupValues[1]
-            "VOICE raw transcript=[${content.length} chars]"
+            "VOICE raw transcript=[${match.groupValues[1].length} chars]"
         }
         result = API_KEY_PATTERN.replace(result, "api_key=[redacted]")
         result = URL_KEY_QUERY_PATTERN.replace(result, "$1key=[redacted]")
@@ -146,41 +150,21 @@ object Log {
     fun getVoiceDiagnosticsLog(maxLines: Int = DEFAULT_VOICE_DIAGNOSTICS_MAX_LINES): List<LogLine> =
         synchronized(logLines) { voiceLogLines.takeLast(maxLines.coerceAtLeast(0)) }
 
-    internal fun filterVoiceDiagnosticsLines(lines: List<LogLine>, maxLines: Int): List<LogLine> {
-        if (maxLines <= 0) return emptyList()
-        val result = ArrayList<LogLine>(minOf(maxLines, 64))
-        for (i in lines.indices.reversed()) {
-            val line = lines[i]
-            if (isVoiceDiagnosticLine(line)) {
-                result.add(line)
-                if (result.size >= maxLines) break
-            }
-        }
-        result.reverse()
-        return result
-    }
-
-    @JvmStatic
-    fun formatVoiceDiagnosticsExport(lines: List<LogLine>, appVersion: String): String {
-        val header = buildString {
-            appendLine("HeliBoard voice diagnostics")
-            appendLine("App version: $appVersion")
-            appendLine("Build: ${BuildConfig.BUILD_TYPE}; Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
-            appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
-            appendLine("Lines: ${lines.size} (oldest first)")
-            appendLine()
-        }
-        return header + lines.joinToString("\n") { it.formatLine(redact = true) }
-    }
-
     /** Focused voice history first, then bounded warnings without duplicated app logcat. */
-    fun formatDebugLogExport(
+    fun formatDiagnosticReport(
         lines: List<LogLine>,
         voiceLines: List<LogLine>,
         appVersion: String,
         systemWarnings: String,
     ): String = buildString {
-        appendLine(formatVoiceDiagnosticsExport(voiceLines, appVersion))
+        appendLine("HeliBoard diagnostic report")
+        appendLine("App version: $appVersion")
+        appendLine("Build: ${BuildConfig.BUILD_TYPE}; Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
+        appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
+        appendLine("Voice events contain counts and state, not audio, editor text or vocabulary contents.")
+        appendLine()
+        appendLine("Voice events (${voiceLines.size}, oldest first)")
+        appendLine(voiceLines.joinToString("\n") { it.formatLine(redact = true) })
         appendLine()
         appendLine("Other app warnings/errors (newest 500; consecutive repeats collapsed)")
         val warnings = lines.filter { it.level in "WEF" && !isVoiceDiagnosticLine(it) }.takeLast(500)
@@ -192,6 +176,22 @@ object Log {
         append(systemWarnings.lineSequence().filter { line ->
             tagPattern.find(line)?.groupValues?.get(1)?.trim() !in appTags
         }.joinToString("\n") { redactVoiceDiagnosticMessage(it) })
+    }
+
+    /** Called off the main thread by the shared export action. */
+    fun collectDiagnosticReport(appVersion: String): String {
+        val systemWarnings = runCatching {
+            val process = Runtime.getRuntime().exec(arrayOf(
+                "logcat", "-d", "-t", "200", "-b", "main,system", "-v", "threadtime",
+                "--pid", android.os.Process.myPid().toString(), "*:W"
+            ))
+            try {
+                process.inputStream.bufferedReader().use { it.readText() }
+            } finally {
+                process.destroy()
+            }
+        }.getOrElse { "Android logcat unavailable: ${it.javaClass.simpleName}" }
+        return formatDiagnosticReport(getLog(), getVoiceDiagnosticsLog(), appVersion, systemWarnings)
     }
 
     internal fun compactWarnings(lines: List<LogLine>): String = buildString {

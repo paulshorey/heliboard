@@ -569,7 +569,7 @@ public class LatinIME extends InputMethodService implements
         mStatsUtilsManager = StatsUtilsManager.getInstance();
         mKeyboardActionListener = new KeyboardActionListenerImpl(this, mInputLogic);
         mIsHardwareAcceleratedDrawingEnabled = this.enableHardwareAcceleration();
-        Log.i(TAG, "Hardware accelerated drawing: " + mIsHardwareAcceleratedDrawingEnabled);
+        Log.d(TAG, "Hardware accelerated drawing: " + mIsHardwareAcceleratedDrawingEnabled);
     }
 
     @Override
@@ -757,7 +757,7 @@ public class LatinIME extends InputMethodService implements
     @Override
     public void onConfigurationChanged(final Configuration conf) {
         SettingsValues settingsValues = mSettings.getCurrent();
-        Log.i(TAG, "onConfigurationChanged");
+        Log.d(TAG, "onConfigurationChanged");
         SubtypeSettings.INSTANCE.reloadSystemLocales(this);
         if (settingsValues.mDisplayOrientation != conf.orientation) {
             mHandler.startOrientationChanging();
@@ -922,7 +922,7 @@ public class LatinIME extends InputMethodService implements
             }
             return;
         }
-        Log.i(TAG, (restarting ? "Res" : "S") +"tarting input. Cursor position = " + editorInfo.initialSelStart + "," + editorInfo.initialSelEnd);
+        Log.d(TAG, (restarting ? "Res" : "S") +"tarting input. Cursor position = " + editorInfo.initialSelStart + "," + editorInfo.initialSelEnd);
         if (DebugFlags.DEBUG_ENABLED) {
             EditorInfoCompatUtils.INSTANCE.debugLog(editorInfo, TAG);
         }
@@ -1066,7 +1066,7 @@ public class LatinIME extends InputMethodService implements
     @Override
     public void onWindowHidden() {
         super.onWindowHidden();
-        Log.i(TAG, "onWindowHidden");
+        Log.d(TAG, "onWindowHidden");
         // The keyboard window can be hidden for two very different reasons:
         //   1. Screen turned off (power button, timeout) — recording should CONTINUE.
         //   2. User action (Back button, app dismissed keyboard) — cancel all work.
@@ -1093,7 +1093,7 @@ public class LatinIME extends InputMethodService implements
 
     void onFinishInputInternal() {
         super.onFinishInput();
-        Log.i(TAG, "onFinishInput");
+        Log.d(TAG, "onFinishInput");
         mFullappSyncInFlightKey = null;
         finalizeEditHistoryForTarget(mEditHistoryTarget);
         mEditHistoryTarget = null;
@@ -1124,7 +1124,7 @@ public class LatinIME extends InputMethodService implements
 
     void onFinishInputViewInternal(final boolean finishingInput) {
         super.onFinishInputView(finishingInput);
-        Log.i(TAG, "onFinishInputView");
+        Log.d(TAG, "onFinishInputView");
         // Prefer flushing edit history while the InputConnection is still usable.
         // onFinishInput is not always called promptly; this is the reliable hook.
         if (finishingInput) {
@@ -1165,7 +1165,7 @@ public class LatinIME extends InputMethodService implements
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd,
                 composingSpanStart, composingSpanEnd);
         if (DebugFlags.DEBUG_ENABLED) {
-            Log.i(TAG, "onUpdateSelection: oss=" + oldSelStart + ", ose=" + oldSelEnd
+            Log.d(TAG, "onUpdateSelection: oss=" + oldSelStart + ", ose=" + oldSelEnd
                     + ", nss=" + newSelStart + ", nse=" + newSelEnd
                     + ", cs=" + composingSpanStart + ", ce=" + composingSpanEnd);
         }
@@ -1289,7 +1289,7 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public void hideWindow() {
-        Log.i(TAG, "hideWindow");
+        Log.d(TAG, "hideWindow");
         // Flush the in-progress slot while the InputConnection is still usually valid.
         // Do not finalize here — the field may still be focused and the user may return.
         if (mEditHistoryTarget != null && !shouldSkipEditHistoryCapture()) {
@@ -1310,18 +1310,14 @@ public class LatinIME extends InputMethodService implements
     @Override
     public void requestHideSelf(int flags) {
         super.requestHideSelf(flags);
-        Log.i(TAG, "requestHideSelf: " + flags);
+        Log.d(TAG, "requestHideSelf: " + flags);
     }
 
     @Override
     public void onDisplayCompletions(final CompletionInfo[] applicationSpecifiedCompletions) {
         if (DebugFlags.DEBUG_ENABLED) {
-            Log.i(TAG, "Received completions:");
-            if (applicationSpecifiedCompletions != null) {
-                for (int i = 0; i < applicationSpecifiedCompletions.length; i++) {
-                    Log.i(TAG, "  #" + i + ": " + applicationSpecifiedCompletions[i]);
-                }
-            }
+            Log.d(TAG, "Received completions; count="
+                    + (applicationSpecifiedCompletions == null ? 0 : applicationSpecifiedCompletions.length));
         }
         if (!mSettings.getCurrent().isApplicationSpecifiedCompletionsOn()) {
             return;
@@ -2209,7 +2205,7 @@ public class LatinIME extends InputMethodService implements
                 try {
                     final String trimmed = text.trim();
                     if (trimmed.isEmpty()) {
-                        Log.i(TAG, "VOICE_STEP_4 empty transcription result — nothing to insert");
+                        Log.i(TAG, "VOICE empty finalized segment; nothing to insert");
                         if (mVoiceInputManager == null || !mVoiceInputManager.hasPendingProcessing()) {
                             mKeyboardSwitcher.hideProcessingIndicator();
                         }

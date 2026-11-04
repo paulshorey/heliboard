@@ -280,7 +280,7 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
             final boolean isPossiblyOffensive, final int timestamp) {
         if (!mBinaryDictionary.addUnigramEntry(word, frequency, shortcutTarget, shortcutFreq,
                 false /* isBeginningOfSentence */, isNotAWord, isPossiblyOffensive, timestamp)) {
-            Log.e(TAG, "Cannot add unigram entry. word: " + word);
+            Log.e(TAG, "Cannot add unigram entry");
         }
     }
 
@@ -297,7 +297,7 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
             runGCIfRequiredLocked(true /* mindsBlockByGC */);
             if (!binaryDictionary.removeUnigramEntry(word)) {
                 if (DEBUG) {
-                    Log.i(TAG, "Cannot remove unigram entry: " + word);
+                    Log.d(TAG, "Cannot remove unigram entry");
                 }
             }
         });
@@ -322,8 +322,7 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
             final int frequency, final int timestamp) {
         if (!mBinaryDictionary.addNgramEntry(ngramContext, word, frequency, timestamp)) {
             if (DEBUG) {
-                Log.i(TAG, "Cannot add n-gram entry.");
-                Log.i(TAG, "  NgramContext: " + ngramContext + ", word: " + word);
+                Log.d(TAG, "Cannot add n-gram entry");
             }
         }
     }
@@ -341,8 +340,7 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
             if (!binaryDictionary.updateEntriesForWordWithNgramContext(ngramContext, word,
                     isValidWord, count, timestamp)) {
                 if (DEBUG) {
-                    Log.e(TAG, "Cannot update counter. word: " + word
-                            + " context: " + ngramContext);
+                    Log.e(TAG, "Cannot update dictionary counter");
                 }
             }
         });

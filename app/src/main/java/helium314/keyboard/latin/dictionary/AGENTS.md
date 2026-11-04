@@ -14,6 +14,7 @@ Concrete binary dictionary implementations and aggregators.
 - `UserBinaryDictionary.java` - user-editable dictionary storage.
 
 ## Non-obvious notes
+- Routine traces use debug/verbose levels and require explicit Android per-tag opt-in. Log counts and state instead of typed words, host text, dictionary entries or suggestion contents. Preserve warnings/errors needed to diagnose failures.
 - These classes are tightly coupled to JNI/native dictionary code and the file-format classes in `latin/makedict/`.
 - When a new dictionary source is added, update the facilitator layer in the parent folder too.
 

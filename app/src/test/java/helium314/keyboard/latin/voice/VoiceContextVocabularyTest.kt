@@ -15,7 +15,7 @@ class VoiceContextVocabularyTest {
     @Test
     fun harvestsProperNounsAndAcronymsFromEditorText() {
         val terms = VoiceContextVocabulary.extractTermsFromContext(
-            "We deployed the Roentgen service to Kubernetes using our internal CLI.",
+            "Roentgen runs on Kubernetes. We deployed Roentgen to Kubernetes using our internal CLI.",
             limit = 20
         )
         assertContains(terms, "Roentgen")
@@ -45,7 +45,7 @@ class VoiceContextVocabularyTest {
     @Test
     fun skipsCapitalizedCommonWordsEvenMidSentence() {
         val terms = VoiceContextVocabulary.extractTermsFromContext(
-            "he said Maybe and then Perhaps",
+            "he said Maybe and then Perhaps; it was Fine and still Fine",
             limit = 20
         )
         assertEquals(emptyList(), terms)
@@ -84,7 +84,7 @@ class VoiceContextVocabularyTest {
 
     @Test
     fun prefersTermsNearestTheCaret() {
-        val context = "we met Alpha then Bravo then Charlie then Delta"
+        val context = "we met Alpha then Bravo then Charlie then Delta; Alpha Bravo Charlie Delta"
         val terms = VoiceContextVocabulary.extractTermsFromContext(context, limit = 2)
         assertEquals(listOf("Delta", "Charlie"), terms)
     }
@@ -102,7 +102,7 @@ class VoiceContextVocabularyTest {
     fun buildPrioritizesUserTermsThenEditorTerms() {
         val terms = VoiceContextVocabulary.build(
             userTerms = listOf("Roentgen"),
-            editorContext = "we talked about Wittgenstein yesterday",
+            editorContext = "Wittgenstein came up; we talked about Wittgenstein yesterday",
             limit = 10
         )
         assertEquals(listOf("Roentgen", "Wittgenstein"), terms)
@@ -150,5 +150,51 @@ class VoiceContextVocabularyTest {
                 limit = 0
             ).isEmpty()
         )
+    }
+
+    @Test fun aSingleCorrectedCapitalizedWordIsNotANameHint() {
+        assertEquals(emptyList(), VoiceContextVocabulary.extractTermsFromContext(
+            "the result was Fine but another correction was Unexpected", 20
+        ))
+    }
+
+    @Test fun sentenceInitialRepetitionAloneDoesNotProveAName() {
+        assertEquals(emptyList(), VoiceContextVocabulary.extractTermsFromContext(
+            "Unexpected results. Unexpected behavior.", 20
+        ))
+    }
+
+    @Test fun conflictingLowercaseUsageDisqualifiesPlainCapitalizedWords() {
+        assertEquals(emptyList(), VoiceContextVocabulary.extractTermsFromContext(
+            "the Unexpected result was Unexpected but unexpected", 20
+        ))
+    }
+
+    @Test fun surroundingQuotesAreNotPartOfAHarvestedHint() {
+        assertEquals(listOf("HeliBoard", "API", "iPhone"), VoiceContextVocabulary.extractTermsFromContext(
+            "use 'iPhone' with ‘API’ and \"HeliBoard\"", 20
+        ))
+    }
+
+    @Test fun longAllCapsWordsAreNotTreatedAsInternalCapitalBrands() {
+        assertEquals(emptyList(), VoiceContextVocabulary.extractTermsFromContext(
+            "this is UNEXPECTEDLYLONG", 20
+        ))
+    }
+
+    @Test fun explicitVocabularyStillAllowsCommonWordsAndSingleNames() {
+        assertEquals(listOf("Fine", "Alice"), VoiceContextVocabulary.build(
+            listOf("Fine", "Alice"), "the result was Fine", 100
+        ))
+    }
+
+    @Test fun automaticBudgetDoesNotCrowdOutExplicitTermsOrCountUserDuplicates() {
+        val userTerms = listOf("API", "iPhone")
+        val editorContext = (('A'..'Z').map { "brand$it" } + userTerms).joinToString(" ")
+        val selection = VoiceContextVocabulary.select(userTerms, editorContext, 100)
+        assertEquals(2, selection.userTermCount)
+        assertEquals(userTerms, selection.terms.take(2))
+        assertEquals(VoiceContextVocabulary.MAX_EDITOR_TERMS, selection.editorTerms.size)
+        assertEquals("brandZ", selection.editorTerms.first())
     }
 }
